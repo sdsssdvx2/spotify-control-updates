@@ -1,33 +1,23 @@
 # Spotify Control Updates
 
-Trusted public update source for the user's Spotify Control installation.
+Trusted public update metadata for Spotify Control.
 
-This repository intentionally contains only update metadata and distributable Spotify Control code. It must never contain Spotify account data, browser/profile data, cookies, tokens, PATs, private logs, machine-specific paths, or other secrets.
+This repository must never contain Spotify account/profile data, cookies, tokens, PATs, private logs, or machine-specific secrets.
 
 ## Trust model
 
-The installed bootstrap accepts only the `stable` manifest from this repository. The manifest pins an immutable full Git commit SHA. The core payload is stored as a Base64-encoded ZIP text file under that commit so it can be published without a GitHub token or binary release uploader.
+The Windows bootstrap is installed out-of-band and is intentionally separate from the managed `bin` directory. It reads only `manifest.json` from this repository. The manifest pins an immutable full Git commit SHA and describes strictly forward version edges.
 
-Before activation the bootstrap verifies:
+For each edge the bootstrap requires the currently installed file SHA-256 to match the edge's `from_sha256`. Patch transport is split into small commit-pinned ASCII chunks. Before applying a patch the bootstrap verifies every chunk SHA-256 and size, then verifies the reassembled Base64, decoded gzip, and decompressed JSON hashes and sizes. The line-patch document is applied only to UTF-8-BOM, ASCII-body, LF-only source text. The staged result must match the edge's exact `to_sha256`.
 
-1. repository, manifest schema, channel, semantic version and minimum bootstrap version;
-2. its own pinned bootstrap SHA-256 and byte size;
-3. commit-pinned raw GitHub URLs for the bootstrap and package;
-4. encoded package SHA-256 and size;
-5. decoded ZIP SHA-256 and size;
-6. an exact allowlist of ZIP entries plus every extracted file's SHA-256 and size;
-7. a canonical payload-set SHA-256;
-8. Windows PowerShell parsing and read-only SelfTest for the staged Spotify Control main and Addon Manager.
+Before activation the complete staged managed payload must match `latest_files` and the canonical `payload_set_sha256`, and both Spotify Control and Addon Manager must pass Windows PowerShell parsing plus read-only SelfTest. Activation uses a same-volume full-`bin` directory swap. A persistent exact backup and the same-volume old root remain available until post-activation verification succeeds. Any failed activation restores and verifies the exact previous tree.
 
-Activation uses a same-volume full `bin` directory swap. The previous exact `bin` tree is preserved in both a same-directory old root and a persistent backup until post-activation SelfTest succeeds. Any failed activation restores and verifies the previous exact tree.
+The bootstrap does not update itself while running. A release that requires a newer bootstrap is rejected by `min_bootstrap_version` and requires an out-of-band bootstrap update.
 
-Native Spotify updates, Spicetify updates, add-on transactions, and user data remain governed by Spotify Control's separate fail-closed transaction policies.
+## Stable channel
 
-## Layout
+- `manifest.json` - live stable manifest
+- `manifest.schema.json` - manifest contract
+- `packages/vX.Y.Z/...` - immutable patch chunks referenced through `source_commit`
 
-- `manifest.json` - current stable channel manifest
-- `manifest.schema.json` - manifest schema
-- `bootstrap/spotify-control-self-updater.ps1` - minimal trust/rollback bootstrap
-- `packages/vX.Y.Z/spotify-control-core-vX.Y.Z.zip.b64` - versioned Base64 transport containing the managed core files
-
-The bootstrap is versioned separately from Spotify Control. A release that requires a newer bootstrap is blocked by `min_bootstrap_version` rather than replacing the trust bootstrap while it is executing.
+Unreferenced experimental or superseded transport files are not trusted. Only paths and hashes explicitly listed by the current manifest are accepted.
