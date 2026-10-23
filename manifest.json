@@ -2,13 +2,13 @@
   "schema": 1,
   "channel": "stable",
   "latest_version": "0.6.11",
-  "min_bootstrap_version": "1.0.0",
+  "min_bootstrap_version": "1.0.1",
   "source_repository": "sdsssdvx2/spotify-control-updates",
   "source_commit": "54a2c4de232f5fc15f00644451e1afff842f3f28",
   "bootstrap": {
-    "version": "1.0.0",
-    "sha256": "f4bda9331021994ccfa000234677700a20440ac1e4419dda062e98f4f92ef09b",
-    "size": 36353
+    "version": "1.0.1",
+    "sha256": "1fa0ff1c9fabe1de2522a286596bdda71709790e5c130ddbdae491e6306141e6",
+    "size": 36368
   },
   "payload_set_sha256": "13ab9dcf7acaecc13e1aa2df905fe9ea292841540fda78d45774aa5833ba0233",
   "latest_files": [
