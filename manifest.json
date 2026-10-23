@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "channel": "stable",
+  "latest_version": "0.6.11",
+  "min_bootstrap_version": "1.0.0",
+  "source_repository": "sdsssdvx2/spotify-control-updates",
+  "source_commit": "54a2c4de232f5fc15f00644451e1afff842f3f28",
+  "bootstrap": {
+    "version": "1.0.0",
+    "sha256": "f4bda9331021994ccfa000234677700a20440ac1e4419dda062e98f4f92ef09b",
+    "size": 36353
+  },
+  "payload_set_sha256": "13ab9dcf7acaecc13e1aa2df905fe9ea292841540fda78d45774aa5833ba0233",
+  "latest_files": [
+    {"path":"bin/spotify-control.ps1","sha256":"045ed3fa898453ce6563a057a31412d254f5958b75286589e8d5cc95c6782a39","size":266307},
+    {"path":"bin/addon-manager.ps1","sha256":"e076b301ce48bc1d1d7742c9588ef088dd643b88e17012b85b795766ff5f3e7c","size":108680},
+    {"path":"bin/spotify-control-agent.vbs","sha256":"2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278","size":4855}
+  ],
+  "updates": [
+    {
+      "from_version":"0.6.10",
+      "to_version":"0.6.11",
+      "patches":[
+        {
+          "path":"bin/spotify-control.ps1",
+          "from_sha256":"6ecb2eb6f25a71c4fdb410f227124126d6c3b91e8f3f4591713aaa40a4afe297",
+          "to_sha256":"045ed3fa898453ce6563a057a31412d254f5958b75286589e8d5cc95c6782a39",
+          "encoding":"gzip-base64-chunks",
+          "encoded_sha256":"42983624a97a3cf1e925297b1b20f6aa987dc6cbc75e3752041f0f3c1fa3bb25",
+          "encoded_size":3904,
+          "compressed_sha256":"580dacec665799073f9d0684ccf0926d5a2ef35a85b02a30c7c1a7710bf58d73",
+          "compressed_size":2927,
+          "json_sha256":"f182095d93ada335c88582f9e30723baacf5c065e35fbdfdb82296fb167d4e88",
+          "json_size":12475,
+          "chunks":[
+            {"path":"packages/v0.6.11/delta-v0610-to-v0611/chunk-000.txt","sha256":"8761734a6c088e7cf5eb023dff70e1e0ddf7b6617f8e6857be6bff5e6f0d20cc","size":976},
+            {"path":"packages/v0.6.11/delta-v0610-to-v0611/chunk-001.txt","sha256":"0ca1f8c973cabbdbbff55947a170288525558f0da2cbbb123da3c5b8112ccd1b","size":976},
+            {"path":"packages/v0.6.11/delta-v0610-to-v0611/chunk-002.txt","sha256":"25e8b36e9d30305dd6c2c5a5d9086a989cb8b1f565f2f85b3641c03809a13d5c","size":976},
+            {"path":"packages/v0.6.11/delta-v0610-to-v0611/chunk-003.txt","sha256":"1a7c7b0de1880b7abb3ba9885ccbe56a7114f6e3650c67a86fe9ca7ddc1e1eb7","size":976}
+          ]
+        }
+      ]
+    }
+  ]
+}
