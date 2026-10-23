@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/main/manifest.schema.json",
+  "title": "Spotify Control stable update manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "channel",
+    "version",
+    "min_bootstrap_version",
+    "package",
+    "files"
+  ],
+  "properties": {
+    "schema": { "const": 1 },
+    "channel": { "const": "stable" },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?$" },
+    "min_bootstrap_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "published_at": { "type": "string", "format": "date-time" },
+    "notes": { "type": "string" },
+    "trust": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "repository"],
+      "properties": {
+        "mode": { "const": "github-commit-pinned-sha256-v1" },
+        "repository": { "const": "sdsssdvx2/spotify-control-updates" },
+        "signature": { "type": ["object", "null"] }
+      }
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "sha256", "size", "commit"],
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^https://raw\\.githubusercontent\\.com/sdsssdvx2/spotify-control-updates/[0-9a-f]{40}/packages/spotify-control-v[0-9A-Za-z.-]+\\.zip$"
+        },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "size": { "type": "integer", "minimum": 1, "maximum": 5242880 },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+      }
+    },
+    "files": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256", "size"],
+        "properties": {
+          "path": { "type": "string", "pattern": "^(bin|bootstrap)/[A-Za-z0-9._+-]+$" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "size": { "type": "integer", "minimum": 1, "maximum": 1048576 }
+        }
+      }
+    }
+  }
+}
