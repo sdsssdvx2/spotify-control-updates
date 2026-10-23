@@ -1,48 +1,44 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/main/manifest.schema.json",
-  "title": "Spotify Control stable update manifest",
+  "title": "Spotify Control stable self-update manifest",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "schema",
-    "channel",
-    "version",
-    "min_bootstrap_version",
-    "package",
-    "files"
-  ],
+  "required": ["schema","channel","version","min_bootstrap_version","source_repository","source_commit","bootstrap","package","payload_set_sha256","files"],
   "properties": {
     "schema": { "const": 1 },
     "channel": { "const": "stable" },
-    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?$" },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
     "min_bootstrap_version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
     "published_at": { "type": "string", "format": "date-time" },
     "notes": { "type": "string" },
-    "trust": {
+    "source_repository": { "const": "sdsssdvx2/spotify-control-updates" },
+    "source_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "bootstrap": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode", "repository"],
+      "required": ["version","url","sha256","size"],
       "properties": {
-        "mode": { "const": "github-commit-pinned-sha256-v1" },
-        "repository": { "const": "sdsssdvx2/spotify-control-updates" },
-        "signature": { "type": ["object", "null"] }
+        "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+        "url": { "type": "string" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "size": { "type": "integer", "minimum": 1, "maximum": 1048576 }
       }
     },
     "package": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["url", "sha256", "size", "commit"],
+      "required": ["encoding","url","sha256","size","decoded_sha256","decoded_size"],
       "properties": {
-        "url": {
-          "type": "string",
-          "pattern": "^https://raw\\.githubusercontent\\.com/sdsssdvx2/spotify-control-updates/[0-9a-f]{40}/packages/spotify-control-v[0-9A-Za-z.-]+\\.zip$"
-        },
+        "encoding": { "const": "base64-zip" },
+        "url": { "type": "string" },
         "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "size": { "type": "integer", "minimum": 1, "maximum": 5242880 },
-        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+        "decoded_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "decoded_size": { "type": "integer", "minimum": 1, "maximum": 5242880 }
       }
     },
+    "payload_set_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "files": {
       "type": "array",
       "minItems": 3,
@@ -50,11 +46,11 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["path", "sha256", "size"],
+        "required": ["path","sha256","size"],
         "properties": {
-          "path": { "type": "string", "pattern": "^(bin|bootstrap)/[A-Za-z0-9._+-]+$" },
+          "path": { "type": "string", "pattern": "^bin/[A-Za-z0-9._+-]+$" },
           "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-          "size": { "type": "integer", "minimum": 1, "maximum": 1048576 }
+          "size": { "type": "integer", "minimum": 1, "maximum": 20971520 }
         }
       }
     }
