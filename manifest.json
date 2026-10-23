@@ -7,8 +7,8 @@
   "source_commit": "54a2c4de232f5fc15f00644451e1afff842f3f28",
   "bootstrap": {
     "version": "1.0.1",
-    "sha256": "34916d1fb96666c66f763097becad6384411f33dda5eabd27bb2133fc9d6f4a1",
-    "size": 36368
+    "sha256": "7576abb5f8df804f1e927fd0e9b7d054d3c00a9935c64537696d9769fe101040",
+    "size": 36881
   },
   "payload_set_sha256": "13ab9dcf7acaecc13e1aa2df905fe9ea292841540fda78d45774aa5833ba0233",
   "latest_files": [
