@@ -7,7 +7,7 @@
   "source_commit": "54a2c4de232f5fc15f00644451e1afff842f3f28",
   "bootstrap": {
     "version": "1.0.1",
-    "sha256": "1fa0ff1c9fabe1de2522a286596bdda71709790e5c130ddbdae491e6306141e6",
+    "sha256": "34916d1fb96666c66f763097becad6384411f33dda5eabd27bb2133fc9d6f4a1",
     "size": 36368
   },
   "payload_set_sha256": "13ab9dcf7acaecc13e1aa2df905fe9ea292841540fda78d45774aa5833ba0233",
