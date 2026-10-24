@@ -1,0 +1,1 @@
+Final validation trigger after bot-published transport c97b6bae845c46730120b08821f8515cfa9ad199 and stable manifest pin.
