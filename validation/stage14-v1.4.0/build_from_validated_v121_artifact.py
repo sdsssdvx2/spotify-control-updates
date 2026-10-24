@@ -25,9 +25,9 @@ v140=Path('validation/stage14-v1.4.0/build_stage14_v140.py').read_text(encoding=
 pair='("Invoke-TrustedV0616SelfUpdateAcceptance","Invoke-TrustedV0617SelfUpdateAcceptance"),\n'
 assert v140.count(pair)==1
 v140=v140.replace(pair,'',1)
-marker="]: run=one(run,a,b)\nrun=one(run,'[int]$check.result.edge_count -ne 1'"
+marker="]: run=one(run,a,b)\n"
 assert v140.count(marker)==1
-v140=v140.replace(marker,"]: run=one(run,a,b)\nassert run.count('Invoke-TrustedV0616SelfUpdateAcceptance')==2,run.count('Invoke-TrustedV0616SelfUpdateAcceptance')\nrun=run.replace('Invoke-TrustedV0616SelfUpdateAcceptance','Invoke-TrustedV0617SelfUpdateAcceptance')\nrun=one(run,'[int]$check.result.edge_count -ne 1'",1)
+v140=v140.replace(marker,"]: run=one(run,a,b)\nassert run.count('Invoke-TrustedV0616SelfUpdateAcceptance')==2,run.count('Invoke-TrustedV0616SelfUpdateAcceptance')\nrun=run.replace('Invoke-TrustedV0616SelfUpdateAcceptance','Invoke-TrustedV0617SelfUpdateAcceptance')\n",1)
 start=v140.index('# Reuse v1.3 builder only as a deterministic bridge')
 end=v140.index('for a,b in [',start)
 replacement="""# Exact v1.3 intermediate was produced immediately above.\nbase=Path('SpotifyControl-Windows-Runtime-Acceptance-v1.3.0.zip')\nassert base.is_file()\nout=Path('stage14-v120-unpacked')\nassert out.is_dir()\nrunp=out/'RUN_RUNTIME_ACCEPTANCE.ps1'\nrun=runp.read_text(encoding='utf-8-sig')\n"""
