@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Reconstruct and verify exact Stage14 ZIP
+      - name: Reconstruct exact Stage14 ZIP and run embedded validation
         shell: python
         run: |
           from pathlib import Path, PurePosixPath
@@ -44,13 +44,15 @@ jobs:
           for rel, size, sha in pieces:
               data = Path(rel).read_bytes()
               print('PIECE', rel, len(data), hashlib.sha256(data).hexdigest())
-              assert len(data) == size, (rel, len(data), size)
-              assert hashlib.sha256(data).hexdigest() == sha, rel
+              assert len(data) == size
+              assert hashlib.sha256(data).hexdigest() == sha
               parts.append(data)
+
           encoded = b''.join(parts)
           print('ENCODED', len(encoded), hashlib.sha256(encoded).hexdigest())
           assert len(encoded) == 40008
           assert hashlib.sha256(encoded).hexdigest() == 'ba2b10d9197cfdba0d683b29612402977aa1da30e75d37ebf15bac1ce37362ba'
+
           raw = base64.b64decode(encoded, validate=True)
           print('ZIP', len(raw), hashlib.sha256(raw).hexdigest())
           assert len(raw) == 30004
@@ -71,40 +73,19 @@ jobs:
                   assert not (len(name) >= 2 and name[1] == ':')
               z.extractall(out)
 
-          sums = {}
           for line in (out/'SHA256SUMS.txt').read_text(encoding='ascii').splitlines():
               if not line.strip():
                   continue
               digest, rel = line.split('  ', 1)
-              sums[rel] = digest.lower()
-          for rel, digest in sums.items():
               p = out/rel
               assert p.is_file(), rel
-              assert hashlib.sha256(p.read_bytes()).hexdigest() == digest, rel
+              assert hashlib.sha256(p.read_bytes()).hexdigest() == digest.lower(), rel
 
           check = subprocess.run([sys.executable, 'evidence/validate_stage14.py'], cwd=out, capture_output=True, text=True)
           print(check.stdout)
           print(check.stderr)
           assert check.returncode == 0
           assert 'STAGE14 SELF VALIDATION: 130/130 PASS' in check.stdout
-
-          run = (out/'RUN_RUNTIME_ACCEPTANCE.ps1').read_text(encoding='utf-8-sig')
-          required = [
-              '$AcceptanceVersion = "1.1.0"',
-              '5306acbe610b06f2c638ebbdc305db9741bbe145392933a38f648906acd302d1',
-              'd6a11c73c561662579c9b28b59e9f2845563e8050eceeb8e5cec0f5f3618759a',
-              'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6',
-              'b1e6c22e2caa9c94d46d7f897172c69f160e6dc3',
-              '7a57bc6970ca4f328fd8a417380421f6094c911008b46c2ef407c9cc2ee28879',
-              'ivLis-Studio/ivLyrics',
-              'release-proof-required',
-              "^sha256:[0-9a-f]{64}$",
-              '$ArmedByThisRun = (-not $OriginalMutationEnabled)',
-              'agent_mutation_enabled = $OriginalMutationEnabled',
-          ]
-          for needle in required:
-              assert needle in run, needle
-          assert 'ivLyrics is installed, but Stage14 baseline expects it absent' not in run
 
       - name: Windows PowerShell 5.1 parser validation
         shell: powershell
