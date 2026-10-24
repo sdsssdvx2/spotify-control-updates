@@ -51,8 +51,7 @@ with zipfile.ZipFile(BytesIO(outer)) as oz:
 assert len(inner)==30856 and sha(inner)==REPAIR_INNER_SHA
 with zipfile.ZipFile(BytesIO(inner)) as iz:
     assert iz.testzip() is None
-    boot_path='bootstrap/spotify-control-self-updater.ps1'
-    bootstrap=iz.read(boot_path)
+    bootstrap=iz.read('bootstrap/spotify-control-self-updater.ps1')
 assert len(bootstrap)==BOOTSTRAP_SIZE and sha(bootstrap)==BOOTSTRAP_SHA
 
 # Rebuild v0.6.11 main+agent from immutable archive, tolerating unrelated historical bad members.
@@ -89,11 +88,36 @@ assert sha(main)==MAIN15_SHA
 p,addon=decoded_payload(m,'0.6.14','0.6.15','bin/addon-manager.ps1')
 assert p['encoding']=='gzip-base64-full-file' and len(addon)==int(p['target_size']) and sha(addon)==ADDON15_SHA
 
-root=Path('ci-bootstrap-fixture/LocalAppData/SpotifyControl'); shutil.rmtree(root.parent.parent,ignore_errors=True)
+fixture=Path('ci-bootstrap-fixture')
+root=fixture/'LocalAppData'/'SpotifyControl'
+shutil.rmtree(fixture,ignore_errors=True)
 (root/'bin').mkdir(parents=True)
 (root/'bootstrap').mkdir(parents=True)
-(root/'bin/spotify-control.ps1').write_bytes(main)
-(root/'bin/addon-manager.ps1').write_bytes(addon)
-(root/'bin/spotify-control-agent.vbs').write_bytes(agent)
-(root/'bootstrap/spotify-control-self-updater.ps1').write_bytes(bootstrap)
-print('BOOTSTRAP_FIXTURE_OK',len(bootstrap),sha(bootstrap),sha(main),sha(addon),sha(agent),'unreadable_old_members',len(unreadable))
+(root/'bin'/'spotify-control.ps1').write_bytes(main)
+(root/'bin'/'addon-manager.ps1').write_bytes(addon)
+(root/'bin'/'spotify-control-agent.vbs').write_bytes(agent)
+(root/'bootstrap'/'spotify-control-self-updater.ps1').write_bytes(bootstrap)
+
+# The real accepted installation contains long-lived auxiliary helpers that are deliberately not
+# part of every self-update patch. Candidate SelfTest only requires their usable installed paths;
+# seed non-mutating CI fixtures so RollbackTest tests the update contract rather than an incomplete install.
+helper_names=(
+    'collect-spotify-diagnostics.ps1',
+    'performance-profiler.ps1',
+    'health-report.ps1',
+    'performance-ab-profiler.ps1',
+    'marketplace-isolation-profiler.ps1',
+)
+for name in helper_names:
+    (root/'bin'/name).write_text("# Spotify Control bootstrap-contract CI installed-helper fixture\n",encoding='utf-8',newline='\n')
+
+# SelfTest's Marketplace swap/rollback sandbox requires one uniquely resolved, structurally valid
+# installed Marketplace tree. Use a tiny local fixture; it is never used for network update logic.
+market=fixture/'LocalAppData'/'spicetify'/'CustomApps'/'marketplace'
+market.mkdir(parents=True)
+(market/'index.js').write_text('// CI Marketplace fixture\n',encoding='utf-8',newline='\n')
+(market/'extension.js').write_text('// CI Marketplace fixture\n',encoding='utf-8',newline='\n')
+(market/'style.css').write_text('/* CI Marketplace fixture */\n',encoding='utf-8',newline='\n')
+(market/'manifest.json').write_text('{"name":"Spotify Marketplace CI Fixture"}\n',encoding='utf-8',newline='\n')
+
+print('BOOTSTRAP_FIXTURE_OK',len(bootstrap),sha(bootstrap),sha(main),sha(addon),sha(agent),'helpers',len(helper_names),'marketplace_files',4,'unreadable_old_members',len(unreadable))
