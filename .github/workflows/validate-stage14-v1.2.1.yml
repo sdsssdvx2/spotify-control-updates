@@ -1,0 +1,174 @@
+name: Validate exact Spotify Control Stage14 v1.2.1 package
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/validate-stage14-v1.2.1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-powershell51-stage14-v121:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebuild trusted v1.2.0, derive v1.2.1, and validate stable manifest
+        shell: python
+        run: |
+          from pathlib import Path, PurePosixPath
+          from collections import Counter
+          import base64, gzip, hashlib, json, re, subprocess, sys, zipfile
+
+          subprocess.check_call(['git','fetch','origin','refs/heads/validate/stage14-v1.2.0:refs/remotes/origin/validate/stage14-v1.2.0'])
+          pieces=[
+            ('seg-00.txt',3000,'035e6abe093db9ab445be4778dbb3d8e4df298b7c95c49c71c42e39a5e4a009d'),
+            ('seg-01.txt',3000,'56751e85bcd925b2f3d88d3e3e6b3a2bf8961ae5b2215dbebbb06da168590560'),
+            ('seg-02.txt',3000,'5302a0379055ab0190427ce6291f8979450143b5665678787154f3a9869cb528'),
+            ('seg-03.txt',3000,'4c8b99d47ca7e89e5f22457908210cc0404426c638c21dd85ab5fe16dd9169ba'),
+            ('seg-04.txt',3000,'4efe46f5d6829ac16401f44db3617e3d252d06b6f692c8b7f7cf5ce181713fe5'),
+            ('seg-05.txt',3000,'891e8173e7f2ec4d25b3b6b81fed4fe1bdf80f1c2ad54b6e588fc016c71bfc9a'),
+            ('seg-06.txt',3000,'548e26cbca4d12cc7f09f975581f100c12bfd04d5fd00131709a9fdf2625dafa'),
+            ('seg-07.txt',3000,'f6f80a220052179704ee0ab1e0e0c26f7675652f589d20c63cf0a7f2eb4c1d1d'),
+            ('seg-08.txt',3000,'81413e9075130123b69728b1a72e38f6b3b58dd6d8e054e0c86eaea293d08a71'),
+            ('seg-09.txt',3000,'2d15806169d13a0c322b9e114f32d084e350b638873c584697352ecd38f3a450'),
+            ('seg-10.txt',3000,'80b330fae3daaad7348a4741feeec65b0d0c585bd0502e206c5f16237a8662b9'),
+            ('seg-11.txt',3000,'f61418e08e3868fa658f93ecf84b476579a54a30414bcb11a68ed035feebc454'),
+            ('seg-12.txt',3000,'0f448c810d07b3a05b5fc158185866795e834897f013b95a9ab9611bda075ada'),
+            ('seg-13.txt',3000,'1b42f405317104bbcc7f41a9bb70951637b54316b78a695131ec488fcf24bf11'),
+            ('seg-14.txt',3000,'989c70515969d8f5d1d7cac8568d366348da333536090d2470bbcebf5279c791'),
+            ('seg-15.txt',984,'aa83e9749ef65b019896f5a320318e7523027d24f3f0b0319e73571a04e8b667')]
+          parts=[]
+          for name,size,sha in pieces:
+            rel='validation/stage14-v1.2.0/segments/'+name
+            data=subprocess.check_output(['git','show','origin/validate/stage14-v1.2.0:'+rel])
+            assert len(data)==size and hashlib.sha256(data).hexdigest()==sha, rel
+            parts.append(data)
+          enc=b''.join(parts)
+          assert len(enc)==45984 and hashlib.sha256(enc).hexdigest()=='54ddc6a5f179cb9b108704dbc6fe92accf20113f2610acba74bd6bd7c4909fa8'
+          raw=base64.b64decode(enc,validate=True)
+          assert len(raw)==34488 and hashlib.sha256(raw).hexdigest()=='cf66fd207cbcd7bf7996af3eb99009ce5ad2adcced3b7652b8343fc0bcfc2ce2'
+          original=Path('v120-original.zip'); original.write_bytes(raw)
+          out=Path('stage14-v121')
+          with zipfile.ZipFile(original) as z:
+            assert z.testzip() is None
+            infos=z.infolist(); names=z.namelist(); assert len(names)==len(set(names))
+            for name in names:
+              p=PurePosixPath(name); assert not p.is_absolute() and '..' not in p.parts and '\\' not in name and not(len(name)>=2 and name[1]==':')
+            z.extractall(out)
+
+          # Reapply the two PS5.1 syntax repairs and regression guard that produced the validated v1.2.0 CI artifact.
+          rp=out/'RUN_RUNTIME_ACCEPTANCE.ps1'; run=rp.read_text(encoding='utf-8-sig')
+          assert run.count("}`n        self_update=")==1 and run.count("$SelfUpdateEvidence`n        addon_schedule_gate=")==1
+          run=run.replace("}`n        self_update=","}\n        self_update=",1).replace("$SelfUpdateEvidence`n        addon_schedule_gate=","$SelfUpdateEvidence\n        addon_schedule_gate=",1)
+          rp.write_text(run,encoding='utf-8-sig',newline='\n')
+          vp=out/'evidence'/'validate_stage14.py'; v=vp.read_text(encoding='utf-8')
+          needle="st,state=strip_ps(s);ck('lexer-ended-code',state=='code',state)\n"
+          extra="ck('no-bare-backtick-newline-escape', '`n' not in st and '`r' not in st, [(i,line) for i,line in enumerate(st.splitlines(),1) if '`n' in line or '`r' in line][:10])\n"
+          assert needle in v and 'no-bare-backtick-newline-escape' not in v
+          vp.write_text(v.replace(needle,needle+extra),encoding='utf-8',newline='\n')
+          chk=subprocess.run([sys.executable,'evidence/validate_stage14.py'],cwd=out,capture_output=True,text=True)
+          assert chk.returncode==0 and 'STAGE14 V1.2 SELF VALIDATION: 156/156 PASS' in chk.stdout
+          rels=['PRECHECK_RUNTIME_ACCEPTANCE.ps1','README.txt','RUN_RUNTIME_ACCEPTANCE.cmd','RUN_RUNTIME_ACCEPTANCE.ps1','evidence/SELF_VALIDATION_REPORT.json','evidence/SELF_VALIDATION_REPORT.txt','evidence/VALIDATION_OUTPUT.txt','evidence/validate_stage14.py']
+          (out/'SHA256SUMS.txt').write_text('\n'.join(f"{hashlib.sha256((out/r).read_bytes()).hexdigest()}  {r}" for r in rels)+'\n',encoding='ascii',newline='\n')
+          v120=Path('v120-final.zip')
+          with zipfile.ZipFile(v120,'w') as zout:
+            for info in infos:
+              ni=zipfile.ZipInfo(info.filename,date_time=info.date_time); ni.compress_type=info.compress_type; ni.comment=info.comment; ni.extra=info.extra; ni.create_system=info.create_system; ni.create_version=info.create_version; ni.extract_version=info.extract_version; ni.flag_bits=info.flag_bits; ni.external_attr=info.external_attr; ni.internal_attr=info.internal_attr; ni.volume=info.volume
+              zout.writestr(ni,(out/info.filename).read_bytes(),compress_type=info.compress_type,compresslevel=6)
+          v120b=v120.read_bytes(); assert len(v120b)==34730 and hashlib.sha256(v120b).hexdigest()=='7d7022789a818818c1c4bd877cc3e052376e2b1dbc9bc7eb7ab70a0b8ac0ba2e'
+
+          # Minimal v1.2.1 delta: package version + repaired stable source pin + explanatory README/validator labels.
+          run=rp.read_text(encoding='utf-8-sig')
+          assert run.count("$AcceptanceVersion = '1.2.0'")==1 and run.count("864e195ab08b3a3d37a181998d1ca59a3c0d7adf")==1
+          run=run.replace("$AcceptanceVersion = '1.2.0'","$AcceptanceVersion = '1.2.1'",1).replace('864e195ab08b3a3d37a181998d1ca59a3c0d7adf','2f8377829ab61dcb88d265bdbd484181f084aef9',1)
+          rp.write_text(run,encoding='utf-8-sig',newline='\n')
+
+          readp=out/'README.txt'; readme=readp.read_text(encoding='utf-8')
+          old="""Spotify Control Windows Runtime Acceptance v1.2.0
+=================================================
+"""
+          assert old in readme; readme=readme.replace(old,"Spotify Control Windows Runtime Acceptance v1.2.1\n=================================================\n",1)
+          oldwhy="""Why v1.2.0 exists
+-----------------
+Stage14 v1.1.0 reached the real SpotifyExit maintenance window safely, but actionable
+addon-updates:1 remained pending. The runtime failure exposed a scheduling bug: main had
+fresh actionable pending evidence, while Addon Manager Update could still exit behind its
+independent 168-hour last_update gate. r5 fixes only that gate mismatch. It never uses Force
+or current-app reinstall semantics; after the gate is bypassed, Update-AutoApps performs a
+fresh inventory/trust recheck and the existing transactional update/rollback flow.
+"""
+          newwhy="""Why v1.2.1 exists
+-----------------
+Stage14 v1.2.0 stopped safely before the live mutation window because bootstrap 1.0.6
+rejected two publication-format defects in the stable manifest: a duplicated 0.6.12 -> 0.6.13
+edge, and a split r5 transport name that did not satisfy the required sequential chunk-005.txt
+contract. Both defects were repaired in the update repository without changing the v0.6.15/r5
+payload bytes or target hashes. The stable manifest now pins a source commit that contains the
+canonical sequential transport. v1.2.1 keeps the validated v1.2.0 runtime logic and changes only
+the acceptance-package version/trust pin needed to accept that repaired publication.
+The r5 behavior itself is unchanged: fresh actionable pending may bypass only the 168-hour
+schedule gate, and the acceptance never uses Force or current-app reinstall semantics.
+"""
+          assert oldwhy in readme; readme=readme.replace(oldwhy,newwhy,1)
+          assert readme.count('864e195ab08b3a3d37a181998d1ca59a3c0d7adf')==1
+          readme=readme.replace('864e195ab08b3a3d37a181998d1ca59a3c0d7adf','2f8377829ab61dcb88d265bdbd484181f084aef9',1)
+          readp.write_text(readme,encoding='utf-8',newline='\n')
+
+          v=vp.read_text(encoding='utf-8')
+          for a,b in [("$AcceptanceVersion = '1.2.0'","$AcceptanceVersion = '1.2.1'"),('864e195ab08b3a3d37a181998d1ca59a3c0d7adf','2f8377829ab61dcb88d265bdbd484181f084aef9'),("readme-v120','Runtime Acceptance v1.2.0","readme-v121','Runtime Acceptance v1.2.1"),('STAGE14 V1.2 SELF VALIDATION:','STAGE14 V1.2.1 SELF VALIDATION:')]:
+            assert a in v; v=v.replace(a,b,1)
+          vp.write_text(v,encoding='utf-8',newline='\n')
+          chk=subprocess.run([sys.executable,'evidence/validate_stage14.py'],cwd=out,capture_output=True,text=True)
+          print(chk.stdout); assert chk.returncode==0 and 'STAGE14 V1.2.1 SELF VALIDATION: 156/156 PASS' in chk.stdout
+          (out/'SHA256SUMS.txt').write_text('\n'.join(f"{hashlib.sha256((out/r).read_bytes()).hexdigest()}  {r}" for r in rels)+'\n',encoding='ascii',newline='\n')
+
+          # Stable manifest must satisfy the exact bootstrap 1.0.6 publication contract fixed on main.
+          m=json.loads(Path('manifest.json').read_text(encoding='utf-8-sig'))
+          assert m['latest_version']=='0.6.15' and m['source_commit']=='2f8377829ab61dcb88d265bdbd484181f084aef9' and m['payload_set_sha256']=='86dbfea3b22c110a2a1425b0340bbf333329c51a5ae9253b0a45a955f0ae67dd'
+          edges=[(e['from_version'],e['to_version']) for e in m['updates']]; assert edges==[('0.6.10','0.6.11'),('0.6.11','0.6.13'),('0.6.12','0.6.13'),('0.6.13','0.6.14'),('0.6.14','0.6.15')]
+          assert all(n==1 for n in Counter(e['from_version'] for e in m['updates']).values())
+          source=m['source_commit']; subprocess.check_call(['git','merge-base','--is-ancestor',source,'HEAD'])
+          for edge in m['updates']:
+            for patch in edge['patches']:
+              for i,c in enumerate(patch['chunks']):
+                p=c['path'].replace('\\','/'); assert p.endswith(f'/chunk-{i:03}.txt') and re.fullmatch(r'packages/v[0-9]+\.[0-9]+\.[0-9]+/[A-Za-z0-9._+-]+/chunk-[0-9]{3}\.txt',p)
+                data=subprocess.check_output(['git','show',f'{source}:{p}']); assert len(data)==c['size'] and hashlib.sha256(data).hexdigest()==c['sha256']
+
+          final=Path('SpotifyControl-Windows-Runtime-Acceptance-v1.2.1.zip')
+          with zipfile.ZipFile(final,'w') as zout:
+            for info in infos:
+              ni=zipfile.ZipInfo(info.filename,date_time=info.date_time); ni.compress_type=info.compress_type; ni.comment=info.comment; ni.extra=info.extra; ni.create_system=info.create_system; ni.create_version=info.create_version; ni.extract_version=info.extract_version; ni.flag_bits=info.flag_bits; ni.external_attr=info.external_attr; ni.internal_attr=info.internal_attr; ni.volume=info.volume
+              zout.writestr(ni,(out/info.filename).read_bytes(),compress_type=info.compress_type,compresslevel=6)
+          fb=final.read_bytes(); print('V1.2.1 ZIP',len(fb),hashlib.sha256(fb).hexdigest())
+          with zipfile.ZipFile(final) as z:
+            assert z.testzip() is None
+            for line in z.read('SHA256SUMS.txt').decode('ascii').splitlines():
+              digest,rel=line.split('  ',1); assert hashlib.sha256(z.read(rel)).hexdigest()==digest
+
+      - name: Windows PowerShell 5.1 parser validation
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Expand-Archive -LiteralPath 'SpotifyControl-Windows-Runtime-Acceptance-v1.2.1.zip' -DestinationPath 'stage14-v121-ps' -Force
+          foreach($rel in @('PRECHECK_RUNTIME_ACCEPTANCE.ps1','RUN_RUNTIME_ACCEPTANCE.ps1')) {
+            $path=(Resolve-Path (Join-Path 'stage14-v121-ps' $rel)).Path
+            $tokens=$null; $errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+            if($errors.Count -ne 0){$errors|ForEach-Object{Write-Error $_.Message};throw "Windows PowerShell 5.1 parser rejected $rel"}
+          }
+          Write-Host 'Stage14 v1.2.1 Windows PowerShell 5.1 parser PASS.'
+
+      - name: Upload exact validated Stage14 v1.2.1 ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-Windows-Runtime-Acceptance-v1.2.1
+          path: SpotifyControl-Windows-Runtime-Acceptance-v1.2.1.zip
+          if-no-files-found: error
+          compression-level: 6
