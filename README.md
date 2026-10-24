@@ -21,3 +21,13 @@ The bootstrap does not update itself while running. A release that requires a ne
 - `packages/vX.Y.Z/...` - immutable patch chunks referenced through `source_commit`
 
 Unreferenced experimental or superseded transport files are not trusted. Only paths and hashes explicitly listed by the current manifest are accepted.
+
+## Runtime acceptance
+
+Stage14 hands-off Windows runtime acceptance completed successfully on 2026-10-25 with acceptance package v1.4.1 against the stable v0.6.17 / Addon Manager v0.6.5-r7 payload.
+
+The accepted runtime evidence covered the chained v0.6.15 -> v0.6.16 -> v0.6.17 self-update rollback test and fresh commit, exact target hashes, Windows-native Marketplace/Pithaya/installed-only-ivLyrics failure-injection rollback sandboxes, running-state check-only behavior, SpotifyExit unattended maintenance, actionable-pending drain to zero, protected Spotify/Spicetify data preservation, native Spotify updater blocking, resident mutation arming, single-instance persistence, and console-free managed launch.
+
+The production bootstrap remains v1.0.6. The stable source anchor for the repaired v0.6.15 -> v0.6.17 transport is `36b15a2ed2f9a23fffbeaf91de78b7854f6108b2`, with payload set SHA-256 `0f7fe384630e027466aa734ac669b410774b4569db231982212b7fa565b691a0`.
+
+Machine-specific runtime reports and backups are intentionally not committed to this public repository.
