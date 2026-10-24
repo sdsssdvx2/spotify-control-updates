@@ -75,6 +75,54 @@ jobs:
           assert doc['to_sha256'] == '5306acbe610b06f2c638ebbdc305db9741bbe145392933a38f648906acd302d1'
           assert len(doc['operations']) == 2
 
+          manifest = json.loads(Path('manifest.json').read_text(encoding='utf-8-sig'))
+          assert manifest['schema'] == 1 and manifest['channel'] == 'stable'
+          assert manifest['latest_version'] == '0.6.14'
+          assert manifest['min_bootstrap_version'] == '1.0.6'
+          assert manifest['source_repository'] == 'sdsssdvx2/spotify-control-updates'
+          assert manifest['source_commit'] == 'b1e6c22e2caa9c94d46d7f897172c69f160e6dc3'
+          assert manifest['bootstrap'] == {
+              'version': '1.0.6',
+              'sha256': 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6',
+              'size': 42963,
+          }
+          expected_latest = {
+              'bin/spotify-control.ps1': (266327, '5306acbe610b06f2c638ebbdc305db9741bbe145392933a38f648906acd302d1'),
+              'bin/addon-manager.ps1': (124124, 'd6a11c73c561662579c9b28b59e9f2845563e8050eceeb8e5cec0f5f3618759a'),
+              'bin/spotify-control-agent.vbs': (4855, '2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278'),
+          }
+          actual_latest = {x['path']: (x['size'], x['sha256'].lower()) for x in manifest['latest_files']}
+          assert actual_latest == expected_latest
+          rows = [f"{path}|{size}|{sha}" for path, (size, sha) in expected_latest.items()]
+          payload_set = hashlib.sha256(('\n'.join(sorted(rows)) + '\n').encode()).hexdigest()
+          assert payload_set == '7a57bc6970ca4f328fd8a417380421f6094c911008b46c2ef407c9cc2ee28879'
+          assert manifest['payload_set_sha256'] == payload_set
+
+          updates = manifest['updates']
+          assert len(updates) == 4
+          assert hashlib.sha256(json.dumps(updates[:3], sort_keys=True, separators=(',', ':')).encode()).hexdigest() == '2d1e1c445aac6da245b2b4e7c5f43674616ee24cd8c0d41c07ebe66cef5da298'
+          from_versions = [edge['from_version'] for edge in updates]
+          assert len(from_versions) == len(set(from_versions))
+          edge = next(e for e in updates if e['from_version'] == '0.6.13')
+          assert edge['to_version'] == '0.6.14'
+          patch_by_path = {p['path']: p for p in edge['patches']}
+          assert set(patch_by_path) == {'bin/spotify-control.ps1', 'bin/addon-manager.ps1'}
+          assert patch_by_path['bin/spotify-control.ps1']['from_sha256'] == 'e20ed445d7a5788cde1be9861dc3b44a81777aad03e0b1d4cea1a6e5bde1a14d'
+          assert patch_by_path['bin/spotify-control.ps1']['to_sha256'] == '5306acbe610b06f2c638ebbdc305db9741bbe145392933a38f648906acd302d1'
+          assert patch_by_path['bin/addon-manager.ps1']['from_sha256'] == 'a194d49bd37320a7035b2deed22faabc70d3d2e14ff7ab2d35035ba5e7f96065'
+          assert patch_by_path['bin/addon-manager.ps1']['to_sha256'] == 'd6a11c73c561662579c9b28b59e9f2845563e8050eceeb8e5cec0f5f3618759a'
+
+          by_from = {e['from_version']: e for e in updates}
+          chain = []
+          version = '0.6.11'
+          while version != manifest['latest_version']:
+              assert version in by_from
+              edge_i = by_from[version]
+              chain.append((edge_i['from_version'], edge_i['to_version']))
+              version = edge_i['to_version']
+              assert len(chain) <= 8
+          assert chain == [('0.6.11', '0.6.13'), ('0.6.13', '0.6.14')]
+
       - name: Windows PowerShell 5.1 parser and full Addon SelfTest
         shell: powershell
         run: |
