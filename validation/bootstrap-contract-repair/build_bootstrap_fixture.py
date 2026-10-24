@@ -39,17 +39,32 @@ def apply_main(cur,m,a,b):
     return out
 
 m=load_manifest()
-# Rebuild the original full v0.6.11 bundle from the immutable chunk archive.
-enc=b''.join(p.read_bytes() for p in sorted(Path('packages/v0.6.11/chunks').glob('chunk-*.txt')))
-zip_bytes=base64.b64decode(b''.join(enc.split()),validate=True)
-with zipfile.ZipFile(BytesIO(zip_bytes)) as z:
-    assert z.testzip() is None
-    by_hash={}
-    for name in z.namelist():
-        if name.endswith('/'): continue
-        data=z.read(name); by_hash.setdefault(sha(data),[]).append((name,data))
+# Rebuild the original full v0.6.11 bundle. Some obsolete archive members have historical CRC defects,
+# so do not trust a whole-archive test; identify the three required immutable files by exact SHA-256.
+def scan_bundle(folder):
+    enc=b''.join(p.read_bytes() for p in sorted(Path(folder).glob('chunk-*.txt')))
+    zip_bytes=base64.b64decode(b''.join(enc.split()),validate=True)
+    found={}; unreadable=[]
+    with zipfile.ZipFile(BytesIO(zip_bytes)) as z:
+        for name in z.namelist():
+            if name.endswith('/'): continue
+            try: data=z.read(name)
+            except Exception as exc:
+                unreadable.append((name,type(exc).__name__))
+                continue
+            h=sha(data)
+            if h in (BOOTSTRAP_SHA,MAIN11_SHA,AGENT_SHA): found.setdefault(h,[]).append((name,data))
+    return found,unreadable
+
+by_hash={}; unreadable=[]
+for folder in ('packages/v0.6.11/chunks','packages/v0.6.11/chunks-v2'):
+    f,bad=scan_bundle(folder); unreadable += [(folder,)+x for x in bad]
+    for h,rows in f.items(): by_hash.setdefault(h,[]).extend(rows)
 for required in (BOOTSTRAP_SHA,MAIN11_SHA,AGENT_SHA):
-    assert len(by_hash.get(required,[]))==1,(required,[x[0] for x in by_hash.get(required,[])])
+    # Deduplicate identical path/data copies across historical archive variants.
+    uniq={ (n,sha(d)):(n,d) for n,d in by_hash.get(required,[]) }
+    assert len(uniq)==1,(required,list(uniq),unreadable[:10])
+    by_hash[required]=list(uniq.values())
 bootstrap_name,bootstrap=by_hash[BOOTSTRAP_SHA][0]
 _,main=by_hash[MAIN11_SHA][0]
 _,agent=by_hash[AGENT_SHA][0]
@@ -68,4 +83,4 @@ root=Path('ci-bootstrap-fixture/LocalAppData/SpotifyControl'); shutil.rmtree(roo
 (root/'bin/addon-manager.ps1').write_bytes(addon)
 (root/'bin/spotify-control-agent.vbs').write_bytes(agent)
 (root/'bin/spotify-control-bootstrap.ps1').write_bytes(bootstrap)
-print('BOOTSTRAP_FIXTURE_OK',bootstrap_name,len(bootstrap),sha(bootstrap),sha(main),sha(addon),sha(agent))
+print('BOOTSTRAP_FIXTURE_OK',bootstrap_name,len(bootstrap),sha(bootstrap),sha(main),sha(addon),sha(agent),'unreadable_old_members',len(unreadable))
