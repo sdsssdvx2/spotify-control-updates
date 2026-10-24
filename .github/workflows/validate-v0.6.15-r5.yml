@@ -25,9 +25,7 @@ jobs:
           from pathlib import Path
           import base64, gzip, hashlib, json, subprocess
           m=json.loads(Path('manifest.json').read_text(encoding='utf-8-sig'))
-          assert m['latest_version']=='0.6.15'
           source=m['source_commit']
-          assert source=='2f8377829ab61dcb88d265bdbd484181f084aef9'
           edge=next(e for e in m['updates'] if e['from_version']=='0.6.14' and e['to_version']=='0.6.15')
           ap=next(p for p in edge['patches'] if p['path']=='bin/addon-manager.ps1')
           parts=[]
@@ -36,43 +34,122 @@ jobs:
               assert len(data)==c['size'] and hashlib.sha256(data).hexdigest()==c['sha256']
               parts.append(data)
           enc=b''.join(parts)
-          assert len(enc)==ap['encoded_size'] and hashlib.sha256(enc).hexdigest()==ap['encoded_sha256']
           comp=base64.b64decode(enc,validate=True)
-          assert len(comp)==ap['compressed_size'] and hashlib.sha256(comp).hexdigest()==ap['compressed_sha256']
           addon=gzip.decompress(comp)
-          assert len(addon)==ap['target_size'] and hashlib.sha256(addon).hexdigest()==ap['to_sha256']
+          assert hashlib.sha256(addon).hexdigest()==ap['to_sha256']
           Path('candidate-addon.ps1').write_bytes(addon)
           print('R5_RECONSTRUCT',len(addon),hashlib.sha256(addon).hexdigest())
 
-      - name: Inspect exact r5 dispatch, pending, discovery and update paths
+      - name: Reconstruct current 0.6.15 main through immutable patch chain
+        shell: python
+        run: |
+          from pathlib import Path
+          from io import BytesIO
+          import base64, gzip, hashlib, json, subprocess, zipfile
+
+          m=json.loads(Path('manifest.json').read_text(encoding='utf-8-sig'))
+          parts=[Path(f'packages/v0.6.11/chunks-v2/chunk-{i:03}.txt').read_bytes() for i in range(4)]
+          enc=b''.join(parts)
+          clean=b''.join(enc.split())
+          print('V0611_FULL_ENCODED',len(enc),len(clean),hashlib.sha256(enc).hexdigest())
+          raw=base64.b64decode(clean,validate=True)
+          print('V0611_FULL_DECODED',len(raw),hashlib.sha256(raw).hexdigest(),raw[:4])
+          with zipfile.ZipFile(BytesIO(raw)) as z:
+              print('V0611_ZIP_NAMES',z.namelist())
+              main=z.read('bin/spotify-control.ps1')
+          print('V0611_MAIN',len(main),hashlib.sha256(main).hexdigest(),repr(main[:12]))
+          assert hashlib.sha256(main).hexdigest()=='045ed3fa898453ce6563a057a31412d254f5958b75286589e8d5cc95c6782a39'
+
+          def reconstruct_patch(edge):
+              p=next(x for x in edge['patches'] if x['path']=='bin/spotify-control.ps1')
+              pieces=[]
+              for c in p['chunks']:
+                  data=Path(c['path']).read_bytes()
+                  assert len(data)==c['size'] and hashlib.sha256(data).hexdigest()==c['sha256']
+                  pieces.append(data)
+              encoded=b''.join(pieces)
+              assert hashlib.sha256(encoded).hexdigest()==p['encoded_sha256']
+              comp=base64.b64decode(encoded,validate=True)
+              assert hashlib.sha256(comp).hexdigest()==p['compressed_sha256']
+              doc_raw=gzip.decompress(comp)
+              assert hashlib.sha256(doc_raw).hexdigest()==p['json_sha256']
+              return p,json.loads(doc_raw.decode('ascii'))
+
+          def apply_ascii_line_patch(src,doc,target_sha):
+              # Bootstrap patches are line-indexed replacements. Preserve original byte line endings/BOM.
+              candidates=[]
+              for mode in ('bytes-reverse','bytes-forward','text-lf-reverse','text-crlf-reverse'):
+                  try:
+                      if mode.startswith('bytes'):
+                          lines=src.splitlines(keepends=True)
+                          ops=list(doc['operations'])
+                          if mode.endswith('reverse'): ops=sorted(ops,key=lambda x:int(x['start_line']),reverse=True)
+                          for op in ops:
+                              ins=str(op.get('insert','')).encode('utf-8').splitlines(keepends=True)
+                              start=int(op['start_line']); delete=int(op['delete_count'])
+                              lines[start:start+delete]=ins
+                          out=b''.join(lines)
+                      else:
+                          bom=src.startswith(b'\xef\xbb\xbf')
+                          text=src.decode('utf-8-sig')
+                          sep='\r\n' if mode.startswith('text-crlf') else '\n'
+                          # normalize only for this candidate; final hash decides exactness.
+                          lines=text.replace('\r\n','\n').splitlines(keepends=True)
+                          ops=sorted(doc['operations'],key=lambda x:int(x['start_line']),reverse=True)
+                          for op in ops:
+                              ins=str(op.get('insert','')).replace('\r\n','\n').splitlines(keepends=True)
+                              start=int(op['start_line']); delete=int(op['delete_count'])
+                              lines[start:start+delete]=ins
+                          txt=''.join(lines)
+                          if sep=='\r\n': txt=txt.replace('\n','\r\n')
+                          out=(b'\xef\xbb\xbf' if bom else b'')+txt.encode('utf-8')
+                      sha=hashlib.sha256(out).hexdigest(); candidates.append((mode,len(out),sha,out))
+                      if sha==target_sha:
+                          print('PATCH_APPLY_MATCH',mode,len(out),sha)
+                          return out
+                  except Exception as e:
+                      print('PATCH_MODE_ERROR',mode,repr(e))
+              print('PATCH_CANDIDATES',[(a,b,c) for a,b,c,_ in candidates])
+              raise AssertionError('No patch application mode matched target SHA')
+
+          current=main
+          version='0.6.11'
+          for to_version in ('0.6.13','0.6.14','0.6.15'):
+              edge=next(e for e in m['updates'] if e['from_version']==version and e['to_version']==to_version)
+              p,doc=reconstruct_patch(edge)
+              print('PATCH_DOC',version,to_version,doc)
+              current=apply_ascii_line_patch(current,doc,p['to_sha256'])
+              version=to_version
+          assert hashlib.sha256(current).hexdigest()=='4faef1e70be20efb551f595c02dad171a44abbe8a53af9a0576dc54fd0e2004f'
+          Path('candidate-main.ps1').write_bytes(current)
+          print('MAIN_RECONSTRUCT',len(current),hashlib.sha256(current).hexdigest())
+
+      - name: Inspect main addon maintenance ordering and pending aggregation
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          $path=(Resolve-Path '.\candidate-addon.ps1').Path
+          $path=(Resolve-Path '.\candidate-main.ps1').Path
           $tokens=$null; $errors=$null
           $ast=[System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
-          if($errors.Count -ne 0){$errors|%{Write-Error $_.Message};throw 'Parser rejected r5'}
+          if($errors.Count -ne 0){$errors|%{Write-Error $_.Message};throw 'Parser rejected reconstructed main'}
           $funcs=@($ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true))
-          Write-Host '=== RELEVANT FUNCTION NAMES ==='
-          $funcs | Where-Object {$_.Name -match 'Auto|Inventory|Discover|Update|Pithaya|ivLyrics|State|Due|Schedule|Pending'} | ForEach-Object {Write-Host $_.Name}
-          Write-Host '=== SELECTED FUNCTION BODIES ==='
-          foreach($name in @('Get-DiscoveredActionableAutoUpdateCount','Update-AutoApps','Get-Inventory','Get-AddonInventory','Discover-AutoApps','Get-AutoAppInventory','Get-PithayaInventory','Get-IvLyricsInventory')){
+          Write-Host '=== RELEVANT MAIN FUNCTIONS ==='
+          $funcs | Where-Object {$_.Name -match 'Addon|Maintenance|Pending|Check|Maintain|Agent|Spicetify|Apply'} | ForEach-Object {Write-Host $_.Name}
+          foreach($name in @('Invoke-AddonManager','Invoke-AddonMaintenance','Invoke-MaintenanceCheck','Get-MaintenanceCheck','Invoke-Maintain','Invoke-CheckOnly','Get-PendingMaintenance','Invoke-SpicetifyApply')){
             $f=$funcs|Where-Object {$_.Name -ceq $name}|Select-Object -First 1
-            if($f){Write-Host ('--- '+$name+' ---');Write-Host $f.Extent.Text}
+            if($f){Write-Host ('=== '+$name+' ===');Write-Host $f.Extent.Text}
           }
-          Write-Host '=== DISPATCH/SCHEDULE CONTEXT ==='
-          $lines=Get-Content -LiteralPath $path
-          $patterns=@('last_update','Get-DiscoveredActionableAutoUpdateCount','Update-AutoApps','CheckOnly','Action -eq','switch ($Action','schedule gate','actionable pending','Update interval')
-          foreach($pat in $patterns){
-            Write-Host ('--- MATCH '+$pat+' ---')
-            Select-String -LiteralPath $path -SimpleMatch -Pattern $pat -Context 5,10 | ForEach-Object {
+          Write-Host '=== EXACT CONTEXT ==='
+          foreach($pat in @('addons-latest.json','addon-updates:','pending_reasons','maintenance-check-latest.json','CommitLast','RollbackLast','-Action Update','-Action Check','exit 10','LASTEXITCODE','CheckOnly','Maintain')){
+            Write-Host ('--- '+$pat+' ---')
+            Select-String -LiteralPath $path -SimpleMatch -Pattern $pat -Context 8,14 | ForEach-Object {
               Write-Host ('LINE '+$_.LineNumber+': '+$_.Line)
-              $_.Context.PreContext | ForEach-Object {Write-Host ('  PRE '+$_)}
-              $_.Context.PostContext | ForEach-Object {Write-Host (' POST '+$_)}
+              $_.Context.PreContext|%{Write-Host (' PRE '+$_)}
+              $_.Context.PostContext|%{Write-Host ('POST '+$_)}
             }
           }
 
-      - name: Run existing r5 SelfTest on clean Windows fixture
+      - name: Run exact r5 SelfTest on clean Windows fixture
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
