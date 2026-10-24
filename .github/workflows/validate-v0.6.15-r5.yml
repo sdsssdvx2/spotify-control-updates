@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   windows-powershell51-stage14-v140:
@@ -20,13 +21,30 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Rebuild trusted prior package and derive Stage14 v1.4.0
+      - name: Download exact previously validated v1.2.1 user artifact
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh api -H 'Accept: application/vnd.github+json' '/repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12559818628/zip' > base-v121-outer.zip
+          if($LASTEXITCODE -ne 0){throw 'Failed to download v1.2.1 Actions artifact'}
+          Expand-Archive -LiteralPath .\base-v121-outer.zip -DestinationPath .\base-v121-outer -Force
+          $inner=Get-ChildItem -LiteralPath .\base-v121-outer -File -Filter 'SpotifyControl-Windows-Runtime-Acceptance-v1.2.1.zip' | Select-Object -First 1
+          if(-not $inner){throw 'v1.2.1 user ZIP missing from Actions artifact'}
+          Copy-Item -LiteralPath $inner.FullName -Destination .\base-v121.zip -Force
+          $h=(Get-FileHash -Algorithm SHA256 -LiteralPath .\base-v121.zip).Hash.ToLowerInvariant()
+          $n=(Get-Item -LiteralPath .\base-v121.zip).Length
+          if($n -ne 34841 -or $h -ne '962a09cd5adbcb4dd49046dd672b44252238f43859f5b97a4ce70f8492068fd8'){throw "v1.2.1 artifact mismatch size=$n sha=$h"}
+          Write-Host 'EXACT_V121_ARTIFACT_PASS'
+
+      - name: Derive Stage14 v1.4.0 from exact validated artifact
         shell: python
         run: |
           import hashlib,runpy
           from pathlib import Path
-          p=Path('validation/stage14-v1.4.0/build_stage14_v140.py')
-          b=p.read_bytes();print('V140_BUILDER',len(b),hashlib.sha256(b).hexdigest())
+          p=Path('validation/stage14-v1.4.0/build_from_validated_v121_artifact.py')
+          b=p.read_bytes();print('V140_ARTIFACT_BUILDER',len(b),hashlib.sha256(b).hexdigest())
           runpy.run_path(str(p),run_name='__main__')
 
       - name: Verify live production v0.6.17 trust anchor and exact two-edge start chain
@@ -49,7 +67,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          $root=Resolve-Path '.\stage14-v121'
+          $root=Resolve-Path '.\stage14-v120-unpacked'
           foreach($rel in @('RUN_RUNTIME_ACCEPTANCE.ps1','PRECHECK_RUNTIME_ACCEPTANCE.ps1')){
             $tokens=$null;$errors=$null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $root $rel),[ref]$tokens,[ref]$errors)
