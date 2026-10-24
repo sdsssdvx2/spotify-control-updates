@@ -1,0 +1,1 @@
+Final pinned-source validation trigger for v0.6.17/r7 after immutable transport + manifest publication.
