@@ -93,6 +93,8 @@ root=fixture/'LocalAppData'/'SpotifyControl'
 shutil.rmtree(fixture,ignore_errors=True)
 (root/'bin').mkdir(parents=True)
 (root/'bootstrap').mkdir(parents=True)
+# Addon Manager's read-only SelfTest requires the normal LOCALAPPDATA Spotify root to exist.
+(fixture/'LocalAppData'/'Spotify').mkdir(parents=True)
 (root/'bin'/'spotify-control.ps1').write_bytes(main)
 (root/'bin'/'addon-manager.ps1').write_bytes(addon)
 (root/'bin'/'spotify-control-agent.vbs').write_bytes(agent)
@@ -120,4 +122,4 @@ market.mkdir(parents=True)
 (market/'style.css').write_text('/* CI Marketplace fixture */\n',encoding='utf-8',newline='\n')
 (market/'manifest.json').write_text('{"name":"Spotify Marketplace CI Fixture"}\n',encoding='utf-8',newline='\n')
 
-print('BOOTSTRAP_FIXTURE_OK',len(bootstrap),sha(bootstrap),sha(main),sha(addon),sha(agent),'helpers',len(helper_names),'marketplace_files',4,'unreadable_old_members',len(unreadable))
+print('BOOTSTRAP_FIXTURE_OK',len(bootstrap),sha(bootstrap),sha(main),sha(addon),sha(agent),'helpers',len(helper_names),'marketplace_files',4,'spotify_root',True,'unreadable_old_members',len(unreadable))
