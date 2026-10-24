@@ -1,95 +1,79 @@
-name: Validate and publish Spotify Control v0.6.16 r6
+name: Validate exact Spotify Control Stage14 v1.3.0 package
 
 on:
   pull_request:
     branches: [main]
     paths:
-      - 'validation/v0.6.16/**'
-      - 'packages/v0.6.16/**'
-      - 'manifest.json'
+      - 'validation/stage14-v1.3.0/**'
       - '.github/workflows/validate-v0.6.15-r5.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  windows-powershell51-v0616:
+  windows-powershell51-stage14-v130:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.ref }}
 
-      - name: Prepare or final-validate exact v0.6.16 publication
+      - name: Rebuild trusted v1.2.1 and derive exact Stage14 v1.3.0
         shell: python
         run: |
           import hashlib, runpy
           from pathlib import Path
-          p=Path('validation/v0.6.16/publish_v0616.py')
+          p=Path('validation/stage14-v1.3.0/build_stage14_v130.py')
           data=p.read_bytes()
-          print('PUBLISH_VALIDATOR',len(data),hashlib.sha256(data).hexdigest())
+          print('V130_BUILDER',len(data),hashlib.sha256(data).hexdigest())
           runpy.run_path(str(p),run_name='__main__')
 
-      - name: Windows PowerShell 5.1 parser, offline SelfTest and real ivLyrics proof
+      - name: Verify live stable v0.6.16 trust anchor matches Stage14 target
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib,json,zipfile
+          m=json.loads(Path('manifest.json').read_text(encoding='utf-8-sig'))
+          assert m['latest_version']=='0.6.16'
+          assert m['source_commit']=='c97b6bae845c46730120b08821f8515cfa9ad199'
+          assert m['payload_set_sha256']=='fbeffb5f594c3feeb621f50e391246bb035dd0fffce5300a575aa74883a7acfb'
+          latest={x['path']:(x['size'],x['sha256']) for x in m['latest_files']}
+          assert latest=={
+            'bin/spotify-control.ps1':(266321,'6d5e154f63dfb77d15e0541a87a653863e0ae9f95df59ffa9bb4b413f97766ad'),
+            'bin/addon-manager.ps1':(152481,'fb2bd974ee795bb697a0e5b534e03477be77b655e60353d82064b1e751bdc686'),
+            'bin/spotify-control-agent.vbs':(4855,'2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278')}
+          z=Path('SpotifyControl-Windows-Runtime-Acceptance-v1.3.0.zip')
+          print('V130_ZIP_FINAL',z.stat().st_size,hashlib.sha256(z.read_bytes()).hexdigest())
+          with zipfile.ZipFile(z) as f:
+            assert f.testzip() is None
+            run=f.read('RUN_RUNTIME_ACCEPTANCE.ps1').decode('utf-8-sig')
+            assert "$AcceptanceVersion = '1.3.0'" in run
+            assert "@('-Action','IvLyricsTagProofSelfTest')" in run
+            assert 'Commit-cycle self-test passed' in run
+            assert 'ivLyrics official-tag fallback gate self-test passed' in run
+            for line in f.read('SHA256SUMS.txt').decode('ascii').splitlines():
+              digest,rel=line.split('  ',1)
+              assert hashlib.sha256(f.read(rel)).hexdigest()==digest,rel
+
+      - name: Windows PowerShell 5.1 parser validation
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          foreach($rel in @('publication-v0.6.16\candidate-main-v0.6.16.ps1','publication-v0.6.16\candidate-addon-v0.6.5-r6.ps1')){
-            $tokens=$null;$errors=$null
-            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $rel).Path,[ref]$tokens,[ref]$errors)
-            if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw "PS5.1 parser rejected $rel"}
+          Expand-Archive -LiteralPath 'SpotifyControl-Windows-Runtime-Acceptance-v1.3.0.zip' -DestinationPath 'stage14-v130-ps' -Force
+          foreach($rel in @('PRECHECK_RUNTIME_ACCEPTANCE.ps1','RUN_RUNTIME_ACCEPTANCE.ps1')) {
+            $path=(Resolve-Path (Join-Path 'stage14-v130-ps' $rel)).Path
+            $tokens=$null; $errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+            if($errors.Count -ne 0) { $errors | ForEach-Object { Write-Error $_.Message }; throw "Windows PowerShell 5.1 parser rejected $rel" }
           }
-          $env:LOCALAPPDATA=Join-Path $env:RUNNER_TEMP 'SpotifyControl-r6-Local'
-          $env:APPDATA=Join-Path $env:RUNNER_TEMP 'SpotifyControl-r6-Roaming'
-          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify') | Out-Null
-          New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
-          $addon=(Resolve-Path 'publication-v0.6.16\candidate-addon-v0.6.5-r6.ps1').Path
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $addon -Action SelfTest
-          if($LASTEXITCODE -ne 0){throw "r6 offline SelfTest failed: $LASTEXITCODE"}
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $addon -Action IvLyricsTagProofSelfTest
-          if($LASTEXITCODE -ne 0){throw "r6 online ivLyrics proof failed: $LASTEXITCODE"}
-          Write-Host 'V0616_R6_PS51_AND_SELFTESTS_PASS'
+          Write-Host 'Stage14 v1.3.0 Windows PowerShell 5.1 parser PASS.'
 
-      - name: Publish immutable transport then pin its source commit
-        if: ${{ hashFiles('packages/v0.6.16/**') == '' && github.event_name == 'pull_request' }}
-        shell: powershell
-        env:
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-        run: |
-          $ErrorActionPreference='Stop'
-          if(Test-Path -LiteralPath '.\packages\v0.6.16'){throw 'v0.6.16 package path unexpectedly exists before first publication.'}
-          New-Item -ItemType Directory -Force -Path '.\packages\v0.6.16' | Out-Null
-          Copy-Item -Path '.\publication-v0.6.16\packages\v0.6.16\*' -Destination '.\packages\v0.6.16' -Recurse -Force
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- 'packages/v0.6.16'
-          git diff --cached --quiet
-          if($LASTEXITCODE -eq 0){throw 'No v0.6.16 transport bytes were staged.'}
-          git commit -m 'Publish immutable v0.6.16 transport'
-          if($LASTEXITCODE -ne 0){throw 'Transport commit failed.'}
-          $transportSha=(git rev-parse HEAD).Trim()
-          if($transportSha -notmatch '^[0-9a-f]{40}$'){throw "Invalid transport commit SHA: $transportSha"}
-          git push origin ("HEAD:"+$env:HEAD_REF)
-          if($LASTEXITCODE -ne 0){throw 'Transport push failed.'}
-          $env:TRANSPORT_SHA=$transportSha
-          python -c "import os; from pathlib import Path; p=Path('publication-v0.6.16/manifest-template.json'); s=p.read_text(encoding='utf-8'); assert s.count('__SOURCE_COMMIT__')==1; Path('manifest.json').write_bytes(s.replace('__SOURCE_COMMIT__',os.environ['TRANSPORT_SHA']).encode('utf-8'))"
-          if($LASTEXITCODE -ne 0){throw 'Manifest source pin generation failed.'}
-          git add -- manifest.json
-          git diff --cached --quiet
-          if($LASTEXITCODE -eq 0){throw 'No manifest change was staged.'}
-          git commit -m 'Publish stable v0.6.16 manifest'
-          if($LASTEXITCODE -ne 0){throw 'Manifest commit failed.'}
-          git push origin ("HEAD:"+$env:HEAD_REF)
-          if($LASTEXITCODE -ne 0){throw 'Manifest push failed.'}
-          Write-Host ("V0616_PUBLICATION_PUSHED source_commit="+$transportSha)
-
-      - name: Upload exact v0.6.16 validation output
+      - name: Upload exact validated Stage14 v1.3.0 ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: spotify-control-v0.6.16-validation-output
-          path: publication-v0.6.16
+          name: SpotifyControl-Windows-Runtime-Acceptance-v1.3.0
+          path: SpotifyControl-Windows-Runtime-Acceptance-v1.3.0.zip
           if-no-files-found: error
           compression-level: 6
