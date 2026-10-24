@@ -1,3 +1,4 @@
+# Final pinned-head validation trigger; no publication semantics.
 from pathlib import Path
 import base64,gzip,hashlib,json,os,re,subprocess
 
