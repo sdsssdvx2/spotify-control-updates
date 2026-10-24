@@ -2,22 +2,23 @@ from pathlib import Path
 import base64,gzip,hashlib,json,os,re,subprocess
 
 OLD_MAIN='5ff7990564287bc409626d8835e27679fb8de434868443313be42fdc0d9cce3b'
-NEW_MAIN='d848f61c318d22b3506b830d4ecc6974d3ba45853957fdd056b3f4f8f4984425'
-NEW_MAIN_SIZE=281551
+PREVIOUS_CANDIDATE_MAIN='d848f61c318d22b3506b830d4ecc6974d3ba45853957fdd056b3f4f8f4984425'
+NEW_MAIN='27783abc40c446aadf6f2a9373b4525ada89759075f37e934958c8e449f2d98f'
+NEW_MAIN_SIZE=281593
 ADDON='b7d1a4bc7707533400402fe42e60d724f88656c2477d4d4a5c0f47be60f47977'
 ADDON_SIZE=154926
 AGENT='2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278'
 AGENT_SIZE=4855
-PAYLOAD='7c5e03a89b8d0d4209bb55485a0e32de56267c56d97a0c97cbb661823bd84d5f'
-ENC_SHA='42ba557900d8d603d2aafdffdffb8f5cf814930b4e4a6fd536a148e3a36bff8e'
-ENC_SIZE=5928
-GZ_SHA='3fe57e3ad9f589381bd5b78026e03a3363f00ddfd1eedcf36feaf5d71b4a5423'
-GZ_SIZE=4444
-JSON_SHA='7ee26d4cfdfaba691096e0d813dba7636d7c03e793485993d540afa2721a1f7d'
-JSON_SIZE=16295
+PAYLOAD='ed87bf1b02a66c77137d96846dc58a3c068372abcb6deb38d335dee32243625e'
+ENC_SHA='be1fd4188c17b27d6fa47e60178ffe4397a360ebe86cf948537d8911bad4dc61'
+ENC_SIZE=5944
+GZ_SHA='1f17fddacd39420019785e681b94435ff9bde17bf2858ff32ac9cd587be23bbe'
+GZ_SIZE=4458
+JSON_SHA='101cf5f1c2a2f77b43e6bb577cd3d141abc5f5990232cf76260903ce04f273ec'
+JSON_SIZE=16340
 CHUNKS=[
- ('packages/v0.6.18/main-v0617-to-v0618/chunk-000.txt','08eb5aa27d29e3ee9b3a8bb857b9bc6f3b83586d462776dbf1df7cf9f07c722b',4096),
- ('packages/v0.6.18/main-v0617-to-v0618/chunk-001.txt','75048499ea1b9754a61966c029e6864bb902db401b2f9f5b219533e641d50d2c',1832),
+ ('packages/v0.6.18/main-v0617-to-v0618/chunk-000.txt','f9ca6e3a6d80c21b5492d191dd25ade1ef3e43c0e3743cdbd6cf97f6cfbae0b3',4096),
+ ('packages/v0.6.18/main-v0617-to-v0618/chunk-001.txt','333186435eec5f438353b5873ccb4bcbc272143a119f4c7bee128bce64137394',1848),
 ]
 
 def sha(b): return hashlib.sha256(b).hexdigest()
@@ -38,7 +39,7 @@ def validate_transport(source_commit):
     assert re.fullmatch(r'[0-9a-f]{40}',source_commit),source_commit
     parts=[]
     for i,(p,h,s) in enumerate(CHUNKS):
-        assert p.endswith(f'/chunk-{i:03d}.txt')
+        assert p.endswith(f'/chunk-{i:03}.txt')
         b=git_bytes(source_commit,p); assert len(b)==s and sha(b)==h,(p,len(b),sha(b)); parts.append(b)
     enc=b''.join(parts); assert len(enc)==ENC_SIZE and sha(enc)==ENC_SHA
     comp=base64.b64decode(enc,validate=True); assert len(comp)==GZ_SIZE and sha(comp)==GZ_SHA
@@ -71,21 +72,33 @@ def validate_manifest(m):
     validate_transport(m['source_commit'])
     print('V0618_MANIFEST_PASS',m['source_commit'],m['payload_set_sha256'])
 
-p=Path('manifest.json'); m=json.loads(p.read_text(encoding='utf-8-sig'))
-if m.get('latest_version')=='0.6.17':
-    transport=os.environ.get('TRANSPORT_SHA','').strip()
+def rewrite_to_current(m,transport):
     assert re.fullmatch(r'[0-9a-f]{40}',transport),'TRANSPORT_SHA missing/invalid'
+    latest={x['path']:x for x in m['latest_files']}
+    latest['bin/spotify-control.ps1']['sha256']=NEW_MAIN;latest['bin/spotify-control.ps1']['size']=NEW_MAIN_SIZE
+    m['latest_version']='0.6.18';m['source_commit']=transport;m['payload_set_sha256']=PAYLOAD
+    m['updates']=[e for e in m['updates'] if e['from_version']!='0.6.17']
+    m['updates'].append(expected_edge())
+    return m
+
+p=Path('manifest.json'); m=json.loads(p.read_text(encoding='utf-8-sig'))
+transport=os.environ.get('TRANSPORT_SHA','').strip()
+if m.get('latest_version')=='0.6.17':
     assert m['source_commit']=='36b15a2ed2f9a23fffbeaf91de78b7854f6108b2'
     latest={x['path']:x for x in m['latest_files']}
     assert latest['bin/spotify-control.ps1']['sha256']==OLD_MAIN
     assert not any(e['from_version']=='0.6.17' for e in m['updates'])
-    m['latest_version']='0.6.18';m['source_commit']=transport;m['payload_set_sha256']=PAYLOAD
-    latest['bin/spotify-control.ps1']['sha256']=NEW_MAIN;latest['bin/spotify-control.ps1']['size']=NEW_MAIN_SIZE
-    m['updates'].append(expected_edge())
+    rewrite_to_current(m,transport)
     p.write_text(json.dumps(m,separators=(',',':')),encoding='utf-8',newline='')
     print('V0618_MANIFEST_PREPARED',transport)
     validate_manifest(m)
 elif m.get('latest_version')=='0.6.18':
+    latest={x['path']:x for x in m['latest_files']}
+    if latest['bin/spotify-control.ps1']['sha256']==PREVIOUS_CANDIDATE_MAIN:
+        assert transport,'TRANSPORT_SHA required to refresh previous v0.6.18 candidate'
+        rewrite_to_current(m,transport)
+        p.write_text(json.dumps(m,separators=(',',':')),encoding='utf-8',newline='')
+        print('V0618_MANIFEST_REFRESHED',transport)
     validate_manifest(m)
 else:
     raise AssertionError(f"unexpected stable latest_version={m.get('latest_version')}")
