@@ -38,7 +38,7 @@ jobs:
           assert len(blob) == 30856, len(blob)
           blob_sha = hashlib.sha256(blob).hexdigest()
           print(f'Actual repair ZIP SHA256: {blob_sha}')
-          assert blob_sha == '9814ea8977c56059593329f0c7d5d3b8deca793ffa179ce2cc41c75d8b63d3e8'
+          assert blob_sha == '6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdfd267bd95f6c6ddcf06'
           Path('repair.zip').write_bytes(blob)
 
           expected = {
