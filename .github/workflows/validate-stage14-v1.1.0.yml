@@ -25,27 +25,35 @@ jobs:
           from pathlib import Path, PurePosixPath
           import base64, hashlib, subprocess, sys, zipfile
 
-          chunk_dir = Path('validation/stage14-v1.1.0/chunks')
-          expected = [
-              ('chunk-000.txt', 6000, 'b7b1a7550bc920f13e3c69ce7f11ef1c36fd899fffb45bbfbbd897e7e02e36f1'),
-              ('chunk-001.txt', 6000, 'dd9f77a03e8d5e4499a883e6505fa2a7cb9e701c2d40afe1b09ef08a9a2fb0c5'),
-              ('chunk-002.txt', 6000, '0c30ebeae24737dffde9ae00f36556158218457b223af5a94fec2e6a7e92f5b4'),
-              ('chunk-003.txt', 6000, 'c1b7b51e274eab7cb4e34e80b1c4108dc9635765926fb85416263d5c41d089ee'),
-              ('chunk-004.txt', 6000, 'f2458ddda18d0dbfadf8a8e18b208465d75e3feb7fbaa2bf6a91223a6ce73ad5'),
-              ('chunk-005.txt', 6000, '449c482299f89ead48e5bcb5e895836ce6498cb32b84d524f07e3c5dc241a977'),
-              ('chunk-006.txt', 4008, '7f7ab0c4a1f1f1e4cd93339e26234260fab83b1a1727cebe54d5f4d744dd4486'),
+          pieces = [
+              ('validation/stage14-v1.1.0/chunks/chunk-000.txt', 6000, 'b7b1a7550bc920f13e3c69ce7f11ef1c36fd899fffb45bbfbbd897e7e02e36f1'),
+              ('validation/stage14-v1.1.0/segments/seg-01.txt', 3000, '295e031e122b2965c50ebbe19c5ee74a1da640c34f81abd11760134034e09a15'),
+              ('validation/stage14-v1.1.0/segments/seg-02.txt', 3000, '320a646d520fb5f0cf9818401a74e6e796e965725ccd77419860de6c22cdc9e2'),
+              ('validation/stage14-v1.1.0/segments/seg-03.txt', 3000, '8b398e6c0dfd1898dc24b2bace530f331b7b7b957fc8a68e28b7c18d94fbbdf9'),
+              ('validation/stage14-v1.1.0/segments/seg-04.txt', 3000, '900c2b6d455fe48899d9174beb78401864246439fa3b8ddb5ea96f9676488fc9'),
+              ('validation/stage14-v1.1.0/segments/seg-05.txt', 3000, '926f1376060de66dbbc27bf07cf9e50000b6bd424957058efb6beccb571be77e'),
+              ('validation/stage14-v1.1.0/segments/seg-06.txt', 3000, 'af5696082d2c82bcf9a9fc522afcd7bc7cde5597c87d4276a3e68f2211b9693d'),
+              ('validation/stage14-v1.1.0/segments/seg-07.txt', 3000, '7eefcefb883581a465a1fe88ab51a9735ec372884513f178b3940a3944e529b9'),
+              ('validation/stage14-v1.1.0/segments/seg-08.txt', 3000, '51d850a5f6b73f9e1055816b53df049a7471bc1ca47807c249cc53e0da369e9e'),
+              ('validation/stage14-v1.1.0/segments/seg-09.txt', 3000, '919f6530daed051dcdedc3420f6e6597bfdff83b9d0ea2ea686f756f3ef5ac1f'),
+              ('validation/stage14-v1.1.0/segments/seg-10.txt', 3000, 'f82a5be5d9fda5c8d9bb20bd144fb19fe66b6469c761a011dc2d5d403165e4c0'),
+              ('validation/stage14-v1.1.0/segments/seg-11.txt', 3000, '90432a03589a5e03d421c75b38928c39d398736ef48abf99670977aceac15094'),
+              ('validation/stage14-v1.1.0/segments/seg-12.txt', 1008, '938f3d11fce05e9f25e273db64ff4a00c75c5c9139a01406af9851229668774e'),
           ]
           parts = []
-          for name, size, sha in expected:
-              data = (chunk_dir/name).read_bytes()
-              assert len(data) == size, (name, len(data), size)
-              assert hashlib.sha256(data).hexdigest() == sha, name
+          for rel, size, sha in pieces:
+              data = Path(rel).read_bytes()
+              print('PIECE', rel, len(data), hashlib.sha256(data).hexdigest())
+              assert len(data) == size, (rel, len(data), size)
+              assert hashlib.sha256(data).hexdigest() == sha, rel
               parts.append(data)
           encoded = b''.join(parts)
+          print('ENCODED', len(encoded), hashlib.sha256(encoded).hexdigest())
           assert len(encoded) == 40008
           assert hashlib.sha256(encoded).hexdigest() == 'ba2b10d9197cfdba0d683b29612402977aa1da30e75d37ebf15bac1ce37362ba'
           raw = base64.b64decode(encoded, validate=True)
-          assert len(raw) == 30004, len(raw)
+          print('ZIP', len(raw), hashlib.sha256(raw).hexdigest())
+          assert len(raw) == 30004
           assert hashlib.sha256(raw).hexdigest() == 'a823775a2c05faa599263ecf3ec3da90aff7ae4012f45380658fde422b6a9dcc'
           zpath = Path('SpotifyControl-Windows-Runtime-Acceptance-v1.1.0.zip')
           zpath.write_bytes(raw)
