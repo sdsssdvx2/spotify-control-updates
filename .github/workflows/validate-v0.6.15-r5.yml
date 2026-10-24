@@ -1,209 +1,135 @@
-name: Validate Spotify Control v0.6.17 bootstrap patch contract
+name: Validate exact Spotify Control Stage14 v1.4.1 package
 
 on:
   pull_request:
     branches: [main]
     paths:
-      - 'validation/bootstrap-contract-repair/**'
-      - 'packages/v0.6.16/main-v0615-to-v0616-compat/**'
-      - 'packages/v0.6.17/main-v0616-to-v0617-compat/**'
-      - 'manifest.json'
-      - '.github/workflows/validate-v0.6.15-r5.yml'
-  push:
-    branches: [main]
-    paths:
-      - 'packages/v0.6.16/main-v0615-to-v0616-compat/**'
-      - 'packages/v0.6.17/main-v0616-to-v0617-compat/**'
-      - 'manifest.json'
+      - 'validation/stage14-v1.4.1/**'
       - '.github/workflows/validate-v0.6.15-r5.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   actions: read
 
 jobs:
-  windows-bootstrap-v106-contract:
+  windows-powershell51-stage14-v141:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
 
-      - name: Download exact previously validated bootstrap 1.0.6 carrier artifact
+      - name: Download exact previously validated Stage14 v1.4.0 artifact
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' > validated-v0614-repair-artifact.zip
+          gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12562419376/zip' > base-v140-outer.zip
           python - <<'PY'
           from pathlib import Path
-          from io import BytesIO
           import hashlib,zipfile
-          outer=Path('validated-v0614-repair-artifact.zip').read_bytes()
-          with zipfile.ZipFile(BytesIO(outer)) as z:
+          outer=Path('base-v140-outer.zip').read_bytes()
+          assert hashlib.sha256(outer).hexdigest()=='28b41358b03c2f7a38a97075690143d6bbfb1bd0c3c9f6bc7d8b24cf3ec76388'
+          with zipfile.ZipFile('base-v140-outer.zip') as z:
               assert z.testzip() is None
-              name='SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip'
-              assert name in z.namelist()
-              inner=z.read(name)
-          assert len(inner)==30856
-          assert hashlib.sha256(inner).hexdigest()=='6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdfd267bd95f6c6ddcf06'
-          with zipfile.ZipFile(BytesIO(inner)) as z:
-              assert z.testzip() is None
-              boot=z.read('bootstrap/spotify-control-self-updater.ps1')
-          assert len(boot)==42963
-          assert hashlib.sha256(boot).hexdigest()=='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
-          print('VALIDATED_BOOTSTRAP_V106_CARRIER_PASS',len(outer),len(inner),len(boot))
+              target='SpotifyControl-Windows-Runtime-Acceptance-v1.4.0.zip'
+              assert z.namelist()==[target],z.namelist()
+              inner=z.read(target)
+          assert len(inner)==23068,len(inner)
+          assert hashlib.sha256(inner).hexdigest()=='65057fe1595a7f78a0fd3e138304c6044c42adbaed829541042f485a9e37655d'
+          Path('base-v140.zip').write_bytes(inner)
+          print('EXACT_STAGE14_V140_ARTIFACT_PASS',len(outer),len(inner),hashlib.sha256(inner).hexdigest())
           PY
 
-      - name: Prepare or final-validate bootstrap-compatible transport
+      - name: Derive Stage14 v1.4.1 only from exact validated v1.4.0
         shell: python
         run: |
           import hashlib,runpy
           from pathlib import Path
-          p=Path('validation/bootstrap-contract-repair/repair_v0616_v0617_patch_contract.py')
+          p=Path('validation/stage14-v1.4.1/build_stage14_v141.py')
           data=p.read_bytes()
-          print('REPAIR_VALIDATOR',len(data),hashlib.sha256(data).hexdigest())
+          print('V141_BUILDER',len(data),hashlib.sha256(data).hexdigest())
           runpy.run_path(str(p),run_name='__main__')
 
-      - name: Publish canonical repair transport then pin candidate manifest
-        if: ${{ github.event_name == 'pull_request' && hashFiles('packages/v0.6.16/main-v0615-to-v0616-compat/**', 'packages/v0.6.17/main-v0616-to-v0617-compat/**') == '' }}
-        shell: powershell
-        env:
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      - name: Verify repaired live production trust anchor and patch contract
+        shell: python
         run: |
-          $ErrorActionPreference='Stop'
-          $pairs=@(
-            @('.\publication-bootstrap-contract-repair\packages\v0.6.16\main-v0615-to-v0616-compat','.\packages\v0.6.16\main-v0615-to-v0616-compat'),
-            @('.\publication-bootstrap-contract-repair\packages\v0.6.17\main-v0616-to-v0617-compat','.\packages\v0.6.17\main-v0616-to-v0617-compat')
-          )
-          foreach($pair in $pairs){
-            if(-not(Test-Path -LiteralPath $pair[0] -PathType Container)){throw ('Prepared repair transport missing: '+$pair[0])}
-            New-Item -ItemType Directory -Force -Path $pair[1] | Out-Null
-            Copy-Item -Path (Join-Path $pair[0] '*') -Destination $pair[1] -Recurse -Force
+          import base64,gzip,hashlib,json,subprocess
+          def sha(b): return hashlib.sha256(b).hexdigest()
+          def gb(ref,path): return subprocess.check_output(['git','show',f'{ref}:{path}'])
+          m=json.loads(gb('origin/main','manifest.json').decode('utf-8-sig'))
+          assert m['latest_version']=='0.6.17'
+          assert m['source_commit']=='36b15a2ed2f9a23fffbeaf91de78b7854f6108b2'
+          assert m['payload_set_sha256']=='0f7fe384630e027466aa734ac669b410774b4569db231982212b7fa565b691a0'
+          assert m['bootstrap']=={'version':'1.0.6','sha256':'d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6','size':42963}
+          latest={x['path']:(x['sha256'],int(x['size'])) for x in m['latest_files']}
+          assert latest=={
+            'bin/spotify-control.ps1':('5ff7990564287bc409626d8835e27679fb8de434868443313be42fdc0d9cce3b',266318),
+            'bin/addon-manager.ps1':('b7d1a4bc7707533400402fe42e60d724f88656c2477d4d4a5c0f47be60f47977',154926),
+            'bin/spotify-control-agent.vbs':('2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278',4855),
           }
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- 'packages/v0.6.16/main-v0615-to-v0616-compat' 'packages/v0.6.17/main-v0616-to-v0617-compat'
-          git diff --cached --quiet
-          if($LASTEXITCODE -eq 0){throw 'No canonical repair transport bytes were staged.'}
-          git commit -m 'Publish canonical bootstrap-compatible v0.6.16-v0.6.17 main transport'
-          if($LASTEXITCODE -ne 0){throw 'Repair transport commit failed.'}
-          $transportSha=(git rev-parse HEAD).Trim()
-          if($transportSha -notmatch '^[0-9a-f]{40}$'){throw "Invalid transport SHA $transportSha"}
-          git push origin ("HEAD:"+$env:HEAD_REF)
-          if($LASTEXITCODE -ne 0){throw 'Repair transport push failed.'}
+          froms=[e['from_version'] for e in m['updates']];assert len(froms)==len(set(froms))
+          for a,b,folder in [
+            ('0.6.15','0.6.16','packages/v0.6.16/main-v0615-to-v0616-compat'),
+            ('0.6.16','0.6.17','packages/v0.6.17/main-v0616-to-v0617-compat')]:
+              e=next(x for x in m['updates'] if x['from_version']==a and x['to_version']==b)
+              p=next(x for x in e['patches'] if x['path']=='bin/spotify-control.ps1')
+              parts=[]
+              for i,c in enumerate(p['chunks']):
+                  q=c['path'];assert q==f'{folder}/chunk-{i:03}.txt',q
+                  data=gb(m['source_commit'],q);assert len(data)==int(c['size']) and sha(data)==c['sha256'];parts.append(data)
+              enc=b''.join(parts);assert len(enc)==int(p['encoded_size']) and sha(enc)==p['encoded_sha256']
+              comp=base64.b64decode(enc,validate=True);assert len(comp)==int(p['compressed_size']) and sha(comp)==p['compressed_sha256']
+              raw=gzip.decompress(comp);assert len(raw)==int(p['json_size']) and sha(raw)==p['json_sha256']
+              doc=json.loads(raw.decode('ascii'))
+              assert doc['schema']==1 and doc['kind']=='ascii-line-patch'
+              assert doc['bom']=='utf8-bom' and doc['line_ending']=='lf'
+              assert doc['from_version']==a and doc['to_version']==b
+              print('LIVE_REPAIRED_PATCH_CONTRACT_PASS',a,b,sha(raw),q)
+          print('LIVE_STAGE14_V141_TRUST_ANCHOR_PASS')
 
-          $env:TRANSPORT_SHA=$transportSha
-          python -c "import os;from pathlib import Path;p=Path('publication-bootstrap-contract-repair/manifest-template.json');s=p.read_text(encoding='utf-8');assert s.count('__SOURCE_COMMIT__')==1;Path('manifest.json').write_bytes(s.replace('__SOURCE_COMMIT__',os.environ['TRANSPORT_SHA']).encode('utf-8'))"
-          if($LASTEXITCODE -ne 0){throw 'Candidate manifest generation failed.'}
-          git add -- manifest.json
-          git diff --cached --quiet
-          if($LASTEXITCODE -eq 0){throw 'No candidate manifest change was staged.'}
-          git commit -m 'Repair stable v0.6.17 bootstrap patch document contract'
-          if($LASTEXITCODE -ne 0){throw 'Candidate manifest commit failed.'}
-          git push origin ("HEAD:"+$env:HEAD_REF)
-          if($LASTEXITCODE -ne 0){throw 'Candidate manifest push failed.'}
-          python validation/bootstrap-contract-repair/repair_v0616_v0617_patch_contract.py
-          if($LASTEXITCODE -ne 0){throw 'Post-publication repair validation failed.'}
-          Write-Host ("BOOTSTRAP_REPAIR_PUBLICATION_PUSHED source_commit="+$transportSha)
-
-      - name: Reconstruct exact bootstrap 1.0.6 and v0.6.15-r5 fixture
-        shell: python
-        run: |
-          import hashlib,runpy
-          from pathlib import Path
-          p=Path('validation/bootstrap-contract-repair/build_bootstrap_fixture.py')
-          data=p.read_bytes()
-          print('FIXTURE_BUILDER',len(data),hashlib.sha256(data).hexdigest())
-          runpy.run_path(str(p),run_name='__main__')
-
-      - name: Windows PowerShell 5.1 exact Check RollbackTest Update cycle
+      - name: Windows PowerShell 5.1 parser and embedded self-validation
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          $root=(Resolve-Path '.\ci-bootstrap-fixture\LocalAppData\SpotifyControl').Path
-          $bin=Join-Path $root 'bin'
-          $boot=Join-Path $root 'bootstrap\spotify-control-self-updater.ps1'
-          $expectedBoot='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
-          if((Get-FileHash -Algorithm SHA256 -LiteralPath $boot).Hash.ToLowerInvariant() -ne $expectedBoot){throw 'Exact bootstrap hash mismatch.'}
-          if((Get-Item -LiteralPath $boot).Length -ne 42963){throw 'Exact bootstrap size mismatch.'}
-          $tokens=$null;$errors=$null
-          [void][System.Management.Automation.Language.Parser]::ParseFile($boot,[ref]$tokens,[ref]$errors)
-          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Exact bootstrap 1.0.6 parser rejected source.'}
-
-          if('${{ github.event_name }}' -eq 'pull_request'){
-            # Validation-only transport shim: redirect only the hard-coded manifest URL and pin
-            # the already-verified original self hash/size so the unchanged parser/update logic
-            # can exercise the candidate commit. This modified copy is never published.
-            $head=(git rev-parse HEAD).Trim()
-            $old='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/main/manifest.json'
-            $new=('https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/'+$head+'/manifest.json')
-            $selfLine='$selfHash = Get-Sha256 -Path $PSCommandPath'
-            $selfPinned='$selfHash = ''d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'''
-            $sizeLine='$bootstrapSize = [int64](Get-Item -LiteralPath $PSCommandPath).Length'
-            $sizePinned='$bootstrapSize = [int64]42963'
-            $text=[IO.File]::ReadAllText($boot)
-            foreach($pair in @(@($old,$new),@($selfLine,$selfPinned),@($sizeLine,$sizePinned))){
-              $count=([regex]::Matches($text,[regex]::Escape([string]$pair[0]))).Count
-              if($count -ne 1){throw ("Expected exactly one CI transport substitution source, found ${count}: "+[string]$pair[0])}
-              $text=$text.Replace([string]$pair[0],[string]$pair[1])
-            }
-            [IO.File]::WriteAllText($boot,$text,[Text.UTF8Encoding]::new($false))
+          $root=(Resolve-Path '.\stage14-v141-unpacked').Path
+          foreach($rel in @('RUN_RUNTIME_ACCEPTANCE.ps1','PRECHECK_RUNTIME_ACCEPTANCE.ps1')){
+            $path=Join-Path $root $rel
             $tokens=$null;$errors=$null
-            [void][System.Management.Automation.Language.Parser]::ParseFile($boot,[ref]$tokens,[ref]$errors)
-            if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Candidate-manifest CI copy failed PS5.1 parse.'}
-            Write-Host ('PR_MANIFEST_URL='+$new)
-            Write-Host 'CI_TRANSPORT_ONLY_SELF_PIN_SHIM=TRUE'
-          } else {
-            if((Get-FileHash -Algorithm SHA256 -LiteralPath $boot).Hash.ToLowerInvariant() -ne $expectedBoot){throw 'Push validation must use byte-exact bootstrap 1.0.6.'}
-            if((Get-Item -LiteralPath $boot).Length -ne 42963){throw 'Push validation bootstrap size changed.'}
-            Write-Host 'USING_BYTE_EXACT_BOOTSTRAP_V106_AGAINST_MAIN'
+            [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw "PS5.1 parser rejected $rel"}
           }
+          python (Join-Path $root 'evidence\validate_stage14.py')
+          if($LASTEXITCODE -ne 0){throw 'Stage14 v1.4.1 embedded validator failed.'}
+          $s=Get-Content -LiteralPath (Join-Path $root 'RUN_RUNTIME_ACCEPTANCE.ps1') -Raw
+          if(-not $s.Contains("`$AcceptanceVersion = '1.4.1'")){throw 'v1.4.1 acceptance version pin missing.'}
+          if(-not $s.Contains("`$ExpectedSourceCommit = '36b15a2ed2f9a23fffbeaf91de78b7854f6108b2'")){throw 'repaired source commit pin missing.'}
+          if($s.Contains('e51f73c90c50cb55e3e3dffe3b55a6f6b1af0b4c')){throw 'stale pre-repair source commit remains.'}
+          Write-Host 'STAGE14_V141_WINDOWS_PS51_AND_SELF_VALIDATION_PASS'
 
-          $env:LOCALAPPDATA=(Resolve-Path '.\ci-bootstrap-fixture\LocalAppData').Path
-          $env:APPDATA=Join-Path (Resolve-Path '.\ci-bootstrap-fixture').Path 'Roaming'
-          New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
-          function Run-Boot([string]$Action){
-            $out=& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $boot -Action $Action -Json 2>&1
-            $code=$LASTEXITCODE
-            Write-Host ("BOOTSTRAP_"+$Action+"_EXIT="+$code)
-            $out|ForEach-Object{Write-Host $_}
-            if($code -ne 0){throw "Bootstrap $Action failed with exit $code"}
-            $last=@($out|Where-Object{[string]$_ -match '^\s*\{'})|Select-Object -Last 1
-            if(-not $last){throw "Bootstrap $Action emitted no JSON result"}
-            return ($last|ConvertFrom-Json)
-          }
+      - name: ZIP CRC internal SHA256SUMS and final identity
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib,json,zipfile
+          p=Path('SpotifyControl-Windows-Runtime-Acceptance-v1.4.1.zip')
+          with zipfile.ZipFile(p) as z:
+              assert z.testzip() is None
+              for line in z.read('SHA256SUMS.txt').decode('ascii').splitlines():
+                  h,rel=line.split('  ',1);assert hashlib.sha256(z.read(rel)).hexdigest()==h,(rel,h)
+              report=json.loads(z.read('evidence/SELF_VALIDATION_REPORT.json').decode('utf-8'))
+              assert report['passed']==report['total']==25
+          data=p.read_bytes()
+          print('V141_FINAL_ZIP',len(data),hashlib.sha256(data).hexdigest())
+          print('V141_RUNTIME_SCRIPT',report['script_sha256'])
 
-          $check=Run-Boot 'Check'
-          if(-not $check.success -or [string]$check.installed_version -ne '0.6.15'){throw 'Check did not see exact v0.6.15 fixture.'}
-          if([int]$check.result.edge_count -ne 2){throw ('Check edge_count expected 2, got '+$check.result.edge_count)}
-
-          $rb=Run-Boot 'RollbackTest'
-          if(-not $rb.success -or [string]$rb.transaction_status -ne 'rolled-back'){throw 'RollbackTest did not finish rolled-back.'}
-          if((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $bin 'spotify-control.ps1')).Hash.ToLowerInvariant() -ne '4faef1e70be20efb551f595c02dad171a44abbe8a53af9a0576dc54fd0e2004f'){throw 'RollbackTest did not restore v0.6.15 main.'}
-          if((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $bin 'addon-manager.ps1')).Hash.ToLowerInvariant() -ne '56185d3b23c4b0df455673ad3f601d67c7980b7428f1d15b3e0465d1a7859022'){throw 'RollbackTest did not restore r5 addon.'}
-
-          $up=Run-Boot 'Update'
-          if(-not $up.success -or [string]$up.transaction_status -ne 'committed'){throw 'Update did not commit.'}
-          if((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $bin 'spotify-control.ps1')).Hash.ToLowerInvariant() -ne '5ff7990564287bc409626d8835e27679fb8de434868443313be42fdc0d9cce3b'){throw 'Update main target mismatch.'}
-          if((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $bin 'addon-manager.ps1')).Hash.ToLowerInvariant() -ne 'b7d1a4bc7707533400402fe42e60d724f88656c2477d4d4a5c0f47be60f47977'){throw 'Update addon target mismatch.'}
-
-          $post=Run-Boot 'Check'
-          if(-not $post.success -or [string]$post.installed_version -ne '0.6.17'){throw 'Post-update Check did not see v0.6.17.'}
-          if($post.result.already_current -ne $true -or [int]$post.result.edge_count -ne 0){throw 'Post-update Check is not already-current with zero edges.'}
-          Write-Host 'BOOTSTRAP_V106_FULL_TWO_EDGE_CYCLE_PASS'
-
-      - name: Preserve validation evidence
-        if: always()
+      - name: Upload exact validated Stage14 v1.4.1 ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: bootstrap-v106-contract-evidence
-          path: |
-            publication-bootstrap-contract-repair
-            ci-bootstrap-fixture/LocalAppData/SpotifyControl/bootstrap/spotify-control-self-updater.ps1
-          if-no-files-found: warn
-          compression-level: 6
+          name: SpotifyControl-Windows-Runtime-Acceptance-v1.4.1
+          path: SpotifyControl-Windows-Runtime-Acceptance-v1.4.1.zip
+          if-no-files-found: error
+          compression-level: 0
