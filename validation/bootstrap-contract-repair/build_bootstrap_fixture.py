@@ -3,6 +3,8 @@ from io import BytesIO
 import base64,gzip,hashlib,json,shutil,subprocess,zipfile
 
 BOOTSTRAP_SHA='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
+BOOTSTRAP_SIZE=42963
+REPAIR_INNER_SHA='6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdfd267bd95f6c6ddcf06'
 MAIN11_SHA='045ed3fa898453ce6563a057a31412d254f5958b75286589e8d5cc95c6782a39'
 MAIN15_SHA='4faef1e70be20efb551f595c02dad171a44abbe8a53af9a0576dc54fd0e2004f'
 ADDON15_SHA='56185d3b23c4b0df455673ad3f601d67c7980b7428f1d15b3e0465d1a7859022'
@@ -39,40 +41,51 @@ def apply_main(cur,m,a,b):
     return out
 
 m=load_manifest()
-# Rebuild the original full v0.6.11 bundle. Some obsolete archive members/variants are historically broken,
-# so identify only the immutable files we need by exact SHA-256 and ignore unrelated unreadable members.
+
+# Exact bootstrap 1.0.6 comes from the previously Windows-validated repair artifact.
+outer=Path('validated-v0614-repair-artifact.zip').read_bytes()
+with zipfile.ZipFile(BytesIO(outer)) as oz:
+    assert oz.testzip() is None
+    target='SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip'
+    assert target in oz.namelist(),oz.namelist()
+    inner=oz.read(target)
+assert len(inner)==30856 and sha(inner)==REPAIR_INNER_SHA
+with zipfile.ZipFile(BytesIO(inner)) as iz:
+    assert iz.testzip() is None
+    boot_path='bootstrap/spotify-control-self-updater.ps1'
+    assert boot_path in iz.namelist()
+    bootstrap=iz.read(boot_path)
+assert len(bootstrap)==BOOTSTRAP_SIZE and sha(bootstrap)==BOOTSTRAP_SHA
+
+# Rebuild original v0.6.11 main+agent from historical immutable bundle; ignore unrelated broken entries/variants.
 def scan_bundle(folder):
     enc=b''.join(p.read_bytes() for p in sorted(Path(folder).glob('chunk-*.txt')))
     zip_bytes=base64.b64decode(b''.join(enc.split()),validate=True)
     found={}; unreadable=[]
-    try:
-        z=zipfile.ZipFile(BytesIO(zip_bytes))
-    except zipfile.BadZipFile:
-        return found,[('<archive>','BadZipFile')]
+    try: z=zipfile.ZipFile(BytesIO(zip_bytes))
+    except zipfile.BadZipFile: return found,[('<archive>','BadZipFile')]
     with z:
         for name in z.namelist():
             if name.endswith('/'): continue
             try: data=z.read(name)
             except Exception as exc:
-                unreadable.append((name,type(exc).__name__))
-                continue
+                unreadable.append((name,type(exc).__name__)); continue
             h=sha(data)
-            if h in (BOOTSTRAP_SHA,MAIN11_SHA,AGENT_SHA): found.setdefault(h,[]).append((name,data))
+            if h in (MAIN11_SHA,AGENT_SHA): found.setdefault(h,[]).append((name,data))
     return found,unreadable
 
 by_hash={}; unreadable=[]
 for folder in ('packages/v0.6.11/chunks','packages/v0.6.11/chunks-v2'):
     f,bad=scan_bundle(folder); unreadable += [(folder,)+x for x in bad]
     for h,rows in f.items(): by_hash.setdefault(h,[]).extend(rows)
-for required in (BOOTSTRAP_SHA,MAIN11_SHA,AGENT_SHA):
-    uniq={ (n,sha(d)):(n,d) for n,d in by_hash.get(required,[]) }
+for required in (MAIN11_SHA,AGENT_SHA):
+    uniq={(n,sha(d)):(n,d) for n,d in by_hash.get(required,[])}
     assert len(uniq)==1,(required,list(uniq),unreadable[:10])
     by_hash[required]=list(uniq.values())
-bootstrap_name,bootstrap=by_hash[BOOTSTRAP_SHA][0]
 _,main=by_hash[MAIN11_SHA][0]
 _,agent=by_hash[AGENT_SHA][0]
-assert len(bootstrap)==42963
 
+# Reconstruct exact current user baseline v0.6.15/r5.
 for a,b in [('0.6.11','0.6.13'),('0.6.13','0.6.14'),('0.6.14','0.6.15')]: main=apply_main(main,m,a,b)
 assert sha(main)==MAIN15_SHA
 p,addon=decoded_payload(m,'0.6.14','0.6.15','bin/addon-manager.ps1')
@@ -84,4 +97,4 @@ root=Path('ci-bootstrap-fixture/LocalAppData/SpotifyControl'); shutil.rmtree(roo
 (root/'bin/addon-manager.ps1').write_bytes(addon)
 (root/'bin/spotify-control-agent.vbs').write_bytes(agent)
 (root/'bin/spotify-control-bootstrap.ps1').write_bytes(bootstrap)
-print('BOOTSTRAP_FIXTURE_OK',bootstrap_name,len(bootstrap),sha(bootstrap),sha(main),sha(addon),sha(agent),'unreadable_old_members',len(unreadable))
+print('BOOTSTRAP_FIXTURE_OK',len(bootstrap),sha(bootstrap),sha(main),sha(addon),sha(agent),'unreadable_old_members',len(unreadable))
