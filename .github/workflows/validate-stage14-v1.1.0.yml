@@ -19,16 +19,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify exact Stage14 ZIP and embedded evidence
+      - name: Reconstruct and verify exact Stage14 ZIP
         shell: python
         run: |
           from pathlib import Path, PurePosixPath
-          import hashlib, subprocess, sys, zipfile
+          import base64, hashlib, subprocess, sys, zipfile
 
-          zpath = Path('validation/stage14-v1.1.0/SpotifyControl-Windows-Runtime-Acceptance-v1.1.0.zip')
-          raw = zpath.read_bytes()
+          chunk_dir = Path('validation/stage14-v1.1.0/chunks')
+          expected = [
+              ('chunk-000.txt', 6000, 'b7b1a7550bc920f13e3c69ce7f11ef1c36fd899fffb45bbfbbd897e7e02e36f1'),
+              ('chunk-001.txt', 6000, 'dd9f77a03e8d5e4499a883e6505fa2a7cb9e701c2d40afe1b09ef08a9a2fb0c5'),
+              ('chunk-002.txt', 6000, '0c30ebeae24737dffde9ae00f36556158218457b223af5a94fec2e6a7e92f5b4'),
+              ('chunk-003.txt', 6000, 'c1b7b51e274eab7cb4e34e80b1c4108dc9635765926fb85416263d5c41d089ee'),
+              ('chunk-004.txt', 6000, 'f2458ddda18d0dbfadf8a8e18b208465d75e3feb7fbaa2bf6a91223a6ce73ad5'),
+              ('chunk-005.txt', 6000, '449c482299f89ead48e5bcb5e895836ce6498cb32b84d524f07e3c5dc241a977'),
+              ('chunk-006.txt', 4008, '7f7ab0c4a1f1f1e4cd93339e26234260fab83b1a1727cebe54d5f4d744dd4486'),
+          ]
+          parts = []
+          for name, size, sha in expected:
+              data = (chunk_dir/name).read_bytes()
+              assert len(data) == size, (name, len(data), size)
+              assert hashlib.sha256(data).hexdigest() == sha, name
+              parts.append(data)
+          encoded = b''.join(parts)
+          assert len(encoded) == 40008
+          assert hashlib.sha256(encoded).hexdigest() == 'ba2b10d9197cfdba0d683b29612402977aa1da30e75d37ebf15bac1ce37362ba'
+          raw = base64.b64decode(encoded, validate=True)
           assert len(raw) == 30004, len(raw)
           assert hashlib.sha256(raw).hexdigest() == 'a823775a2c05faa599263ecf3ec3da90aff7ae4012f45380658fde422b6a9dcc'
+          zpath = Path('SpotifyControl-Windows-Runtime-Acceptance-v1.1.0.zip')
+          zpath.write_bytes(raw)
 
           out = Path('stage14-unpacked')
           with zipfile.ZipFile(zpath) as z:
@@ -54,7 +74,7 @@ jobs:
               assert p.is_file(), rel
               assert hashlib.sha256(p.read_bytes()).hexdigest() == digest, rel
 
-          check = subprocess.run([sys.executable, str(out/'evidence/validate_stage14.py')], cwd=out, capture_output=True, text=True)
+          check = subprocess.run([sys.executable, 'evidence/validate_stage14.py'], cwd=out, capture_output=True, text=True)
           print(check.stdout)
           print(check.stderr)
           assert check.returncode == 0
@@ -82,7 +102,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          Expand-Archive -LiteralPath 'validation\stage14-v1.1.0\SpotifyControl-Windows-Runtime-Acceptance-v1.1.0.zip' -DestinationPath 'stage14-ps' -Force
+          Expand-Archive -LiteralPath 'SpotifyControl-Windows-Runtime-Acceptance-v1.1.0.zip' -DestinationPath 'stage14-ps' -Force
           foreach($rel in @('PRECHECK_RUNTIME_ACCEPTANCE.ps1','RUN_RUNTIME_ACCEPTANCE.ps1')) {
             $path = (Resolve-Path (Join-Path 'stage14-ps' $rel)).Path
             $tokens = $null
@@ -99,6 +119,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SpotifyControl-Windows-Runtime-Acceptance-v1.1.0
-          path: validation/stage14-v1.1.0/SpotifyControl-Windows-Runtime-Acceptance-v1.1.0.zip
+          path: SpotifyControl-Windows-Runtime-Acceptance-v1.1.0.zip
           if-no-files-found: error
           compression-level: 6
