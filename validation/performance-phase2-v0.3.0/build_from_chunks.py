@@ -40,6 +40,7 @@ with zipfile.ZipFile(final, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
     for name in sorted([*SOURCE_FILE_SHA256, 'SHA256SUMS.txt']):
         data = (out / name).read_bytes()
         zi = zipfile.ZipInfo(name, date_time=(2026, 10, 25, 0, 3, 0))
+        zi.create_system = 3
         zi.compress_type = zipfile.ZIP_DEFLATED
         zi.external_attr = 0o644 << 16
         z.writestr(zi, data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
