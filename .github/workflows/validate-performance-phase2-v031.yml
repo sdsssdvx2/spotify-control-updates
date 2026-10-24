@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Reconstruct exact v0.3.1 package from pinned ASCII transport
+      - name: Reconstruct validated runtime source and deterministically repair README paths
         shell: python
         run: |
           import runpy
@@ -95,15 +95,15 @@ jobs:
           if(Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'SpotifyControl')){throw 'SelfTest mutated a production-shaped SpotifyControl path.'}
           Write-Host 'PHASE2_V031_WINDOWS_PS51_SELFTEST_PASS'
 
-      - name: Verify exact final ZIP identity CRC and internal SHA256SUMS
+      - name: Verify exact final ZIP identity CRC checksums and text controls
         shell: python
         run: |
           from pathlib import Path
           import hashlib,zipfile
           p=Path('SpotifyControl-Track-Transition-Isolation-v0.3.1.zip')
           data=p.read_bytes()
-          assert len(data)==17950,len(data)
-          assert hashlib.sha256(data).hexdigest()=='a7956053f0bf8e8d6b20558894873e9a9a6d31e4131ce8a1c6a7226ea7eb127c'
+          assert len(data)==17946,len(data)
+          assert hashlib.sha256(data).hexdigest()=='a0502408df6ff313f434943671db2d00a147f812b18562f5e346f292412921f8'
           with zipfile.ZipFile(p) as z:
               assert z.testzip() is None
               assert sorted(z.namelist())==sorted(['README.md','RUN_TRACK_TRANSITION_ISOLATION.cmd','SELFTEST.cmd','SHA256SUMS.txt','track-transition-isolation.ps1'])
@@ -112,7 +112,17 @@ jobs:
               for line in lines:
                   h,name=line.split('  ',1)
                   assert hashlib.sha256(z.read(name)).hexdigest()==h,(name,h)
+              readme=z.read('README.md')
+              assert b'%LOCALAPPDATA%\\SpotifyControl\\reports\\track-transition-isolation-latest.json' in readme
+              assert b'%LOCALAPPDATA%\\SpotifyControl\\logs\\track-transition-isolation-error.log' in readme
+              for name in z.namelist():
+                  if not name.lower().endswith(('.md','.cmd','.ps1','.txt')):
+                      continue
+                  b=z.read(name)
+                  assert not [i for i,x in enumerate(b) if x==13 and (i+1>=len(b) or b[i+1]!=10)], name
+                  assert b'\t' not in b, name
           print('PHASE2_V031_FINAL_ZIP_PASS',len(data),hashlib.sha256(data).hexdigest())
+          print('PHASE2_V031_FINAL_TEXT_CONTROL_SCAN_PASS')
 
       - name: Upload exact validated Phase 2 v0.3.1 package
         uses: actions/upload-artifact@v4
