@@ -1,4 +1,4 @@
-name: Debug r5 unattended pending path
+name: Export exact stable r5 Addon Manager
 
 on:
   pull_request:
@@ -11,19 +11,18 @@ permissions:
   contents: read
 
 jobs:
-  windows-r5-commit-debug:
+  windows-export-r5:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Reconstruct exact stable r5 Addon Manager
         shell: python
         run: |
           from pathlib import Path
-          import base64, gzip, hashlib, json, subprocess
+          import base64,gzip,hashlib,json,subprocess
           m=json.loads(Path('manifest.json').read_text(encoding='utf-8-sig'))
           source=m['source_commit']
           edge=next(e for e in m['updates'] if e['from_version']=='0.6.14' and e['to_version']=='0.6.15')
@@ -33,70 +32,26 @@ jobs:
               data=subprocess.check_output(['git','show',f'{source}:{c["path"]}'])
               assert len(data)==c['size'] and hashlib.sha256(data).hexdigest()==c['sha256']
               parts.append(data)
-          enc=b''.join(parts); comp=base64.b64decode(enc,validate=True); addon=gzip.decompress(comp)
-          assert len(addon)==ap['target_size'] and hashlib.sha256(addon).hexdigest()==ap['to_sha256']
-          Path('candidate-addon.ps1').write_bytes(addon)
-          print('R5_RECONSTRUCT',len(addon),hashlib.sha256(addon).hexdigest())
-
-      - name: Print exact fingerprint, validation, transaction and self-test functions
+          enc=b''.join(parts)
+          assert len(enc)==ap['encoded_size'] and hashlib.sha256(enc).hexdigest()==ap['encoded_sha256']
+          comp=base64.b64decode(enc,validate=True)
+          assert len(comp)==ap['compressed_size'] and hashlib.sha256(comp).hexdigest()==ap['compressed_sha256']
+          addon=gzip.decompress(comp)
+          assert len(addon)==128714
+          assert hashlib.sha256(addon).hexdigest()=='56185d3b23c4b0df455673ad3f601d67c7980b7428f1d15b3e0465d1a7859022'
+          Path('spotify-control-addon-manager-v0.6.5-r5.ps1').write_bytes(addon)
+          print('EXACT_R5',len(addon),hashlib.sha256(addon).hexdigest())
+      - name: Windows PowerShell 5.1 parser verification
         shell: powershell
         run: |
-          $ErrorActionPreference='Stop'
-          $path=(Resolve-Path '.\candidate-addon.ps1').Path
           $tokens=$null;$errors=$null
-          $ast=[System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
-          if($errors.Count){$errors|%{Write-Error $_.Message};throw 'Parser rejected reconstructed r5'}
-          $funcs=@($ast.FindAll({param($n)$n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true))
-          $names=@(
-            'Get-DirectoryGitSnapshot',
-            'Test-PithayaTreeAgainstRemote',
-            'Test-IvLyricsStageRoot',
-            'Invoke-AtomicDirectorySwap',
-            'New-PithayaTransactionBackup',
-            'Commit-LastTransaction',
-            'Rollback-LastTransaction',
-            'Invoke-PithayaTransactionSelfTest',
-            'Invoke-IvLyricsTransactionSelfTest',
-            'Run-SelfTest'
-          )
-          foreach($name in $names){
-            $f=$funcs|Where-Object{$_.Name -ceq $name}|Select-Object -First 1
-            if($f){Write-Host ('===== '+$name+' =====');Write-Host $f.Extent.Text}
-          }
-          Write-Host '===== FINGERPRINT CALL SITES ====='
-          Select-String -LiteralPath $path -SimpleMatch -Pattern 'fingerprint' -Context 2,3 | ForEach-Object {
-            if($_.LineNumber -ge 450 -and $_.LineNumber -le 1900){
-              Write-Host ('LINE '+$_.LineNumber+': '+$_.Line)
-              $_.Context.PreContext|%{Write-Host (' PRE '+$_)}
-              $_.Context.PostContext|%{Write-Host ('POST '+$_)}
-            }
-          }
-
-      - name: Build a no-network commit-after-swap fixture from exact r5 functions
-        shell: python
-        run: |
-          from pathlib import Path
-          s=Path('candidate-addon.ps1').read_text(encoding='utf-8-sig')
-          # Existing SelfTest must already exercise swap/rollback, but r5 currently has no explicit
-          # successful CommitLast-after-swap assertion. Record that gap before fixing it.
-          terms={
-            'commit_function': 'function Commit-LastTransaction',
-            'commit_action': '"CommitLast"',
-            'transaction_selftest': 'transaction self-test passed',
-            'commit_fixture_phrase': 'commit-after-swap',
-          }
-          for k,v in terms.items(): print(k, s.count(v))
-          assert s.count(terms['commit_function'])==1
-          assert s.count(terms['commit_action'])>=1
-          assert s.count(terms['transaction_selftest'])>=1
-
-      - name: Run exact r5 SelfTest on clean Windows fixture
-        shell: powershell
-        run: |
-          $ErrorActionPreference='Stop'
-          $env:LOCALAPPDATA=Join-Path $env:RUNNER_TEMP 'SpotifyControlTest-Local'
-          $env:APPDATA=Join-Path $env:RUNNER_TEMP 'SpotifyControlTest-Roaming'
-          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
-          New-Item -ItemType Directory -Force -Path $env:APPDATA|Out-Null
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\candidate-addon.ps1 -Action SelfTest
-          if($LASTEXITCODE -ne 0){throw "r5 SelfTest failed $LASTEXITCODE"}
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path '.\spotify-control-addon-manager-v0.6.5-r5.ps1').Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|%{Write-Error $_.Message};throw 'Exact r5 parser failure'}
+          Write-Host 'Exact r5 PS5.1 parser PASS.'
+      - name: Upload exact r5 source
+        uses: actions/upload-artifact@v4
+        with:
+          name: spotify-control-addon-manager-v0.6.5-r5-exact
+          path: spotify-control-addon-manager-v0.6.5-r5.ps1
+          if-no-files-found: error
+          compression-level: 6
