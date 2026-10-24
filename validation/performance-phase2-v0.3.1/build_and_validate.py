@@ -6,7 +6,10 @@ PAYLOAD = ROOT / 'payload'
 PARTS = [
     ('chunk-000.txt', 4096, 'eb116d7a05dc2a2378db9fc3529311e942846c663d0e4623ab67f4ef8f4cdbb3'),
     ('chunk-001.txt', 4096, '9d51df08ca410ef2ff93c836be05a87b822020d3692debb9029824bf50abfe1a'),
-    ('rest.txt', 15744, 'fd9b81b929eb6321b109c8d27223490abea0d9acfdd31666d33d72d335a910aa'),
+    ('chunk-002.txt', 4096, '1d39088ff7cb5e0e55ac733f1bb65f07c77dc3e0f5ea796a8d2fa56320f95f7c'),
+    ('chunk-003.txt', 4096, 'f4444c70fa758b3038e471d8bf9f678115ec9f8defc9f0b6409c7d926f83c5dc'),
+    ('chunk-004.txt', 4096, '4bf4434e2f21ded2b53f04e9c6a4b8f4aa0922a2b3a43d939f7e9b212d5198b3'),
+    ('chunk-005.txt', 3456, '9763ff54b6da8d970ec900595ac08c3de5fe719db53bdf5276da735e1699ad13'),
 ]
 EXPECTED_ZIP_SIZE = 17950
 EXPECTED_ZIP_SHA256 = 'a7956053f0bf8e8d6b20558894873e9a9a6d31e4131ce8a1c6a7226ea7eb127c'
@@ -22,13 +25,16 @@ def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 encoded_parts = []
-for name, size, expected in PARTS:
+for i, (name, size, expected) in enumerate(PARTS):
+    expected_name = f'chunk-{i:03d}.txt'
+    assert name == expected_name, (name, expected_name)
     data = (PAYLOAD / name).read_bytes()
     assert len(data) == size, (name, len(data), size)
     assert sha(data) == expected, (name, sha(data), expected)
     data.decode('ascii')
     encoded_parts.append(data)
 
+assert not (PAYLOAD / 'rest.txt').exists(), 'Legacy rest.txt must not be present in the canonical six-chunk transport.'
 encoded = b''.join(encoded_parts)
 assert len(encoded) == 23936
 assert sha(encoded) == '2906ae40553434283c7574b2bc35c1a7e1b8e03c4c455d6f1c9bbdbec390fad1'
@@ -61,4 +67,5 @@ outzip.write_bytes(raw)
 assert len(outzip.read_bytes()) == EXPECTED_ZIP_SIZE
 assert sha(outzip.read_bytes()) == EXPECTED_ZIP_SHA256
 print('PHASE2_V031_RECONSTRUCTION_PASS', EXPECTED_ZIP_SIZE, EXPECTED_ZIP_SHA256)
+print('PHASE2_V031_TRANSPORT_PASS', len(PARTS), len(encoded), sha(encoded))
 print('PHASE2_V031_SCRIPT', EXPECTED_ENTRIES['track-transition-isolation.ps1'][0], EXPECTED_ENTRIES['track-transition-isolation.ps1'][1])
