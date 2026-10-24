@@ -39,7 +39,7 @@ jobs:
           blob_sha = hashlib.sha256(blob).hexdigest()
           print(f'Actual repair ZIP SHA256: {blob_sha}')
           assert blob_sha == '6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdfd267bd95f6c6ddcf06'
-          Path('repair.zip').write_bytes(blob)
+          Path('SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip').write_bytes(blob)
 
           expected = {
               'APPLY_REPAIR.cmd',
@@ -56,7 +56,7 @@ jobs:
               'evidence/validate_repair.py',
           }
           out = Path('repair-extracted')
-          with zipfile.ZipFile('repair.zip') as z:
+          with zipfile.ZipFile('SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip') as z:
               assert z.testzip() is None
               names = z.namelist()
               assert set(names) == expected and len(names) == len(expected)
@@ -113,3 +113,11 @@ jobs:
             }
           }
           Write-Host 'Exact repair package Windows PowerShell 5.1 parser validation passed.'
+
+      - name: Upload exact validated repair ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14
+          path: SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip
+          if-no-files-found: error
+          compression-level: 0
