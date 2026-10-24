@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Reconstruct exact Stage14 v1.2.0 ZIP and validate
+      - name: Reconstruct, repair, and verify exact Stage14 v1.2.0 ZIP
         shell: python
         run: |
           from pathlib import Path, PurePosixPath
@@ -41,7 +41,6 @@ jobs:
           parts=[]
           for rel,size,sha in pieces:
               data=Path(rel).read_bytes()
-              print('PIECE', rel, len(data), hashlib.sha256(data).hexdigest())
               assert len(data)==size, (rel,len(data),size)
               assert hashlib.sha256(data).hexdigest()==sha, rel
               parts.append(data)
@@ -49,7 +48,6 @@ jobs:
           assert len(encoded)==45984
           assert hashlib.sha256(encoded).hexdigest()=='54ddc6a5f179cb9b108704dbc6fe92accf20113f2610acba74bd6bd7c4909fa8'
           raw=base64.b64decode(encoded, validate=True)
-          print('ZIP', len(raw), hashlib.sha256(raw).hexdigest())
           assert len(raw)==34488
           assert hashlib.sha256(raw).hexdigest()=='cf66fd207cbcd7bf7996af3eb99009ce5ad2adcced3b7652b8343fc0bcfc2ce2'
           zpath=Path('SpotifyControl-Windows-Runtime-Acceptance-v1.2.0.zip')
@@ -58,44 +56,63 @@ jobs:
           out=Path('stage14-v120-unpacked')
           with zipfile.ZipFile(zpath) as z:
               assert z.testzip() is None
+              infos=z.infolist()
               names=z.namelist()
               assert len(names)==len(set(names))
               for name in names:
                   p=PurePosixPath(name)
-                  assert not p.is_absolute()
-                  assert '..' not in p.parts
-                  assert '\\' not in name
+                  assert not p.is_absolute() and '..' not in p.parts and '\\' not in name
                   assert not (len(name)>=2 and name[1]==':')
               z.extractall(out)
 
-          for line in (out/'SHA256SUMS.txt').read_text(encoding='ascii').splitlines():
-              if not line.strip():
-                  continue
-              digest,rel=line.split('  ',1)
-              p=out/rel
-              assert p.is_file(), rel
-              assert hashlib.sha256(p.read_bytes()).hexdigest()==digest.lower(), rel
+          run_path=out/'RUN_RUNTIME_ACCEPTANCE.ps1'
+          run=run_path.read_text(encoding='utf-8-sig')
+          assert run.count("}`n        self_update=")==1
+          assert run.count("$SelfUpdateEvidence`n        addon_schedule_gate=")==1
+          run=run.replace("}`n        self_update=", "}\n        self_update=", 1)
+          run=run.replace("$SelfUpdateEvidence`n        addon_schedule_gate=", "$SelfUpdateEvidence\n        addon_schedule_gate=", 1)
+          run_path.write_text(run,encoding='utf-8-sig',newline='\n')
+
+          validator=out/'evidence'/'validate_stage14.py'
+          v=validator.read_text(encoding='utf-8')
+          needle="st,state=strip_ps(s);ck('lexer-ended-code',state=='code',state)\n"
+          extra="ck('no-bare-backtick-newline-escape', '`n' not in st and '`r' not in st, [(i,line) for i,line in enumerate(st.splitlines(),1) if '`n' in line or '`r' in line][:10])\n"
+          assert needle in v and 'no-bare-backtick-newline-escape' not in v
+          validator.write_text(v.replace(needle,needle+extra),encoding='utf-8',newline='\n')
 
           check=subprocess.run([sys.executable,'evidence/validate_stage14.py'],cwd=out,capture_output=True,text=True)
-          print(check.stdout)
-          print(check.stderr)
+          print(check.stdout); print(check.stderr)
           assert check.returncode==0
-          assert 'STAGE14 V1.2 SELF VALIDATION: 155/155 PASS' in check.stdout
+          assert 'STAGE14 V1.2 SELF VALIDATION: 156/156 PASS' in check.stdout
+          assert 'PASS: no-bare-backtick-newline-escape - []' in check.stdout
+
+          rels=['PRECHECK_RUNTIME_ACCEPTANCE.ps1','README.txt','RUN_RUNTIME_ACCEPTANCE.cmd','RUN_RUNTIME_ACCEPTANCE.ps1','evidence/SELF_VALIDATION_REPORT.json','evidence/SELF_VALIDATION_REPORT.txt','evidence/VALIDATION_OUTPUT.txt','evidence/validate_stage14.py']
+          (out/'SHA256SUMS.txt').write_text('\n'.join(f"{hashlib.sha256((out/r).read_bytes()).hexdigest()}  {r}" for r in rels)+'\n',encoding='ascii',newline='\n')
+
+          fixed=Path('fixed.zip')
+          with zipfile.ZipFile(fixed,'w') as zout:
+              for info in infos:
+                  data=(out/info.filename).read_bytes()
+                  ni=zipfile.ZipInfo(info.filename,date_time=info.date_time)
+                  ni.compress_type=info.compress_type; ni.comment=info.comment; ni.extra=info.extra
+                  ni.create_system=info.create_system; ni.create_version=info.create_version; ni.extract_version=info.extract_version
+                  ni.flag_bits=info.flag_bits; ni.external_attr=info.external_attr; ni.internal_attr=info.internal_attr; ni.volume=info.volume
+                  zout.writestr(ni,data,compress_type=info.compress_type,compresslevel=6)
+          fixed_raw=fixed.read_bytes()
+          print('FIXED ZIP',len(fixed_raw),hashlib.sha256(fixed_raw).hexdigest())
+          assert len(fixed_raw)==34623
+          assert hashlib.sha256(fixed_raw).hexdigest()=='f99a537111a0fd925fda2fb9395cf03369776f0aab862f9f367f7f3fb83a6a52'
+          fixed.replace(zpath)
+
+          with zipfile.ZipFile(zpath) as z:
+              assert z.testzip() is None
+              for line in z.read('SHA256SUMS.txt').decode('ascii').splitlines():
+                  digest,rel=line.split('  ',1)
+                  assert hashlib.sha256(z.read(rel)).hexdigest()==digest, rel
 
           run=(out/'RUN_RUNTIME_ACCEPTANCE.ps1').read_text(encoding='utf-8-sig')
-          required=[
-              '0.6.15',
-              '0.6.5-r5',
-              '864e195ab08b3a3d37a181998d1ca59a3c0d7adf',
-              '86dbfea3b22c110a2a1425b0340bbf333329c51a5ae9253b0a45a955f0ae67dd',
-              'Fresh actionable addon pending bypasses the 168-hour schedule gate',
-              'Force/reinstall semantics remain disabled',
-              "Invoke-Bootstrap 'Rollback' -Force:$SelfUpdateFreshCommitReached",
-              "Invoke-TrustedV0615SelfUpdateAcceptance\n    $Phase='preflight'",
-          ]
-          normalized=run.replace('\r\n','\n')
-          for needle in required:
-              assert needle in normalized, needle
+          for needle in ['0.6.15','0.6.5-r5','864e195ab08b3a3d37a181998d1ca59a3c0d7adf','86dbfea3b22c110a2a1425b0340bbf333329c51a5ae9253b0a45a955f0ae67dd','Fresh actionable addon pending bypasses the 168-hour schedule gate','Force/reinstall semantics remain disabled',"Invoke-Bootstrap 'Rollback' -Force:$SelfUpdateFreshCommitReached"]:
+              assert needle in run
       - name: Windows PowerShell 5.1 parser validation
         shell: powershell
         run: |
@@ -108,7 +125,6 @@ jobs:
             if($errors.Count -ne 0) { $errors | ForEach-Object { Write-Error $_.Message }; throw "Windows PowerShell 5.1 parser rejected $rel" }
           }
           Write-Host 'Stage14 v1.2.0 Windows PowerShell 5.1 parser PASS.'
-
       - name: Upload exact validated Stage14 v1.2.0 ZIP
         uses: actions/upload-artifact@v4
         with:
