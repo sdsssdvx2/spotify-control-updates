@@ -100,8 +100,8 @@ jobs:
                   zout.writestr(ni,data,compress_type=info.compress_type,compresslevel=6)
           fixed_raw=fixed.read_bytes()
           print('FIXED ZIP',len(fixed_raw),hashlib.sha256(fixed_raw).hexdigest())
-          assert len(fixed_raw)==34623
-          assert hashlib.sha256(fixed_raw).hexdigest()=='f99a537111a0fd925fda2fb9395cf03369776f0aab862f9f367f7f3fb83a6a52'
+          assert len(fixed_raw)==34730
+          assert hashlib.sha256(fixed_raw).hexdigest()=='7d7022789a818818c1c4bd877cc3e052376e2b1dbc9bc7eb7ab70a0b8ac0ba2e'
           fixed.replace(zpath)
 
           with zipfile.ZipFile(zpath) as z:
