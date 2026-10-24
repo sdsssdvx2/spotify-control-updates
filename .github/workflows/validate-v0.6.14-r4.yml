@@ -1,0 +1,98 @@
+name: Validate Spotify Control v0.6.14 r4
+
+on:
+  push:
+    branches:
+      - 'fix/v0.6.14-addon-char-regression'
+      - 'main'
+    paths:
+      - 'packages/v0.6.14/**'
+      - 'manifest.json'
+      - '.github/workflows/validate-v0.6.14-r4.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-powershell51-regression:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct and verify v0.6.14 transports
+        shell: python
+        run: |
+          from pathlib import Path
+          import base64, gzip, hashlib, json
+
+          addon_dir = Path('packages/v0.6.14/addon-v065r3-to-v065r4')
+          expected_chunks = [
+              ('chunk-000.txt', 4096, 'e88fdde2bc31a939c2d86d204f39c13d7a41c080b6c909e777872c49d70448d8'),
+              ('chunk-001.txt', 4096, 'b43305664dfc2e950788cf6de840bcfc7bf3e10b6b23c7c6cd9fb5c9c5d7440f'),
+              ('chunk-002.txt', 4096, 'b4f949d342adbda5ba404204f6fedd4b1efd819f33230610c225d37ceaf3921e'),
+              ('chunk-003.txt', 4096, '0178d049ab807dc141ee616436170f62cba61fe4f1db531fa084f345d9d44691'),
+              ('chunk-004.txt', 4096, 'd11096e2791b645e57d36f8b53e84b3d7a5cc6ee1356d20a6bb762d7a6e5720c'),
+              ('chunk-005.txt', 4096, '0a92a00b9294a23bb00820eac21b3a67dac82f13b8d7d30623301c5e67803c6f'),
+              ('chunk-006.txt', 4096, '33e6bf074d6b7d2fbc2880401f60cdbe7f8d1795ca5917febddffbe662bce60e'),
+              ('chunk-007.txt', 4096, '27e98c427752e071a0a50e82dca4701c17a2a1932f400f1db8d03904cb89e3a8'),
+              ('chunk-008.txt', 1900, '3e7065c70f860b853d45d0386bcbfa35129994e0e0e4d60390ce5e58bfdb33b6'),
+          ]
+          encoded_parts = []
+          for name, expected_size, expected_sha in expected_chunks:
+              data = (addon_dir / name).read_bytes()
+              assert len(data) == expected_size, (name, len(data), expected_size)
+              assert hashlib.sha256(data).hexdigest() == expected_sha, name
+              encoded_parts.append(data)
+          addon_encoded = b''.join(encoded_parts)
+          assert len(addon_encoded) == 34668
+          assert hashlib.sha256(addon_encoded).hexdigest() == '347c1c264d56f9cb8e7b6cff4d920426bbf94fe005455f87380fa185147c2a5f'
+          addon_gz = base64.b64decode(addon_encoded, validate=True)
+          assert len(addon_gz) == 26001
+          assert hashlib.sha256(addon_gz).hexdigest() == 'aa7ed8288563c718bd072c016a80235370206d7f3f295989171646a4634e1a22'
+          addon = gzip.decompress(addon_gz)
+          assert len(addon) == 124124
+          assert hashlib.sha256(addon).hexdigest() == 'd6a11c73c561662579c9b28b59e9f2845563e8050eceeb8e5cec0f5f3618759a'
+          assert b'$Version = "0.6.5-r4"' in addon
+          assert b".Replace('\\\\','/')" not in addon
+          assert b"[char[]]@('\\\\','/')" not in addon
+          Path('out').mkdir(exist_ok=True)
+          Path('out/addon-manager.ps1').write_bytes(addon)
+
+          main_chunk = Path('packages/v0.6.14/main-v0613-to-v0614/chunk-000.txt').read_bytes()
+          assert len(main_chunk) == 456
+          assert hashlib.sha256(main_chunk).hexdigest() == 'a45fa33b28c173db98e9ba29a9d7e8b58e99f627db4f13d1f15b3ff391079e81'
+          main_gz = base64.b64decode(main_chunk, validate=True)
+          assert len(main_gz) == 340
+          assert hashlib.sha256(main_gz).hexdigest() == '6793c7157c01a295502b273a1938f9ff8167acb091d342ea1dffa944ddb82add'
+          patch = gzip.decompress(main_gz)
+          assert len(patch) == 490
+          assert hashlib.sha256(patch).hexdigest() == '4f84375c3b56ce713ca148cc186bd31ebd9182a4965c17163342d6663dc01465'
+          doc = json.loads(patch)
+          assert doc['kind'] == 'ascii-line-patch'
+          assert doc['from_version'] == '0.6.13' and doc['to_version'] == '0.6.14'
+          assert doc['from_sha256'] == 'e20ed445d7a5788cde1be9861dc3b44a81777aad03e0b1d4cea1a6e5bde1a14d'
+          assert doc['to_sha256'] == '5306acbe610b06f2c638ebbdc305db9741bbe145392933a38f648906acd302d1'
+          assert len(doc['operations']) == 2
+
+      - name: Windows PowerShell 5.1 parser and full Addon SelfTest
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'SpotifyControlTest-Local'
+          $env:APPDATA = Join-Path $env:RUNNER_TEMP 'SpotifyControlTest-Roaming'
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify') | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
+
+          $path = (Resolve-Path 'out/addon-manager.ps1').Path
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors)
+          if ($errors.Count -ne 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw 'Windows PowerShell 5.1 parser rejected Addon Manager r4.'
+          }
+
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $path -Action SelfTest
+          if ($LASTEXITCODE -ne 0) { throw "Addon Manager r4 SelfTest failed with exit code $LASTEXITCODE" }
