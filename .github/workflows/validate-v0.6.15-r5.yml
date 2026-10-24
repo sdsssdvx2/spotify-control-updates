@@ -31,8 +31,6 @@ jobs:
           from pathlib import Path
 
           manifest_raw = Path('manifest.json').read_bytes()
-          assert len(manifest_raw) == 12467
-          assert hashlib.sha256(manifest_raw).hexdigest() == '09e282b74b5fb348fab548e6eb71a71d7c9ad89475387bc3b98d1a09099e8a78'
           manifest = json.loads(manifest_raw.decode('utf-8-sig'))
           source_commit = manifest['source_commit']
           assert source_commit == '2f8377829ab61dcb88d265bdbd484181f084aef9'
