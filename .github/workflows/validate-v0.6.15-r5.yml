@@ -1,0 +1,102 @@
+name: Validate Spotify Control v0.6.15 r5
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'manifest.json'
+      - 'packages/v0.6.15/**'
+      - '.github/workflows/validate-v0.6.15-r5.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-powershell51-v0615:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact v0.6.15 candidate and verify immutable edge
+        shell: python
+        run: |
+          import base64, gzip, hashlib, json
+          from pathlib import Path
+
+          manifest = json.loads(Path('manifest.json').read_text(encoding='utf-8-sig'))
+          assert manifest['latest_version'] == '0.6.15'
+          assert manifest['min_bootstrap_version'] == '1.0.6'
+          assert manifest['bootstrap']['sha256'] == 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
+          assert manifest['bootstrap']['size'] == 42963
+          edge = [x for x in manifest['updates'] if x['from_version']=='0.6.14' and x['to_version']=='0.6.15']
+          assert len(edge) == 1
+          edge = edge[0]
+          patches = {p['path']:p for p in edge['patches']}
+          mp = patches['bin/spotify-control.ps1']
+          ap = patches['bin/addon-manager.ps1']
+          assert mp['from_sha256'] == '5306acbe610b06f2c638ebbdc305db9741bbe145392933a38f648906acd302d1'
+          assert mp['to_sha256'] == '4faef1e70be20efb551f595c02dad171a44abbe8a53af9a0576dc54fd0e2004f'
+          assert ap['from_sha256'] == 'd6a11c73c561662579c9b28b59e9f2845563e8050eceeb8e5cec0f5f3618759a'
+          assert ap['to_sha256'] == '56185d3b23c4b0df455673ad3f601d67c7980b7428f1d15b3e0465d1a7859022'
+
+          def reconstruct(p):
+              parts=[]
+              for c in p['chunks']:
+                  data=Path(c['path']).read_bytes()
+                  assert len(data)==c['size'], c['path']
+                  assert hashlib.sha256(data).hexdigest()==c['sha256'], c['path']
+                  parts.append(data)
+              encoded=b''.join(parts)
+              assert len(encoded)==p['encoded_size']
+              assert hashlib.sha256(encoded).hexdigest()==p['encoded_sha256']
+              comp=base64.b64decode(encoded, validate=True)
+              assert len(comp)==p['compressed_size']
+              assert hashlib.sha256(comp).hexdigest()==p['compressed_sha256']
+              return gzip.decompress(comp)
+
+          patch_raw=reconstruct(mp)
+          assert len(patch_raw)==476
+          assert hashlib.sha256(patch_raw).hexdigest()=='cf35307ab4a59e3c4fd062b84ed5f38a094d9bb057c6ed7990111af164628207'
+          patch=json.loads(patch_raw.decode('ascii'))
+          assert patch['kind']=='ascii-line-patch'
+          assert patch['from_version']=='0.6.14' and patch['to_version']=='0.6.15'
+          assert patch['from_sha256']==mp['from_sha256'] and patch['to_sha256']==mp['to_sha256']
+          assert patch['operations'] == [
+              {'start_line':0,'delete_count':1,'insert':'# Spotify Control v0.6.15 Pending-Aware Addon Maintenance\n'},
+              {'start_line':12,'delete_count':1,'insert':'$ScriptVersion = "0.6.15"\n'},
+          ]
+
+          addon=reconstruct(ap)
+          assert len(addon)==128714
+          assert hashlib.sha256(addon).hexdigest()==ap['to_sha256']
+          Path('candidate-addon.ps1').write_bytes(addon)
+
+          txt=addon.decode('utf-8-sig')
+          assert '$Version = "0.6.5-r5"' in txt
+          assert 'Get-DiscoveredActionableAutoUpdateCount' in txt
+          assert 'Fresh actionable addon pending bypasses the 168-hour schedule gate' in txt
+          assert 'Force/reinstall semantics remain disabled' in txt
+          assert 'Pending-aware schedule-bypass self-test passed' in txt
+
+          prior=json.loads(Path('validation/v0.6.15/prior-v0614-edge.json').read_text(encoding='utf-8'))
+          actual=[x for x in manifest['updates'] if x['from_version']=='0.6.13' and x['to_version']=='0.6.14']
+          assert len(actual)==1 and actual[0]==prior
+
+      - name: Windows PowerShell 5.1 parser and r5 SelfTest
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'SpotifyControlTest-Local'
+          $env:APPDATA = Join-Path $env:RUNNER_TEMP 'SpotifyControlTest-Roaming'
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify') | Out-Null
+          New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
+          foreach($p in @('candidate-addon.ps1')) {
+            $tokens=$null; $errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count -ne 0) { $errors | % { Write-Error $_.Message }; throw "Parser rejected $p" }
+          }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\candidate-addon.ps1 -Action SelfTest
+          if($LASTEXITCODE -ne 0) { throw "Addon r5 SelfTest failed: $LASTEXITCODE" }
+          Write-Host 'v0.6.15/r5 Windows PowerShell 5.1 validation PASS.'
