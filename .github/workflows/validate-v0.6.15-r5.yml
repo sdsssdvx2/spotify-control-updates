@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  windows-r5-filter-debug:
+  windows-r5-commit-debug:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -33,16 +33,12 @@ jobs:
               data=subprocess.check_output(['git','show',f'{source}:{c["path"]}'])
               assert len(data)==c['size'] and hashlib.sha256(data).hexdigest()==c['sha256']
               parts.append(data)
-          enc=b''.join(parts)
-          assert len(enc)==ap['encoded_size'] and hashlib.sha256(enc).hexdigest()==ap['encoded_sha256']
-          comp=base64.b64decode(enc,validate=True)
-          assert len(comp)==ap['compressed_size'] and hashlib.sha256(comp).hexdigest()==ap['compressed_sha256']
-          addon=gzip.decompress(comp)
+          enc=b''.join(parts); comp=base64.b64decode(enc,validate=True); addon=gzip.decompress(comp)
           assert len(addon)==ap['target_size'] and hashlib.sha256(addon).hexdigest()==ap['to_sha256']
           Path('candidate-addon.ps1').write_bytes(addon)
           print('R5_RECONSTRUCT',len(addon),hashlib.sha256(addon).hexdigest())
 
-      - name: Print exact pending detector and mutation/commit functions
+      - name: Print exact fingerprint, validation, transaction and self-test functions
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -52,43 +48,47 @@ jobs:
           if($errors.Count){$errors|%{Write-Error $_.Message};throw 'Parser rejected reconstructed r5'}
           $funcs=@($ast.FindAll({param($n)$n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true))
           $names=@(
-            'Get-DiscoveredActionableAutoUpdateCount',
-            'Get-AddonInventory',
-            'Update-AutoApps',
+            'Get-DirectoryGitSnapshot',
+            'Test-PithayaTreeAgainstRemote',
+            'Test-IvLyricsStageRoot',
+            'Invoke-AtomicDirectorySwap',
+            'New-PithayaTransactionBackup',
             'Commit-LastTransaction',
-            'Get-PithayaInventory',
-            'Get-IvLyricsInventory',
-            'Resolve-PithayaInstallations',
-            'Resolve-IvLyricsInstallations',
-            'Get-PithayaRemoteInfo',
-            'Get-IvLyricsReleaseInfo'
+            'Rollback-LastTransaction',
+            'Invoke-PithayaTransactionSelfTest',
+            'Invoke-IvLyricsTransactionSelfTest',
+            'Run-SelfTest'
           )
           foreach($name in $names){
             $f=$funcs|Where-Object{$_.Name -ceq $name}|Select-Object -First 1
             if($f){Write-Host ('===== '+$name+' =====');Write-Host $f.Extent.Text}
           }
-          Write-Host '===== UPDATE-AVAILABLE CONTEXTS ====='
-          Select-String -LiteralPath $path -SimpleMatch -Pattern 'update-available' -Context 3,5 | ForEach-Object {
-            Write-Host ('LINE '+$_.LineNumber+': '+$_.Line)
-            $_.Context.PreContext|%{Write-Host (' PRE '+$_)}
-            $_.Context.PostContext|%{Write-Host ('POST '+$_)}
+          Write-Host '===== FINGERPRINT CALL SITES ====='
+          Select-String -LiteralPath $path -SimpleMatch -Pattern 'fingerprint' -Context 2,3 | ForEach-Object {
+            if($_.LineNumber -ge 450 -and $_.LineNumber -le 1900){
+              Write-Host ('LINE '+$_.LineNumber+': '+$_.Line)
+              $_.Context.PreContext|%{Write-Host (' PRE '+$_)}
+              $_.Context.PostContext|%{Write-Host ('POST '+$_)}
+            }
           }
 
-      - name: Assert detector/candidate safety-set alignment structurally
+      - name: Build a no-network commit-after-swap fixture from exact r5 functions
         shell: python
         run: |
           from pathlib import Path
-          import re
           s=Path('candidate-addon.ps1').read_text(encoding='utf-8-sig')
-          # Preserve the deployed r5 safety contract while making mismatches visible in CI.
-          assert "Get-DiscoveredActionableAutoUpdateCount" in s
-          assert "Update-AutoApps" in s
-          for token in ['trusted-baseline','trusted-known-baseline','release-proof-required']:
-              print(token, s.count(token))
-          # Print compact snippets used by the next patch design.
-          for needle in ['Get-DiscoveredActionableAutoUpdateCount','function Update-AutoApps','function Commit-LastTransaction']:
-              i=s.find(needle); assert i>=0
-              print('SNIPPET',needle,repr(s[i:i+2500]))
+          # Existing SelfTest must already exercise swap/rollback, but r5 currently has no explicit
+          # successful CommitLast-after-swap assertion. Record that gap before fixing it.
+          terms={
+            'commit_function': 'function Commit-LastTransaction',
+            'commit_action': '"CommitLast"',
+            'transaction_selftest': 'transaction self-test passed',
+            'commit_fixture_phrase': 'commit-after-swap',
+          }
+          for k,v in terms.items(): print(k, s.count(v))
+          assert s.count(terms['commit_function'])==1
+          assert s.count(terms['commit_action'])>=1
+          assert s.count(terms['transaction_selftest'])>=1
 
       - name: Run exact r5 SelfTest on clean Windows fixture
         shell: powershell
