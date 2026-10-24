@@ -1,215 +1,82 @@
-name: Validate and publish Spotify Control v0.6.17 r7 proven-or-monitor
+name: Validate exact Spotify Control Stage14 v1.4.0 package
 
 on:
   pull_request:
     branches: [main]
     paths:
-      - 'validation/v0.6.17/**'
-      - 'packages/v0.6.17/**'
-      - 'manifest.json'
+      - 'validation/stage14-v1.4.0/**'
       - '.github/workflows/validate-v0.6.15-r5.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  windows-powershell51-v0617:
+  windows-powershell51-stage14-v140:
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.ref }}
 
-      - name: Prepare or final-validate exact v0.6.17 publication
+      - name: Rebuild trusted prior package and derive Stage14 v1.4.0
         shell: python
         run: |
-          import hashlib, runpy
+          import hashlib,runpy
           from pathlib import Path
-          p=Path('validation/v0.6.17/publish_v0617.py')
-          data=p.read_bytes()
-          print('PUBLISH_VALIDATOR',len(data),hashlib.sha256(data).hexdigest())
+          p=Path('validation/stage14-v1.4.0/build_stage14_v140.py')
+          b=p.read_bytes();print('V140_BUILDER',len(b),hashlib.sha256(b).hexdigest())
           runpy.run_path(str(p),run_name='__main__')
 
-      - name: Windows PowerShell 5.1 parser and r7 built-in proof suites
+      - name: Verify live production v0.6.17 trust anchor and exact two-edge start chain
+        shell: python
+        run: |
+          import json,subprocess
+          m=json.loads(subprocess.check_output(['git','show','origin/main:manifest.json']).decode('utf-8-sig'))
+          assert m['latest_version']=='0.6.17'
+          assert m['source_commit']=='e51f73c90c50cb55e3e3dffe3b55a6f6b1af0b4c'
+          assert m['payload_set_sha256']=='0f7fe384630e027466aa734ac669b410774b4569db231982212b7fa565b691a0'
+          files={x['path']:(x['sha256'],int(x['size'])) for x in m['latest_files']}
+          assert files['bin/spotify-control.ps1']==('5ff7990564287bc409626d8835e27679fb8de434868443313be42fdc0d9cce3b',266318)
+          assert files['bin/addon-manager.ps1']==('b7d1a4bc7707533400402fe42e60d724f88656c2477d4d4a5c0f47be60f47977',154926)
+          graph={(e['from_version'],e['to_version']) for e in m['updates']}
+          assert ('0.6.15','0.6.16') in graph and ('0.6.16','0.6.17') in graph
+          froms=[e['from_version'] for e in m['updates']];assert len(froms)==len(set(froms))
+          print('LIVE_STABLE_V0617_TWO_EDGE_CHAIN_PASS')
+
+      - name: Windows PowerShell 5.1 parser and package self-validation
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          foreach($rel in @('publication-v0.6.17\candidate-main-v0.6.17.ps1','publication-v0.6.17\candidate-addon-v0.6.5-r7.ps1')){
+          $root=Resolve-Path '.\stage14-v121'
+          foreach($rel in @('RUN_RUNTIME_ACCEPTANCE.ps1','PRECHECK_RUNTIME_ACCEPTANCE.ps1')){
             $tokens=$null;$errors=$null
-            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $rel).Path,[ref]$tokens,[ref]$errors)
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $root $rel),[ref]$tokens,[ref]$errors)
             if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw "PS5.1 parser rejected $rel"}
           }
-          $env:LOCALAPPDATA=Join-Path $env:RUNNER_TEMP 'SpotifyControl-r7-SelfTest-Local'
-          $env:APPDATA=Join-Path $env:RUNNER_TEMP 'SpotifyControl-r7-SelfTest-Roaming'
-          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify') | Out-Null
-          New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
-          $addon=(Resolve-Path 'publication-v0.6.17\candidate-addon-v0.6.5-r7.ps1').Path
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $addon -Action SelfTest
-          if($LASTEXITCODE -ne 0){throw "r7 offline SelfTest failed: $LASTEXITCODE"}
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $addon -Action IvLyricsTagProofSelfTest
-          if($LASTEXITCODE -ne 0){throw "r7 online ivLyrics tag proof failed: $LASTEXITCODE"}
-          Write-Host 'V0617_R7_PS51_AND_BUILTIN_SELFTESTS_PASS'
+          python (Join-Path $root 'evidence\validate_stage14.py')
+          if($LASTEXITCODE -ne 0){throw 'embedded Stage14 v1.4.0 validator failed'}
+          $s=Get-Content -LiteralPath (Join-Path $root 'RUN_RUNTIME_ACCEPTANCE.ps1') -Raw
+          foreach($must in @("[int]`$check.result.edge_count -ne 2",'Invoke-TrustedV0617SelfUpdateAcceptance','ivLyrics official-tag fallback gate self-test passed','ivLyrics unproven-current fallback self-test passed','Commit-cycle self-test passed','IvLyricsTagProofSelfTest','monitor-update-available-unproven','monitor-unproven-baseline')){if(-not $s.Contains($must)){throw "missing v1.4 requirement: $must"}}
+          if($s.Contains('Invoke-TrustedV0616SelfUpdateAcceptance')){throw 'stale v1.3 self-update function remains'}
+          Write-Host 'STAGE14_V140_WINDOWS_PS51_PASS'
 
-      - name: Exact v6.1.18 to latest ivLyrics transactional integration
-        shell: powershell
+      - name: ZIP CRC and internal SHA256SUMS
+        shell: python
         run: |
-          $ErrorActionPreference='Stop'
-          $addon=(Resolve-Path 'publication-v0.6.17\candidate-addon-v0.6.5-r7.ps1').Path
-          $env:LOCALAPPDATA=Join-Path $env:RUNNER_TEMP 'SpotifyControl-r7-Exact-Local'
-          $env:APPDATA=Join-Path $env:RUNNER_TEMP 'SpotifyControl-r7-Exact-Roaming'
-          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $env:LOCALAPPDATA,$env:APPDATA
-          $spotify=Join-Path $env:LOCALAPPDATA 'Spotify'
-          $web=Join-Path $spotify 'Browser\Default'
-          New-Item -ItemType Directory -Force -Path (Join-Path $web 'IndexedDB'),(Join-Path $web 'Local Storage\leveldb') | Out-Null
-          [IO.File]::WriteAllText((Join-Path $web 'IndexedDB\fixture.db'),'protected-indexeddb',[Text.UTF8Encoding]::new($false))
-          [IO.File]::WriteAllText((Join-Path $web 'Local Storage\leveldb\fixture.ldb'),'protected-localstorage',[Text.UTF8Encoding]::new($false))
-          [IO.File]::WriteAllText((Join-Path $web 'Preferences'),'protected-preferences',[Text.UTF8Encoding]::new($false))
-          $spicetify=Join-Path $env:APPDATA 'spicetify'
-          $app=Join-Path $env:LOCALAPPDATA 'spicetify\CustomApps\ivLyrics'
-          New-Item -ItemType Directory -Force -Path $spicetify,$app | Out-Null
-          @('[AdditionalOptions]','custom_apps = ivLyrics') | Set-Content -LiteralPath (Join-Path $spicetify 'config-xpui.ini') -Encoding ASCII
+          import zipfile,hashlib
+          p='SpotifyControl-Windows-Runtime-Acceptance-v1.4.0.zip'
+          with zipfile.ZipFile(p) as z:
+            assert z.testzip() is None
+            for line in z.read('SHA256SUMS.txt').decode('ascii').splitlines():
+              h,rel=line.split('  ',1);assert hashlib.sha256(z.read(rel)).hexdigest()==h,(rel,h)
+          b=open(p,'rb').read();print('V140_FINAL_ZIP',len(b),hashlib.sha256(b).hexdigest())
 
-          $zip=Join-Path $env:RUNNER_TEMP 'ivlyrics-v6.1.18.zip'
-          $extract=Join-Path $env:RUNNER_TEMP 'ivlyrics-v6.1.18-src'
-          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $extract
-          Invoke-WebRequest -UseBasicParsing -Headers @{'User-Agent'='SpotifyControl-CI'} -Uri 'https://github.com/ivLis-Studio/ivLyrics/archive/refs/tags/v6.1.18.zip' -OutFile $zip
-          Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
-          $root=Get-ChildItem -LiteralPath $extract -Directory | Select-Object -First 1
-          if(-not $root){throw 'v6.1.18 archive root missing'}
-          Copy-Item -Path (Join-Path $root.FullName '*') -Destination $app -Recurse -Force
-          foreach($required in @('manifest.json','index.js','version.txt')){if(-not(Test-Path -LiteralPath (Join-Path $app $required) -PathType Leaf)){throw "v6.1.18 fixture missing $required"}}
-
-          function Get-TreeDigest([string]$Root){
-            $rows=@()
-            foreach($f in @(Get-ChildItem -LiteralPath $Root -File -Recurse | Sort-Object FullName)){
-              $rel=$f.FullName.Substring($Root.Length).TrimStart([char]92,[char]47).Replace([char]92,[char]47)
-              $rows += ($rel+'|'+$f.Length+'|'+(Get-FileHash -Algorithm SHA256 -LiteralPath $f.FullName).Hash.ToLowerInvariant())
-            }
-            $bytes=[Text.Encoding]::UTF8.GetBytes(($rows -join "`n")+"`n")
-            $sha=[Security.Cryptography.SHA256]::Create();try{return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
-          }
-          $protectedBefore=Get-TreeDigest $spotify
-
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $addon -Action Check
-          if($LASTEXITCODE -ne 0){throw "exact fixture Check failed: $LASTEXITCODE"}
-          $reportPath=Join-Path $env:LOCALAPPDATA 'SpotifyControl\reports\addons-latest.json'
-          if(-not(Test-Path -LiteralPath $reportPath -PathType Leaf)){throw 'addons-latest.json missing after exact Check'}
-          $report=Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
-          $iv=@($report.items|Where-Object{$_.name -eq 'ivLyrics'})
-          if($iv.Count -ne 1){throw 'ivLyrics row missing/duplicated after exact Check'}
-          $iv=$iv[0]
-          if($iv.installed -ne $true -or [string]$iv.local -ne '6.1.18' -or [string]$iv.source -ne 'ivLis-Studio/ivLyrics'){throw 'exact Check identity mismatch'}
-          if([string]$iv.status -ne 'update-available' -or [string]$iv.local_safety -ne 'trusted-baseline'){throw ("exact Check did not establish trusted actionable baseline: status="+$iv.status+' safety='+$iv.local_safety)}
-          if([string]::IsNullOrWhiteSpace([string]$iv.installed_fingerprint)){throw 'exact Check did not persist installed fingerprint'}
-          $remote=[string]$iv.remote
-          if([string]::IsNullOrWhiteSpace($remote) -or $remote -eq '6.1.18'){throw 'exact Check remote version invalid'}
-
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $addon -Action Update
-          $updateExit=$LASTEXITCODE
-          if($updateExit -ne 10){throw "exact fixture Update expected exit 10, got $updateExit"}
-          $localVersion=(Get-Content -LiteralPath (Join-Path $app 'version.txt') -Raw).Trim()
-          if($localVersion -ne $remote){throw "ivLyrics live swap version mismatch: $localVersion vs $remote"}
-          $awaiting=@()
-          foreach($j in @(Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'SpotifyControl') -File -Recurse -Filter '*.json' -ErrorAction SilentlyContinue)){
-            try{$o=Get-Content -LiteralPath $j.FullName -Raw|ConvertFrom-Json;if([string]$o.status -eq 'awaiting-apply'){$awaiting+=$j.FullName}}catch{}
-          }
-          if($awaiting.Count -lt 1){throw 'no awaiting-apply ledger/report after exact Update'}
-
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $addon -Action CommitLast
-          if($LASTEXITCODE -ne 0){throw "exact fixture CommitLast failed: $LASTEXITCODE"}
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $addon -Action Check
-          if($LASTEXITCODE -ne 0){throw "exact fixture post-commit Check failed: $LASTEXITCODE"}
-          $report=Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
-          $iv=@($report.items|Where-Object{$_.name -eq 'ivLyrics'});if($iv.Count -ne 1){throw 'post-commit ivLyrics row mismatch'};$iv=$iv[0]
-          if([string]$iv.status -ne 'current'){throw ("post-commit ivLyrics not current: "+$iv.status)}
-          $pending=@($report.items|Where-Object{$_.policy -eq 'auto' -and $_.installed -eq $true -and $_.status -eq 'update-available'})
-          if($pending.Count -ne 0){throw ("post-commit actionable pending remains: "+($pending.name -join ','))}
-          $stillAwaiting=@()
-          foreach($j in @(Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'SpotifyControl') -File -Recurse -Filter '*.json' -ErrorAction SilentlyContinue)){
-            try{$o=Get-Content -LiteralPath $j.FullName -Raw|ConvertFrom-Json;if([string]$o.status -eq 'awaiting-apply'){$stillAwaiting+=$j.FullName}}catch{}
-          }
-          if($stillAwaiting.Count -ne 0){throw ('awaiting-apply JSON remains after commit: '+($stillAwaiting -join ','))}
-          $protectedAfter=Get-TreeDigest $spotify
-          if($protectedAfter -ne $protectedBefore){throw 'protected synthetic Spotify Browser/Default data changed'}
-          Write-Host ("V0617_EXACT_IVLYRICS_FULL_CYCLE_PASS local=6.1.18 remote="+$remote)
-
-      - name: Modified v6.1.18 must become monitor-only and remain untouched
-        shell: powershell
-        run: |
-          $ErrorActionPreference='Stop'
-          $addon=(Resolve-Path 'publication-v0.6.17\candidate-addon-v0.6.5-r7.ps1').Path
-          $env:LOCALAPPDATA=Join-Path $env:RUNNER_TEMP 'SpotifyControl-r7-Drift-Local'
-          $env:APPDATA=Join-Path $env:RUNNER_TEMP 'SpotifyControl-r7-Drift-Roaming'
-          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $env:LOCALAPPDATA,$env:APPDATA
-          $spotify=Join-Path $env:LOCALAPPDATA 'Spotify'
-          $web=Join-Path $spotify 'Browser\Default'
-          New-Item -ItemType Directory -Force -Path (Join-Path $web 'IndexedDB'),(Join-Path $web 'Local Storage\leveldb') | Out-Null
-          [IO.File]::WriteAllText((Join-Path $web 'IndexedDB\fixture.db'),'protected-indexeddb',[Text.UTF8Encoding]::new($false))
-          [IO.File]::WriteAllText((Join-Path $web 'Preferences'),'protected-preferences',[Text.UTF8Encoding]::new($false))
-          $spicetify=Join-Path $env:APPDATA 'spicetify';$app=Join-Path $env:LOCALAPPDATA 'spicetify\CustomApps\ivLyrics'
-          New-Item -ItemType Directory -Force -Path $spicetify,$app | Out-Null
-          @('[AdditionalOptions]','custom_apps = ivLyrics') | Set-Content -LiteralPath (Join-Path $spicetify 'config-xpui.ini') -Encoding ASCII
-          $zip=Join-Path $env:RUNNER_TEMP 'ivlyrics-v6.1.18.zip';$extract=Join-Path $env:RUNNER_TEMP 'ivlyrics-v6.1.18-drift-src'
-          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $extract
-          if(-not(Test-Path -LiteralPath $zip -PathType Leaf)){Invoke-WebRequest -UseBasicParsing -Headers @{'User-Agent'='SpotifyControl-CI'} -Uri 'https://github.com/ivLis-Studio/ivLyrics/archive/refs/tags/v6.1.18.zip' -OutFile $zip}
-          Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
-          $root=Get-ChildItem -LiteralPath $extract -Directory|Select-Object -First 1;Copy-Item -Path (Join-Path $root.FullName '*') -Destination $app -Recurse -Force
-          [IO.File]::WriteAllText((Join-Path $app '__local_modified_marker.txt'),'local-modification',[Text.UTF8Encoding]::new($false))
-          function Get-TreeDigest([string]$Root){
-            $rows=@();foreach($f in @(Get-ChildItem -LiteralPath $Root -File -Recurse|Sort-Object FullName)){$rel=$f.FullName.Substring($Root.Length).TrimStart([char]92,[char]47).Replace([char]92,[char]47);$rows+=($rel+'|'+$f.Length+'|'+(Get-FileHash -Algorithm SHA256 -LiteralPath $f.FullName).Hash.ToLowerInvariant())};$bytes=[Text.Encoding]::UTF8.GetBytes(($rows -join "`n")+"`n");$sha=[Security.Cryptography.SHA256]::Create();try{return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
-          }
-          $treeBefore=Get-TreeDigest $app;$protectedBefore=Get-TreeDigest $spotify
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $addon -Action Check
-          if($LASTEXITCODE -ne 0){throw "drift fixture Check failed: $LASTEXITCODE"}
-          $reportPath=Join-Path $env:LOCALAPPDATA 'SpotifyControl\reports\addons-latest.json';$report=Get-Content -LiteralPath $reportPath -Raw|ConvertFrom-Json
-          $iv=@($report.items|Where-Object{$_.name -eq 'ivLyrics'});if($iv.Count -ne 1){throw 'drift ivLyrics row mismatch'};$iv=$iv[0]
-          if([string]$iv.status -ne 'monitor-update-available-unproven' -or [string]$iv.local_safety -ne 'monitor-unproven-baseline'){throw ("drift fixture did not become monitor-only: status="+$iv.status+' safety='+$iv.local_safety)}
-          if([string]::IsNullOrWhiteSpace([string]$iv.proof_error)){throw 'drift fixture monitor row missing proof_error'}
-          $pending=@($report.items|Where-Object{$_.policy -eq 'auto' -and $_.installed -eq $true -and $_.status -eq 'update-available'});if($pending.Count -ne 0){throw 'drift fixture incorrectly remains actionable pending'}
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $addon -Action Update
-          if($LASTEXITCODE -ne 0){throw "drift fixture Update should be no-op exit 0, got $LASTEXITCODE"}
-          if((Get-TreeDigest $app) -ne $treeBefore){throw 'drift ivLyrics tree was mutated'}
-          if((Get-TreeDigest $spotify) -ne $protectedBefore){throw 'drift protected Spotify data changed'}
-          $active=@()
-          foreach($j in @(Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'SpotifyControl') -File -Recurse -Filter '*.json' -ErrorAction SilentlyContinue)){try{$o=Get-Content -LiteralPath $j.FullName -Raw|ConvertFrom-Json;if([string]$o.status -in @('prepared','swapping','awaiting-apply')){$active+=$j.FullName}}catch{}}
-          if($active.Count -ne 0){throw ('drift fixture created active transaction: '+($active -join ','))}
-          Write-Host 'V0617_DRIFT_IVLYRICS_MONITOR_ONLY_PASS'
-
-      - name: Publish immutable v0.6.17 transport then pin source commit
-        if: ${{ hashFiles('packages/v0.6.17/**') == '' && github.event_name == 'pull_request' }}
-        shell: powershell
-        env:
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-        run: |
-          $ErrorActionPreference='Stop'
-          if(Test-Path -LiteralPath '.\packages\v0.6.17'){throw 'v0.6.17 package path unexpectedly exists before first publication.'}
-          New-Item -ItemType Directory -Force -Path '.\packages\v0.6.17' | Out-Null
-          Copy-Item -Path '.\publication-v0.6.17\packages\v0.6.17\*' -Destination '.\packages\v0.6.17' -Recurse -Force
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- 'packages/v0.6.17'
-          git diff --cached --quiet
-          if($LASTEXITCODE -eq 0){throw 'No v0.6.17 transport bytes were staged.'}
-          git commit -m 'Publish immutable v0.6.17 transport'
-          if($LASTEXITCODE -ne 0){throw 'Transport commit failed.'}
-          $transportSha=(git rev-parse HEAD).Trim();if($transportSha -notmatch '^[0-9a-f]{40}$'){throw "Invalid transport commit SHA: $transportSha"}
-          git push origin ("HEAD:"+$env:HEAD_REF);if($LASTEXITCODE -ne 0){throw 'Transport push failed.'}
-          $env:TRANSPORT_SHA=$transportSha
-          python -c "import os; from pathlib import Path; p=Path('publication-v0.6.17/manifest-template.json'); s=p.read_text(encoding='utf-8'); assert s.count('__SOURCE_COMMIT__')==1; Path('manifest.json').write_bytes(s.replace('__SOURCE_COMMIT__',os.environ['TRANSPORT_SHA']).encode('utf-8'))"
-          if($LASTEXITCODE -ne 0){throw 'Manifest source pin generation failed.'}
-          git add -- manifest.json;git diff --cached --quiet
-          if($LASTEXITCODE -eq 0){throw 'No manifest change was staged.'}
-          git commit -m 'Publish stable v0.6.17 manifest';if($LASTEXITCODE -ne 0){throw 'Manifest commit failed.'}
-          git push origin ("HEAD:"+$env:HEAD_REF);if($LASTEXITCODE -ne 0){throw 'Manifest push failed.'}
-          Write-Host ("V0617_PUBLICATION_PUSHED source_commit="+$transportSha)
-
-      - name: Upload exact v0.6.17 validation output
+      - name: Upload exact validated Stage14 v1.4.0 ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: spotify-control-v0.6.17-validation-output
-          path: publication-v0.6.17
+          name: SpotifyControl-Windows-Runtime-Acceptance-v1.4.0
+          path: SpotifyControl-Windows-Runtime-Acceptance-v1.4.0.zip
           if-no-files-found: error
-          compression-level: 6
+          compression-level: 0
