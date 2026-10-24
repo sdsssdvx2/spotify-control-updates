@@ -18,33 +18,83 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Reconstruct exact v0.6.15 candidate and verify immutable edge
+      - name: Verify bootstrap-compatible manifest and reconstruct exact v0.6.15 payloads
         shell: python
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          import base64, gzip, hashlib, json
+          import base64, gzip, hashlib, json, os, re, subprocess
+          from collections import Counter
           from pathlib import Path
 
-          manifest = json.loads(Path('manifest.json').read_text(encoding='utf-8-sig'))
+          manifest_raw = Path('manifest.json').read_bytes()
+          assert len(manifest_raw) == 12467
+          assert hashlib.sha256(manifest_raw).hexdigest() == '09e282b74b5fb348fab548e6eb71a71d7c9ad89475387bc3b98d1a09099e8a78'
+          manifest = json.loads(manifest_raw.decode('utf-8-sig'))
+          source_commit = manifest['source_commit']
+          assert source_commit == '2f8377829ab61dcb88d265bdbd484181f084aef9'
           assert manifest['latest_version'] == '0.6.15'
           assert manifest['min_bootstrap_version'] == '1.0.6'
           assert manifest['bootstrap']['sha256'] == 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
           assert manifest['bootstrap']['size'] == 42963
-          edge = [x for x in manifest['updates'] if x['from_version']=='0.6.14' and x['to_version']=='0.6.15']
-          assert len(edge) == 1
-          edge = edge[0]
-          patches = {p['path']:p for p in edge['patches']}
-          mp = patches['bin/spotify-control.ps1']
-          ap = patches['bin/addon-manager.ps1']
-          assert mp['from_sha256'] == '5306acbe610b06f2c638ebbdc305db9741bbe145392933a38f648906acd302d1'
-          assert mp['to_sha256'] == '4faef1e70be20efb551f595c02dad171a44abbe8a53af9a0576dc54fd0e2004f'
-          assert ap['from_sha256'] == 'd6a11c73c561662579c9b28b59e9f2845563e8050eceeb8e5cec0f5f3618759a'
-          assert ap['to_sha256'] == '56185d3b23c4b0df455673ad3f601d67c7980b7428f1d15b3e0465d1a7859022'
+          assert manifest['payload_set_sha256'] == '86dbfea3b22c110a2a1425b0340bbf333329c51a5ae9253b0a45a955f0ae67dd'
+
+          rows=[f"{x['path']}|{x['size']}|{x['sha256'].lower()}" for x in manifest['latest_files']]
+          assert hashlib.sha256(('\n'.join(sorted(rows))+'\n').encode()).hexdigest() == manifest['payload_set_sha256']
+
+          expected_edges=[('0.6.10','0.6.11'),('0.6.11','0.6.13'),('0.6.12','0.6.13'),('0.6.13','0.6.14'),('0.6.14','0.6.15')]
+          actual_edges=[(e['from_version'],e['to_version']) for e in manifest['updates']]
+          assert actual_edges == expected_edges, actual_edges
+          counts=Counter(e['from_version'] for e in manifest['updates'])
+          assert all(v == 1 for v in counts.values()), counts
+
+          # Exact bootstrap v1.0.6 chunk naming contract: sequential chunk-000.txt, chunk-001.txt, ...
+          for edge in manifest['updates']:
+              to=edge['to_version']
+              seen=set()
+              for patch in edge['patches']:
+                  assert patch['path'] not in seen
+                  seen.add(patch['path'])
+                  chunks=patch['chunks']
+                  assert 1 <= len(chunks) <= 32
+                  total=0
+                  for i,c in enumerate(chunks):
+                      expected=f'chunk-{i:03}.txt'
+                      p=c['path'].replace('\\','/')
+                      assert re.fullmatch(r'packages/v[0-9]+\.[0-9]+\.[0-9]+/[A-Za-z0-9._+-]+/chunk-[0-9]{3}\.txt',p), p
+                      assert p.startswith(f'packages/v{to}/'), p
+                      assert p.endswith('/'+expected), (p,expected)
+                      total += int(c['size'])
+                  assert total == int(patch['encoded_size'])
+
+          # On PRs, prove this changes only the two known publication defects plus the required source pin.
+          base_sha=os.environ.get('BASE_SHA','').strip()
+          if base_sha:
+              base_raw=subprocess.check_output(['git','show',f'{base_sha}:manifest.json'])
+              assert len(base_raw)==15231
+              base=json.loads(base_raw.decode('utf-8-sig'))
+              dups=[e for e in base['updates'] if e['from_version']=='0.6.12']
+              assert len(dups)==2 and dups[0]==dups[1]
+              old_edge=[e for e in base['updates'] if e['from_version']=='0.6.14' and e['to_version']=='0.6.15'][0]
+              old_ap=[p for p in old_edge['patches'] if p['path']=='bin/addon-manager.ps1'][0]
+              old_names=[Path(c['path']).name for c in old_ap['chunks']]
+              assert old_names[5:7]==['chunk-005a.txt','chunk-005b.txt']
+              assert base['payload_set_sha256']==manifest['payload_set_sha256']
+              assert base['latest_files']==manifest['latest_files']
+              assert base['bootstrap']==manifest['bootstrap']
+
+          # Every referenced transport byte must exist at the pinned source_commit, because bootstrap downloads by commit SHA.
+          subprocess.check_call(['git','merge-base','--is-ancestor',source_commit,'HEAD'])
+          def source_bytes(path):
+              return subprocess.check_output(['git','show',f'{source_commit}:{path}'])
 
           def reconstruct(p):
               parts=[]
               for c in p['chunks']:
-                  data=Path(c['path']).read_bytes()
+                  data=source_bytes(c['path'])
                   assert len(data)==c['size'], c['path']
                   assert hashlib.sha256(data).hexdigest()==c['sha256'], c['path']
                   parts.append(data)
@@ -56,14 +106,21 @@ jobs:
               assert hashlib.sha256(comp).hexdigest()==p['compressed_sha256']
               return gzip.decompress(comp)
 
+          edge=[x for x in manifest['updates'] if x['from_version']=='0.6.14' and x['to_version']=='0.6.15'][0]
+          patches={p['path']:p for p in edge['patches']}
+          mp=patches['bin/spotify-control.ps1']; ap=patches['bin/addon-manager.ps1']
+          assert mp['from_sha256']=='5306acbe610b06f2c638ebbdc305db9741bbe145392933a38f648906acd302d1'
+          assert mp['to_sha256']=='4faef1e70be20efb551f595c02dad171a44abbe8a53af9a0576dc54fd0e2004f'
+          assert ap['from_sha256']=='d6a11c73c561662579c9b28b59e9f2845563e8050eceeb8e5cec0f5f3618759a'
+          assert ap['to_sha256']=='56185d3b23c4b0df455673ad3f601d67c7980b7428f1d15b3e0465d1a7859022'
+
           patch_raw=reconstruct(mp)
           assert len(patch_raw)==476
           assert hashlib.sha256(patch_raw).hexdigest()=='cf35307ab4a59e3c4fd062b84ed5f38a094d9bb057c6ed7990111af164628207'
           patch=json.loads(patch_raw.decode('ascii'))
           assert patch['kind']=='ascii-line-patch'
           assert patch['from_version']=='0.6.14' and patch['to_version']=='0.6.15'
-          assert patch['from_sha256']==mp['from_sha256'] and patch['to_sha256']==mp['to_sha256']
-          assert patch['operations'] == [
+          assert patch['operations']==[
               {'start_line':0,'delete_count':1,'insert':'# Spotify Control v0.6.15 Pending-Aware Addon Maintenance\n'},
               {'start_line':12,'delete_count':1,'insert':'$ScriptVersion = "0.6.15"\n'},
           ]
@@ -72,7 +129,6 @@ jobs:
           assert len(addon)==128714
           assert hashlib.sha256(addon).hexdigest()==ap['to_sha256']
           Path('candidate-addon.ps1').write_bytes(addon)
-
           txt=addon.decode('utf-8-sig')
           assert '$Version = "0.6.5-r5"' in txt
           assert 'Get-DiscoveredActionableAutoUpdateCount' in txt
@@ -83,20 +139,41 @@ jobs:
           prior=json.loads(Path('validation/v0.6.15/prior-v0614-edge.json').read_text(encoding='utf-8'))
           actual=[x for x in manifest['updates'] if x['from_version']=='0.6.13' and x['to_version']=='0.6.14']
           assert len(actual)==1 and actual[0]==prior
+          print('Manifest bootstrap-compatibility and source-commit reconstruction PASS.')
 
-      - name: Windows PowerShell 5.1 parser and r5 SelfTest
+      - name: Windows PowerShell 5.1 bootstrap-contract check and r5 SelfTest
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
+          $manifest=Get-Content -LiteralPath .\manifest.json -Raw | ConvertFrom-Json
+          $edgeKeys=@{}
+          foreach($edge in @($manifest.updates)) {
+            $from=[string]$edge.from_version; $to=[string]$edge.to_version
+            $edgeKey=$from.ToLowerInvariant()
+            if($edgeKeys.ContainsKey($edgeKey)){throw "Manifest has more than one edge starting at $from."}
+            $edgeKeys[$edgeKey]=$true
+            foreach($patch in @($edge.patches)) {
+              $chunks=@($patch.chunks)
+              $total=[int64]0
+              for($i=0;$i -lt $chunks.Count;$i++) {
+                $chunk=$chunks[$i]
+                $cpath=([string]$chunk.path).Replace([char]92,[char]47)
+                $expectedName=('chunk-{0:D3}.txt' -f $i)
+                if($cpath -notmatch '^packages/v[0-9]+\.[0-9]+\.[0-9]+/[A-Za-z0-9._+-]+/chunk-[0-9]{3}\.txt$' -or -not $cpath.StartsWith(('packages/v'+$to+'/')) -or -not $cpath.EndsWith('/'+$expectedName)){throw "Unsafe or out-of-order patch chunk path: $cpath"}
+                $total += [int64]$chunk.size
+              }
+              if($total -ne [int64]$patch.encoded_size){throw "Patch chunk sizes do not add up for $($patch.path)"}
+            }
+          }
+          Write-Host 'Bootstrap v1.0.6 manifest edge/chunk contract PASS.'
+
           $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'SpotifyControlTest-Local'
           $env:APPDATA = Join-Path $env:RUNNER_TEMP 'SpotifyControlTest-Roaming'
           New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify') | Out-Null
           New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
-          foreach($p in @('candidate-addon.ps1')) {
-            $tokens=$null; $errors=$null
-            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$tokens,[ref]$errors)
-            if($errors.Count -ne 0) { $errors | % { Write-Error $_.Message }; throw "Parser rejected $p" }
-          }
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path .\candidate-addon.ps1).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count -ne 0) { $errors | % { Write-Error $_.Message }; throw 'Parser rejected candidate-addon.ps1' }
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\candidate-addon.ps1 -Action SelfTest
           if($LASTEXITCODE -ne 0) { throw "Addon r5 SelfTest failed: $LASTEXITCODE" }
           Write-Host 'v0.6.15/r5 Windows PowerShell 5.1 validation PASS.'
