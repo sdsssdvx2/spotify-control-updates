@@ -31,9 +31,9 @@ jobs:
           block=text.split(marker,1)[1].split(end,1)[0]
           lines=block.splitlines(); assert lines
           code='\n'.join(x[10:] if x.startswith('          ') else x for x in lines)+'\n'
+          assert "out=Path('stage14-v121')" in code
+          code=code.replace("out=Path('stage14-v121')","out=Path('stage14-v120-unpacked')",1)
           Path('stage14-v1.2.1-builder.py').write_text(code,encoding='utf-8',newline='\n')
-          for n,line in enumerate(code.splitlines(),1):
-            if 55 <= n <= 70: print(f'BUILDER {n}: {line}')
           exec(compile(code,'stage14-v1.2.1-builder.py','exec'),{'__name__':'__main__'})
 
       - name: Windows PowerShell 5.1 parser validation
