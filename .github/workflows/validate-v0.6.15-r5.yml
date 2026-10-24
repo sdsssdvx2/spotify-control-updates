@@ -45,10 +45,10 @@ jobs:
         run: |
           from pathlib import Path
           from io import BytesIO
-          import base64, gzip, hashlib, json, subprocess, zipfile
+          import base64, gzip, hashlib, json, zipfile
 
           m=json.loads(Path('manifest.json').read_text(encoding='utf-8-sig'))
-          parts=[Path(f'packages/v0.6.11/chunks-v2/chunk-{i:03}.txt').read_bytes() for i in range(4)]
+          parts=[Path(f'packages/v0.6.11/chunks/chunk-{i:03}.txt').read_bytes() for i in range(8)]
           enc=b''.join(parts)
           clean=b''.join(enc.split())
           print('V0611_FULL_ENCODED',len(enc),len(clean),hashlib.sha256(enc).hexdigest())
@@ -76,7 +76,6 @@ jobs:
               return p,json.loads(doc_raw.decode('ascii'))
 
           def apply_ascii_line_patch(src,doc,target_sha):
-              # Bootstrap patches are line-indexed replacements. Preserve original byte line endings/BOM.
               candidates=[]
               for mode in ('bytes-reverse','bytes-forward','text-lf-reverse','text-crlf-reverse'):
                   try:
@@ -93,7 +92,6 @@ jobs:
                           bom=src.startswith(b'\xef\xbb\xbf')
                           text=src.decode('utf-8-sig')
                           sep='\r\n' if mode.startswith('text-crlf') else '\n'
-                          # normalize only for this candidate; final hash decides exactness.
                           lines=text.replace('\r\n','\n').splitlines(keepends=True)
                           ops=sorted(doc['operations'],key=lambda x:int(x['start_line']),reverse=True)
                           for op in ops:
