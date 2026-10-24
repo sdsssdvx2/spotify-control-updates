@@ -62,7 +62,7 @@ jobs:
           $ErrorActionPreference='Stop'
           if(Test-Path -LiteralPath '.\packages\v0.6.16'){throw 'v0.6.16 package path unexpectedly exists before first publication.'}
           New-Item -ItemType Directory -Force -Path '.\packages\v0.6.16' | Out-Null
-          Copy-Item -LiteralPath '.\publication-v0.6.16\packages\v0.6.16\*' -Destination '.\packages\v0.6.16' -Recurse -Force
+          Copy-Item -Path '.\publication-v0.6.16\packages\v0.6.16\*' -Destination '.\packages\v0.6.16' -Recurse -Force
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -- 'packages/v0.6.16'
