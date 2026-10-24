@@ -121,6 +121,7 @@ jobs:
           $boot=Join-Path $bin 'spotify-control-bootstrap.ps1'
           $expectedBoot='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
           if((Get-FileHash -Algorithm SHA256 -LiteralPath $boot).Hash.ToLowerInvariant() -ne $expectedBoot){throw 'Exact bootstrap hash mismatch.'}
+          if((Get-Item -LiteralPath $boot).Length -ne 42963){throw 'Exact bootstrap size mismatch.'}
           $tokens=$null;$errors=$null
           [void][System.Management.Automation.Language.Parser]::ParseFile($boot,[ref]$tokens,[ref]$errors)
           if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Exact bootstrap 1.0.6 parser rejected source.'}
@@ -132,17 +133,25 @@ jobs:
             $head=(git rev-parse HEAD).Trim()
             $old='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/main/manifest.json'
             $new=('https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/'+$head+'/manifest.json')
+            $selfLine='$selfHash = Get-Sha256 -Path $PSCommandPath'
+            $selfPinned='$selfHash = ''d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'''
+            $sizeLine='$bootstrapSize = [int64](Get-Item -LiteralPath $PSCommandPath).Length'
+            $sizePinned='$bootstrapSize = [int64]42963'
             $text=[IO.File]::ReadAllText($boot)
-            $count=([regex]::Matches($text,[regex]::Escape($old))).Count
-            if($count -ne 1){throw "Expected exactly one production manifest URL in bootstrap, found $count"}
-            $text=$text.Replace($old,$new)
-            [IO.File]::WriteAllText($boot,$text,[Text.UTF8Encoding]::new($true))
+            foreach($pair in @(@($old,$new),@($selfLine,$selfPinned),@($sizeLine,$sizePinned))){
+              $count=([regex]::Matches($text,[regex]::Escape([string]$pair[0]))).Count
+              if($count -ne 1){throw ("Expected exactly one CI transport substitution source, found $count: "+[string]$pair[0])}
+              $text=$text.Replace([string]$pair[0],[string]$pair[1])
+            }
+            [IO.File]::WriteAllText($boot,$text,[Text.UTF8Encoding]::new($false))
             $tokens=$null;$errors=$null
             [void][System.Management.Automation.Language.Parser]::ParseFile($boot,[ref]$tokens,[ref]$errors)
-            if($errors.Count){throw 'Manifest-URL-only CI copy failed PS5.1 parse.'}
+            if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Candidate-manifest CI copy failed PS5.1 parse.'}
             Write-Host ('PR_MANIFEST_URL='+$new)
+            Write-Host 'CI_TRANSPORT_ONLY_SELF_PIN_SHIM=TRUE'
           } else {
             if((Get-FileHash -Algorithm SHA256 -LiteralPath $boot).Hash.ToLowerInvariant() -ne $expectedBoot){throw 'Push validation must use byte-exact bootstrap 1.0.6.'}
+            if((Get-Item -LiteralPath $boot).Length -ne 42963){throw 'Push validation bootstrap size changed.'}
             Write-Host 'USING_BYTE_EXACT_BOOTSTRAP_V106_AGAINST_MAIN'
           }
 
@@ -150,7 +159,7 @@ jobs:
           $env:APPDATA=Join-Path (Resolve-Path '.\ci-bootstrap-fixture').Path 'Roaming'
           New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
           function Run-Boot([string]$Action){
-            $out=& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $boot -Action $Action 2>&1
+            $out=& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $boot -Action $Action -Json 2>&1
             $code=$LASTEXITCODE
             Write-Host ("BOOTSTRAP_"+$Action+"_EXIT="+$code)
             $out|ForEach-Object{Write-Host $_}
