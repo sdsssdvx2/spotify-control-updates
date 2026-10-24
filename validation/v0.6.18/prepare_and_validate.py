@@ -17,8 +17,12 @@ GZ_SIZE=4458
 JSON_SHA='101cf5f1c2a2f77b43e6bb577cd3d141abc5f5990232cf76260903ce04f273ec'
 JSON_SIZE=16340
 CHUNKS=[
- ('packages/v0.6.18/main-v0617-to-v0618/chunk-000.txt','f9ca6e3a6d80c21b5492d191dd25ade1ef3e43c0e3743cdbd6cf97f6cfbae0b3',4096),
- ('packages/v0.6.18/main-v0617-to-v0618/chunk-001.txt','333186435eec5f438353b5873ccb4bcbc272143a119f4c7bee128bce64137394',1848),
+ ('packages/v0.6.18/main-v0617-to-v0618-r2/chunk-000.txt','080749e3fc1b36ce40cb3f9ff9acf08ac83b630d772b3246f1f5ea430dc835f3',1024),
+ ('packages/v0.6.18/main-v0617-to-v0618-r2/chunk-001.txt','4acfae8decec577f77d0c7aa4d5bda017974dc05e222a0758bdad5b404c641e6',1024),
+ ('packages/v0.6.18/main-v0617-to-v0618-r2/chunk-002.txt','24f0e1a2a7cb25ee0f400dcfcf4fc9448e8c59c83d37b68cb9960b5b7753b7cf',1024),
+ ('packages/v0.6.18/main-v0617-to-v0618-r2/chunk-003.txt','d0600daa8f58f95a230d44cebe29214080b18c3161e018ead18e787398cd86d8',1024),
+ ('packages/v0.6.18/main-v0617-to-v0618-r2/chunk-004.txt','33a4524f84c605881e392860067089f8617f206cd03005ce0e7f76b9d624eaaf',1024),
+ ('packages/v0.6.18/main-v0617-to-v0618-r2/chunk-005.txt','0cc863dbf9b4a96730cfa09802bd53be49b88622aee3eef8c86e860d20088f1b',824),
 ]
 
 def sha(b): return hashlib.sha256(b).hexdigest()
