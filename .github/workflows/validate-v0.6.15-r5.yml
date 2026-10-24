@@ -1,4 +1,4 @@
-name: Validate Spotify Control v0.6.16 r6 publication
+name: Validate and publish Spotify Control v0.6.16 r6
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   windows-powershell51-v0616:
@@ -21,170 +21,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref }}
 
-      - name: Reconstruct stable payloads, derive r6 and build immutable v0.6.16 publication
+      - name: Prepare or final-validate exact v0.6.16 publication
         shell: python
         run: |
+          import hashlib, runpy
           from pathlib import Path
-          from io import BytesIO
-          import base64,gzip,hashlib,json,shutil,subprocess,zipfile
-
-          manifest=json.loads(Path('manifest.json').read_text(encoding='utf-8-sig'))
-          assert manifest['latest_version']=='0.6.15'
-          assert manifest['source_commit']=='2f8377829ab61dcb88d265bdbd484181f084aef9'
-          assert manifest['payload_set_sha256']=='86dbfea3b22c110a2a1425b0340bbf333329c51a5ae9253b0a45a955f0ae67dd'
-          source=manifest['source_commit']
-
-          def source_bytes(path):
-              return subprocess.check_output(['git','show',f'{source}:{path}'])
-          def reconstruct_payload(p):
-              parts=[]
-              for c in p['chunks']:
-                  data=source_bytes(c['path'])
-                  assert len(data)==c['size'] and hashlib.sha256(data).hexdigest()==c['sha256'],c['path']
-                  parts.append(data)
-              enc=b''.join(parts)
-              assert len(enc)==p['encoded_size'] and hashlib.sha256(enc).hexdigest()==p['encoded_sha256']
-              comp=base64.b64decode(enc,validate=True)
-              assert len(comp)==p['compressed_size'] and hashlib.sha256(comp).hexdigest()==p['compressed_sha256']
-              return gzip.decompress(comp)
-
-          edge15=next(e for e in manifest['updates'] if e['from_version']=='0.6.14' and e['to_version']=='0.6.15')
-          addon15=next(p for p in edge15['patches'] if p['path']=='bin/addon-manager.ps1')
-          r5=reconstruct_payload(addon15)
-          assert len(r5)==128714 and hashlib.sha256(r5).hexdigest()=='56185d3b23c4b0df455673ad3f601d67c7980b7428f1d15b3e0465d1a7859022'
-
-          patch_enc=Path('validation/v0.6.16/r5-to-r6.patch.json.gz.b64').read_bytes()
-          assert len(patch_enc)==8768 and hashlib.sha256(patch_enc).hexdigest()=='36b20a04c3bd425472dd1a616a042edcda81cbd0c20824803acc6c619536371c'
-          patch_raw=gzip.decompress(base64.b64decode(patch_enc,validate=True))
-          assert len(patch_raw)==26823 and hashlib.sha256(patch_raw).hexdigest()=='372cf3d2b19e797cb63b3d6b65c38114f77be12b9a92474c9899692ac2729235'
-          pdoc=json.loads(patch_raw)
-          assert pdoc['from_sha256']==hashlib.sha256(r5).hexdigest()
-          lines=r5.decode('utf-8-sig').splitlines(keepends=True)
-          for op in sorted(pdoc['operations'],key=lambda x:int(x['start_line']),reverse=True):
-              lines[int(op['start_line']):int(op['start_line'])+int(op['delete_count'])]=str(op.get('insert','')).splitlines(keepends=True)
-          r6=b'\xef\xbb\xbf'+''.join(lines).encode('utf-8')
-          assert len(r6)==152481 and hashlib.sha256(r6).hexdigest()=='fb2bd974ee795bb697a0e5b534e03477be77b655e60353d82064b1e751bdc686'
-
-          # Reconstruct current main 0.6.15 from the immutable v0.6.11 full package and manifest patch chain.
-          full_enc=b''.join(Path(f'packages/v0.6.11/chunks/chunk-{i:03}.txt').read_bytes() for i in range(8))
-          with zipfile.ZipFile(BytesIO(base64.b64decode(b''.join(full_enc.split()),validate=True))) as z:
-              main=z.read('bin/spotify-control.ps1')
-          assert hashlib.sha256(main).hexdigest()=='045ed3fa898453ce6563a057a31412d254f5958b75286589e8d5cc95c6782a39'
-
-          def reconstruct_main_patch(edge):
-              p=next(x for x in edge['patches'] if x['path']=='bin/spotify-control.ps1')
-              encoded=b''.join(Path(c['path']).read_bytes() for c in p['chunks'])
-              assert len(encoded)==p['encoded_size'] and hashlib.sha256(encoded).hexdigest()==p['encoded_sha256']
-              comp=base64.b64decode(encoded,validate=True)
-              assert hashlib.sha256(comp).hexdigest()==p['compressed_sha256']
-              raw=gzip.decompress(comp)
-              assert hashlib.sha256(raw).hexdigest()==p['json_sha256']
-              return p,json.loads(raw.decode('ascii'))
-          def apply_line_patch(src,p,doc):
-              assert hashlib.sha256(src).hexdigest()==p['from_sha256']
-              lines=src.decode('utf-8-sig').splitlines(keepends=True)
-              for op in sorted(doc['operations'],key=lambda x:int(x['start_line']),reverse=True):
-                  start=int(op['start_line']); delete=int(op['delete_count'])
-                  lines[start:start+delete]=str(op.get('insert','')).splitlines(keepends=True)
-              out=b'\xef\xbb\xbf'+''.join(lines).encode('utf-8')
-              assert hashlib.sha256(out).hexdigest()==p['to_sha256']
-              return out
-          ver='0.6.11'
-          for to in ('0.6.13','0.6.14','0.6.15'):
-              edge=next(e for e in manifest['updates'] if e['from_version']==ver and e['to_version']==to)
-              p,doc=reconstruct_main_patch(edge); main=apply_line_patch(main,p,doc); ver=to
-          assert len(main)==266313 and hashlib.sha256(main).hexdigest()=='4faef1e70be20efb551f595c02dad171a44abbe8a53af9a0576dc54fd0e2004f'
-
-          # v0.6.16 main is deliberately only a version/header bump; all functional change is in r6.
-          main_doc={
-              'kind':'ascii-line-patch','from_version':'0.6.15','to_version':'0.6.16',
-              'from_sha256':hashlib.sha256(main).hexdigest(),'to_sha256':'',
-              'operations':[
-                  {'start_line':0,'delete_count':1,'insert':'# Spotify Control v0.6.16 ivLyrics Historical-Tag Trust Bootstrap\n'},
-                  {'start_line':12,'delete_count':1,'insert':'$ScriptVersion = "0.6.16"\n'}
-              ]
-          }
-          main_lines=main.decode('utf-8-sig').splitlines(keepends=True)
-          for op in sorted(main_doc['operations'],key=lambda x:int(x['start_line']),reverse=True):
-              main_lines[int(op['start_line']):int(op['start_line'])+int(op['delete_count'])]=op['insert'].splitlines(keepends=True)
-          main16=b'\xef\xbb\xbf'+''.join(main_lines).encode('utf-8')
-          main_doc['to_sha256']=hashlib.sha256(main16).hexdigest()
-          assert b'$ScriptVersion = "0.6.16"' in main16
-
-          out=Path('publication-v0.6.16'); shutil.rmtree(out,ignore_errors=True)
-          pkg=out/'packages'/'v0.6.16'; (pkg/'main-v0615-to-v0616').mkdir(parents=True); (pkg/'addon-v065r5-to-v065r6').mkdir(parents=True)
-          (out/'candidate-main-v0.6.16.ps1').write_bytes(main16)
-          (out/'candidate-addon-v0.6.5-r6.ps1').write_bytes(r6)
-
-          main_json=json.dumps(main_doc,separators=(',',':'),ensure_ascii=True).encode('ascii')
-          main_gz=gzip.compress(main_json,compresslevel=9,mtime=0); main_b64=base64.b64encode(main_gz)
-          addon_gz=gzip.compress(r6,compresslevel=9,mtime=0); addon_b64=base64.b64encode(addon_gz)
-
-          def write_chunks(root,data,size=4096):
-              rows=[]
-              for i in range(0,len(data),size):
-                  part=data[i:i+size]; name=f'chunk-{i//size:03}.txt'; (root/name).write_bytes(part)
-                  rows.append({'path':str((root/name).relative_to(out)).replace('\\','/'),'sha256':hashlib.sha256(part).hexdigest(),'size':len(part)})
-              return rows
-          main_chunks=write_chunks(pkg/'main-v0615-to-v0616',main_b64)
-          addon_chunks=write_chunks(pkg/'addon-v065r5-to-v065r6',addon_b64)
-
-          main_patch={
-              'path':'bin/spotify-control.ps1','from_sha256':hashlib.sha256(main).hexdigest(),'to_sha256':hashlib.sha256(main16).hexdigest(),
-              'encoding':'gzip-base64-chunks','encoded_sha256':hashlib.sha256(main_b64).hexdigest(),'encoded_size':len(main_b64),
-              'compressed_sha256':hashlib.sha256(main_gz).hexdigest(),'compressed_size':len(main_gz),
-              'json_sha256':hashlib.sha256(main_json).hexdigest(),'json_size':len(main_json),'chunks':main_chunks
-          }
-          addon_patch={
-              'path':'bin/addon-manager.ps1','from_sha256':hashlib.sha256(r5).hexdigest(),'to_sha256':hashlib.sha256(r6).hexdigest(),
-              'encoding':'gzip-base64-full-file','encoded_sha256':hashlib.sha256(addon_b64).hexdigest(),'encoded_size':len(addon_b64),
-              'compressed_sha256':hashlib.sha256(addon_gz).hexdigest(),'compressed_size':len(addon_gz),'target_size':len(r6),'chunks':addon_chunks
-          }
-          # Manifest paths are repository-relative, not artifact-root-relative.
-          for patch in (main_patch,addon_patch):
-              for c in patch['chunks']: c['path']=c['path'].removeprefix('packages/') if False else c['path']
-          new_edge={'from_version':'0.6.15','to_version':'0.6.16','patches':[main_patch,addon_patch]}
-          latest=[
-              {'path':'bin/spotify-control.ps1','sha256':hashlib.sha256(main16).hexdigest(),'size':len(main16)},
-              {'path':'bin/addon-manager.ps1','sha256':hashlib.sha256(r6).hexdigest(),'size':len(r6)},
-              {'path':'bin/spotify-control-agent.vbs','sha256':'2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278','size':4855}
-          ]
-          rows=[f"{x['path']}|{x['size']}|{x['sha256']}" for x in latest]
-          payload_sha=hashlib.sha256(('\n'.join(sorted(rows))+'\n').encode()).hexdigest()
-          template=json.loads(json.dumps(manifest))
-          template['latest_version']='0.6.16'; template['source_commit']='__SOURCE_COMMIT__'; template['payload_set_sha256']=payload_sha; template['latest_files']=latest
-          template['updates']=list(manifest['updates'])+[new_edge]
-          (out/'manifest-template.json').write_text(json.dumps(template,separators=(',',':')),encoding='utf-8',newline='\n')
-          metadata={
-              'main16_size':len(main16),'main16_sha256':hashlib.sha256(main16).hexdigest(),
-              'r6_size':len(r6),'r6_sha256':hashlib.sha256(r6).hexdigest(),
-              'payload_set_sha256':payload_sha,
-              'main_json_size':len(main_json),'main_json_sha256':hashlib.sha256(main_json).hexdigest(),
-              'main_compressed_size':len(main_gz),'main_compressed_sha256':hashlib.sha256(main_gz).hexdigest(),
-              'main_encoded_size':len(main_b64),'main_encoded_sha256':hashlib.sha256(main_b64).hexdigest(),
-              'addon_compressed_size':len(addon_gz),'addon_compressed_sha256':hashlib.sha256(addon_gz).hexdigest(),
-              'addon_encoded_size':len(addon_b64),'addon_encoded_sha256':hashlib.sha256(addon_b64).hexdigest(),
-              'main_chunks':main_chunks,'addon_chunks':addon_chunks
-          }
-          (out/'metadata.json').write_text(json.dumps(metadata,indent=2),encoding='utf-8',newline='\n')
-
-          # Reconstruct both generated transports before anything can be published.
-          def read_generated(patch):
-              parts=[]
-              for i,c in enumerate(patch['chunks']):
-                  assert c['path'].endswith(f'/chunk-{i:03}.txt')
-                  data=(out/c['path']).read_bytes(); assert len(data)==c['size'] and hashlib.sha256(data).hexdigest()==c['sha256']; parts.append(data)
-              enc=b''.join(parts); assert len(enc)==patch['encoded_size'] and hashlib.sha256(enc).hexdigest()==patch['encoded_sha256']
-              comp=base64.b64decode(enc,validate=True); assert len(comp)==patch['compressed_size'] and hashlib.sha256(comp).hexdigest()==patch['compressed_sha256']
-              return gzip.decompress(comp)
-          reconstructed_main_doc=json.loads(read_generated(main_patch).decode('ascii'))
-          rebuilt=apply_line_patch(main,main_patch,reconstructed_main_doc)
-          assert rebuilt==main16
-          assert read_generated(addon_patch)==r6
-          from_versions=[e['from_version'] for e in template['updates']]
-          assert len(from_versions)==len(set(from_versions))
-          print('PUBLICATION_BUILD_PASS',json.dumps(metadata,separators=(',',':')))
+          p=Path('validation/v0.6.16/publish_v0616.py')
+          data=p.read_bytes()
+          print('PUBLISH_VALIDATOR',len(data),hashlib.sha256(data).hexdigest())
+          runpy.run_path(str(p),run_name='__main__')
 
       - name: Windows PowerShell 5.1 parser, offline SelfTest and real ivLyrics proof
         shell: powershell
@@ -193,7 +40,7 @@ jobs:
           foreach($rel in @('publication-v0.6.16\candidate-main-v0.6.16.ps1','publication-v0.6.16\candidate-addon-v0.6.5-r6.ps1')){
             $tokens=$null;$errors=$null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $rel).Path,[ref]$tokens,[ref]$errors)
-            if($errors.Count){$errors|%{Write-Error $_.Message};throw "PS5.1 parser rejected $rel"}
+            if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw "PS5.1 parser rejected $rel"}
           }
           $env:LOCALAPPDATA=Join-Path $env:RUNNER_TEMP 'SpotifyControl-r6-Local'
           $env:APPDATA=Join-Path $env:RUNNER_TEMP 'SpotifyControl-r6-Roaming'
@@ -206,10 +53,43 @@ jobs:
           if($LASTEXITCODE -ne 0){throw "r6 online ivLyrics proof failed: $LASTEXITCODE"}
           Write-Host 'V0616_R6_PS51_AND_SELFTESTS_PASS'
 
-      - name: Upload exact v0.6.16 publication candidate
+      - name: Publish immutable transport then pin its source commit
+        if: ${{ hashFiles('packages/v0.6.16/**') == '' && github.event_name == 'pull_request' }}
+        shell: powershell
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if(Test-Path -LiteralPath '.\packages\v0.6.16'){throw 'v0.6.16 package path unexpectedly exists before first publication.'}
+          New-Item -ItemType Directory -Force -Path '.\packages\v0.6.16' | Out-Null
+          Copy-Item -LiteralPath '.\publication-v0.6.16\packages\v0.6.16\*' -Destination '.\packages\v0.6.16' -Recurse -Force
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- 'packages/v0.6.16'
+          git diff --cached --quiet
+          if($LASTEXITCODE -eq 0){throw 'No v0.6.16 transport bytes were staged.'}
+          git commit -m 'Publish immutable v0.6.16 transport'
+          if($LASTEXITCODE -ne 0){throw 'Transport commit failed.'}
+          $transportSha=(git rev-parse HEAD).Trim()
+          if($transportSha -notmatch '^[0-9a-f]{40}$'){throw "Invalid transport commit SHA: $transportSha"}
+          git push origin ("HEAD:"+$env:HEAD_REF)
+          if($LASTEXITCODE -ne 0){throw 'Transport push failed.'}
+          $env:TRANSPORT_SHA=$transportSha
+          python -c "import os; from pathlib import Path; p=Path('publication-v0.6.16/manifest-template.json'); s=p.read_text(encoding='utf-8'); assert s.count('__SOURCE_COMMIT__')==1; Path('manifest.json').write_bytes(s.replace('__SOURCE_COMMIT__',os.environ['TRANSPORT_SHA']).encode('utf-8'))"
+          if($LASTEXITCODE -ne 0){throw 'Manifest source pin generation failed.'}
+          git add -- manifest.json
+          git diff --cached --quiet
+          if($LASTEXITCODE -eq 0){throw 'No manifest change was staged.'}
+          git commit -m 'Publish stable v0.6.16 manifest'
+          if($LASTEXITCODE -ne 0){throw 'Manifest commit failed.'}
+          git push origin ("HEAD:"+$env:HEAD_REF)
+          if($LASTEXITCODE -ne 0){throw 'Manifest push failed.'}
+          Write-Host ("V0616_PUBLICATION_PUSHED source_commit="+$transportSha)
+
+      - name: Upload exact v0.6.16 validation output
         uses: actions/upload-artifact@v4
         with:
-          name: spotify-control-v0.6.16-publication-candidate
+          name: spotify-control-v0.6.16-validation-output
           path: publication-v0.6.16
           if-no-files-found: error
           compression-level: 6
