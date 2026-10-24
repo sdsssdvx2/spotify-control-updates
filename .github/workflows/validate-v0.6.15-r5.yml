@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  windows-r5-unattended-debug:
+  windows-r5-filter-debug:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -34,55 +34,61 @@ jobs:
               assert len(data)==c['size'] and hashlib.sha256(data).hexdigest()==c['sha256']
               parts.append(data)
           enc=b''.join(parts)
-          addon=gzip.decompress(base64.b64decode(enc,validate=True))
-          assert hashlib.sha256(addon).hexdigest()==ap['to_sha256']
+          assert len(enc)==ap['encoded_size'] and hashlib.sha256(enc).hexdigest()==ap['encoded_sha256']
+          comp=base64.b64decode(enc,validate=True)
+          assert len(comp)==ap['compressed_size'] and hashlib.sha256(comp).hexdigest()==ap['compressed_sha256']
+          addon=gzip.decompress(comp)
+          assert len(addon)==ap['target_size'] and hashlib.sha256(addon).hexdigest()==ap['to_sha256']
           Path('candidate-addon.ps1').write_bytes(addon)
           print('R5_RECONSTRUCT',len(addon),hashlib.sha256(addon).hexdigest())
 
-      - name: Reconstruct current 0.6.15 main through immutable patch chain
-        shell: python
-        run: |
-          from pathlib import Path
-          from io import BytesIO
-          import base64,gzip,hashlib,json,zipfile
-          m=json.loads(Path('manifest.json').read_text(encoding='utf-8-sig'))
-          enc=b''.join(Path(f'packages/v0.6.11/chunks/chunk-{i:03}.txt').read_bytes() for i in range(8))
-          raw=base64.b64decode(b''.join(enc.split()),validate=True)
-          with zipfile.ZipFile(BytesIO(raw)) as z: main=z.read('bin/spotify-control.ps1')
-          assert hashlib.sha256(main).hexdigest()=='045ed3fa898453ce6563a057a31412d254f5958b75286589e8d5cc95c6782a39'
-          def patch(edge,src):
-              p=next(x for x in edge['patches'] if x['path']=='bin/spotify-control.ps1')
-              enc=b''.join(Path(c['path']).read_bytes() for c in p['chunks'])
-              comp=base64.b64decode(enc,validate=True); doc=json.loads(gzip.decompress(comp).decode('ascii'))
-              bom=src.startswith(b'\xef\xbb\xbf'); text=src.decode('utf-8-sig').replace('\r\n','\n')
-              lines=text.splitlines(keepends=True)
-              for op in sorted(doc['operations'],key=lambda x:int(x['start_line']),reverse=True):
-                  start=int(op['start_line']); delete=int(op['delete_count']); ins=str(op.get('insert','')).replace('\r\n','\n').splitlines(keepends=True)
-                  lines[start:start+delete]=ins
-              out=(b'\xef\xbb\xbf' if bom else b'')+''.join(lines).encode('utf-8')
-              assert hashlib.sha256(out).hexdigest()==p['to_sha256']
-              return out
-          cur=main; ver='0.6.11'
-          for to in ('0.6.13','0.6.14','0.6.15'):
-              edge=next(e for e in m['updates'] if e['from_version']==ver and e['to_version']==to); cur=patch(edge,cur); ver=to
-          assert hashlib.sha256(cur).hexdigest()=='4faef1e70be20efb551f595c02dad171a44abbe8a53af9a0576dc54fd0e2004f'
-          Path('candidate-main.ps1').write_bytes(cur)
-          print('MAIN_RECONSTRUCT',len(cur),hashlib.sha256(cur).hexdigest())
-
-      - name: Print exact maintenance functions
+      - name: Print exact pending detector and mutation/commit functions
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          $path=(Resolve-Path '.\candidate-main.ps1').Path
+          $path=(Resolve-Path '.\candidate-addon.ps1').Path
           $tokens=$null;$errors=$null
           $ast=[System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
-          if($errors.Count){throw 'Parser rejected reconstructed main'}
+          if($errors.Count){$errors|%{Write-Error $_.Message};throw 'Parser rejected reconstructed r5'}
           $funcs=@($ast.FindAll({param($n)$n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true))
-          foreach($name in @('Get-AddonPendingSummary','Invoke-AddonManager','Invoke-MaintenanceCheckPhase','Invoke-MaintenanceMutationPhase','Invoke-ResidentAgentTick','Maintain')){
+          $names=@(
+            'Get-DiscoveredActionableAutoUpdateCount',
+            'Get-AddonInventory',
+            'Update-AutoApps',
+            'Commit-LastTransaction',
+            'Get-PithayaInventory',
+            'Get-IvLyricsInventory',
+            'Resolve-PithayaInstallations',
+            'Resolve-IvLyricsInstallations',
+            'Get-PithayaRemoteInfo',
+            'Get-IvLyricsReleaseInfo'
+          )
+          foreach($name in $names){
             $f=$funcs|Where-Object{$_.Name -ceq $name}|Select-Object -First 1
-            if(-not $f){throw "Missing function $name"}
-            Write-Host ('===== '+$name+' =====');Write-Host $f.Extent.Text
+            if($f){Write-Host ('===== '+$name+' =====');Write-Host $f.Extent.Text}
           }
+          Write-Host '===== UPDATE-AVAILABLE CONTEXTS ====='
+          Select-String -LiteralPath $path -SimpleMatch -Pattern 'update-available' -Context 3,5 | ForEach-Object {
+            Write-Host ('LINE '+$_.LineNumber+': '+$_.Line)
+            $_.Context.PreContext|%{Write-Host (' PRE '+$_)}
+            $_.Context.PostContext|%{Write-Host ('POST '+$_)}
+          }
+
+      - name: Assert detector/candidate safety-set alignment structurally
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          s=Path('candidate-addon.ps1').read_text(encoding='utf-8-sig')
+          # Preserve the deployed r5 safety contract while making mismatches visible in CI.
+          assert "Get-DiscoveredActionableAutoUpdateCount" in s
+          assert "Update-AutoApps" in s
+          for token in ['trusted-baseline','trusted-known-baseline','release-proof-required']:
+              print(token, s.count(token))
+          # Print compact snippets used by the next patch design.
+          for needle in ['Get-DiscoveredActionableAutoUpdateCount','function Update-AutoApps','function Commit-LastTransaction']:
+              i=s.find(needle); assert i>=0
+              print('SNIPPET',needle,repr(s[i:i+2500]))
 
       - name: Run exact r5 SelfTest on clean Windows fixture
         shell: powershell
