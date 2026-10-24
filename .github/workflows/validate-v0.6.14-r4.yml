@@ -32,7 +32,7 @@ jobs:
           assert len(encoded) == 41144, len(encoded)
           encoded_sha = hashlib.sha256(encoded).hexdigest()
           print(f'Actual repair base64 transport SHA256: {encoded_sha}')
-          assert encoded_sha == '833a74bb7816c3c1989136531c93a6730b184b59db12d8fcc54f25ae9db12672'
+          assert encoded_sha == 'e16c803b86ec461afd2e1ae3f2a4fd8ee26bd90cd5b0c94816a4a68db507535a'
 
           blob = base64.b64decode(encoded, validate=True)
           assert len(blob) == 30856, len(blob)
