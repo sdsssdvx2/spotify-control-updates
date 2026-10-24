@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Reconstruct and verify v0.6.14 transports
+      - name: Reconstruct and verify immutable v0.6.14 edge
         shell: python
         run: |
           from pathlib import Path
@@ -38,108 +38,75 @@ jobs:
               ('chunk-007.txt', 4096, '27e98c427752e071a0a50e82dca4701c17a2a1932f400f1db8d03904cb89e3a8'),
               ('chunk-008.txt', 1900, '3e7065c70f860b853d45d0386bcbfa35129994e0e0e4d60390ce5e58bfdb33b6'),
           ]
-          encoded_parts = []
+          encoded_parts=[]
           for name, expected_size, expected_sha in expected_chunks:
-              data = (addon_dir / name).read_bytes()
-              assert len(data) == expected_size, (name, len(data), expected_size)
-              assert hashlib.sha256(data).hexdigest() == expected_sha, name
+              data=(addon_dir/name).read_bytes()
+              assert len(data)==expected_size, (name,len(data),expected_size)
+              assert hashlib.sha256(data).hexdigest()==expected_sha, name
               encoded_parts.append(data)
-          addon_encoded = b''.join(encoded_parts)
-          assert len(addon_encoded) == 34668
-          assert hashlib.sha256(addon_encoded).hexdigest() == '347c1c264d56f9cb8e7b6cff4d920426bbf94fe005455f87380fa185147c2a5f'
-          addon_gz = base64.b64decode(addon_encoded, validate=True)
-          assert len(addon_gz) == 26001
-          assert hashlib.sha256(addon_gz).hexdigest() == 'aa7ed8288563c718bd072c016a80235370206d7f3f295989171646a4634e1a22'
-          addon = gzip.decompress(addon_gz)
-          assert len(addon) == 124124
-          assert hashlib.sha256(addon).hexdigest() == 'd6a11c73c561662579c9b28b59e9f2845563e8050eceeb8e5cec0f5f3618759a'
+          addon_encoded=b''.join(encoded_parts)
+          assert len(addon_encoded)==34668
+          assert hashlib.sha256(addon_encoded).hexdigest()=='347c1c264d56f9cb8e7b6cff4d920426bbf94fe005455f87380fa185147c2a5f'
+          addon_gz=base64.b64decode(addon_encoded,validate=True)
+          assert len(addon_gz)==26001
+          assert hashlib.sha256(addon_gz).hexdigest()=='aa7ed8288563c718bd072c016a80235370206d7f3f295989171646a4634e1a22'
+          addon=gzip.decompress(addon_gz)
+          assert len(addon)==124124
+          assert hashlib.sha256(addon).hexdigest()=='d6a11c73c561662579c9b28b59e9f2845563e8050eceeb8e5cec0f5f3618759a'
           assert b'$Version = "0.6.5-r4"' in addon
           assert b".Replace('\\\\','/')" not in addon
           assert b"[char[]]@('\\\\','/')" not in addon
           Path('out').mkdir(exist_ok=True)
           Path('out/addon-manager.ps1').write_bytes(addon)
 
-          main_chunk = Path('packages/v0.6.14/main-v0613-to-v0614/chunk-000.txt').read_bytes()
-          assert len(main_chunk) == 456
-          assert hashlib.sha256(main_chunk).hexdigest() == 'a45fa33b28c173db98e9ba29a9d7e8b58e99f627db4f13d1f15b3ff391079e81'
-          main_gz = base64.b64decode(main_chunk, validate=True)
-          assert len(main_gz) == 340
-          assert hashlib.sha256(main_gz).hexdigest() == '6793c7157c01a295502b273a1938f9ff8167acb091d342ea1dffa944ddb82add'
-          patch = gzip.decompress(main_gz)
-          assert len(patch) == 490
-          assert hashlib.sha256(patch).hexdigest() == '4f84375c3b56ce713ca148cc186bd31ebd9182a4965c17163342d6663dc01465'
-          doc = json.loads(patch)
-          assert doc['kind'] == 'ascii-line-patch'
-          assert doc['from_version'] == '0.6.13' and doc['to_version'] == '0.6.14'
-          assert doc['from_sha256'] == 'e20ed445d7a5788cde1be9861dc3b44a81777aad03e0b1d4cea1a6e5bde1a14d'
-          assert doc['to_sha256'] == '5306acbe610b06f2c638ebbdc305db9741bbe145392933a38f648906acd302d1'
-          assert len(doc['operations']) == 2
+          main_chunk=Path('packages/v0.6.14/main-v0613-to-v0614/chunk-000.txt').read_bytes()
+          assert len(main_chunk)==456
+          assert hashlib.sha256(main_chunk).hexdigest()=='a45fa33b28c173db98e9ba29a9d7e8b58e99f627db4f13d1f15b3ff391079e81'
+          main_gz=base64.b64decode(main_chunk,validate=True)
+          assert len(main_gz)==340
+          assert hashlib.sha256(main_gz).hexdigest()=='6793c7157c01a295502b273a1938f9ff8167acb091d342ea1dffa944ddb82add'
+          patch=gzip.decompress(main_gz)
+          assert len(patch)==490
+          assert hashlib.sha256(patch).hexdigest()=='4f84375c3b56ce713ca148cc186bd31ebd9182a4965c17163342d6663dc01465'
+          doc=json.loads(patch)
+          assert doc['kind']=='ascii-line-patch'
+          assert doc['from_version']=='0.6.13' and doc['to_version']=='0.6.14'
+          assert doc['from_sha256']=='e20ed445d7a5788cde1be9861dc3b44a81777aad03e0b1d4cea1a6e5bde1a14d'
+          assert doc['to_sha256']=='5306acbe610b06f2c638ebbdc305db9741bbe145392933a38f648906acd302d1'
+          assert len(doc['operations'])==2
 
-          manifest = json.loads(Path('manifest.json').read_text(encoding='utf-8-sig'))
-          assert manifest['schema'] == 1 and manifest['channel'] == 'stable'
-          assert manifest['latest_version'] == '0.6.14'
-          assert manifest['min_bootstrap_version'] == '1.0.6'
-          assert manifest['source_repository'] == 'sdsssdvx2/spotify-control-updates'
-          assert manifest['source_commit'] == 'b1e6c22e2caa9c94d46d7f897172c69f160e6dc3'
-          assert manifest['bootstrap'] == {
-              'version': '1.0.6',
-              'sha256': 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6',
-              'size': 42963,
+          # v0.6.14 is now a historical immutable edge. Do not require it to remain the channel latest.
+          manifest=json.loads(Path('manifest.json').read_text(encoding='utf-8-sig'))
+          assert manifest['schema']==1 and manifest['channel']=='stable'
+          assert manifest['min_bootstrap_version']=='1.0.6'
+          assert manifest['source_repository']=='sdsssdvx2/spotify-control-updates'
+          assert manifest['bootstrap']=={
+              'version':'1.0.6',
+              'sha256':'d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6',
+              'size':42963,
           }
-          expected_latest = {
-              'bin/spotify-control.ps1': (266327, '5306acbe610b06f2c638ebbdc305db9741bbe145392933a38f648906acd302d1'),
-              'bin/addon-manager.ps1': (124124, 'd6a11c73c561662579c9b28b59e9f2845563e8050eceeb8e5cec0f5f3618759a'),
-              'bin/spotify-control-agent.vbs': (4855, '2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278'),
-          }
-          actual_latest = {x['path']: (x['size'], x['sha256'].lower()) for x in manifest['latest_files']}
-          assert actual_latest == expected_latest
-          rows = [f"{path}|{size}|{sha}" for path, (size, sha) in expected_latest.items()]
-          payload_set = hashlib.sha256(('\n'.join(sorted(rows)) + '\n').encode()).hexdigest()
-          assert payload_set == '7a57bc6970ca4f328fd8a417380421f6094c911008b46c2ef407c9cc2ee28879'
-          assert manifest['payload_set_sha256'] == payload_set
-
-          updates = manifest['updates']
-          assert len(updates) == 4
-          assert hashlib.sha256(json.dumps(updates[:3], sort_keys=True, separators=(',', ':')).encode()).hexdigest() == '2d1e1c445aac6da245b2b4e7c5f43674616ee24cd8c0d41c07ebe66cef5da298'
-          from_versions = [edge['from_version'] for edge in updates]
-          assert len(from_versions) == len(set(from_versions))
-          edge = next(e for e in updates if e['from_version'] == '0.6.13')
-          assert edge['to_version'] == '0.6.14'
-          patch_by_path = {p['path']: p for p in edge['patches']}
-          assert set(patch_by_path) == {'bin/spotify-control.ps1', 'bin/addon-manager.ps1'}
-          assert patch_by_path['bin/spotify-control.ps1']['from_sha256'] == 'e20ed445d7a5788cde1be9861dc3b44a81777aad03e0b1d4cea1a6e5bde1a14d'
-          assert patch_by_path['bin/spotify-control.ps1']['to_sha256'] == '5306acbe610b06f2c638ebbdc305db9741bbe145392933a38f648906acd302d1'
-          assert patch_by_path['bin/addon-manager.ps1']['from_sha256'] == 'a194d49bd37320a7035b2deed22faabc70d3d2e14ff7ab2d35035ba5e7f96065'
-          assert patch_by_path['bin/addon-manager.ps1']['to_sha256'] == 'd6a11c73c561662579c9b28b59e9f2845563e8050eceeb8e5cec0f5f3618759a'
-
-          by_from = {e['from_version']: e for e in updates}
-          chain = []
-          version = '0.6.11'
-          while version != manifest['latest_version']:
-              assert version in by_from
-              edge_i = by_from[version]
-              chain.append((edge_i['from_version'], edge_i['to_version']))
-              version = edge_i['to_version']
-              assert len(chain) <= 8
-          assert chain == [('0.6.11', '0.6.13'), ('0.6.13', '0.6.14')]
+          edges=[e for e in manifest['updates'] if e['from_version']=='0.6.13' and e['to_version']=='0.6.14']
+          assert len(edges)==1
+          prior=json.loads(Path('validation/v0.6.15/prior-v0614-edge.json').read_text(encoding='utf-8'))
+          assert edges[0]==prior
+          patch_by_path={p['path']:p for p in edges[0]['patches']}
+          assert set(patch_by_path)=={'bin/spotify-control.ps1','bin/addon-manager.ps1'}
+          assert patch_by_path['bin/spotify-control.ps1']['to_sha256']=='5306acbe610b06f2c638ebbdc305db9741bbe145392933a38f648906acd302d1'
+          assert patch_by_path['bin/addon-manager.ps1']['to_sha256']=='d6a11c73c561662579c9b28b59e9f2845563e8050eceeb8e5cec0f5f3618759a'
+          print('Immutable v0.6.13 -> v0.6.14 edge validation PASS.')
 
       - name: Windows PowerShell 5.1 parser and full Addon SelfTest
         shell: powershell
         run: |
-          $ErrorActionPreference = 'Stop'
-          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'SpotifyControlTest-Local'
-          $env:APPDATA = Join-Path $env:RUNNER_TEMP 'SpotifyControlTest-Roaming'
+          $ErrorActionPreference='Stop'
+          $env:LOCALAPPDATA=Join-Path $env:RUNNER_TEMP 'SpotifyControlTest-Local'
+          $env:APPDATA=Join-Path $env:RUNNER_TEMP 'SpotifyControlTest-Roaming'
           New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify') | Out-Null
           New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
-
-          $path = (Resolve-Path 'out/addon-manager.ps1').Path
-          $tokens = $null
-          $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors)
-          if ($errors.Count -ne 0) {
-            $errors | ForEach-Object { Write-Error $_.Message }
-            throw 'Windows PowerShell 5.1 parser rejected Addon Manager r4.'
-          }
-
+          $path=(Resolve-Path 'out/addon-manager.ps1').Path
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+          if($errors.Count -ne 0){$errors|ForEach-Object{Write-Error $_.Message};throw 'Windows PowerShell 5.1 parser rejected Addon Manager r4.'}
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $path -Action SelfTest
-          if ($LASTEXITCODE -ne 0) { throw "Addon Manager r4 SelfTest failed with exit code $LASTEXITCODE" }
+          if($LASTEXITCODE -ne 0){throw "Addon Manager r4 SelfTest failed with exit code $LASTEXITCODE"}
+          Write-Host 'Historical v0.6.14/r4 Windows PowerShell 5.1 validation PASS.'
