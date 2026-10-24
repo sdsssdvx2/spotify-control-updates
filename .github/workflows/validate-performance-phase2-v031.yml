@@ -51,6 +51,8 @@ jobs:
           ]
           for x in required:
               assert x in s, x
+          assert "(?<href>colors\\.css|user\\.css)\\1" in s
+          assert "(?<href>colors\\.css|user\\.css)\\2" not in s
           assert 'function Invoke-Spicetify' not in s
           native_calls=[line.strip() for line in s.splitlines() if 'Invoke-Native ' in line and not line.lstrip().startswith('function ')]
           assert len(native_calls)==2, native_calls
@@ -101,7 +103,7 @@ jobs:
           p=Path('SpotifyControl-Track-Transition-Isolation-v0.3.1.zip')
           data=p.read_bytes()
           assert len(data)==17950,len(data)
-          assert hashlib.sha256(data).hexdigest()=='6bdd9d81c327471b6cf27be877c587e4b67d34456823fd5d722d1e854dd99bb9'
+          assert hashlib.sha256(data).hexdigest()=='a7956053f0bf8e8d6b20558894873e9a9a6d31e4131ce8a1c6a7226ea7eb127c'
           with zipfile.ZipFile(p) as z:
               assert z.testzip() is None
               assert sorted(z.namelist())==sorted(['README.md','RUN_TRACK_TRANSITION_ISOLATION.cmd','SELFTEST.cmd','SHA256SUMS.txt','track-transition-isolation.ps1'])
