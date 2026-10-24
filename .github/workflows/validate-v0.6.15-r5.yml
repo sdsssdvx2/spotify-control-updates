@@ -140,7 +140,7 @@ jobs:
             $text=[IO.File]::ReadAllText($boot)
             foreach($pair in @(@($old,$new),@($selfLine,$selfPinned),@($sizeLine,$sizePinned))){
               $count=([regex]::Matches($text,[regex]::Escape([string]$pair[0]))).Count
-              if($count -ne 1){throw ("Expected exactly one CI transport substitution source, found $count: "+[string]$pair[0])}
+              if($count -ne 1){throw ("Expected exactly one CI transport substitution source, found ${count}: "+[string]$pair[0])}
               $text=$text.Replace([string]$pair[0],[string]$pair[1])
             }
             [IO.File]::WriteAllText($boot,$text,[Text.UTF8Encoding]::new($false))
