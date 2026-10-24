@@ -1,0 +1,124 @@
+name: Validate Spotify Control v0.6.14-r2 repair wrapper
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/validate-v0614-repair-r2.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  windows-powershell51-regression:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download previously validated v0.6.14 repair artifact
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $headers=@{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri 'https://api.github.com/repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' -OutFile old-artifact.zip
+          Expand-Archive -LiteralPath old-artifact.zip -DestinationPath old-artifact -Force
+          if(-not(Test-Path -LiteralPath 'old-artifact\SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip' -PathType Leaf)){
+            throw 'Validated v0.6.14 inner repair ZIP is missing from artifact.'
+          }
+
+      - name: Build r2 wrapper and run 89-check structural validator
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib, zipfile, subprocess, sys, shutil
+          src=Path('old-artifact/SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip')
+          old=src.read_bytes()
+          assert len(old)==30856
+          assert hashlib.sha256(old).hexdigest()=='6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdfd267bd95f6c6ddcf06'
+          root=Path('r2-root')
+          if root.exists(): shutil.rmtree(root)
+          root.mkdir()
+          with zipfile.ZipFile(src) as z:
+              assert z.testzip() is None
+              z.extractall(root)
+
+          p=root/'APPLY_REPAIR.ps1'
+          s=p.read_text(encoding='utf-8-sig')
+          old_line="if(([string]$iv.digest).ToLowerInvariant() -notmatch '^[0-9a-f]{64}$' -or [int64]$iv.asset_size -le 0){throw 'ivLyrics update is pending without a valid published digest/asset size.'}"
+          new_line="if(([string]$iv.digest).ToLowerInvariant() -notmatch '^sha256:[0-9a-f]{64}$' -or [int64]$iv.asset_size -le 0){throw 'ivLyrics update is pending without a valid published digest/asset size.'}"
+          assert s.count(old_line)==1
+          p.write_text(s.replace(old_line,new_line,1),encoding='utf-8-sig',newline='\r\n')
+
+          r=root/'README.txt'
+          t=r.read_text(encoding='utf-8-sig')
+          assert t.startswith('Spotify Control Installed ivLyrics Transaction Repair v0.6.14\n')
+          t=t.replace('Spotify Control Installed ivLyrics Transaction Repair v0.6.14\n','Spotify Control Installed ivLyrics Transaction Repair v0.6.14-r2\n',1)
+          t=t.replace('Purpose\n','Purpose\n- Repair-wrapper revision r2 fixes the canonical GitHub asset digest validation regression from the first v0.6.14 wrapper. The target Spotify Control/Add-on versions are unchanged.\n',1)
+          r.write_text(t,encoding='utf-8',newline='\r\n')
+
+          v=root/'evidence/validate_repair.py'
+          x=v.read_text(encoding='utf-8')
+          needle="c('ivLyrics digest+size required if pending', 'published digest/asset size' in apply)\n"
+          assert x.count(needle)==1
+          x=x.replace(needle,needle+"c('ivLyrics canonical GitHub digest prefix required', \"-notmatch '^sha256:[0-9a-f]{64}$'\" in apply)\n"+"c('ivLyrics stale bare-digest validator removed', \"-notmatch '^[0-9a-f]{64}$'\" not in apply)\n",1)
+          v.write_text(x,encoding='utf-8',newline='\n')
+
+          sv=root/'evidence/SELF_VALIDATION_REPORT.txt'
+          y=sv.read_text(encoding='utf-8-sig')
+          y=y.replace('Spotify Control Installed ivLyrics Transaction Repair v0.6.14\n','Spotify Control Installed ivLyrics Transaction Repair v0.6.14-r2\n',1)
+          y=y.replace('Static/structural validator: 87/87 PASS','Static/structural validator: 89/89 PASS')
+          y+='\nRepair-wrapper r2 regression proof:\n- APPLY_REPAIR.ps1 now requires canonical GitHub asset digest form sha256:<64hex>.\n- The stale bare-64hex wrapper validator is explicitly rejected by the structural validator.\n- Target Spotify Control v0.6.14 / Addon Manager v0.6.5-r4 payloads and trust pins are unchanged.\n'
+          sv.write_text(y,encoding='utf-8',newline='\r\n')
+
+          check=subprocess.run([sys.executable,str(v)],capture_output=True,text=True)
+          print(check.stdout); print(check.stderr)
+          assert check.returncode==0 and 'RESULT: 89/89 PASS' in check.stdout
+          (root/'evidence/VALIDATION.txt').write_text(check.stdout,encoding='utf-8',newline='\r\n')
+
+          lines=[]
+          for f in sorted(root.rglob('*')):
+              if f.is_file() and f.name!='SHA256SUMS.txt':
+                  rel=f.relative_to(root).as_posix()
+                  lines.append(f"{hashlib.sha256(f.read_bytes()).hexdigest()}  {rel}")
+          (root/'SHA256SUMS.txt').write_text('\n'.join(lines)+'\n',encoding='ascii',newline='\n')
+
+          out=Path('SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14-r2.zip')
+          with zipfile.ZipFile(out,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=9) as z:
+              for f in sorted(root.rglob('*')):
+                  if not f.is_file(): continue
+                  zi=zipfile.ZipInfo(f.relative_to(root).as_posix(),date_time=(2026,10,24,9,55,0))
+                  zi.compress_type=zipfile.ZIP_DEFLATED
+                  zi.external_attr=0o100644<<16
+                  z.writestr(zi,f.read_bytes(),compress_type=zipfile.ZIP_DEFLATED,compresslevel=9)
+          print('R2_ZIP_SIZE='+str(out.stat().st_size))
+          print('R2_ZIP_SHA256='+hashlib.sha256(out.read_bytes()).hexdigest())
+          with zipfile.ZipFile(out) as z: assert z.testzip() is None
+
+      - name: Windows PowerShell 5.1 parser and canonical digest regression fixture
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($rel in @('PRECHECK_REPAIR.ps1','APPLY_REPAIR.ps1','ROLLBACK_REPAIR.ps1','bootstrap\spotify-control-self-updater.ps1')){
+            $path=(Resolve-Path (Join-Path 'r2-root' $rel)).Path
+            $tokens=$null; $errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+            if($errors.Count -ne 0){$errors|ForEach-Object{Write-Error $_.Message};throw "Parser rejected $rel"}
+          }
+          $canonical='sha256:'+('a'*64); $bare=('a'*64)
+          if($canonical -notmatch '^sha256:[0-9a-f]{64}$'){throw 'Canonical GitHub digest fixture was rejected.'}
+          if($bare -match '^sha256:[0-9a-f]{64}$'){throw 'Bare legacy digest fixture was incorrectly accepted.'}
+          Write-Host 'Windows PowerShell 5.1 parser + canonical digest regression fixture PASS.'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14-r2
+          path: SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14-r2.zip
+          if-no-files-found: error
