@@ -39,13 +39,17 @@ def apply_main(cur,m,a,b):
     return out
 
 m=load_manifest()
-# Rebuild the original full v0.6.11 bundle. Some obsolete archive members have historical CRC defects,
-# so do not trust a whole-archive test; identify the three required immutable files by exact SHA-256.
+# Rebuild the original full v0.6.11 bundle. Some obsolete archive members/variants are historically broken,
+# so identify only the immutable files we need by exact SHA-256 and ignore unrelated unreadable members.
 def scan_bundle(folder):
     enc=b''.join(p.read_bytes() for p in sorted(Path(folder).glob('chunk-*.txt')))
     zip_bytes=base64.b64decode(b''.join(enc.split()),validate=True)
     found={}; unreadable=[]
-    with zipfile.ZipFile(BytesIO(zip_bytes)) as z:
+    try:
+        z=zipfile.ZipFile(BytesIO(zip_bytes))
+    except zipfile.BadZipFile:
+        return found,[('<archive>','BadZipFile')]
+    with z:
         for name in z.namelist():
             if name.endswith('/'): continue
             try: data=z.read(name)
@@ -61,7 +65,6 @@ for folder in ('packages/v0.6.11/chunks','packages/v0.6.11/chunks-v2'):
     f,bad=scan_bundle(folder); unreadable += [(folder,)+x for x in bad]
     for h,rows in f.items(): by_hash.setdefault(h,[]).extend(rows)
 for required in (BOOTSTRAP_SHA,MAIN11_SHA,AGENT_SHA):
-    # Deduplicate identical path/data copies across historical archive variants.
     uniq={ (n,sha(d)):(n,d) for n,d in by_hash.get(required,[]) }
     assert len(uniq)==1,(required,list(uniq),unreadable[:10])
     by_hash[required]=list(uniq.values())
@@ -70,10 +73,8 @@ _,main=by_hash[MAIN11_SHA][0]
 _,agent=by_hash[AGENT_SHA][0]
 assert len(bootstrap)==42963
 
-# Reconstruct the exact user's current v0.6.15 main via the historical supported patch chain.
 for a,b in [('0.6.11','0.6.13'),('0.6.13','0.6.14'),('0.6.14','0.6.15')]: main=apply_main(main,m,a,b)
 assert sha(main)==MAIN15_SHA
-# r5 is a full-file transport, so no earlier addon fixture is needed.
 p,addon=decoded_payload(m,'0.6.14','0.6.15','bin/addon-manager.ps1')
 assert p['encoding']=='gzip-base64-full-file' and len(addon)==int(p['target_size']) and sha(addon)==ADDON15_SHA
 
