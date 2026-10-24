@@ -54,25 +54,29 @@ jobs:
           print('VALIDATED_BOOTSTRAP_V106_CARRIER_PASS',len(outer),len(inner),len(boot))
           PY
 
-      - name: Prepare candidate manifest or validate final pinned publication
+      - name: Prepare refresh candidate manifest or validate final pinned publication
         shell: powershell
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           $ErrorActionPreference='Stop'
-          $latest=(Get-Content -LiteralPath '.\manifest.json' -Raw | ConvertFrom-Json).latest_version
-          if('${{ github.event_name }}' -eq 'pull_request' -and $latest -eq '0.6.17'){
+          $m=Get-Content -LiteralPath '.\manifest.json' -Raw | ConvertFrom-Json
+          $latest=[string]$m.latest_version
+          $currentMain=[string](@($m.latest_files | Where-Object {$_.path -eq 'bin/spotify-control.ps1'})[0].sha256)
+          $wantedMain='27783abc40c446aadf6f2a9373b4525ada89759075f37e934958c8e449f2d98f'
+          $needsPublication=($latest -eq '0.6.17' -or ($latest -eq '0.6.18' -and $currentMain -ne $wantedMain))
+          if('${{ github.event_name }}' -eq 'pull_request' -and $needsPublication){
             $transportSha=(git rev-parse HEAD).Trim()
             if($transportSha -notmatch '^[0-9a-f]{40}$'){throw "Invalid transport SHA $transportSha"}
             $env:TRANSPORT_SHA=$transportSha
             python validation/v0.6.18/prepare_and_validate.py
-            if($LASTEXITCODE -ne 0){throw 'v0.6.18 publication preparation failed.'}
+            if($LASTEXITCODE -ne 0){throw 'v0.6.18 publication preparation/refresh failed.'}
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
             git add -- manifest.json
             git diff --cached --quiet
             if($LASTEXITCODE -eq 0){throw 'No candidate manifest change was staged.'}
-            git commit -m 'Release Spotify Control v0.6.18 backup metadata repair'
+            git commit -m 'Refresh Spotify Control v0.6.18 CRLF-safe backup metadata repair'
             if($LASTEXITCODE -ne 0){throw 'Candidate manifest commit failed.'}
             git push origin ("HEAD:"+$env:HEAD_REF)
             if($LASTEXITCODE -ne 0){throw 'Candidate manifest push failed.'}
@@ -85,7 +89,7 @@ jobs:
       - name: Static candidate patch safety audit
         shell: python
         run: |
-          import base64,gzip,hashlib,json,subprocess
+          import base64,gzip,json,subprocess
           m=json.load(open('manifest.json',encoding='utf-8'))
           e=next(x for x in m['updates'] if x['from_version']=='0.6.17' and x['to_version']=='0.6.18')
           p=next(x for x in e['patches'] if x['path']=='bin/spotify-control.ps1')
@@ -98,11 +102,13 @@ jobs:
             'Spotify prefs byte-exact restoration failed','blocked-unproven',
             'Spicetify Backup metadata BOM/CRLF rewrite fixture',
             "Invoke-SpicetifyBackupApplyPinnedPrefs -FullVersion ([string]$candidate.FullVersion)",
+            "(?=\\r?$)",
           ]
           for x in required: assert x in inserted,x
           assert "@('backup','apply')" in inserted
           assert 'Please re-install Spotify' not in inserted
-          assert m['latest_files'][0]['sha256']=='d848f61c318d22b3506b830d4ecc6974d3ba45853957fdd056b3f4f8f4984425'
+          latest={x['path']:x for x in m['latest_files']}
+          assert latest['bin/spotify-control.ps1']=={'path':'bin/spotify-control.ps1','sha256':'27783abc40c446aadf6f2a9373b4525ada89759075f37e934958c8e449f2d98f','size':281593}
           print('V0618_STATIC_SAFETY_AUDIT_PASS')
 
       - name: Reconstruct exact bootstrap 1.0.6 and accepted v0.6.15-r5 fixture
@@ -176,8 +182,8 @@ jobs:
           $up=Run-Boot 'Update'
           if(-not $up.success -or [string]$up.transaction_status -ne 'committed'){throw 'Update did not commit.'}
           $main=Join-Path $bin 'spotify-control.ps1'
-          if((Get-FileHash -Algorithm SHA256 -LiteralPath $main).Hash.ToLowerInvariant() -ne 'd848f61c318d22b3506b830d4ecc6974d3ba45853957fdd056b3f4f8f4984425'){throw 'Update main target mismatch.'}
-          if((Get-Item -LiteralPath $main).Length -ne 281551){throw 'Update main target size mismatch.'}
+          if((Get-FileHash -Algorithm SHA256 -LiteralPath $main).Hash.ToLowerInvariant() -ne '27783abc40c446aadf6f2a9373b4525ada89759075f37e934958c8e449f2d98f'){throw 'Update main target mismatch.'}
+          if((Get-Item -LiteralPath $main).Length -ne 281593){throw 'Update main target size mismatch.'}
           if((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $bin 'addon-manager.ps1')).Hash.ToLowerInvariant() -ne 'b7d1a4bc7707533400402fe42e60d724f88656c2477d4d4a5c0f47be60f47977'){throw 'Update addon target mismatch.'}
           $tokens=$null;$errors=$null
           [void][System.Management.Automation.Language.Parser]::ParseFile($main,[ref]$tokens,[ref]$errors)
