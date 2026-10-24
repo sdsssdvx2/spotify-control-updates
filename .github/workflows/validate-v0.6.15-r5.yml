@@ -27,10 +27,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api -H 'Accept: application/vnd.github+json' '/repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12559818628/zip' > base-v121-outer.zip
+          gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12559818628/zip' > base-v121-outer.zip
           python - <<'PY'
           from pathlib import Path
-          import hashlib, zipfile, shutil
+          import hashlib, zipfile
           outer=Path('base-v121-outer.zip')
           with zipfile.ZipFile(outer) as z:
               assert z.testzip() is None
