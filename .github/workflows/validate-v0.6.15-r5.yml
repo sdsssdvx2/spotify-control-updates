@@ -21,22 +21,28 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download exact previously validated v1.2.1 user artifact
-        shell: powershell
+      - name: Download exact previously validated v1.2.1 Actions artifact byte-safely
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $ErrorActionPreference='Stop'
+          set -euo pipefail
           gh api -H 'Accept: application/vnd.github+json' '/repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12559818628/zip' > base-v121-outer.zip
-          if($LASTEXITCODE -ne 0){throw 'Failed to download v1.2.1 Actions artifact'}
-          Expand-Archive -LiteralPath .\base-v121-outer.zip -DestinationPath .\base-v121-outer -Force
-          $inner=Get-ChildItem -LiteralPath .\base-v121-outer -File -Filter 'SpotifyControl-Windows-Runtime-Acceptance-v1.2.1.zip' | Select-Object -First 1
-          if(-not $inner){throw 'v1.2.1 user ZIP missing from Actions artifact'}
-          Copy-Item -LiteralPath $inner.FullName -Destination .\base-v121.zip -Force
-          $h=(Get-FileHash -Algorithm SHA256 -LiteralPath .\base-v121.zip).Hash.ToLowerInvariant()
-          $n=(Get-Item -LiteralPath .\base-v121.zip).Length
-          if($n -ne 34841 -or $h -ne '962a09cd5adbcb4dd49046dd672b44252238f43859f5b97a4ce70f8492068fd8'){throw "v1.2.1 artifact mismatch size=$n sha=$h"}
-          Write-Host 'EXACT_V121_ARTIFACT_PASS'
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, zipfile, shutil
+          outer=Path('base-v121-outer.zip')
+          with zipfile.ZipFile(outer) as z:
+              assert z.testzip() is None
+              names=z.namelist()
+              target='SpotifyControl-Windows-Runtime-Acceptance-v1.2.1.zip'
+              assert target in names, names
+              data=z.read(target)
+          assert len(data)==34841, len(data)
+          assert hashlib.sha256(data).hexdigest()=='962a09cd5adbcb4dd49046dd672b44252238f43859f5b97a4ce70f8492068fd8'
+          Path('base-v121.zip').write_bytes(data)
+          print('EXACT_V121_ARTIFACT_PASS',len(data),hashlib.sha256(data).hexdigest())
+          PY
 
       - name: Derive Stage14 v1.4.0 from exact validated artifact
         shell: python
