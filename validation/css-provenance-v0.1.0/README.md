@@ -2,6 +2,8 @@
 
 Validation-only tool for the next Performance Phase 2 step. It captures the exact active Spicetify CSS bytes needed to optimize `user.css` / `colors.css` without guessing or changing the user's visual setup.
 
+The collector is validated under Windows PowerShell 5.1, matching the user's production scripting environment.
+
 ## What it reads
 
 - `%APPDATA%\Spotify\Apps\xpui\user.css`
