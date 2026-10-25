@@ -1,0 +1,100 @@
+name: Validate direct extension performance patches v0.1.0
+
+on:
+  push:
+    branches:
+      - perf/direct-extension-optimization-v0.2.0
+    paths:
+      - 'performance/direct-extension-patches/**'
+      - '.github/workflows/validate-direct-extension-patches-v0.1.0.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'performance/direct-extension-patches/**'
+      - '.github/workflows/validate-direct-extension-patches-v0.1.0.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove production payload is outside this experiment
+        shell: powershell
+        run: |
+          $forbidden=@('manifest.json','packages/v0.6.19/','performance/overlay/','validation/v0.6.19/')
+          $base='6e2dd5cec54ca795457935d6bee83f63d39722bf'
+          git cat-file -e "$base^{commit}"
+          $changed=@(git diff --name-only "$base...HEAD")
+          foreach($path in $changed){
+            if($path -eq 'manifest.json' -or $path.StartsWith('packages/v0.6.19/') -or $path.StartsWith('performance/overlay/') -or $path.StartsWith('validation/v0.6.19/')){ throw "Frozen v0.6.19 production surface changed: $path" }
+          }
+          Write-Host 'DIRECT_EXTENSION_PRODUCTION_ISOLATION_PASS'
+
+      - name: PowerShell 5.1 parser and static safety audit
+        shell: powershell
+        run: |
+          $files=@(
+            'performance/direct-extension-patches/apply-direct-extension-patches.ps1',
+            'performance/direct-extension-patches/tests/test-direct-extension-patches.ps1'
+          )
+          foreach($file in $files){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw "PowerShell parser failed: $file"}
+          }
+          $engine=Get-Content 'performance/direct-extension-patches/apply-direct-extension-patches.ps1' -Raw
+          foreach($needle in @('spicetify apply','spicetify backup','spicetify restore','config-xpui.ini','\Browser\','\Default\','LocalStorage.set','PlaylistAPI.remove')){
+            if($engine.IndexOf($needle,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Forbidden mutation surface in patch engine: $needle"}
+          }
+          $targets=Get-Content 'performance/direct-extension-patches/targets.json' -Raw|ConvertFrom-Json
+          if(@($targets.targets).Count -ne 2){throw 'Unexpected target count.'}
+          foreach($bad in @('ivlyrics','tagify','splitify','sc-cover-ambience','user.css','colors.css','marketplace')){
+            if(($targets|ConvertTo-Json -Depth 10).IndexOf($bad,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Protected/non-target component leaked into target metadata: $bad"}
+          }
+          Write-Host 'DIRECT_EXTENSION_STATIC_SAFETY_PASS'
+
+      - name: Download and verify immutable upstream fixtures
+        shell: powershell
+        run: |
+          $popup=Join-Path $env:RUNNER_TEMP 'popupLyrics-v2.46.2.js'
+          $stars=Join-Path $env:RUNNER_TEMP 'star-ratings-33aa3d293f9fbb58d7a749a8cea10c318351e6c6.js'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/spicetify/cli/v2.46.2/Extensions/popupLyrics.js' -OutFile $popup
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/brimell/spicetify-star-ratings/33aa3d293f9fbb58d7a749a8cea10c318351e6c6/dist/star-ratings.js' -OutFile $stars
+          if((Get-Item $popup).Length -ne 39553 -or (Get-FileHash $popup -Algorithm SHA256).Hash.ToLowerInvariant() -ne '2b280aea8514bd15044c36403257ca6ac21f1f98e6798beb4aa319bf19a70e4f'){throw 'PopupLyrics pinned upstream identity mismatch.'}
+          if((Get-Item $stars).Length -ne 43396 -or (Get-FileHash $stars -Algorithm SHA256).Hash.ToLowerInvariant() -ne '198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1'){throw 'Star Ratings pinned upstream identity mismatch.'}
+          node --check $popup
+          node --check $stars
+          "POPUP_FIXTURE=$popup"|Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "STAR_FIXTURE=$stars"|Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host 'DIRECT_EXTENSION_PINNED_FIXTURES_PASS'
+
+      - name: Behavior policy tests
+        shell: powershell
+        run: node performance/direct-extension-patches/tests/test-behavior.js
+
+      - name: Reversible exact-byte patch regression
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'performance/direct-extension-patches/tests/test-direct-extension-patches.ps1' -PopupFixture $env:POPUP_FIXTURE -StarFixture $env:STAR_FIXTURE
+          if($LASTEXITCODE -ne 0){throw "Direct extension patch regression failed: $LASTEXITCODE"}
+
+      - name: Final repository safety invariants
+        shell: powershell
+        run: |
+          $engine=Get-Content 'performance/direct-extension-patches/apply-direct-extension-patches.ps1' -Raw
+          foreach($required in @('active-bytes-not-exact-pinned-upstream','skipped-toctou-active-bytes-changed','conflict-newer-or-unknown-active-bytes','Write-BytesAtomic','original.bin')){
+            if($engine.IndexOf($required,[StringComparison]::Ordinal) -lt 0){throw "Missing fail-safe invariant: $required"}
+          }
+          if($engine.IndexOf('extensions/popupLyrics.js',[StringComparison]::OrdinalIgnoreCase) -ge 0 -or $engine.IndexOf('extensions/sc-star-ratings.js',[StringComparison]::OrdinalIgnoreCase) -ge 0){
+            throw 'Target paths must remain metadata-driven, not duplicated inside the engine.'
+          }
+          Write-Host 'DIRECT_EXTENSION_FINAL_SAFETY_PASS'
