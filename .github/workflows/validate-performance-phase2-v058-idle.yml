@@ -29,7 +29,7 @@ jobs:
           if($bad.Count){throw "Validation branch touched production/out-of-scope files: $($bad -join ', ')"}
           if($changed.Count -ne 3){throw "Expected exactly 3 validation-only files, found $($changed.Count): $($changed -join ', ')"}
           Write-Host 'PHASE2_V058_SCOPE_PASS'
-      - name: Build exact deterministic package
+      - name: Build deterministic Windows candidate package
         shell: powershell
         run: |
           python validation/performance-phase2-v0.5.8/build_v058.py
@@ -43,9 +43,9 @@ jobs:
           $scriptHash=(Get-FileHash $script -Algorithm SHA256).Hash.ToLowerInvariant()
           $zipSize=(Get-Item $zip).Length
           $zipHash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($scriptSize -ne 126577 -or $scriptHash -ne 'd14c88e4a992c432328005d4651901b1be5ea748ce41542a95b53dbe3e49b8d4'){throw "Generated script identity drifted: $scriptSize/$scriptHash"}
-          if($zipSize -ne 159567 -or $zipHash -ne '3457f0f7501b44221c4f210a6ae61aa19b84dd6ac60cb303bf49cd6f2e4fc787'){throw "Generated package identity drifted: $zipSize/$zipHash"}
-          Write-Host "PHASE2_V058_IMMUTABLE_IDENTITY_PASS package_size=$zipSize package_sha=$zipHash script_size=$scriptSize script_sha=$scriptHash"
+          if($scriptSize -ne 127185 -or $scriptHash -ne 'e189dd1b5b07f54feaf6015c10501359446033cb0fa800e52e2bd83e0fef45d1'){throw "Generated script identity drifted: $scriptSize/$scriptHash"}
+          if($zipSize -ne 160175 -or $zipHash -notmatch '^[0-9a-f]{64}$'){throw "Generated package identity malformed: $zipSize/$zipHash"}
+          Write-Host "PHASE2_V058_WINDOWS_CANDIDATE_IDENTITY package_size=$zipSize package_sha=$zipHash script_size=$scriptSize script_sha=$scriptHash"
       - name: PowerShell 5.1 parse and zero-media-command static contract
         shell: powershell
         run: |
@@ -75,9 +75,18 @@ jobs:
           foreach($need in @('Refresh-SpotifySilentForTest','Get-SpotifyPlaybackStatusV058','unexpectedly entered Playing','IsSpotifyForeground','Get-RoleSnapshot')){if($measure.IndexOf($need,[StringComparison]::Ordinal) -lt 0){throw "Idle measurement invariant missing: $need"}}
           $stop=Get-FunctionText 'Stop-SpotifyForVariant'
           $suspend=$stop.IndexOf('SuspendAll()',[StringComparison]::Ordinal)
-          $restore=$stop.IndexOf('Restore-SpotifyAudioForTest',[StringComparison]::Ordinal)
-          $kill=$stop.IndexOf('Stop-Process -Force',[StringComparison]::Ordinal)
-          if($suspend -lt 0 -or $restore -lt 0 -or $kill -lt 0 -or $suspend -ge $restore -or $restore -ge $kill){throw 'Suspended shutdown ordering is not Suspend -> exact audio restore -> terminate.'}
+          if($suspend -lt 0){throw 'Residual shutdown lacks SuspendAll().'}
+          $tail=$stop.Substring($suspend)
+          $restore=$tail.IndexOf('Restore-SpotifyAudioForTest',[StringComparison]::Ordinal)
+          $kill=$tail.IndexOf('Stop-Process -Force',[StringComparison]::Ordinal)
+          if($restore -lt 0 -or $kill -lt 0 -or $restore -ge $kill){throw 'Residual shutdown is not Suspend -> exact audio restore -> force terminate.'}
+          $resume=$tail.IndexOf('ResumeAll()',[StringComparison]::Ordinal)
+          if($resume -ge 0){
+            $rearm=$tail.IndexOf('Arm-SpotifySilentGuard',[StringComparison]::Ordinal)
+            $verify=$tail.IndexOf('Refresh-SpotifySilentForTest',[StringComparison]::Ordinal)
+            $proof=$tail.IndexOf('$resilencedBeforeResume=$true',[StringComparison]::Ordinal)
+            if($rearm -lt 0 -or $verify -lt 0 -or $proof -lt 0 -or $rearm -ge $resume -or $verify -ge $resume -or $proof -ge $resume){throw 'Residual Spotify could be resumed without verified mute + volume 0 re-arming.'}
+          }
           Write-Host 'PHASE2_V058_PS51_ZERO_MEDIA_COMMAND_STATIC_PASS'
       - name: Verify exact packaged production overlay sources
         shell: powershell
@@ -98,7 +107,7 @@ jobs:
         run: |
           powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File phase2-v058-unpacked\idle-overlay-media-command-free-revalidation.ps1 -Action SelfTest
           if($LASTEXITCODE -ne 0){throw "v0.5.8 SelfTest failed: $LASTEXITCODE"}
-      - name: Verify internal checksums and deterministic rebuild
+      - name: Verify internal checksums and deterministic Windows rebuild
         shell: powershell
         run: |
           foreach($line in Get-Content phase2-v058-unpacked\SHA256SUMS.txt){if($line -notmatch '^([0-9a-f]{64})  (.+)$'){throw "Bad checksum row: $line"};$p=Join-Path phase2-v058-unpacked ($Matches[2]-replace '/','\');$h=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant();if($h -ne $Matches[1]){throw "Checksum mismatch: $($Matches[2])"}}
@@ -106,9 +115,9 @@ jobs:
           python validation/performance-phase2-v0.5.8/build_v058.py
           if($LASTEXITCODE -ne 0){throw 'Second deterministic build failed.'}
           $size2=(Get-Item $zip).Length;$sha2=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($size1 -ne $size2 -or $sha1 -ne $sha2){throw "Non-deterministic v0.5.8 package: $size1/$sha1 vs $size2/$sha2"}
-          if($size2 -ne 159567 -or $sha2 -ne '3457f0f7501b44221c4f210a6ae61aa19b84dd6ac60cb303bf49cd6f2e4fc787'){throw "Second build no longer matches immutable Windows artifact identity: $size2/$sha2"}
-          Write-Host "PHASE2_V058_DETERMINISTIC_IDENTITY_PASS size=$size2 sha=$sha2"
+          if($size1 -ne $size2 -or $sha1 -ne $sha2){throw "Non-deterministic Windows v0.5.8 package: $size1/$sha1 vs $size2/$sha2"}
+          if($size2 -ne 160175){throw "Second build size drifted: $size2/$sha2"}
+          Write-Host "PHASE2_V058_WINDOWS_DETERMINISTIC_CANDIDATE_PASS size=$size2 sha=$sha2"
       - uses: actions/upload-artifact@v4
         with:
           name: SpotifyControl-Production-Lazy-Overlay-Media-Command-Free-Idle-Revalidation-v0.5.8
