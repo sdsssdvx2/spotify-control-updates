@@ -21,15 +21,14 @@ assert hashlib.sha256(raw).hexdigest()==target['sha256']
 text=raw.decode('utf-8-sig')
 lines=text.splitlines()
 print('ADDON_RECONSTRUCT_PASS',len(raw),target['sha256'],len(lines))
-needles=[r'^function\s+',r'\bSelfTest\b',r'\bStage10\b',r'\bMarketplace\b',r'\bPithaya\b',r'\bSpotifyExit\b',r'\bswitch\s*\(',r'addon-manager',r'Version']
-seen=[]
-for i,line in enumerate(lines,1):
-    if any(re.search(n,line,re.I) for n in needles):
-        seen.append(i)
-for i in sorted(set(seen)):
-    lo=max(1,i-2); hi=min(len(lines),i+4)
-    print(f'--- CONTEXT {lo}-{hi} ---')
-    for n in range(lo,hi+1):
+
+def emit(lo,hi,title):
+    print(f'=== {title} {lo}-{hi} ===')
+    for n in range(lo,min(hi,len(lines))+1):
         s=lines[n-1]
-        if len(s)>500: s=s[:500]+'...[truncated]'
+        if len(s)>900: s=s[:900]+'...[truncated]'
         print(f'{n:05d}: {s}')
+
+emit(1760,1895,'UPDATE_AUTO_APPS')
+emit(1935,2025,'COMMIT_AND_PREFLIGHT')
+emit(2538,2615,'MAIN_SWITCH')
