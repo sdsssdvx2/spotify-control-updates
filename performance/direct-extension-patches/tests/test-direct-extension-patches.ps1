@@ -20,13 +20,17 @@ $fixturePopupBefore=(Get-FileHash $PopupFixture -Algorithm SHA256).Hash.ToLowerI
 $fixtureStarBefore=(Get-FileHash $StarFixture -Algorithm SHA256).Hash.ToLowerInvariant()
 
 function Invoke-Patch([string]$Mode,[string]$Metadata=$Targets,[switch]$AllowConflict) {
-    $raw=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $Patch -Mode $Mode -XpuiRoot $Xpui -StateRoot $State -TargetMetadataPath $Metadata 2>&1
+    $raw=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $Patch -Mode $Mode -XpuiRoot $Xpui -StateRoot $State -TargetMetadataPath $Metadata 2>&1)
     $code=$LASTEXITCODE
     $raw|ForEach-Object{Write-Host $_}
     if(-not $AllowConflict -and $code -ne 0){throw "$Mode failed with exit $code"}
     if($AllowConflict -and $code -notin @(0,2)){throw "$Mode unexpected exit $code"}
-    $json=@($raw|Where-Object{[string]$_ -match '^\s*\{'})|Select-Object -Last 1
-    if(-not $json){throw "$Mode emitted no JSON"}
+    $start=-1
+    for($i=0;$i -lt $raw.Count;$i++){
+        if(([string]$raw[$i]).TrimStart().StartsWith('{')){$start=$i;break}
+    }
+    if($start -lt 0){throw "$Mode emitted no JSON"}
+    $json=(@($raw[$start..($raw.Count-1)]|ForEach-Object{[string]$_}) -join "`n")
     return [pscustomobject]@{Code=$code;Value=($json|ConvertFrom-Json)}
 }
 
