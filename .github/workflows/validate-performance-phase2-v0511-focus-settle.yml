@@ -63,7 +63,7 @@ jobs:
           $hide=$show.IndexOf('Hide-SpotifyWindowsForSetup',[StringComparison]::Ordinal);$throw=$show.IndexOf('Spotify remained foreground after bounded WS_EX_NOACTIVATE startup-race stabilization.',[StringComparison]::Ordinal)
           if($hide -lt 0 -or $throw -lt 0 -or $hide -ge $throw){throw 'Foreground race is not retried before fail-closed throw.'}
           $measure=Get-FunctionText 'Measure-IdleCondition'
-          foreach($x in @('$slotSeconds=$slot*$periodSeconds','$sleepMs=[int][Math]::Floor($remaining*1000.0)','$missedSlots += $skip','$slot += (1+$skip)','*0.75')){if($measure.IndexOf($x,[StringComparison]::Ordinal) -lt 0){throw "Deadline/quality contract missing: $x"}}
+          foreach($x in @('$targetMs=[double]$sampleSlot*[double]$SampleIntervalMs','$remainingMs=$targetMs-$clock.Elapsed.TotalMilliseconds','$missedScheduleSlots+=$missed;$sampleSlot+=$missed','$sampleSlot++','*0.75')){if($measure.IndexOf($x,[StringComparison]::Ordinal) -lt 0){throw "Deadline/quality contract missing: $x"}}
           if($measure.IndexOf('Start-Sleep -Milliseconds $SampleIntervalMs',[StringComparison]::Ordinal) -ge 0){throw 'Old sleep-plus-work cadence survived.'}
           if($measure.IndexOf('Get-CimInstance',[StringComparison]::OrdinalIgnoreCase) -ge 0){throw 'Timed measurement contains direct CIM.'}
           Write-Host 'PHASE2_V0511_PS51_BOUNDED_FOCUS_STATIC_PASS'
