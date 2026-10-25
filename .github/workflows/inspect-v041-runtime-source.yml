@@ -23,7 +23,8 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          git show validate/performance-phase2-v0.4.1:validation/performance-phase2-v0.4.1/build_and_validate.py | Set-Content -LiteralPath build_v041.py -Encoding utf8
+          git show origin/validate/performance-phase2-v0.4.1:validation/performance-phase2-v0.4.1/build_and_validate.py | Set-Content -LiteralPath build_v041.py -Encoding utf8
+          if($LASTEXITCODE -ne 0){throw 'Could not read exact v0.4.1 builder from remote validation branch.'}
           python build_v041.py
           if($LASTEXITCODE -ne 0){throw 'v0.4.1 rebuild failed.'}
           $zip=(Resolve-Path 'SpotifyControl-Track-Transition-Single-Hook-Isolation-v0.4.1.zip').Path
@@ -31,6 +32,7 @@ jobs:
           $z=[IO.Compression.ZipFile]::OpenRead($zip)
           try {
             $entry=$z.GetEntry('track-transition-isolation.ps1')
+            if(-not $entry){throw 'v0.4.1 script entry missing.'}
             $reader=New-Object IO.StreamReader($entry.Open(),[Text.Encoding]::UTF8,$true)
             try{$text=$reader.ReadToEnd()}finally{$reader.Dispose()}
           } finally {$z.Dispose()}
