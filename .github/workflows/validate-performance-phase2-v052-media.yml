@@ -38,12 +38,15 @@ jobs:
         shell: powershell
         run: |
           function Write-LabLog { param([string]$Message,[string]$Level='INFO') Write-Host "[$Level] $Message" }
+          Add-Type -AssemblyName System.Runtime.WindowsRuntime -ErrorAction Stop
           $helper=Get-Content ./validation/performance-phase2-v0.5.2/runtime_media_v052.ps1.inc -Raw
           Invoke-Expression $helper
           Add-SpotifyAudioSessionType
           if(-not ('SpotifyControlAudioSession' -as [type])){throw 'SpotifyControlAudioSession type did not compile.'}
           $null=[Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager,Windows.Media.Control,ContentType=WindowsRuntime]
-          $generic=@([System.WindowsRuntimeSystemExtensions].GetMethods()|Where-Object{$_.Name -eq 'AsTask' -and $_.IsGenericMethodDefinition -and $_.GetParameters().Count -eq 1})
+          $bridge=[Type]::GetType('System.WindowsRuntimeSystemExtensions, System.Runtime.WindowsRuntime',$false)
+          if($null-eq$bridge){throw 'WinRT bridge type unavailable after loading System.Runtime.WindowsRuntime.'}
+          $generic=@($bridge.GetMethods()|Where-Object{$_.Name -eq 'AsTask' -and $_.IsGenericMethodDefinition -and $_.GetParameters().Count -eq 1})
           if($generic.Count-lt1){throw 'WinRT AsTask<T> bridge unavailable.'}
           try { Initialize-SpotifyWinRtMedia; Write-Host ('V052_WINRT_MANAGER_PASS sessions='+@($script:SpotifyMediaManager.GetSessions()).Count) } catch { Write-Host ('V052_WINRT_MANAGER_HEADLESS_WARNING '+$_.Exception.Message) }
           Write-Host 'V052_COREAUDIO_COMPILE_PASS'
