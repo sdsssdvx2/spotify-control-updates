@@ -67,18 +67,18 @@ function Get-PerformanceOverlayExactProvenance([string]$XpuiRoot,[string]$Target
         $id=[string]$target.id
         try {
             $known=Get-PithayaKnownBaseline $id
-            if (-not $known) { Write-AddonLog "Performance overlay skip $id: no authoritative known baseline." 'WARN'; continue }
-            if ([string]$known.revision -cne [string]$target.dist_revision) { Write-AddonLog "Performance overlay skip $id: authoritative revision differs from pinned optimization revision." 'WARN'; continue }
+            if (-not $known) { Write-AddonLog "Performance overlay skip ${id}: no authoritative known baseline." 'WARN'; continue }
+            if ([string]$known.revision -cne [string]$target.dist_revision) { Write-AddonLog "Performance overlay skip ${id}: authoritative revision differs from pinned optimization revision." 'WARN'; continue }
             $resolved=Resolve-SpicetifyAsset -Name $id -Kind 'CustomApp' -Roots $roots
-            if (-not $resolved -or [string]$resolved.status -ne 'resolved' -or [string]::IsNullOrWhiteSpace([string]$resolved.selected_path)) { Write-AddonLog "Performance overlay skip $id: CustomApp path is not uniquely resolved." 'WARN'; continue }
+            if (-not $resolved -or [string]$resolved.status -ne 'resolved' -or [string]::IsNullOrWhiteSpace([string]$resolved.selected_path)) { Write-AddonLog "Performance overlay skip ${id}: CustomApp path is not uniquely resolved." 'WARN'; continue }
             $snapshot=Get-DirectoryGitSnapshot ([string]$resolved.selected_path)
-            if ([string]$snapshot.fingerprint -cne [string]$known.fingerprint) { Write-AddonLog "Performance overlay skip $id: installed CustomApp tree is not the exact authoritative baseline." 'WARN'; continue }
+            if ([string]$snapshot.fingerprint -cne [string]$known.fingerprint) { Write-AddonLog "Performance overlay skip ${id}: installed CustomApp tree is not the exact authoritative baseline." 'WARN'; continue }
             $activePath=Join-Path $XpuiRoot (([string]$target.extension_path) -replace '/','\')
-            if (-not (Test-Path -LiteralPath $activePath -PathType Leaf)) { Write-AddonLog "Performance overlay skip $id: active xpui extension is absent." 'WARN'; continue }
+            if (-not (Test-Path -LiteralPath $activePath -PathType Leaf)) { Write-AddonLog "Performance overlay skip ${id}: active xpui extension is absent." 'WARN'; continue }
             $size=[int64](Get-Item -LiteralPath $activePath).Length
-            if ($size -ne [int64]$target.extension_size) { Write-AddonLog "Performance overlay skip $id: active extension size differs from pinned bytes." 'WARN'; continue }
+            if ($size -ne [int64]$target.extension_size) { Write-AddonLog "Performance overlay skip ${id}: active extension size differs from pinned bytes." 'WARN'; continue }
             $hash=Get-PerformanceOverlayFileSha256 $activePath
-            if ($hash -cne [string]$target.extension_sha256) { Write-AddonLog "Performance overlay skip $id: active extension SHA-256 differs from pinned bytes." 'WARN'; continue }
+            if ($hash -cne [string]$target.extension_sha256) { Write-AddonLog "Performance overlay skip ${id}: active extension SHA-256 differs from pinned bytes." 'WARN'; continue }
             $trusted[$id]=[ordered]@{
                 trust='exact-active-extension'
                 trusted_revision=[string]$target.dist_revision
@@ -88,7 +88,7 @@ function Get-PerformanceOverlayExactProvenance([string]$XpuiRoot,[string]$Target
                 full_tree_fingerprint=[string]$snapshot.fingerprint
             }
         } catch {
-            Write-AddonLog "Performance overlay skip $id: provenance check failed: $($_.Exception.Message)" 'WARN'
+            Write-AddonLog "Performance overlay skip ${id}: provenance check failed: $($_.Exception.Message)" 'WARN'
         }
     }
     return [pscustomobject]@{ schema=1; generated_at=(Get-Date).ToString('o'); targets=[pscustomobject]$trusted }
