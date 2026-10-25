@@ -5,14 +5,19 @@ on:
     branches:
       - main
     paths:
-      - 'manifest.json'
       - 'packages/v0.6.19/**'
-      - 'performance/overlay/**'
       - 'validation/v0.6.19/**'
       - '.github/workflows/validate-v0.6.19-release.yml'
+      - '.github/workflows/validate-v0.6.15-r5.yml'
   push:
     branches:
       - main
+    paths:
+      - 'packages/v0.6.19/**'
+      - 'validation/v0.6.19/**'
+      - '.github/workflows/validate-v0.6.19-release.yml'
+      - '.github/workflows/validate-v0.6.15-r5.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -30,18 +35,21 @@ jobs:
         shell: powershell
         run: |
           $frozen='635358a620a9d28d99a52571085558906af967b6'
+          $released='95c1205944ef24836f03be1db87117ccbc0f4593'
           if ('${{ github.event_name }}' -eq 'pull_request') {
             $base='${{ github.event.pull_request.base.sha }}'
-            if($base -ne $frozen) { throw "v0.6.19 PR base moved unexpectedly: $base" }
+            if($base -ne $frozen -and $base -ne $released) { throw "v0.6.19 validation PR base is not an accepted release base: $base" }
           }
           git cat-file -e "$frozen^{commit}"
+          git cat-file -e "$released^{commit}"
           $changed=@(git diff --name-only "$frozen...HEAD")
           $unexpected=@($changed | Where-Object {
             $_ -notlike 'performance/overlay/*' -and
             $_ -notlike 'validation/v0.6.19/*' -and
             $_ -notlike 'packages/v0.6.19/*' -and
             $_ -ne 'manifest.json' -and
-            $_ -ne '.github/workflows/validate-v0.6.19-release.yml'
+            $_ -ne '.github/workflows/validate-v0.6.19-release.yml' -and
+            $_ -ne '.github/workflows/validate-v0.6.15-r5.yml'
           })
           if($unexpected.Count -gt 0) { throw "Unexpected v0.6.19 release files: $($unexpected -join ', ')" }
           $trackedRaw=@(git ls-files 'validation/v0.6.19/out/**')
