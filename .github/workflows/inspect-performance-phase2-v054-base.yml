@@ -1,0 +1,22 @@
+name: Inspect Performance Phase 2 v0.5.4 Base
+on:
+  push:
+    branches:
+      - validate/performance-phase2-v0.5.4-overlay
+    paths:
+      - 'validation/performance-phase2-v0.5.4/inspect_v053.py'
+      - '.github/workflows/inspect-performance-phase2-v054-base.yml'
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rebuild exact v0.5.3 and print integration surfaces
+        shell: powershell
+        run: |
+          python validation/performance-phase2-v0.5.4/inspect_v053.py
+          if($LASTEXITCODE -ne 0){throw "v0.5.3 structure inspection failed: $LASTEXITCODE"}
