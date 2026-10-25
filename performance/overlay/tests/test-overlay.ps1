@@ -100,7 +100,7 @@ try {
     $f2 = New-Fixture (Join-Path $tempRoot 'mixed') $baseIndex $mixed
     $mixedApply = Invoke-OverlayJson 'Apply' $f2
     Assert-True ($mixedApply.status -eq 'applied') 'Mixed provenance still applies safe target'
-    Assert-True ((@($mixedApply.optimized_targets)).Count -eq 1 -and $mixedApply.optimized_targets[0] -eq 'better-local-files') 'Changed Playlist Maker revision skipped'
+    Assert-True ((@($mixedApply.optimized_targets)).Count -eq 1 -and @($mixedApply.optimized_targets)[0] -eq 'better-local-files') 'Changed Playlist Maker revision skipped'
     $mixedText = [IO.File]::ReadAllText($f2.Index)
     Assert-True ($mixedText.Contains('spotify-control-performance-overlay:lazy:better-local-files')) 'Exact target optimized'
     Assert-True ($mixedText.Contains("src='extensions/playlist-maker/extension.js'")) 'Changed target remains eager/original'
@@ -120,7 +120,7 @@ try {
     $f4 = New-Fixture (Join-Path $tempRoot 'duplicate') $duplicateIndex $exactProvenance
     $dup = Invoke-OverlayJson 'Apply' $f4
     Assert-True ($dup.status -eq 'applied') 'Other exact target still applies when one hook is ambiguous'
-    Assert-True ((@($dup.optimized_targets)).Count -eq 1 -and $dup.optimized_targets[0] -eq 'playlist-maker') 'Ambiguous Better Local Files skipped'
+    Assert-True ((@($dup.optimized_targets)).Count -eq 1 -and @($dup.optimized_targets)[0] -eq 'playlist-maker') 'Ambiguous Better Local Files skipped'
     Invoke-OverlayJson 'Restore' $f4 | Out-Null
 
     # Reserved loader conflict: never overwrite unknown file, never touch index.
@@ -135,7 +135,7 @@ try {
     # Upstream rewrites index after an overlay: stale state must not restore/clobber old bytes.
     $f6 = New-Fixture (Join-Path $tempRoot 'upstream-rewrite') $baseIndex $exactProvenance
     Invoke-OverlayJson 'Apply' $f6 | Out-Null
-    $newUpstream = $baseIndex.Replace('<body>', '<!-- new-upstream-index -->`n<body>')
+    $newUpstream = $baseIndex.Replace('<body>', "<!-- new-upstream-index -->`n<body>")
     Write-Utf8NoBom $f6.Index $newUpstream
     $reapply = Invoke-OverlayJson 'Apply' $f6
     Assert-True ($reapply.status -eq 'applied') 'New upstream index re-evaluated rather than overwritten by old backup'
