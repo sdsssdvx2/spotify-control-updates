@@ -1,0 +1,141 @@
+name: Validate v0.6.19 Bootstrap 1.0.6 E2E
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/v0.6.19-bootstrap-e2e/**'
+      - '.github/workflows/validate-v0.6.19-bootstrap-e2e.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'validation/v0.6.19-bootstrap-e2e/**'
+      - '.github/workflows/validate-v0.6.19-bootstrap-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  bootstrap-one-edge-windows:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify released manifest identity
+        shell: powershell
+        run: |
+          $m=Get-Content manifest.json -Raw | ConvertFrom-Json
+          if($m.latest_version -ne '0.6.19') { throw "Expected released v0.6.19 manifest, got $($m.latest_version)" }
+          if($m.bootstrap.version -ne '1.0.6' -or $m.bootstrap.sha256 -ne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' -or [int64]$m.bootstrap.size -ne 42963) { throw 'Bootstrap 1.0.6 release identity changed.' }
+          $edge=@($m.updates | Where-Object { $_.from_version -eq '0.6.18' -and $_.to_version -eq '0.6.19' })
+          if($edge.Count -ne 1 -or @($edge[0].patches).Count -ne 2) { throw 'Exact one-edge v0.6.18 -> v0.6.19 transport missing or ambiguous.' }
+          Write-Host 'V0619_BOOTSTRAP_E2E_MANIFEST_PASS'
+
+      - name: Download exact previously validated Bootstrap 1.0.6 carrier
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' > validated-v0614-repair-artifact.zip
+          python - <<'PY'
+          from pathlib import Path
+          from io import BytesIO
+          import hashlib,zipfile
+          outer=Path('validated-v0614-repair-artifact.zip').read_bytes()
+          with zipfile.ZipFile(BytesIO(outer)) as z:
+              assert z.testzip() is None
+              inner=z.read('SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip')
+          assert len(inner)==30856
+          assert hashlib.sha256(inner).hexdigest()=='6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdfd267bd95f6c6ddcf06'
+          with zipfile.ZipFile(BytesIO(inner)) as z:
+              boot=z.read('bootstrap/spotify-control-self-updater.ps1')
+          assert len(boot)==42963
+          assert hashlib.sha256(boot).hexdigest()=='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
+          print('VALIDATED_BOOTSTRAP_V106_CARRIER_PASS',len(outer),len(inner),len(boot))
+          PY
+
+      - name: Prepare exact installed v0.6.18 fixture
+        shell: powershell
+        run: |
+          python validation/v0.6.19-bootstrap-e2e/prepare_fixture.py
+          if($LASTEXITCODE -ne 0) { throw 'Exact v0.6.18 Bootstrap fixture preparation failed.' }
+
+      - name: Exact Bootstrap 1.0.6 Check RollbackTest Update one-edge cycle
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=(Resolve-Path '.\ci-bootstrap-fixture\LocalAppData\SpotifyControl').Path
+          $bin=Join-Path $root 'bin'
+          $boot=Join-Path $root 'bootstrap\spotify-control-self-updater.ps1'
+          $baseMain='27783abc40c446aadf6f2a9373b4525ada89759075f37e934958c8e449f2d98f'
+          $baseAddon='b7d1a4bc7707533400402fe42e60d724f88656c2477d4d4a5c0f47be60f47977'
+          $targetMain='45795b9622953a10c6eca2ee2f5a19fc4467c5143d5bdf7a9f2ad64841b9416f'
+          $targetAddon='df17018bdb5f62f55624070d047933387f62c049dae73cf5cefcc541bc412afa'
+          $agent='2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278'
+          $bootstrap='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
+
+          if((Get-FileHash -Algorithm SHA256 -LiteralPath $boot).Hash.ToLowerInvariant() -ne $bootstrap -or (Get-Item -LiteralPath $boot).Length -ne 42963) { throw 'Exact Bootstrap 1.0.6 fixture mismatch.' }
+          if((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $bin 'spotify-control.ps1')).Hash.ToLowerInvariant() -ne $baseMain) { throw 'Base v0.6.18 main mismatch.' }
+          if((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $bin 'addon-manager.ps1')).Hash.ToLowerInvariant() -ne $baseAddon) { throw 'Base Addon Manager r7 mismatch.' }
+          if((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $bin 'spotify-control-agent.vbs')).Hash.ToLowerInvariant() -ne $agent) { throw 'Resident agent fixture mismatch.' }
+
+          $env:LOCALAPPDATA=(Resolve-Path '.\ci-bootstrap-fixture\LocalAppData').Path
+          $env:APPDATA=Join-Path (Resolve-Path '.\ci-bootstrap-fixture').Path 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:APPDATA | Out-Null
+
+          function Run-Boot([string]$Action) {
+            $out=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $boot -Action $Action -Json 2>&1
+            $code=$LASTEXITCODE
+            Write-Host ("BOOTSTRAP_"+$Action+"_EXIT="+$code)
+            $out | ForEach-Object { Write-Host $_ }
+            if($code -ne 0) { throw "Bootstrap $Action failed with exit $code" }
+            $last=@($out | Where-Object { [string]$_ -match '^\s*\{' }) | Select-Object -Last 1
+            if(-not $last) { throw "Bootstrap $Action emitted no JSON result" }
+            return ($last | ConvertFrom-Json)
+          }
+
+          $check=Run-Boot 'Check'
+          if(-not $check.success -or [string]$check.installed_version -ne '0.6.18') { throw 'Check did not detect exact installed v0.6.18.' }
+          if([int]$check.result.edge_count -ne 1) { throw ("Expected exactly one update edge, got "+$check.result.edge_count) }
+
+          $rb=Run-Boot 'RollbackTest'
+          if(-not $rb.success -or [string]$rb.transaction_status -ne 'rolled-back') { throw 'RollbackTest did not finish rolled-back.' }
+          if((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $bin 'spotify-control.ps1')).Hash.ToLowerInvariant() -ne $baseMain) { throw 'RollbackTest did not restore exact v0.6.18 main.' }
+          if((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $bin 'addon-manager.ps1')).Hash.ToLowerInvariant() -ne $baseAddon) { throw 'RollbackTest did not restore exact Addon Manager r7.' }
+          if((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $bin 'spotify-control-agent.vbs')).Hash.ToLowerInvariant() -ne $agent) { throw 'RollbackTest changed resident agent.' }
+
+          $up=Run-Boot 'Update'
+          if(-not $up.success -or [string]$up.transaction_status -ne 'committed') { throw 'Update did not commit v0.6.19.' }
+          $main=Join-Path $bin 'spotify-control.ps1'
+          $addon=Join-Path $bin 'addon-manager.ps1'
+          if((Get-FileHash -Algorithm SHA256 -LiteralPath $main).Hash.ToLowerInvariant() -ne $targetMain -or (Get-Item -LiteralPath $main).Length -ne 281580) { throw 'Updated v0.6.19 main identity mismatch.' }
+          if((Get-FileHash -Algorithm SHA256 -LiteralPath $addon).Hash.ToLowerInvariant() -ne $targetAddon -or (Get-Item -LiteralPath $addon).Length -ne 202849) { throw 'Updated Addon Manager r8 identity mismatch.' }
+          if((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $bin 'spotify-control-agent.vbs')).Hash.ToLowerInvariant() -ne $agent) { throw 'Update changed resident agent.' }
+          if((Get-FileHash -Algorithm SHA256 -LiteralPath $boot).Hash.ToLowerInvariant() -ne $bootstrap) { throw 'Update changed Bootstrap 1.0.6.' }
+
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($main,[ref]$tokens,[ref]$errors)
+          if($errors.Count) { $errors | ForEach-Object { Write-Error $_.Message }; throw 'Updated v0.6.19 main failed Windows PowerShell 5.1 parse.' }
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($addon,[ref]$tokens,[ref]$errors)
+          if($errors.Count) { $errors | ForEach-Object { Write-Error $_.Message }; throw 'Updated Addon Manager r8 failed Windows PowerShell 5.1 parse.' }
+
+          $mainSelf=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $main -Action SelfTest 2>&1
+          $mainSelfCode=$LASTEXITCODE; $mainSelf | ForEach-Object { Write-Host $_ }
+          if($mainSelfCode -ne 0) { throw 'Updated v0.6.19 main SelfTest failed.' }
+          $addonSelf=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest 2>&1
+          $addonSelfCode=$LASTEXITCODE; $addonSelf | ForEach-Object { Write-Host $_ }
+          if($addonSelfCode -ne 0) { throw 'Updated Addon Manager r8 SelfTest failed.' }
+
+          $post=Run-Boot 'Check'
+          if(-not $post.success -or [string]$post.installed_version -ne '0.6.19') { throw 'Post-update Check did not detect v0.6.19.' }
+          if($post.result.already_current -ne $true -or [int]$post.result.edge_count -ne 0) { throw 'Post-update Check is not already-current with zero edges.' }
+          Write-Host 'BOOTSTRAP_V106_EXACT_V0618_TO_V0619_ONE_EDGE_E2E_PASS'
