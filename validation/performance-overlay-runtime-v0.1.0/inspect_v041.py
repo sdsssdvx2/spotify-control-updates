@@ -32,11 +32,13 @@ with tempfile.TemporaryDirectory() as td:
         return None
 
     wanted=[
+        'Write-LabLog','Test-SafePath','Get-Sha256Lower','ConvertTo-NativeQuotedArgument','Invoke-Native','Get-SpicetifyExe','Get-IniValue','Get-IniList','Get-TreeFingerprint',
         'Get-ResidentProcesses','Wait-ControlWorkersIdle','Suspend-Resident','Restore-Resident',
-        'Stop-SpotifyForVariant','Wait-SpotifyReady','Wait-SpotifyRestartStable',
+        'Stop-SpotifyForVariant','Prepare-Variant','Wait-SpotifyReady','Wait-SpotifyRestartStable',
         'Assert-AcceptedRuntimeBaseline','Measure-TransitionCondition','Get-RoleSnapshot',
         'Get-SpotifyPidSet','Update-RoleCache','Get-ProcessRoleFromCommandLine',
-        'Get-LogicalCpuCount','Add-MediaKeyType','Send-MediaKey','Copy-Tree','Backup-ProtectedPersistence'
+        'Get-LogicalCpuCount','Add-MediaKeyType','Send-MediaKey','Copy-Tree','Backup-ProtectedPersistence',
+        'Test-IsElevated','Get-Median','Get-Percentile','Get-MetricSummary','Analyze-Transitions','Get-WorkloadPolicy','Average-TwoMetricSummaries','Build-Comparison'
     ]
     print('SCRIPT_LENGTH',len(s.encode('utf-8-sig')))
     for n in wanted:
