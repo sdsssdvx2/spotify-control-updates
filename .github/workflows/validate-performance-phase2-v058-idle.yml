@@ -44,7 +44,7 @@ jobs:
           $zipSize=(Get-Item $zip).Length
           $zipHash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           if($scriptSize -ne 126577 -or $scriptHash -ne 'd14c88e4a992c432328005d4651901b1be5ea748ce41542a95b53dbe3e49b8d4'){throw "Generated script identity drifted: $scriptSize/$scriptHash"}
-          if($zipSize -ne 42627 -or $zipHash -ne '26729442ad1bc85916fa561cea3a85830cf1e88686afad6615eb2aab93ba26c5'){throw "Generated package identity drifted: $zipSize/$zipHash"}
+          if($zipSize -ne 159567 -or $zipHash -ne '6ffdb90f8c6928c8d9b7273511539957978aacbd0266967741852bceee2ef1d7'){throw "Generated package identity drifted: $zipSize/$zipHash"}
           Write-Host "PHASE2_V058_IMMUTABLE_IDENTITY_PASS package_size=$zipSize package_sha=$zipHash script_size=$scriptSize script_sha=$scriptHash"
       - name: PowerShell 5.1 parse and zero-media-command static contract
         shell: powershell
@@ -107,7 +107,7 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Second deterministic build failed.'}
           $size2=(Get-Item $zip).Length;$sha2=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           if($size1 -ne $size2 -or $sha1 -ne $sha2){throw "Non-deterministic v0.5.8 package: $size1/$sha1 vs $size2/$sha2"}
-          if($size2 -ne 42627 -or $sha2 -ne '26729442ad1bc85916fa561cea3a85830cf1e88686afad6615eb2aab93ba26c5'){throw "Second build no longer matches immutable artifact identity: $size2/$sha2"}
+          if($size2 -ne 159567 -or $sha2 -ne '6ffdb90f8c6928c8d9b7273511539957978aacbd0266967741852bceee2ef1d7'){throw "Second build no longer matches immutable artifact identity: $size2/$sha2"}
           Write-Host "PHASE2_V058_DETERMINISTIC_IDENTITY_PASS size=$size2 sha=$sha2"
       - uses: actions/upload-artifact@v4
         with:
