@@ -1,5 +1,5 @@
 from pathlib import Path
-import base64,gzip,hashlib,json,struct,zlib,binascii,zipfile,io
+import base64,gzip,hashlib,json,zipfile,io
 
 ROOT=Path(__file__).resolve().parents[2]
 manifest=json.loads((ROOT/'manifest.json').read_text(encoding='utf-8-sig'))
@@ -23,19 +23,18 @@ def apply_line_patch(raw, patch):
     return bom+''.join(lines).encode('ascii')
 
 def extract_seed():
-    # chunks-v2 is intentionally not used: the retained copy is incomplete (its local
-    # spotify-control.ps1 header advertises 51066 compressed bytes while the decoded
-    # retained blob is only 19089 bytes). The original chunks/ transport is complete.
     seed_paths=sorted(str(p.relative_to(ROOT)).replace('\\','/') for p in (ROOT/'packages/v0.6.11/chunks').glob('chunk-*.txt'))
     assert seed_paths, 'v0.6.11 retained seed chunks missing'
     encoded=cat(seed_paths)
     blob=base64.b64decode(encoded,validate=True)
     print('SEED_TRANSPORT',len(encoded),sha(encoded),len(blob),sha(blob),seed_paths)
     with zipfile.ZipFile(io.BytesIO(blob),'r') as z:
-        bad=z.testzip(); assert bad is None,bad
         names=z.namelist(); print('SEED_ENTRIES',names)
         candidates=[n for n in names if n.lower().endswith('spotify-control.ps1')]
         assert len(candidates)==1,candidates
+        # The historical archive contains a known-corrupt old addon-manager entry, so do not
+        # reject the unrelated main entry via whole-archive testzip(). Reading this entry itself
+        # performs its own CRC verification; the next manifest edge additionally pins its SHA.
         raw=z.read(candidates[0])
     return candidates[0],raw
 
