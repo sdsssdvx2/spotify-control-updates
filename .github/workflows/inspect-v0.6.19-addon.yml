@@ -1,4 +1,4 @@
-name: Inspect v0.6.19 Addon Manager integration points
+name: Inspect v0.6.19 production integration points
 
 on:
   push:
@@ -21,3 +21,6 @@ jobs:
       - name: Reconstruct exact current Addon Manager and print integration contexts
         shell: powershell
         run: python validation/v0.6.19/inspect_current_addon.py
+      - name: Inspect current main payload and version patch contract
+        shell: powershell
+        run: python validation/v0.6.19/inspect_current_main.py
