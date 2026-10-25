@@ -11,13 +11,14 @@ function Get-ComponentBaselineKind {
     param($Actual)
     if($Actual.main -eq $ExpectedMainSha -and $Actual.addon -eq $ExpectedAddonSha -and $Actual.agent -eq $ExpectedAgentSha -and $Actual.bootstrap -eq $ExpectedBootstrapSha){return 'current-v0619-r8'}
     if($Actual.main -eq $PreviousMainSha -and $Actual.addon -eq $PreviousAddonSha -and $Actual.agent -eq $ExpectedAgentSha -and $Actual.bootstrap -eq $ExpectedBootstrapSha){return 'previous-v0618-r7'}
+    if($Actual.main -eq $Previous2MainSha -and $Actual.addon -eq $Previous2AddonSha -and $Actual.agent -eq $ExpectedAgentSha -and $Actual.bootstrap -eq $ExpectedBootstrapSha){return 'previous-v0617-r7'}
     return 'unknown-or-partial'
 }
 
 function Write-ComponentHashDiagnostics {
     param($Actual,[string]$Prefix='Component identity')
-    Write-LabLog ("{0}: main actual={1} expected-current={2} expected-previous={3}" -f $Prefix,$Actual.main,$ExpectedMainSha,$PreviousMainSha) 'INFO'
-    Write-LabLog ("{0}: addon actual={1} expected-current={2} expected-previous={3}" -f $Prefix,$Actual.addon,$ExpectedAddonSha,$PreviousAddonSha) 'INFO'
+    Write-LabLog ("{0}: main actual={1} expected-current={2} expected-v0618={3} expected-v0617={4}" -f $Prefix,$Actual.main,$ExpectedMainSha,$PreviousMainSha,$Previous2MainSha) 'INFO'
+    Write-LabLog ("{0}: addon actual={1} expected-current={2} expected-v0618={3} expected-v0617={4}" -f $Prefix,$Actual.addon,$ExpectedAddonSha,$PreviousAddonSha,$Previous2AddonSha) 'INFO'
     Write-LabLog ("{0}: agent actual={1} expected={2}" -f $Prefix,$Actual.agent,$ExpectedAgentSha) 'INFO'
     Write-LabLog ("{0}: bootstrap actual={1} expected={2}" -f $Prefix,$Actual.bootstrap,$ExpectedBootstrapSha) 'INFO'
 }
@@ -39,17 +40,18 @@ function Align-ReleasedProductionBaseline {
     if(-not(Wait-ControlWorkersIdle 30)){throw 'Spotify Control worker is active before production alignment.'}
 
     $alignment=[string]$Accepted.baseline_kind
-    if($Accepted.baseline_kind -eq 'previous-v0618-r7'){
-        Write-LabLog 'Exact previous production v0.6.18/r7 detected. Running validated Bootstrap 1.0.6 one-edge update while resident/Spotify are stopped.' 'WARN'
+    $installed=$null;$edges=0
+    if($Accepted.baseline_kind -eq 'previous-v0618-r7'){$installed='0.6.18';$edges=1;$alignment='auto-updated-v0618-r7-to-v0619-r8'}
+    elseif($Accepted.baseline_kind -eq 'previous-v0617-r7'){$installed='0.6.17';$edges=2;$alignment='auto-updated-v0617-r7-to-v0619-r8'}
+    elseif($Accepted.baseline_kind -eq 'current-v0619-r8'){$alignment='already-current-v0619-r8'}
+    else{throw "Unexpected preflight baseline kind during alignment: $($Accepted.baseline_kind)"}
+
+    if($edges -gt 0){
+        Write-LabLog ("Exact previous production {0} detected. Running validated Bootstrap 1.0.6 {1}-edge update while resident/Spotify are stopped." -f $installed,$edges) 'WARN'
         $check=Invoke-BootstrapJson -BootstrapAction 'Check'
-        if(-not [bool]$check.success -or [string]$check.installed_version -ne '0.6.18' -or [int]$check.result.edge_count -ne 1){throw 'Bootstrap Check did not prove the exact one-edge v0.6.18 -> v0.6.19 update path.'}
+        if(-not [bool]$check.success -or [string]$check.installed_version -ne $installed -or [int]$check.result.edge_count -ne $edges){throw "Bootstrap Check did not prove the exact $installed -> v0.6.19 $edges-edge update path."}
         $up=Invoke-BootstrapJson -BootstrapAction 'Update'
         if(-not [bool]$up.success -or [string]$up.transaction_status -ne 'committed'){throw 'Bootstrap Update did not commit the exact v0.6.19 production update.'}
-        $alignment='auto-updated-v0618-r7-to-v0619-r8'
-    }elseif($Accepted.baseline_kind -ne 'current-v0619-r8'){
-        throw "Unexpected preflight baseline kind during alignment: $($Accepted.baseline_kind)"
-    }else{
-        $alignment='already-current-v0619-r8'
     }
 
     $postUpdate=Get-ComponentHashSnapshot
@@ -84,7 +86,7 @@ function Assert-AcceptedRuntimeBaseline {
     $kind=Get-ComponentBaselineKind $actual
     Write-ComponentHashDiagnostics -Actual $actual -Prefix 'Read-only preflight component identity'
     if($kind -eq 'unknown-or-partial'){
-        $msg=("Unknown or partial Spotify Control component state. No production files were changed. main={0}; addon={1}; agent={2}; bootstrap={3}. Expected current main={4}, addon={5}; previous main={6}, addon={7}; shared agent={8}, bootstrap={9}." -f $actual.main,$actual.addon,$actual.agent,$actual.bootstrap,$ExpectedMainSha,$ExpectedAddonSha,$PreviousMainSha,$PreviousAddonSha,$ExpectedAgentSha,$ExpectedBootstrapSha)
+        $msg=("Unknown or partial Spotify Control component state. No production files were changed. main={0}; addon={1}; agent={2}; bootstrap={3}. Expected current main={4}, addon={5}; v0618 main={6}, addon={7}; v0617 main={8}, addon={9}; shared agent={10}, bootstrap={11}." -f $actual.main,$actual.addon,$actual.agent,$actual.bootstrap,$ExpectedMainSha,$ExpectedAddonSha,$PreviousMainSha,$PreviousAddonSha,$Previous2MainSha,$Previous2AddonSha,$ExpectedAgentSha,$ExpectedBootstrapSha)
         throw $msg
     }
 
@@ -92,5 +94,6 @@ function Assert-AcceptedRuntimeBaseline {
     if($spotifyVersion -notmatch ('^'+[regex]::Escape($ExpectedSpotifyVersion)+'(?:\.|$)')){throw "Spotify version drifted from accepted baseline: $spotifyVersion"}
     $sp=Invoke-Native -FilePath (Get-SpicetifyExe) -Arguments @('--version')
     if($sp.ExitCode -ne 0 -or [string]$sp.Output -notmatch [regex]::Escape($ExpectedSpicetifyVersion)){throw "Spicetify version drifted from accepted baseline: $($sp.Output)"}
-    return [pscustomobject]@{baseline_kind=$kind;spotify_control_version=$(if($kind -eq 'current-v0619-r8'){'0.6.19'}else{'0.6.18'});addon_manager_version=$(if($kind -eq 'current-v0619-r8'){'0.6.5-r8'}else{'0.6.5-r7'});spotify_version=$spotifyVersion;spicetify_version=$ExpectedSpicetifyVersion;hashes=$actual}
+    $controlVersion=$(if($kind -eq 'current-v0619-r8'){'0.6.19'}elseif($kind -eq 'previous-v0618-r7'){'0.6.18'}else{'0.6.17'})
+    return [pscustomobject]@{baseline_kind=$kind;spotify_control_version=$controlVersion;addon_manager_version=$(if($kind -eq 'current-v0619-r8'){'0.6.5-r8'}else{'0.6.5-r7'});spotify_version=$spotifyVersion;spicetify_version=$ExpectedSpicetifyVersion;hashes=$actual}
 }
