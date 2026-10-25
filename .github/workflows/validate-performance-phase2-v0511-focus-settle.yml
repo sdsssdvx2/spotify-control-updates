@@ -1,0 +1,102 @@
+name: Validate Performance Phase 2 v0.5.11 Focus Stabilization
+on:
+  push:
+    branches:
+      - validate/performance-phase2-v0.5.11-focus-settle
+    paths:
+      - 'validation/performance-phase2-v0.5.11/**'
+      - '.github/workflows/validate-performance-phase2-v0511-focus-settle.yml'
+  pull_request:
+    paths:
+      - 'validation/performance-phase2-v0.5.11/**'
+      - '.github/workflows/validate-performance-phase2-v0511-focus-settle.yml'
+permissions:
+  contents: read
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Prove validation-only scope
+        shell: powershell
+        run: |
+          $base='29d6c52c6a79559e513b367ec57edcccebae5fd0'
+          git cat-file -e "$base^{commit}"
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allowed=@('validation/performance-phase2-v0.5.11/build_v0511.py','.github/workflows/validate-performance-phase2-v0511-focus-settle.yml')
+          $bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Validation branch touched production/out-of-scope files: $($bad -join ', ')"}
+          if($changed.Count -ne 2){throw "Expected exactly 2 validation-only files, found $($changed.Count): $($changed -join ', ')"}
+          Write-Host 'PHASE2_V0511_SCOPE_PASS'
+      - name: Build exact deterministic package
+        shell: powershell
+        run: |
+          python validation/performance-phase2-v0.5.11/build_v0511.py
+          if($LASTEXITCODE -ne 0){throw "v0.5.11 build failed: $LASTEXITCODE"}
+          $zip='SpotifyControl-Production-Lazy-Overlay-Media-Command-Free-Idle-Revalidation-v0.5.11.zip'
+          $unpack='phase2-v0511-unpacked'
+          if(Test-Path $unpack){Remove-Item $unpack -Recurse -Force}
+          Expand-Archive -LiteralPath $zip -DestinationPath $unpack
+          $ps1=Join-Path $unpack 'idle-overlay-media-command-free-revalidation.ps1'
+          $zs=(Get-Item $zip).Length;$zh=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $ps=(Get-Item $ps1).Length;$ph=(Get-FileHash $ps1 -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($zs -ne 166484 -or $zh -ne 'b0783be52c08b8ea444328b3eb850f10dd374fff87e360e6a8b4d5bc3e68f8ae'){throw "Package identity drifted: $zs/$zh"}
+          if($ps -ne 132421 -or $ph -ne '7530bd421864ff0f67280f35c612a3b3954050f3aa2c086c4750cb9d85e7aeb1'){throw "PS1 identity drifted: $ps/$ph"}
+          Write-Host "PHASE2_V0511_IMMUTABLE_IDENTITY_PASS zip=$zs/$zh ps1=$ps/$ph"
+      - name: PowerShell 5.1 parse and bounded-focus contract
+        shell: powershell
+        run: |
+          $p='phase2-v0511-unpacked\idle-overlay-media-command-free-revalidation.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error ("line {0}: {1}" -f $_.Extent.StartLineNumber,$_.Message)};throw 'Generated v0.5.11 failed PowerShell 5.1 parse.'}
+          $s=Get-Content $p -Raw
+          foreach($x in @('sampler_revision=''v0.5.11-absolute-deadline-cached-sampler''','focus_race_policy=''bounded-hide-reshow-stabilization-no-foreground-forcing''','focus_race_recoveries_total','sample_schedule_lag_p95_ms','missed_schedule_slots','WS_EX_NOACTIVATE','Hide-SpotifyWindowsForSetup','$stableChecks -ge 5','$settle.ElapsedMilliseconds -lt 3000','ShowBehind($hwnd)','startup-hidden-then-stably-nonforeground-ws-ex-noactivate','verified_media_commands_expected=0','production_overlay_state_unchanged_exact','global_media_keys_used=$false')){if($s.IndexOf($x,[StringComparison]::Ordinal) -lt 0){throw "Missing v0.5.11 contract: $x"}}
+          foreach($x in @('TryPlayAsync','TryPauseAsync','TrySkipNextAsync','Invoke-SpotifyMediaCommand','-Command Play','-Command Pause','-Command Next','keybd_event','SpotifyControlMediaKeys','Send-MediaKey','[byte]0xB0','[byte]0xB3')){if($s.IndexOf($x,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Forbidden media-control surface survived: $x"}}
+          if([regex]::IsMatch($s,'SetForegroundWindow\s*\(',[Text.RegularExpressions.RegexOptions]::IgnoreCase)){throw 'v0.5.11 must not call or declare SetForegroundWindow.'}
+          if($s.IndexOf('Spotify unexpectedly owns foreground focus after WS_EX_NOACTIVATE background placement.',[StringComparison]::Ordinal) -ge 0){throw 'Old one-shot foreground failure survived v0.5.11.'}
+          function Get-FunctionText([string]$name){$start=$s.IndexOf("function $name {");if($start -lt 0){throw "Function missing: $name"};$end=$s.IndexOf("`r`nfunction ",$start+20);if($end -lt 0){$end=$s.IndexOf("`nfunction ",$start+20)};if($end -lt 0){$end=$s.Length};return $s.Substring($start,$end-$start)}
+          $show=Get-FunctionText 'Show-SpotifyBehindUserForMeasurement'
+          foreach($x in @('Hide-SpotifyWindowsForSetup','$raceRecoveries++','$stableChecks++','$stableChecks -ge 5','Start-Sleep -Milliseconds 80','Start-Sleep -Milliseconds 60')){if($show.IndexOf($x,[StringComparison]::Ordinal) -lt 0){throw "Focus stabilization function missing: $x"}}
+          $hide=$show.IndexOf('Hide-SpotifyWindowsForSetup',[StringComparison]::Ordinal);$throw=$show.IndexOf('Spotify remained foreground after bounded WS_EX_NOACTIVATE startup-race stabilization.',[StringComparison]::Ordinal)
+          if($hide -lt 0 -or $throw -lt 0 -or $hide -ge $throw){throw 'Foreground race is not retried before fail-closed throw.'}
+          $measure=Get-FunctionText 'Measure-IdleCondition'
+          foreach($x in @('$slotSeconds=$slot*$periodSeconds','$sleepMs=[int][Math]::Floor($remaining*1000.0)','$missedSlots += $skip','$slot += (1+$skip)','*0.75')){if($measure.IndexOf($x,[StringComparison]::Ordinal) -lt 0){throw "Deadline/quality contract missing: $x"}}
+          if($measure.IndexOf('Start-Sleep -Milliseconds $SampleIntervalMs',[StringComparison]::Ordinal) -ge 0){throw 'Old sleep-plus-work cadence survived.'}
+          if($measure.IndexOf('Get-CimInstance',[StringComparison]::OrdinalIgnoreCase) -ge 0){throw 'Timed measurement contains direct CIM.'}
+          Write-Host 'PHASE2_V0511_PS51_BOUNDED_FOCUS_STATIC_PASS'
+      - name: Verify exact packaged production overlay sources
+        shell: powershell
+        run: |
+          $expected=@{
+            'phase2-v0511-unpacked\overlay\apply-overlay.ps1'='053a597e834aab959a588350160ce81046ceda66e2a2ac233eeff8af78fea544'
+            'phase2-v0511-unpacked\overlay\lazy-custom-app-loader.js'='c38af0f6266747f50d2a0c05e9a49d5ffb34135738715fab6321ff4ae79623d9'
+            'phase2-v0511-unpacked\overlay\targets.json'='c255e53066abbd730467e0c1d92e81dd907e1ea2f245daf6f0d080d2239fea35'
+          }
+          foreach($p in $expected.Keys){$h=(Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant();if($h -ne $expected[$p]){throw "Overlay source identity mismatch: $p $h"}}
+          Write-Host 'PHASE2_V0511_OVERLAY_SOURCE_PASS'
+      - name: Run generated Windows real-engine and guard SelfTest
+        shell: powershell
+        env:
+          SPOTIFYCONTROL_TEST_RESIDUAL_CLEANUP: '0'
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File phase2-v0511-unpacked\idle-overlay-media-command-free-revalidation.ps1 -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw "v0.5.11 SelfTest failed: $LASTEXITCODE"}
+      - name: Verify internal checksums and deterministic rebuild
+        shell: powershell
+        run: |
+          foreach($line in Get-Content phase2-v0511-unpacked\SHA256SUMS.txt){if($line -notmatch '^([0-9a-f]{64})  (.+)$'){throw "Bad checksum row: $line"};$p=Join-Path phase2-v0511-unpacked ($Matches[2]-replace '/','\');$h=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant();if($h -ne $Matches[1]){throw "Checksum mismatch: $($Matches[2])"}}
+          $zip='SpotifyControl-Production-Lazy-Overlay-Media-Command-Free-Idle-Revalidation-v0.5.11.zip';$s1=(Get-Item $zip).Length;$h1=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          python validation/performance-phase2-v0.5.11/build_v0511.py
+          if($LASTEXITCODE -ne 0){throw 'Second deterministic build failed.'}
+          $s2=(Get-Item $zip).Length;$h2=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($s1 -ne $s2 -or $h1 -ne $h2 -or $s2 -ne 166484 -or $h2 -ne 'b0783be52c08b8ea444328b3eb850f10dd374fff87e360e6a8b4d5bc3e68f8ae'){throw "Non-deterministic v0.5.11 package: $s1/$h1 vs $s2/$h2"}
+          Write-Host "PHASE2_V0511_DETERMINISTIC_IDENTITY_PASS size=$s2 sha=$h2"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-Production-Lazy-Overlay-Media-Command-Free-Idle-Revalidation-v0.5.11
+          path: SpotifyControl-Production-Lazy-Overlay-Media-Command-Free-Idle-Revalidation-v0.5.11.zip
+          if-no-files-found: error
+          retention-days: 14
