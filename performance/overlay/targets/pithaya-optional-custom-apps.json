@@ -10,6 +10,11 @@
       "extension_path": "extensions/better-local-files/extension.js",
       "route_prefixes": ["/better-local-files"],
       "load_policy": "before-navigation",
+      "readiness": {
+        "kind": "global-property",
+        "property": "localTracksService",
+        "timeoutMs": 10000
+      },
       "reason": "The app dereferences window.localTracksService during render; the original extension must finish loading before the route is entered."
     },
     {
@@ -18,7 +23,11 @@
       "extension_path": "extensions/playlist-maker/extension.js",
       "route_prefixes": ["/playlist-maker"],
       "load_policy": "before-navigation",
-      "reason": "The original extension performs update checking and storage migrations; preserve original ordering by completing it before route entry."
+      "readiness": {
+        "kind": "playlist-maker-migrations",
+        "timeoutMs": 10000
+      },
+      "reason": "The original extension performs update checking and legacy storage migrations; preserve ordering by completing observable migration cleanup before route entry."
     }
   ]
 }
