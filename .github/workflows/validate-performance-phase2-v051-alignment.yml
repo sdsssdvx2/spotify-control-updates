@@ -49,7 +49,8 @@ jobs:
           $s=Get-Content $path -Raw
           foreach($required in @(
             'Get-ComponentHashSnapshot','Get-ComponentBaselineKind','Write-ComponentHashDiagnostics',
-            'Invoke-BootstrapJson','Align-ReleasedAddonManagerBaseline','Assert-AcceptedRuntimeBaseline',
+            'Invoke-BootstrapJson','Align-ReleasedProductionBaseline','Assert-AcceptedRuntimeBaseline',
+            'Production alignment requires the resident to be suspended first.',
             'current-v0619-r8','previous-v0618-r7','unknown-or-partial',
             '45795b9622953a10c6eca2ee2f5a19fc4467c5143d5bdf7a9f2ad64841b9416f',
             'df17018bdb5f62f55624070d047933387f62c049dae73cf5cefcc541bc412afa',
