@@ -1,5 +1,5 @@
 from pathlib import Path
-import subprocess, tempfile, zipfile, re, shutil, os
+import subprocess, tempfile, zipfile, re
 
 SRC_COMMIT='4d9eb71d1fa97b70d839dc887cdc8f5531d2ff8b'
 BUILDER='validation/performance-phase2-v0.4.1/build_and_validate.py'
@@ -13,27 +13,14 @@ with tempfile.TemporaryDirectory() as td:
     with zipfile.ZipFile(z) as zz:
         s=zz.read('track-transition-isolation.ps1').decode('utf-8-sig')
 
-    print('SCRIPT_LENGTH',len(s.encode('utf-8-sig')))
-    print('=== FUNCTIONS ===')
-    for m in re.finditer(r'(?m)^function\s+([A-Za-z0-9_-]+)\s*\{',s):
-        print(m.group(1))
-
-    wanted=[
-        'Assert-ExactRuntime','Suspend-Resident','Resume-Resident','Stop-SpotifyResiduals',
-        'Close-SpotifyForMutation','Get-TreeFingerprint','Restore-OriginalXpui','Get-ProcessSnapshot',
-        'Measure-Condition','Send-MediaKey','Write-IndexVariantAtomic','Backup-ProtectedPersistence',
-        'Get-ActiveXpui','Get-ConfigSnapshot'
-    ]
     def function_block(name):
         pat=re.compile(r'(?m)^function\s+'+re.escape(name)+r'\s*\{')
         m=pat.search(s)
         if not m:return None
-        start=m.start(); depth=0; in_s=False; in_d=False; esc=False
-        i=m.end()-1
+        start=m.start(); depth=0; in_s=False; in_d=False; i=m.end()-1
         while i<len(s):
             ch=s[i]
-            if ch=='`':
-                i+=2; continue
+            if ch=='`': i+=2; continue
             if not in_d and ch=="'": in_s=not in_s
             elif not in_s and ch=='"': in_d=not in_d
             elif not in_s and not in_d:
@@ -43,13 +30,16 @@ with tempfile.TemporaryDirectory() as td:
                     if depth==0:return s[start:i+1]
             i+=1
         return None
-    print('=== SELECTED BLOCKS ===')
+
+    wanted=[
+        'Get-ResidentProcesses','Wait-ControlWorkersIdle','Suspend-Resident','Restore-Resident',
+        'Stop-SpotifyForVariant','Wait-SpotifyReady','Wait-SpotifyRestartStable',
+        'Assert-AcceptedRuntimeBaseline','Measure-TransitionCondition','Get-RoleSnapshot',
+        'Get-SpotifyPidSet','Update-RoleCache','Get-ProcessRoleFromCommandLine',
+        'Get-LogicalCpuCount','Add-MediaKeyType','Send-MediaKey','Copy-Tree','Backup-ProtectedPersistence'
+    ]
+    print('SCRIPT_LENGTH',len(s.encode('utf-8-sig')))
     for n in wanted:
         b=function_block(n)
-        print('---',n,'FOUND' if b else 'MISSING','---')
-        if b: print(b[:12000])
-
-    print('=== PARAM HEAD ===')
-    print(s[:8000])
-    print('=== MAIN TAIL ===')
-    print(s[-18000:])
+        print('\n=== BLOCK',n,'FOUND' if b else 'MISSING','===')
+        if b: print(b)
