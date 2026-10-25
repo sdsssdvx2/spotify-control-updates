@@ -1,0 +1,28 @@
+name: Cleanup Performance Phase 2 v0.5.4 Temp
+on:
+  push:
+    branches:
+      - validate/performance-phase2-v0.5.4-overlay
+    paths:
+      - '.github/workflows/cleanup-performance-phase2-v054-temp.yml'
+permissions:
+  contents: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove temporary fixer and inspector files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f \
+            validation/performance-phase2-v0.5.4/fix_selftest_spacing.py \
+            validation/performance-phase2-v0.5.4/inspect_v053.py \
+            .github/workflows/fix-performance-phase2-v054-selftest.yml \
+            .github/workflows/inspect-performance-phase2-v054-base.yml \
+            .github/workflows/cleanup-performance-phase2-v054-temp.yml
+          git commit -m 'Remove temporary v0.5.4 fixer and inspector helpers'
+          git push origin HEAD:validate/performance-phase2-v0.5.4-overlay
