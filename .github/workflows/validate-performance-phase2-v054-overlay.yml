@@ -25,7 +25,7 @@ jobs:
           $base='29d6c52c6a79559e513b367ec57edcccebae5fd0'
           git cat-file -e "$base^{commit}"
           $changed=@(git diff --name-only "$base...HEAD")
-          $bad=@($changed|Where-Object{$_ -notlike 'validation/performance-phase2-v0.5.4/*' -and $_ -notin @('.github/workflows/validate-performance-phase2-v054-overlay.yml','.github/workflows/inspect-performance-phase2-v054-base.yml')})
+          $bad=@($changed|Where-Object{$_ -notlike 'validation/performance-phase2-v0.5.4/*' -and $_ -ne '.github/workflows/validate-performance-phase2-v054-overlay.yml'})
           if($bad.Count){throw "Validation branch touched production/out-of-scope files: $($bad -join ', ')"}
           Write-Host 'PHASE2_V054_SCOPE_PASS'
       - name: Build exact deterministic package
@@ -50,6 +50,7 @@ jobs:
           $s=Get-Content $p -Raw
           foreach($x in @('TrySkipNextAsync','SPOTIFY_NEXT_CONFIRMED','RegisterSessionNotification','WaitForSpotifyCapture(5000,5)','current-v0620-r9','BASELINE_A','BLF_ORIGINAL','PLAYLIST_MAKER_ORIGINAL','BOTH_ORIGINAL','production_overlay_state_unchanged_exact','exact-production-lazy-overlay-index-policy-only','Refusing overlay reset because current index SHA-256 is not a profiler-owned/known state')){if($s.IndexOf($x,[StringComparison]::Ordinal) -lt 0){throw "Missing v0.5.4 safety/runtime contract: $x"}}
           foreach($x in @('keybd_event','SpotifyControlMediaKeys','Send-MediaKey','[byte]0xB0','[byte]0xB3')){if($s.IndexOf($x,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Legacy global media-key surface survived: $x"}}
+          foreach($x in @('-ne95','-ne2.5','Count-ne','status-ne','reason-ne','$txt-notmatch','$txt-match','-eq$origSha','-ne$origSha')){if($s.IndexOf($x,[StringComparison]::Ordinal) -ge 0){throw "Glued PowerShell operator survived: $x"}}
           $labStart=$s.IndexOf('function Invoke-Lab {')
           if($labStart -lt 0){throw 'Invoke-Lab was not found in generated v0.5.4 script.'}
           $labEnd=$s.IndexOf("`r`nfunction ",$labStart+20)
