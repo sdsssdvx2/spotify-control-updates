@@ -48,6 +48,7 @@ jobs:
         run: |
           $files = @(
             'performance/overlay/apply-overlay.ps1',
+            'performance/overlay/collect-active-provenance.ps1',
             'performance/overlay/tests/test-overlay.ps1'
           )
           foreach ($file in $files) {
@@ -60,6 +61,7 @@ jobs:
             }
           }
           $apply = Get-Content 'performance/overlay/apply-overlay.ps1' -Raw
+          $collector = Get-Content 'performance/overlay/collect-active-provenance.ps1' -Raw
           $forbidden = @(
             'spicetify apply',
             'spicetify backup',
@@ -73,7 +75,26 @@ jobs:
           )
           foreach ($needle in $forbidden) {
             if ($apply.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-              throw "Forbidden production/persistence mutation surface found: $needle"
+              throw "Forbidden production/persistence mutation surface found in apply script: $needle"
+            }
+            if ($collector.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+              throw "Forbidden production/persistence mutation surface found in collector: $needle"
+            }
+          }
+          $collectorForbidden = @(
+            'Set-Content',
+            'Add-Content',
+            'Remove-Item',
+            'Move-Item',
+            'Copy-Item',
+            '[IO.File]::Delete',
+            '[IO.File]::Move',
+            '[IO.File]::Copy',
+            '[IO.File]::Replace'
+          )
+          foreach ($needle in $collectorForbidden) {
+            if ($collector.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+              throw "Collector must remain read-only with respect to xpui: forbidden command found: $needle"
             }
           }
           Write-Host "PASS: PowerShell parser and static mutation-scope audit."
@@ -92,9 +113,13 @@ jobs:
           if ($blf.Count -ne 1 -or $blf[0].dist_revision -ne 'bf467fab93e6c1f8b8d4189dc1054bd1cafb3f3a') { throw 'Better Local Files provenance mismatch' }
           if ($pm.Count -ne 1 -or $pm[0].dist_revision -ne '9fd89fb40a53e4cfbf0953d34f806f4a8a36fc64') { throw 'Playlist Maker provenance mismatch' }
           if (@($targets.targets | Where-Object { $_.id -eq 'sc-cover-ambience' }).Count -ne 0) { throw 'SC Cover Ambience must not be an optimization target' }
+          foreach ($target in @($targets.targets)) {
+            if (-not $target.extension_sha256 -or ([string]$target.extension_sha256).Length -ne 64) { throw "Missing pinned extension SHA-256 for $($target.id)" }
+            if ([int64]$target.extension_size -le 0) { throw "Missing pinned extension size for $($target.id)" }
+          }
           Write-Host "PASS: exact target provenance and exclusion policy."
 
-      - name: Derive exact immutable upstream extension hashes
+      - name: Verify exact immutable upstream extension hashes
         shell: powershell
         run: |
           $targets = Get-Content 'performance/overlay/targets/pithaya-optional-custom-apps.json' -Raw | ConvertFrom-Json
@@ -104,7 +129,13 @@ jobs:
             Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $dest
             $sha = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLowerInvariant()
             $size = (Get-Item -LiteralPath $dest).Length
-            Write-Host "TRUSTED_EXTENSION_SHA256 id=$($target.id) revision=$($target.dist_revision) size=$size sha256=$sha"
+            if ($size -ne [int64]$target.extension_size) {
+              throw "Pinned upstream extension size mismatch for $($target.id): expected=$($target.extension_size) actual=$size"
+            }
+            if ($sha -ne [string]$target.extension_sha256) {
+              throw "Pinned upstream extension SHA-256 mismatch for $($target.id): expected=$($target.extension_sha256) actual=$sha"
+            }
+            Write-Host "VERIFIED_EXTENSION_SHA256 id=$($target.id) revision=$($target.dist_revision) size=$size sha256=$sha"
           }
 
       - name: JavaScript syntax check
@@ -117,7 +148,7 @@ jobs:
         shell: powershell
         run: node performance/overlay/tests/test-loader.js
 
-      - name: Run reversible overlay transform tests
+      - name: Run collector and reversible overlay transform tests
         shell: powershell
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File performance/overlay/tests/test-overlay.ps1
 
