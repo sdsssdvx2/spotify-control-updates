@@ -32,11 +32,41 @@ function Invoke-BootstrapJson {
     try{return ([string]$jsonLine[0]|ConvertFrom-Json)}catch{throw "Bootstrap $BootstrapAction JSON parse failed: $($_.Exception.Message)"}
 }
 
-function Align-ReleasedAddonManagerBaseline {
-    $r=Invoke-Native -FilePath 'powershell.exe' -Arguments @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$AddonPath,'-Action','Update') -TimeoutSeconds 900
-    if($r.ExitCode -ne 0){throw "Released Addon Manager r8 Update/alignment failed with exit $($r.ExitCode): $($r.Output)"}
-    Write-LabLog 'Released Addon Manager r8 Update/alignment completed before the measurement snapshot.' 'OK'
-    return [pscustomobject]@{status='addon-manager-r8-update-completed';output=$r.Output}
+function Align-ReleasedProductionBaseline {
+    param($Accepted)
+    if(-not $script:ResidentSuspended){throw 'Production alignment requires the resident to be suspended first.'}
+    if(@(Get-Process Spotify -ErrorAction SilentlyContinue).Count -ne 0){throw 'Production alignment requires Spotify to be fully stopped first.'}
+    if(-not(Wait-ControlWorkersIdle 30)){throw 'Spotify Control worker is active before production alignment.'}
+
+    $alignment=[string]$Accepted.baseline_kind
+    if($Accepted.baseline_kind -eq 'previous-v0618-r7'){
+        Write-LabLog 'Exact previous production v0.6.18/r7 detected. Running validated Bootstrap 1.0.6 one-edge update while resident/Spotify are stopped.' 'WARN'
+        $check=Invoke-BootstrapJson -BootstrapAction 'Check'
+        if(-not [bool]$check.success -or [string]$check.installed_version -ne '0.6.18' -or [int]$check.result.edge_count -ne 1){throw 'Bootstrap Check did not prove the exact one-edge v0.6.18 -> v0.6.19 update path.'}
+        $up=Invoke-BootstrapJson -BootstrapAction 'Update'
+        if(-not [bool]$up.success -or [string]$up.transaction_status -ne 'committed'){throw 'Bootstrap Update did not commit the exact v0.6.19 production update.'}
+        $alignment='auto-updated-v0618-r7-to-v0619-r8'
+    }elseif($Accepted.baseline_kind -ne 'current-v0619-r8'){
+        throw "Unexpected preflight baseline kind during alignment: $($Accepted.baseline_kind)"
+    }else{
+        $alignment='already-current-v0619-r8'
+    }
+
+    $postUpdate=Get-ComponentHashSnapshot
+    Write-ComponentHashDiagnostics -Actual $postUpdate -Prefix 'Post-bootstrap component identity'
+    if((Get-ComponentBaselineKind $postUpdate) -ne 'current-v0619-r8'){throw 'Production alignment did not converge to exact released v0.6.19/r8 component identities.'}
+
+    $addon=Invoke-Native -FilePath 'powershell.exe' -Arguments @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$AddonPath,'-Action','Update') -TimeoutSeconds 900
+    if($addon.ExitCode -ne 0){throw "Released Addon Manager r8 Update/alignment failed with exit $($addon.ExitCode): $($addon.Output)"}
+    if(@(Get-ResidentProcesses).Count -ne 0){throw 'Addon Manager alignment unexpectedly restarted the resident.'}
+    if(@(Get-Process Spotify -ErrorAction SilentlyContinue).Count -gt 0){Stop-SpotifyForVariant}
+    if(-not(Wait-ControlWorkersIdle 30)){throw 'Spotify Control worker remained active after Addon Manager alignment.'}
+
+    $final=Get-ComponentHashSnapshot
+    Write-ComponentHashDiagnostics -Actual $final -Prefix 'Final production-aligned component identity'
+    if((Get-ComponentBaselineKind $final) -ne 'current-v0619-r8'){throw 'Addon Manager alignment changed released Spotify Control component identities.'}
+    Write-LabLog 'Released production baseline and Addon Manager r8 update/overlay cycle aligned before measurement snapshot.' 'OK'
+    return [pscustomobject]@{status='aligned';production_alignment=$alignment;addon_manager_alignment='update-completed';hashes=$final;addon_output=$addon.Output}
 }
 
 function Assert-AcceptedRuntimeBaseline {
@@ -48,23 +78,12 @@ function Assert-AcceptedRuntimeBaseline {
         $action=@($task.Actions|Select-Object -First 1)[0]
         if($null -eq $action -or [string]$action.Execute -notmatch '(?i)wscript(?:\.exe)?$' -or [string]$action.Arguments -notmatch [regex]::Escape('spotify-control-agent.vbs')){throw 'Resident task action no longer matches the accepted wscript agent.'}
     }catch{throw ('Accepted resident task precheck failed: '+$_.Exception.Message)}
-    if(-not(Wait-ControlWorkersIdle 30)){throw 'Spotify Control maintenance is still active. Refusing to overlap production alignment/profiling.'}
+    if(-not(Wait-ControlWorkersIdle 30)){throw 'Spotify Control maintenance is still active. Refusing to overlap profiling.'}
 
     $actual=Get-ComponentHashSnapshot
     $kind=Get-ComponentBaselineKind $actual
-    Write-ComponentHashDiagnostics -Actual $actual -Prefix 'Preflight component identity'
-    $alignment='already-current-v0619-r8'
-    if($kind -eq 'previous-v0618-r7'){
-        Write-LabLog 'Exact previous production v0.6.18/r7 detected. Running validated Bootstrap 1.0.6 one-edge update to v0.6.19/r8 before profiling.' 'WARN'
-        $check=Invoke-BootstrapJson -BootstrapAction 'Check'
-        if(-not [bool]$check.success -or [string]$check.installed_version -ne '0.6.18' -or [int]$check.result.edge_count -ne 1){throw 'Bootstrap Check did not prove the exact one-edge v0.6.18 -> v0.6.19 update path.'}
-        $up=Invoke-BootstrapJson -BootstrapAction 'Update'
-        if(-not [bool]$up.success -or [string]$up.transaction_status -ne 'committed'){throw 'Bootstrap Update did not commit the exact v0.6.19 production update.'}
-        $actual=Get-ComponentHashSnapshot
-        Write-ComponentHashDiagnostics -Actual $actual -Prefix 'Post-update component identity'
-        if((Get-ComponentBaselineKind $actual) -ne 'current-v0619-r8'){throw 'Bootstrap committed but final v0.6.19/r8 component identities did not match the released production set.'}
-        $alignment='auto-updated-v0618-r7-to-v0619-r8'
-    }elseif($kind -ne 'current-v0619-r8'){
+    Write-ComponentHashDiagnostics -Actual $actual -Prefix 'Read-only preflight component identity'
+    if($kind -eq 'unknown-or-partial'){
         $msg=("Unknown or partial Spotify Control component state. No production files were changed. main={0}; addon={1}; agent={2}; bootstrap={3}. Expected current main={4}, addon={5}; previous main={6}, addon={7}; shared agent={8}, bootstrap={9}." -f $actual.main,$actual.addon,$actual.agent,$actual.bootstrap,$ExpectedMainSha,$ExpectedAddonSha,$PreviousMainSha,$PreviousAddonSha,$ExpectedAgentSha,$ExpectedBootstrapSha)
         throw $msg
     }
@@ -73,6 +92,5 @@ function Assert-AcceptedRuntimeBaseline {
     if($spotifyVersion -notmatch ('^'+[regex]::Escape($ExpectedSpotifyVersion)+'(?:\.|$)')){throw "Spotify version drifted from accepted baseline: $spotifyVersion"}
     $sp=Invoke-Native -FilePath (Get-SpicetifyExe) -Arguments @('--version')
     if($sp.ExitCode -ne 0 -or [string]$sp.Output -notmatch [regex]::Escape($ExpectedSpicetifyVersion)){throw "Spicetify version drifted from accepted baseline: $($sp.Output)"}
-    if(-not(Wait-ControlWorkersIdle 30)){throw 'Spotify Control maintenance became active after production alignment.'}
-    return [pscustomobject]@{spotify_control_version='0.6.19';addon_manager_version='0.6.5-r8';spotify_version=$spotifyVersion;spicetify_version=$ExpectedSpicetifyVersion;hashes=$actual;production_alignment=$alignment}
+    return [pscustomobject]@{baseline_kind=$kind;spotify_control_version=$(if($kind -eq 'current-v0619-r8'){'0.6.19'}else{'0.6.18'});addon_manager_version=$(if($kind -eq 'current-v0619-r8'){'0.6.5-r8'}else{'0.6.5-r7'});spotify_version=$spotifyVersion;spicetify_version=$ExpectedSpicetifyVersion;hashes=$actual}
 }
