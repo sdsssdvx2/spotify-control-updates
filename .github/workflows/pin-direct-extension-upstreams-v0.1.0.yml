@@ -1,0 +1,40 @@
+name: Pin direct extension upstream bytes v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/direct-extension-upstream-pins-v0.1.0
+    paths:
+      - '.github/workflows/pin-direct-extension-upstreams-v0.1.0.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pin-windows:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download immutable upstream extension bytes and print identities
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $popup=Join-Path $env:RUNNER_TEMP 'popupLyrics-v2.46.2.js'
+          $stars=Join-Path $env:RUNNER_TEMP 'star-ratings-33aa3d293f9fbb58d7a749a8cea10c318351e6c6.js'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/spicetify/cli/v2.46.2/Extensions/popupLyrics.js' -OutFile $popup
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/brimell/spicetify-star-ratings/33aa3d293f9fbb58d7a749a8cea10c318351e6c6/dist/star-ratings.js' -OutFile $stars
+          foreach($row in @(
+            [pscustomobject]@{Id='popupLyrics';Path=$popup;Revision='spicetify/cli@v2.46.2'},
+            [pscustomobject]@{Id='star-ratings';Path=$stars;Revision='brimell/spicetify-star-ratings@33aa3d293f9fbb58d7a749a8cea10c318351e6c6'}
+          )) {
+            $size=[int64](Get-Item -LiteralPath $row.Path).Length
+            $sha=(Get-FileHash -LiteralPath $row.Path -Algorithm SHA256).Hash.ToLowerInvariant()
+            Write-Host ("PIN {0} revision={1} size={2} sha256={3}" -f $row.Id,$row.Revision,$size,$sha)
+          }
+          node --check $popup
+          if($LASTEXITCODE -ne 0){ throw 'popupLyrics upstream JS parse failed.' }
+          node --check $stars
+          if($LASTEXITCODE -ne 0){ throw 'Star Ratings upstream JS parse failed.' }
+          Write-Host 'DIRECT_EXTENSION_UPSTREAM_PINS_PASS'
