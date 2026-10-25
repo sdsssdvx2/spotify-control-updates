@@ -52,7 +52,7 @@ jobs:
           if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Integrated v0.5.2 failed PowerShell 5.1 parse.'}
           $s=Get-Content $p -Raw
           foreach($bad in @('keybd_event','SpotifyControlMediaKeys','Send-MediaKey','[byte]0xB0','[byte]0xB3')){if($s.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "Legacy global media-key surface survived: $bad"}}
-          foreach($good in @('TrySkipNextAsync','TryPlayAsync','TryPauseAsync','SPOTIFY_NEXT_CONFIRMED','SpotifyControlAudioSession','CaptureAndMute','Restore-SpotifyAudioForTest','global_media_keys_used=$false','$NextOffsets = @(5,13,21)','$TransitionSeconds = 27','$PlaybackWarmupSeconds = 8')){if($s.IndexOf($good,[StringComparison]::Ordinal)-lt0){throw "Missing v0.5.2 integrated contract: $good"}}
+          foreach($good in @('$Version = "0.5.2"','TrySkipNextAsync','TryPlayAsync','TryPauseAsync','SPOTIFY_NEXT_CONFIRMED','SpotifyControlAudioSession','CaptureAndMute','Restore-SpotifyAudioForTest','global_media_keys_used=$false','$NextOffsets = @(5,13,21)','$TransitionSeconds = 27','$PlaybackWarmupSeconds = 8')){if($s.IndexOf($good,[StringComparison]::Ordinal)-lt0){throw "Missing v0.5.2 integrated contract: $good"}}
           Write-Host 'V052_INTEGRATED_MEDIA_ISOLATION_PASS'
       - name: Profiler self-test
         shell: powershell
@@ -61,7 +61,7 @@ jobs:
           powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File phase2-v052/track-transition-direct-patch-acceptance.ps1 -Action SelfTest
           if($LASTEXITCODE-ne0){throw "v0.5.2 SelfTest failed: $LASTEXITCODE"}
           Write-Host 'V052_SELFTEST_PASS'
-      - name: Revalidate immutable patch engine behavior
+      - name: Download immutable upstream fixtures and revalidate patch engine behavior
         shell: powershell
         run: |
           $repoEngine=(Get-FileHash performance/direct-extension-patches/apply-direct-extension-patches.ps1 -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -70,7 +70,14 @@ jobs:
           $repoTargets=(Get-FileHash performance/direct-extension-patches/targets.json -Algorithm SHA256).Hash.ToLowerInvariant()
           $pkgTargets=(Get-FileHash phase2-v052/targets.json -Algorithm SHA256).Hash.ToLowerInvariant()
           if($repoTargets-ne$pkgTargets -or $pkgTargets-ne'9b49d43bb8ff568f9e1a4f7009e2958edce0f77b857d948e563b81bb514aefa3'){throw 'Patch targets identity changed.'}
-          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/direct-extension-patches/tests/test-direct-extension-patches.ps1
+          $popup=Join-Path $env:RUNNER_TEMP 'popupLyrics-v2.46.2.js';$stars=Join-Path $env:RUNNER_TEMP 'star-ratings-33aa3d293f9fbb58d7a749a8cea10c318351e6c6.js'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/spicetify/cli/v2.46.2/Extensions/popupLyrics.js' -OutFile $popup
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/brimell/spicetify-star-ratings/33aa3d293f9fbb58d7a749a8cea10c318351e6c6/dist/star-ratings.js' -OutFile $stars
+          if((Get-Item $popup).Length-ne39553 -or (Get-FileHash $popup -Algorithm SHA256).Hash.ToLowerInvariant()-ne'2b280aea8514bd15044c36403257ca6ac21f1f98e6798beb4aa319bf19a70e4f'){throw 'Popup fixture mismatch.'}
+          if((Get-Item $stars).Length-ne43396 -or (Get-FileHash $stars -Algorithm SHA256).Hash.ToLowerInvariant()-ne'198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1'){throw 'Star fixture mismatch.'}
+          node performance/direct-extension-patches/tests/test-behavior.js
+          if($LASTEXITCODE-ne0){throw 'Behavior policy test failed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/direct-extension-patches/tests/test-direct-extension-patches.ps1 -PopupFixture $popup -StarFixture $stars
           if($LASTEXITCODE-ne0){throw 'Direct patch regression failed.'}
           Write-Host 'V052_PATCH_REGRESSION_PASS'
       - name: Deterministic rebuild
