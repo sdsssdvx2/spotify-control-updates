@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "target": {
+    "id": "star-ratings-observer-debounce-v1",
+    "relative_path": "extensions/sc-star-ratings.js",
+    "source_repository": "brimell/spicetify-star-ratings",
+    "source_revision": "33aa3d293f9fbb58d7a749a8cea10c318351e6c6",
+    "expected_size": 43396,
+    "expected_sha256": "198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1",
+    "transformed_sha256": "6e0d1c84408294a619d91191eec83a6d10794ef31093d31ccf1f1bd39ea8c8a3"
+  }
+}
