@@ -3,14 +3,17 @@ param(
     [string]$Mode = 'Audit',
     [string]$XpuiRoot,
     [string]$ProvenancePath,
-    [string]$StateRoot
+    [string]$StateRoot,
+    [string]$TargetMetadataPath
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$TargetsPath = Join-Path $ScriptRoot 'targets\pithaya-optional-custom-apps.json'
+if (-not $TargetMetadataPath) {
+    $TargetMetadataPath = Join-Path $ScriptRoot 'targets\pithaya-optional-custom-apps.json'
+}
 $LoaderSource = Join-Path $ScriptRoot 'lazy-custom-app-loader.js'
 $LoaderRelativePath = 'extensions/spotify-control-performance-overlay.v010.js'
 $OverlayMarkerPrefix = 'spotify-control-performance-overlay:lazy:'
@@ -84,26 +87,51 @@ function Get-TrustedTarget([object]$Provenance, [string]$Id) {
     return $property.Value
 }
 
+function Get-OptionalProperty([object]$Object, [string]$Name) {
+    if (-not $Object) { return $null }
+    $property = $Object.PSObject.Properties[$Name]
+    if (-not $property) { return $null }
+    return $property.Value
+}
+
 function Get-TagPattern([string]$ExtensionPath) {
     $escaped = [Text.RegularExpressions.Regex]::Escape($ExtensionPath)
     return '<script\b(?=[^>]*\bsrc\s*=\s*["''](?:\./)?' + $escaped + '["''])[^>]*>\s*</script\s*>'
 }
 
-function Get-Plan([string]$IndexText, [object]$TargetsDoc, [object]$Provenance) {
+function Get-Plan([string]$IndexText, [object]$TargetsDoc, [object]$Provenance, [string]$XpuiRoot) {
     $results = New-Object Collections.Generic.List[object]
     $options = [Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [Text.RegularExpressions.RegexOptions]::Singleline
     foreach ($target in @($TargetsDoc.targets)) {
         $trusted = Get-TrustedTarget $Provenance $target.id
         $reason = $null
         $eligible = $true
+        $activeExtensionPath = Join-Path $XpuiRoot ([string]$target.extension_path -replace '/', '\')
+        $activeSize = $null
+        $activeSha = $null
+
         if (-not $trusted) {
-            $eligible = $false; $reason = 'missing-local-provenance'
-        } elseif ($trusted.trust -ne 'exact-local-tree') {
-            $eligible = $false; $reason = 'local-provenance-not-exact'
-        } elseif ($trusted.trusted_revision -ne $target.dist_revision) {
+            $eligible = $false; $reason = 'missing-active-extension-provenance'
+        } elseif ((Get-OptionalProperty $trusted 'trust') -ne 'exact-active-extension') {
+            $eligible = $false; $reason = 'active-extension-provenance-not-exact'
+        } elseif ((Get-OptionalProperty $trusted 'trusted_revision') -ne $target.dist_revision) {
             $eligible = $false; $reason = 'revision-changed-skip-optimization'
-        } elseif ($trusted.source -and $trusted.source -ne $TargetsDoc.distribution_repository) {
+        } elseif ((Get-OptionalProperty $trusted 'source') -ne $TargetsDoc.distribution_repository) {
             $eligible = $false; $reason = 'source-changed-skip-optimization'
+        } elseif ((Get-OptionalProperty $trusted 'observed_sha256') -ne $target.extension_sha256) {
+            $eligible = $false; $reason = 'provenance-extension-sha256-mismatch'
+        } elseif ([int64](Get-OptionalProperty $trusted 'observed_size') -ne [int64]$target.extension_size) {
+            $eligible = $false; $reason = 'provenance-extension-size-mismatch'
+        } elseif (-not (Test-Path -LiteralPath $activeExtensionPath -PathType Leaf)) {
+            $eligible = $false; $reason = 'active-extension-absent-after-provenance'
+        } else {
+            $activeSize = [int64](Get-Item -LiteralPath $activeExtensionPath).Length
+            $activeSha = Get-FileSha256 $activeExtensionPath
+            if ($activeSize -ne [int64]$target.extension_size) {
+                $eligible = $false; $reason = 'active-extension-size-changed-after-provenance'
+            } elseif ($activeSha -ne [string]$target.extension_sha256) {
+                $eligible = $false; $reason = 'active-extension-sha256-changed-after-provenance'
+            }
         }
 
         $pattern = Get-TagPattern $target.extension_path
@@ -114,11 +142,15 @@ function Get-Plan([string]$IndexText, [object]$TargetsDoc, [object]$Provenance) 
         $results.Add([pscustomobject]@{
             id = $target.id
             eligible = $eligible
-            reason = $(if ($eligible) { 'exact-provenance-and-hook' } else { $reason })
+            reason = $(if ($eligible) { 'exact-active-extension-and-hook' } else { $reason })
             match_count = $matches.Count
             pattern = $pattern
             extension_path = $target.extension_path
             dist_revision = $target.dist_revision
+            expected_extension_size = [int64]$target.extension_size
+            active_extension_size = $activeSize
+            expected_extension_sha256 = [string]$target.extension_sha256
+            active_extension_sha256 = $activeSha
             route_prefixes = @($target.route_prefixes)
             readiness = $target.readiness
         })
@@ -163,9 +195,9 @@ function Write-JsonUtf8([string]$Path, [object]$Value) {
     [IO.File]::WriteAllBytes($Path, $bytes)
 }
 
-if (-not (Test-Path -LiteralPath $TargetsPath)) { throw "Target metadata missing: $TargetsPath" }
+if (-not (Test-Path -LiteralPath $TargetMetadataPath)) { throw "Target metadata missing: $TargetMetadataPath" }
 if (-not (Test-Path -LiteralPath $LoaderSource)) { throw "Loader missing: $LoaderSource" }
-$targetsDoc = Get-Content -LiteralPath $TargetsPath -Raw | ConvertFrom-Json
+$targetsDoc = Get-Content -LiteralPath $TargetMetadataPath -Raw | ConvertFrom-Json
 $loaderSha = Get-FileSha256 $LoaderSource
 
 if ($Mode -eq 'Restore') {
@@ -210,7 +242,7 @@ if (-not (Test-Path -LiteralPath $indexPath)) { throw "xpui index missing: $inde
 if (-not $ProvenancePath -or -not (Test-Path -LiteralPath $ProvenancePath)) { throw 'ProvenancePath is required and must exist for Audit/Apply.' }
 $provenance = Get-Content -LiteralPath $ProvenancePath -Raw | ConvertFrom-Json
 $index = Read-Utf8Exact $indexPath
-$plan = Get-Plan $index.Text $targetsDoc $provenance
+$plan = Get-Plan $index.Text $targetsDoc $provenance $XpuiRoot
 
 if ($Mode -eq 'Audit') {
     [pscustomobject]@{ status = 'audited'; mode = 'Audit'; index_sha256 = Get-BytesSha256 $index.Bytes; targets = $plan } | ConvertTo-Json -Depth 16
