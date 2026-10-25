@@ -1,1 +1,1 @@
-Retrigger Windows validation after the exact one-line audio guard accessibility correction.
+Retrigger Windows validation after the exact audio guard compile fix and integrated v0.5.3 version identity correction.
