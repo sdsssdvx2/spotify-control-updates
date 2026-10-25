@@ -1,0 +1,103 @@
+name: Validate Performance Phase 2 v0.5.5 Counterbalanced
+on:
+  push:
+    branches:
+      - validate/performance-phase2-v0.5.5-counterbalanced
+    paths:
+      - 'validation/performance-phase2-v0.5.5/**'
+      - '.github/workflows/validate-performance-phase2-v055-counterbalanced.yml'
+  pull_request:
+    paths:
+      - 'validation/performance-phase2-v0.5.5/**'
+      - '.github/workflows/validate-performance-phase2-v055-counterbalanced.yml'
+permissions:
+  contents: read
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Prove validation-only scope
+        shell: powershell
+        run: |
+          $base='29d6c52c6a79559e513b367ec57edcccebae5fd0'
+          git cat-file -e "$base^{commit}"
+          $changed=@(git diff --name-only "$base...HEAD")
+          $bad=@($changed|Where-Object{$_ -notlike 'validation/performance-phase2-v0.5.5/*' -and $_ -ne '.github/workflows/validate-performance-phase2-v055-counterbalanced.yml'})
+          if($bad.Count){throw "Validation branch touched production/out-of-scope files: $($bad -join ', ')"}
+          Write-Host 'PHASE2_V055_SCOPE_PASS'
+      - name: Build exact deterministic package
+        shell: powershell
+        run: |
+          python validation/performance-phase2-v0.5.5/build_v055.py
+          if($LASTEXITCODE -ne 0){throw "v0.5.5 build failed: $LASTEXITCODE"}
+          $zip='SpotifyControl-Production-Lazy-Overlay-Counterbalanced-Revalidation-v0.5.5.zip'
+          $script='phase2-v055-unpacked\track-transition-overlay-counterbalanced-revalidation.ps1'
+          if(Test-Path phase2-v055-unpacked){Remove-Item phase2-v055-unpacked -Recurse -Force}
+          Expand-Archive -LiteralPath $zip -DestinationPath phase2-v055-unpacked
+          $scriptSize=(Get-Item $script).Length
+          $scriptHash=(Get-FileHash $script -Algorithm SHA256).Hash.ToLowerInvariant()
+          $zipSize=(Get-Item $zip).Length
+          $zipHash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($scriptSize -ne 126657 -or $scriptHash -ne 'e3d6ed2af97adf1c7e97a1286b100ea856bdedf730922899b25f107040513909'){throw "Generated script identity drifted: $scriptSize/$scriptHash"}
+          if($zipSize -ne 159982 -or $zipHash -ne 'ce7d5e6642c44df64b13310f808ce3575c92d6aff419c2f7689afcebcd652d76'){throw "Generated package identity drifted: $zipSize/$zipHash"}
+          Write-Host "PHASE2_V055_IMMUTABLE_IDENTITY_PASS package_size=$zipSize package_sha=$zipHash script_size=$scriptSize script_sha=$scriptHash"
+      - name: PowerShell 5.1 parse and static safety contract
+        shell: powershell
+        run: |
+          $p='phase2-v055-unpacked\track-transition-overlay-counterbalanced-revalidation.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error ("line {0}: {1}" -f $_.Extent.StartLineNumber,$_.Message)};throw 'Generated v0.5.5 failed PowerShell 5.1 parse.'}
+          $s=Get-Content $p -Raw
+          foreach($x in @('TrySkipNextAsync','SPOTIFY_NEXT_CONFIRMED','RegisterSessionNotification','WaitForSpotifyCapture(5000,5)','current-v0620-r9','williams-counterbalanced-4x4','A,B,D,C','B,C,A,D','C,D,B,A','D,A,C,B','verified_transitions_expected=48','production_overlay_state_unchanged_exact','extension_payloads_mutated=$false','global_media_keys_used=$false')){if($s.IndexOf($x,[StringComparison]::Ordinal) -lt 0){throw "Missing v0.5.5 safety/runtime contract: $x"}}
+          foreach($x in @('keybd_event','SpotifyControlMediaKeys','Send-MediaKey','[byte]0xB0','[byte]0xB3')){if($s.IndexOf($x,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Legacy global media-key surface survived: $x"}}
+          $labStart=$s.IndexOf('function Invoke-Lab {')
+          if($labStart -lt 0){throw 'Invoke-Lab was not found in generated v0.5.5 script.'}
+          $labEnd=$s.IndexOf("`r`nfunction ",$labStart+20)
+          if($labEnd -lt 0){$labEnd=$s.IndexOf("`nfunction ",$labStart+20)}
+          if($labEnd -lt 0){$labEnd=$s.IndexOf("`r`ntry{",$labStart+20)}
+          if($labEnd -lt 0){$labEnd=$s.IndexOf("`ntry{",$labStart+20)}
+          if($labEnd -lt 0){$labEnd=$s.Length}
+          $lab=$s.Substring($labStart,$labEnd-$labStart)
+          foreach($x in @('Assert-DirectPatchEligibility','Invoke-DirectPatchEngine','Write-PatchSubsetMetadata','PatchMetadataPaths')){if($lab.IndexOf($x,[StringComparison]::Ordinal) -ge 0){throw "Direct-patch path survived in v0.5.5 Invoke-Lab: $x"}}
+          if($lab.IndexOf('variantCount -ne 16',[StringComparison]::Ordinal) -lt 0){throw 'Invoke-Lab does not enforce the exact 16-condition matrix.'}
+          Write-Host 'PHASE2_V055_PS51_STATIC_PASS'
+      - name: Verify exact packaged production overlay sources
+        shell: powershell
+        run: |
+          $expected=@{
+            'phase2-v055-unpacked\overlay\apply-overlay.ps1'='053a597e834aab959a588350160ce81046ceda66e2a2ac233eeff8af78fea544'
+            'phase2-v055-unpacked\overlay\lazy-custom-app-loader.js'='c38af0f6266747f50d2a0c05e9a49d5ffb34135738715fab6321ff4ae79623d9'
+            'phase2-v055-unpacked\overlay\targets.json'='c255e53066abbd730467e0c1d92e81dd907e1ea2f245daf6f0d080d2239fea35'
+          }
+          foreach($p in $expected.Keys){$h=(Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant();if($h -ne $expected[$p]){throw "Overlay source identity mismatch: $p $h"}}
+          $t=Get-Content phase2-v055-unpacked\overlay\targets.json -Raw|ConvertFrom-Json
+          if((@($t.targets|ForEach-Object{$_.id}|Sort-Object)-join ',') -ne 'better-local-files,playlist-maker'){throw 'Packaged production overlay target set drifted.'}
+          Write-Host 'PHASE2_V055_OVERLAY_SOURCE_PASS'
+      - name: Run generated counterbalanced real-engine SelfTest
+        shell: powershell
+        env:
+          SPOTIFYCONTROL_TEST_RESIDUAL_CLEANUP: '0'
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File phase2-v055-unpacked\track-transition-overlay-counterbalanced-revalidation.ps1 -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw "v0.5.5 SelfTest failed: $LASTEXITCODE"}
+      - name: Verify internal checksums and deterministic rebuild
+        shell: powershell
+        run: |
+          foreach($line in Get-Content phase2-v055-unpacked\SHA256SUMS.txt){if($line -notmatch '^([0-9a-f]{64})  (.+)$'){throw "Bad checksum row: $line"};$p=Join-Path phase2-v055-unpacked ($Matches[2]-replace '/','\');$h=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant();if($h -ne $Matches[1]){throw "Checksum mismatch: $($Matches[2])"}}
+          $zip='SpotifyControl-Production-Lazy-Overlay-Counterbalanced-Revalidation-v0.5.5.zip';$size1=(Get-Item $zip).Length;$sha1=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          python validation/performance-phase2-v0.5.5/build_v055.py
+          if($LASTEXITCODE -ne 0){throw 'Second deterministic build failed.'}
+          $size2=(Get-Item $zip).Length;$sha2=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($size1 -ne $size2 -or $sha1 -ne $sha2){throw "Non-deterministic v0.5.5 package: $size1/$sha1 vs $size2/$sha2"}
+          if($size2 -ne 159982 -or $sha2 -ne 'ce7d5e6642c44df64b13310f808ce3575c92d6aff419c2f7689afcebcd652d76'){throw "Second build no longer matches immutable artifact identity: $size2/$sha2"}
+          Write-Host "PHASE2_V055_DETERMINISTIC_IDENTITY_PASS size=$size2 sha=$sha2"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-Production-Lazy-Overlay-Counterbalanced-Revalidation-v0.5.5
+          path: SpotifyControl-Production-Lazy-Overlay-Counterbalanced-Revalidation-v0.5.5.zip
+          if-no-files-found: error
+          retention-days: 14
