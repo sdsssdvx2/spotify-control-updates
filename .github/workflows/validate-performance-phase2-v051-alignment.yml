@@ -20,7 +20,7 @@ permissions:
 jobs:
   validate-windows:
     runs-on: windows-2025
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -89,3 +89,58 @@ jobs:
           python validation/v0.6.19/build_v0619.py --validate-published
           if($LASTEXITCODE -ne 0){throw 'Published v0.6.19 transport validation failed.'}
           Write-Host 'V051_PUBLISHED_TRANSPORT_PASS'
+
+      - name: Build exact integrated v0.5.1 package
+        shell: powershell
+        run: |
+          python validation/performance-phase2-v0.5.1/build_v051.py
+          if($LASTEXITCODE -ne 0){throw 'v0.5.1 deterministic assembly failed.'}
+          $zip='SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.1.zip'
+          if((Get-Item $zip).Length -ne 97408){throw 'Unexpected v0.5.1 package size.'}
+          $sha=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sha -ne '7217fc3c8a1c6effd330280bf3c60e13f580a13260f208a2436801106390263f'){throw "Unexpected v0.5.1 package SHA: $sha"}
+          Expand-Archive -LiteralPath $zip -DestinationPath phase2-v051 -Force
+          foreach($line in Get-Content phase2-v051/SHA256SUMS.txt){
+            if($line -notmatch '^([0-9a-f]{64})  (.+)$'){throw "Bad SHA256SUMS row: $line"}
+            $actual=(Get-FileHash -LiteralPath (Join-Path 'phase2-v051' $Matches[2]) -Algorithm SHA256).Hash.ToLowerInvariant()
+            if($actual -ne $Matches[1]){throw "Checksum mismatch: $($Matches[2])"}
+          }
+          Write-Host 'V051_EXACT_PACKAGE_IDENTITY_PASS'
+
+      - name: Integrated PowerShell 5.1 parser static ordering and self-test
+        shell: powershell
+        run: |
+          $path='phase2-v051/track-transition-direct-patch-acceptance.ps1'
+          if((Get-Item $path).Length -ne 77641){throw 'Unexpected integrated profiler size.'}
+          $sha=(Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sha -ne '065bf91e4ea2928b38877da2f9b9ca0d1cd1505375ff8514bac6a2b70265370f'){throw "Unexpected integrated profiler SHA: $sha"}
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Integrated v0.5.1 profiler failed PowerShell 5.1 parse.'}
+          $s=Get-Content $path -Raw
+          $suspend=$s.IndexOf('Suspend-Resident',[StringComparison]::Ordinal)
+          $align=$s.IndexOf('$script:ProductionAlignment=Align-ReleasedProductionBaseline -Accepted $accepted',[StringComparison]::Ordinal)
+          $snapshot=$s.IndexOf('$script:OriginalConfigHash=Get-Sha256Lower $ConfigPath',[StringComparison]::Ordinal)
+          if($suspend-lt0 -or $align-le$suspend -or $snapshot-le$align){throw 'Production alignment ordering is not suspend -> align -> snapshot.'}
+          if($s.IndexOf('production_alignment_precedes_snapshot=$true',[StringComparison]::Ordinal)-lt0){throw 'Production alignment report marker missing.'}
+          $env:SPOTIFYCONTROL_TEST_RESIDUAL_CLEANUP='1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $path -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw "Integrated v0.5.1 SelfTest failed: $LASTEXITCODE"}
+          Write-Host 'V051_INTEGRATED_PS51_SELFTEST_PASS'
+
+      - name: Deterministic rebuild identity
+        shell: powershell
+        run: |
+          $before=(Get-FileHash 'SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.1.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+          python validation/performance-phase2-v0.5.1/build_v051.py
+          $after=(Get-FileHash 'SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.1.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($before-ne$after -or $after-ne'7217fc3c8a1c6effd330280bf3c60e13f580a13260f208a2436801106390263f'){throw "v0.5.1 deterministic rebuild mismatch: $before / $after"}
+          Write-Host 'V051_DETERMINISTIC_REBUILD_PASS'
+
+      - name: Upload exact v0.5.1 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.1
+          path: SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.1.zip
+          if-no-files-found: error
+          retention-days: 14
