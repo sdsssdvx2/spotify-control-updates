@@ -1,0 +1,23 @@
+name: Inspect v0.6.19 Addon Manager integration points
+
+on:
+  push:
+    branches:
+      - release/v0.6.19-performance-overlay
+    paths:
+      - 'validation/v0.6.19/**'
+      - '.github/workflows/inspect-v0.6.19-addon.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reconstruct exact current Addon Manager and print integration contexts
+        shell: powershell
+        run: python validation/v0.6.19/inspect_current_addon.py
