@@ -15,6 +15,9 @@ def body(name):
 
 names=re.findall(r'(?m)^function\s+([A-Za-z0-9_-]+)\s*\{',s)
 print('FUNCTIONS',','.join(names))
-for n in names:
-    if any(k in n.lower() for k in ['media','spotify','transition','workload']):
-        body(n)
+for n in ['Prepare-Variant','Stop-SpotifyForVariant','Wait-SpotifyReady','Add-MediaKeyType','Send-MediaKey','Get-RoleSnapshot','Measure-TransitionCondition','Analyze-Transitions','Get-WorkloadPolicy','Average-TwoMetricSummaries','Build-Comparison','Build-TextReport','Invoke-SelfTest','Show-Status','Invoke-Lab']:
+    body(n)
+print('\n===== CONSTANTS =====')
+for line in s.splitlines():
+    if any(tok in line for tok in ['$TransitionSeconds','$SampleIntervalMs','$NextOffsets','$TransitionWindowSeconds','$WarmupSeconds']):
+        print(line)
