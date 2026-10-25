@@ -1,0 +1,117 @@
+name: Validate Performance Phase 2 v0.5.8 Media-Command-Free Idle
+on:
+  push:
+    branches:
+      - validate/performance-phase2-v0.5.8-idle
+    paths:
+      - 'validation/performance-phase2-v0.5.8/**'
+      - '.github/workflows/validate-performance-phase2-v058-idle.yml'
+  pull_request:
+    paths:
+      - 'validation/performance-phase2-v0.5.8/**'
+      - '.github/workflows/validate-performance-phase2-v058-idle.yml'
+permissions:
+  contents: read
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Prove validation-only scope
+        shell: powershell
+        run: |
+          $base='29d6c52c6a79559e513b367ec57edcccebae5fd0'
+          git cat-file -e "$base^{commit}"
+          $changed=@(git diff --name-only "$base...HEAD")
+          $bad=@($changed|Where-Object{$_ -notlike 'validation/performance-phase2-v0.5.8/*' -and $_ -ne '.github/workflows/validate-performance-phase2-v058-idle.yml'})
+          if($bad.Count){throw "Validation branch touched production/out-of-scope files: $($bad -join ', ')"}
+          if($changed.Count -ne 3){throw "Expected exactly 3 validation-only files, found $($changed.Count): $($changed -join ', ')"}
+          Write-Host 'PHASE2_V058_SCOPE_PASS'
+      - name: Build exact deterministic package
+        shell: powershell
+        run: |
+          python validation/performance-phase2-v0.5.8/build_v058.py
+          if($LASTEXITCODE -ne 0){throw "v0.5.8 build failed: $LASTEXITCODE"}
+          $zip='SpotifyControl-Production-Lazy-Overlay-Media-Command-Free-Idle-Revalidation-v0.5.8.zip'
+          $unpack='phase2-v058-unpacked'
+          $script=Join-Path $unpack 'idle-overlay-media-command-free-revalidation.ps1'
+          if(Test-Path $unpack){Remove-Item $unpack -Recurse -Force}
+          Expand-Archive -LiteralPath $zip -DestinationPath $unpack
+          $scriptSize=(Get-Item $script).Length
+          $scriptHash=(Get-FileHash $script -Algorithm SHA256).Hash.ToLowerInvariant()
+          $zipSize=(Get-Item $zip).Length
+          $zipHash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($scriptSize -ne 126577 -or $scriptHash -ne 'd14c88e4a992c432328005d4651901b1be5ea748ce41542a95b53dbe3e49b8d4'){throw "Generated script identity drifted: $scriptSize/$scriptHash"}
+          if($zipSize -ne 42627 -or $zipHash -ne '26729442ad1bc85916fa561cea3a85830cf1e88686afad6615eb2aab93ba26c5'){throw "Generated package identity drifted: $zipSize/$zipHash"}
+          Write-Host "PHASE2_V058_IMMUTABLE_IDENTITY_PASS package_size=$zipSize package_sha=$zipHash script_size=$scriptSize script_sha=$scriptHash"
+      - name: PowerShell 5.1 parse and zero-media-command static contract
+        shell: powershell
+        run: |
+          $p='phase2-v058-unpacked\idle-overlay-media-command-free-revalidation.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error ("line {0}: {1}" -f $_.Extent.StartLineNumber,$_.Message)};throw 'Generated v0.5.8 failed PowerShell 5.1 parse.'}
+          $s=Get-Content $p -Raw
+          foreach($x in @('media-command-free-idle','Measure-IdleCondition','Assert-SpotifyIdleGuardV058','Start-SpotifyIdleGuardedSessionV058','SetMasterVolume(0.0f','GetMasterVolume(out level)','GetMute(out muted)','CallbackFailureCount','WS_EX_NOACTIVATE','SpotifyControlProcessFreeze','SuspendAll()','spotify_play_command_used=$false','spotify_next_command_used=$false','spotify_pause_command_used=$false','verified_media_commands_expected=0','production_overlay_state_unchanged_exact','extension_payloads_mutated=$false','global_media_keys_used=$false')){if($s.IndexOf($x,[StringComparison]::Ordinal) -lt 0){throw "Missing v0.5.8 safety/runtime contract: $x"}}
+          foreach($x in @('TryPlayAsync','TryPauseAsync','TrySkipNextAsync','Invoke-SpotifyMediaCommand','Invoke-SpotifyGuardedNextV057','-Command Play','-Command Pause','-Command Next',"ValidateSet('Pause','Next')",'keybd_event','SpotifyControlMediaKeys','Send-MediaKey','[byte]0xB0','[byte]0xB3')){if($s.IndexOf($x,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Forbidden media-control surface survived: $x"}}
+          function Get-FunctionText([string]$name){
+            $start=$s.IndexOf("function $name {")
+            if($start -lt 0){throw "Function missing: $name"}
+            $end=$s.IndexOf("`r`nfunction ",$start+20)
+            if($end -lt 0){$end=$s.IndexOf("`nfunction ",$start+20)}
+            if($end -lt 0){$end=$s.IndexOf("`r`ntry{",$start+20)}
+            if($end -lt 0){$end=$s.IndexOf("`ntry{",$start+20)}
+            if($end -lt 0){$end=$s.Length}
+            return $s.Substring($start,$end-$start)
+          }
+          $prep=Get-FunctionText 'Prepare-Variant'
+          $arm=$prep.IndexOf('Arm-SpotifySilentGuard',[StringComparison]::Ordinal)
+          $launch=$prep.IndexOf('Start-SpotifyHiddenForVariant',[StringComparison]::Ordinal)
+          if($arm -lt 0 -or $launch -lt 0 -or $arm -ge $launch){throw 'Audio guard is not armed before Spotify launch.'}
+          $measure=Get-FunctionText 'Measure-IdleCondition'
+          foreach($bad in @('TryPauseAsync','TrySkipNextAsync','Invoke-SpotifyMediaCommand','Restore-SpotifyAudioForTest')){if($measure.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Idle measurement contains forbidden operation: $bad"}}
+          foreach($need in @('Refresh-SpotifySilentForTest','Get-SpotifyPlaybackStatusV058','unexpectedly entered Playing','IsSpotifyForeground','Get-RoleSnapshot')){if($measure.IndexOf($need,[StringComparison]::Ordinal) -lt 0){throw "Idle measurement invariant missing: $need"}}
+          $stop=Get-FunctionText 'Stop-SpotifyForVariant'
+          $suspend=$stop.IndexOf('SuspendAll()',[StringComparison]::Ordinal)
+          $restore=$stop.IndexOf('Restore-SpotifyAudioForTest',[StringComparison]::Ordinal)
+          $kill=$stop.IndexOf('Stop-Process -Force',[StringComparison]::Ordinal)
+          if($suspend -lt 0 -or $restore -lt 0 -or $kill -lt 0 -or $suspend -ge $restore -or $restore -ge $kill){throw 'Suspended shutdown ordering is not Suspend -> exact audio restore -> terminate.'}
+          Write-Host 'PHASE2_V058_PS51_ZERO_MEDIA_COMMAND_STATIC_PASS'
+      - name: Verify exact packaged production overlay sources
+        shell: powershell
+        run: |
+          $expected=@{
+            'phase2-v058-unpacked\overlay\apply-overlay.ps1'='053a597e834aab959a588350160ce81046ceda66e2a2ac233eeff8af78fea544'
+            'phase2-v058-unpacked\overlay\lazy-custom-app-loader.js'='c38af0f6266747f50d2a0c05e9a49d5ffb34135738715fab6321ff4ae79623d9'
+            'phase2-v058-unpacked\overlay\targets.json'='c255e53066abbd730467e0c1d92e81dd907e1ea2f245daf6f0d080d2239fea35'
+          }
+          foreach($p in $expected.Keys){$h=(Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant();if($h -ne $expected[$p]){throw "Overlay source identity mismatch: $p $h"}}
+          $t=Get-Content phase2-v058-unpacked\overlay\targets.json -Raw|ConvertFrom-Json
+          if((@($t.targets|ForEach-Object{$_.id}|Sort-Object)-join ',') -ne 'better-local-files,playlist-maker'){throw 'Packaged production overlay target set drifted.'}
+          Write-Host 'PHASE2_V058_OVERLAY_SOURCE_PASS'
+      - name: Run generated Windows real-engine and guard SelfTest
+        shell: powershell
+        env:
+          SPOTIFYCONTROL_TEST_RESIDUAL_CLEANUP: '0'
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File phase2-v058-unpacked\idle-overlay-media-command-free-revalidation.ps1 -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw "v0.5.8 SelfTest failed: $LASTEXITCODE"}
+      - name: Verify internal checksums and deterministic rebuild
+        shell: powershell
+        run: |
+          foreach($line in Get-Content phase2-v058-unpacked\SHA256SUMS.txt){if($line -notmatch '^([0-9a-f]{64})  (.+)$'){throw "Bad checksum row: $line"};$p=Join-Path phase2-v058-unpacked ($Matches[2]-replace '/','\');$h=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant();if($h -ne $Matches[1]){throw "Checksum mismatch: $($Matches[2])"}}
+          $zip='SpotifyControl-Production-Lazy-Overlay-Media-Command-Free-Idle-Revalidation-v0.5.8.zip';$size1=(Get-Item $zip).Length;$sha1=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          python validation/performance-phase2-v0.5.8/build_v058.py
+          if($LASTEXITCODE -ne 0){throw 'Second deterministic build failed.'}
+          $size2=(Get-Item $zip).Length;$sha2=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($size1 -ne $size2 -or $sha1 -ne $sha2){throw "Non-deterministic v0.5.8 package: $size1/$sha1 vs $size2/$sha2"}
+          if($size2 -ne 42627 -or $sha2 -ne '26729442ad1bc85916fa561cea3a85830cf1e88686afad6615eb2aab93ba26c5'){throw "Second build no longer matches immutable artifact identity: $size2/$sha2"}
+          Write-Host "PHASE2_V058_DETERMINISTIC_IDENTITY_PASS size=$size2 sha=$sha2"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-Production-Lazy-Overlay-Media-Command-Free-Idle-Revalidation-v0.5.8
+          path: SpotifyControl-Production-Lazy-Overlay-Media-Command-Free-Idle-Revalidation-v0.5.8.zip
+          if-no-files-found: error
+          retention-days: 14
