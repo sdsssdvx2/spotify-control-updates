@@ -2,8 +2,8 @@ from pathlib import Path
 import subprocess, io, zipfile, hashlib, shutil
 BASE_COMMIT='e07a2e720d0887b7a55879c2b0cd66ecfade41cc'
 BASE_PATH='validation/performance-phase2-v0.4.0/SpotifyControl-Track-Transition-Single-Hook-Isolation-v0.4.0.zip'
-BASE_SIZE=65773
-BASE_SHA='da5b43521883973d783913e571476e342ae64d616c67e7f6eb592f3d013d1549'
+BASE_SIZE=19764
+BASE_SHA='ac014e2f5621d8460d307a5df689ce11f9378ba9504b894c5ed54e29b87b3a1d'
 OUT='SpotifyControl-Track-Transition-Single-Hook-Isolation-v0.4.1.zip'
 def sha(b): return hashlib.sha256(b).hexdigest()
 
@@ -18,6 +18,7 @@ with zipfile.ZipFile(io.BytesIO(base)) as z:
     f={n:z.read(n) for n in z.namelist()}
 
 s=f['track-transition-isolation.ps1'].decode('utf-8-sig').replace('\r\n','\n')
+s=replace1(s,'    $presentationTags=@($themeHooks.tag+$cssHooks.tag)','    $presentationTags=@(@($themeHooks|ForEach-Object{$_.tag})+@($cssHooks|ForEach-Object{$_.tag}))')
 for a,b in [
  ('# Spotify Control Track Transition Single-Hook Isolation v0.4.0','# Spotify Control Track Transition Single-Hook Isolation v0.4.1'),
  ('$Version = "0.4.0"','$Version = "0.4.1"'),
