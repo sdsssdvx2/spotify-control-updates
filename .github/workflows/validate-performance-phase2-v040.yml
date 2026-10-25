@@ -1,0 +1,146 @@
+name: Validate Performance Phase 2 v0.4.0 single-hook profiler
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'validation/performance-phase2-v0.4.0/**'
+      - '.github/workflows/validate-performance-phase2-v040.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-powershell51-phase2-v040:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build exact deterministic v0.4.0 package
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path('validation/performance-phase2-v0.4.0/build_and_validate.py', run_name='__main__')
+
+      - name: Static fail-closed single-hook safety audit
+        shell: python
+        run: |
+          from pathlib import Path
+          import re, hashlib
+          p=Path('phase2-v040/track-transition-isolation.ps1')
+          b=p.read_bytes()
+          assert len(b)==59270, len(b)
+          assert hashlib.sha256(b).hexdigest()=='ce7c4f56e4d206653cbe91969bb43cb81ebb2be074e15530b50a268821877548'
+          s=b.decode('utf-8-sig')
+          required=[
+            '$Version = "0.4.0"',
+            '5ff7990564287bc409626d8835e27679fb8de434868443313be42fdc0d9cce3b',
+            '27783abc40c446aadf6f2a9373b4525ada89759075f37e934958c8e449f2d98f',
+            'b7d1a4bc7707533400402fe42e60d724f88656c2477d4d4a5c0f47be60f47977',
+            '2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278',
+            'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6',
+            '$ExpectedSpotifyVersion = "1.3.6.1921"',
+            '$ExpectedSpicetifyVersion = "2.46.2"',
+            "mutation_engine='direct-active-xpui-single-hook-index-tags'",
+            'Build-SingleHookVariantMatrix','Write-IndexVariantAtomic','Restore-OriginalXpui','Get-TreeFingerprint',
+            'SINGLE_','PRESENTATION_HOOKS_OFF','BASELINE_A','BASELINE_B',
+            'baseline_cpu_confidence','baseline_memory_confidence','single_hook_ranking',
+            'track-transition-single-hook-latest.json','track-transition-single-hook-error.log',
+            'performance-phase2-single-hook-v040',
+            'ivLyrics','tagify','splitify',
+            'SYNTHETIC_RESTORE_FAILURE_INJECTION',
+            'spicetify_apply_used=$false','spicetify_config_mutated=$false',
+            'Residual Spotify process cleanup failed before xpui mutation.',
+          ]
+          for x in required:
+              assert x in s, x
+          for old in ['DIRECT_EXTENSIONS_OFF','OPTIONAL_CUSTOM_APP_HOOKS_OFF','MARKETPLACE_HOOKS_OFF','ALL_KNOWN_HOOKS_OFF','NEAR_CORE']:
+              assert old not in s, old
+          assert 'function Write-IndexVariantAtomic {function' not in s
+          assert 'function Show-Status {function' not in s
+          assert 'switch($Action)try{' not in s
+          assert 'function Invoke-Spicetify' not in s
+          native_calls=[line.strip() for line in s.splitlines() if 'Invoke-Native ' in line and not line.lstrip().startswith('function ')]
+          assert len(native_calls)==2, native_calls
+          assert any('robocopy' in x.lower() for x in native_calls), native_calls
+          assert any("@('--version')" in x for x in native_calls), native_calls
+          for x in native_calls:
+              low=x.lower()
+              assert ' apply' not in low and ' backup' not in low and ' restore' not in low and ' config ' not in low, x
+          assert not re.search(r'(?im)^\s*spicetify(?:\.exe)?\s+(?:apply|backup|restore|config)\b',s)
+          assert not re.search(r'(?im)Invoke-Native[^\r\n]*-Arguments\s+@\([^\r\n]*(?:apply|backup|restore|config)',s)
+          remove_lines=[line.strip() for line in s.splitlines() if 'Remove-Item ' in line]
+          assert len(remove_lines)==3, remove_lines
+          assert all(any(tok in x for tok in ('$tmp','$old','$fakeRoot')) for x in remove_lines), remove_lines
+          for bad in ['Remove-AppxPackage','Unregister-ScheduledTask','Disable-ScheduledTask','spicetify restore backup','Please re-install Spotify']:
+              assert bad not in s, bad
+          print('PHASE2_V040_STATIC_SAFETY_AUDIT_PASS')
+          print('NATIVE_CALLS',native_calls)
+          print('REMOVE_LINES',remove_lines)
+
+      - name: Windows PowerShell 5.1 parser and synthetic restore/residual SelfTest
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $scriptPath=(Resolve-Path '.\phase2-v040\track-transition-isolation.ps1').Path
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($scriptPath,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'PowerShell 5.1 parser rejected v0.4.0 profiler.'}
+          $sandbox=Join-Path $env:RUNNER_TEMP 'phase2-v040-selftest'
+          Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $sandbox | Out-Null
+          $env:LOCALAPPDATA=Join-Path $sandbox 'LocalAppData'
+          $env:APPDATA=Join-Path $sandbox 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA | Out-Null
+          $env:SPOTIFYCONTROL_TEST_RESIDUAL_CLEANUP='1'
+          $out=& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Action SelfTest 2>&1
+          $code=$LASTEXITCODE
+          $out|ForEach-Object{Write-Host $_}
+          if($code -ne 0){throw "Phase 2 v0.4.0 SelfTest failed with exit $code"}
+          $joined=($out -join "`n")
+          $required=@(
+            'SELFTEST PASS: synthetic failure injection restored exact index/tree/config via production restore function.',
+            'SELFTEST PASS: residual Spotify process cleanup before xpui mutation.',
+            'SELFTEST PASS: single-hook hook inventory/matrix, UTF-8 BOM+CRLF preservation, exact tree restore, failure injection, percentile/process/transition math.'
+          )
+          foreach($marker in $required){if($joined -notmatch [regex]::Escape($marker)){throw "Expected SelfTest marker missing: $marker"}}
+          if(Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'SpotifyControl')){throw 'SelfTest mutated a production-shaped SpotifyControl path.'}
+          Write-Host 'PHASE2_V040_WINDOWS_PS51_SELFTEST_PASS'
+
+      - name: Verify exact final ZIP identity CRC checksums and text controls
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib,zipfile
+          p=Path('SpotifyControl-Track-Transition-Single-Hook-Isolation-v0.4.0.zip')
+          data=p.read_bytes()
+          assert len(data)==19764,len(data)
+          assert hashlib.sha256(data).hexdigest()=='ac014e2f5621d8460d307a5df689ce11f9378ba9504b894c5ed54e29b87b3a1d'
+          with zipfile.ZipFile(p) as z:
+              assert z.testzip() is None
+              assert sorted(z.namelist())==sorted(['README.md','RUN_TRACK_TRANSITION_ISOLATION.cmd','SELFTEST.cmd','SHA256SUMS.txt','track-transition-isolation.ps1'])
+              lines=z.read('SHA256SUMS.txt').decode('ascii').splitlines()
+              assert len(lines)==4
+              for line in lines:
+                  h,name=line.split('  ',1)
+                  assert hashlib.sha256(z.read(name)).hexdigest()==h,(name,h)
+              script=z.read('track-transition-isolation.ps1')
+              assert len(script)==59270
+              assert hashlib.sha256(script).hexdigest()=='ce7c4f56e4d206653cbe91969bb43cb81ebb2be074e15530b50a268821877548'
+              for name in z.namelist():
+                  if not name.lower().endswith(('.md','.cmd','.ps1','.txt')): continue
+                  b=z.read(name)
+                  assert not [i for i,x in enumerate(b) if x==13 and (i+1>=len(b) or b[i+1]!=10)], name
+                  assert b'\t' not in b, name
+          print('PHASE2_V040_FINAL_ZIP_PASS',len(data),hashlib.sha256(data).hexdigest())
+          print('PHASE2_V040_FINAL_TEXT_CONTROL_SCAN_PASS')
+
+      - name: Upload exact validated Phase 2 v0.4.0 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-Track-Transition-Single-Hook-Isolation-v0.4.0
+          path: SpotifyControl-Track-Transition-Single-Hook-Isolation-v0.4.0.zip
+          if-no-files-found: error
+          compression-level: 0
