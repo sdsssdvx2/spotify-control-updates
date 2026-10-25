@@ -57,6 +57,8 @@ async function main() {
     const p2 = controller.ensureLoaded(betterLocal);
     assert.strictEqual(p1, p2, 'concurrent ensureLoaded calls must deduplicate');
     assert.strictEqual(controller.getState('better-local-files'), 'loading');
+    await delay();
+    assert.strictEqual(typeof resolveLoad, 'function', 'synthetic load resolver must be installed after promise microtask');
     resolveLoad();
     await Promise.all([p1, p2]);
     assert.strictEqual(loadCalls, 1);
@@ -80,6 +82,8 @@ async function main() {
     overlay.installHistoryGuard(history, guardController);
     history.push('/better-local-files');
     assert.strictEqual(calls.length, 0, 'target navigation must wait for original extension');
+    await delay();
+    assert.strictEqual(typeof resolveGuardLoad, 'function', 'guard load resolver must be installed after promise microtask');
     resolveGuardLoad();
     await delay();
     await delay();
