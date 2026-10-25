@@ -1,0 +1,167 @@
+name: Validate Spotify Control v0.6.20 Release
+
+on:
+  push:
+    branches:
+      - release/v0.6.20-star-ratings-performance
+    paths:
+      - 'performance/star-ratings/**'
+      - 'validation/v0.6.20/**'
+      - 'validation/v0.6.20-bootstrap-e2e/**'
+      - 'packages/v0.6.20/**'
+      - 'manifest.json'
+      - '.github/workflows/prepare-v0.6.20-release.yml'
+      - '.github/workflows/validate-v0.6.20-release.yml'
+      - '.github/workflows/validate-v0.6.20-bootstrap-e2e.yml'
+      - '.github/workflows/validate-v0.6.20-bootstrap-main-e2e.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'performance/star-ratings/**'
+      - 'validation/v0.6.20/**'
+      - 'validation/v0.6.20-bootstrap-e2e/**'
+      - 'packages/v0.6.20/**'
+      - 'manifest.json'
+      - '.github/workflows/prepare-v0.6.20-release.yml'
+      - '.github/workflows/validate-v0.6.20-release.yml'
+      - '.github/workflows/validate-v0.6.20-bootstrap-e2e.yml'
+      - '.github/workflows/validate-v0.6.20-bootstrap-main-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove exact release scope
+        shell: powershell
+        run: |
+          $base='6e2dd5cec54ca795457935d6bee83f63d39722bf'
+          git cat-file -e "$base^{commit}"
+          $changed=@(git diff --name-only "$base...HEAD")
+          $unexpected=@($changed|Where-Object{
+            $_ -notlike 'performance/star-ratings/*' -and
+            $_ -notlike 'validation/v0.6.20/*' -and
+            $_ -notlike 'validation/v0.6.20-bootstrap-e2e/*' -and
+            $_ -notlike 'packages/v0.6.20/*' -and
+            $_ -ne 'manifest.json' -and
+            $_ -ne '.github/workflows/prepare-v0.6.20-release.yml' -and
+            $_ -ne '.github/workflows/validate-v0.6.20-release.yml' -and
+            $_ -ne '.github/workflows/validate-v0.6.20-bootstrap-e2e.yml' -and
+            $_ -ne '.github/workflows/validate-v0.6.20-bootstrap-main-e2e.yml'
+          })
+          if($unexpected.Count){throw "Unexpected v0.6.20 release files: $($unexpected -join ', ')"}
+          $raw=@(git ls-files 'validation/v0.6.20/out/**')
+          if($raw.Count){throw "Raw generated candidates must not be committed: $($raw -join ', ')"}
+          Write-Host 'V0620_RELEASE_SCOPE_PASS'
+
+      - name: Validate published manifest and immutable transports
+        shell: powershell
+        run: |
+          python validation/v0.6.20/build_v0620.py --validate-published
+          if($LASTEXITCODE -ne 0){throw 'Published v0.6.20 validation failed.'}
+
+      - name: Rebuild exact candidates deterministically
+        shell: powershell
+        run: |
+          python validation/v0.6.20/build_v0620.py --build
+          if($LASTEXITCODE -ne 0){throw 'Deterministic v0.6.20 build failed.'}
+          git diff --exit-code -- packages/v0.6.20 validation/v0.6.20/candidate-metadata.json
+          if($LASTEXITCODE -ne 0){throw 'Committed v0.6.20 transports differ from deterministic rebuild.'}
+
+      - name: Verify exact manifest identities
+        shell: powershell
+        run: |
+          $m=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($m.latest_version -ne '0.6.20'){throw "Unexpected latest_version: $($m.latest_version)"}
+          if($m.min_bootstrap_version -ne '1.0.6'){throw 'min_bootstrap_version changed.'}
+          if($m.bootstrap.version -ne '1.0.6' -or $m.bootstrap.sha256 -ne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' -or [int64]$m.bootstrap.size -ne 42963){throw 'Bootstrap 1.0.6 contract changed.'}
+          if($m.source_commit -ne '3543ee39bd9afa353a4d276c2b6b0f86dccafd74'){throw "Unexpected source_commit: $($m.source_commit)"}
+          if($m.payload_set_sha256 -ne '65bf8dff2f563ce5caf80f660db64b1f6b34ced3029c24dfbfa3463f2ba3bf52'){throw 'Unexpected v0.6.20 payload set.'}
+          $main=@($m.latest_files|Where-Object path -eq 'bin/spotify-control.ps1');$addon=@($m.latest_files|Where-Object path -eq 'bin/addon-manager.ps1');$agent=@($m.latest_files|Where-Object path -eq 'bin/spotify-control-agent.vbs')
+          if($main.Count -ne 1 -or [int64]$main[0].size -ne 281585 -or $main[0].sha256 -ne 'e9f0181756cfb84c505c30f54b6067e321f6d178d3a1936489714b8f4441ba18'){throw 'v0.6.20 main identity mismatch.'}
+          if($addon.Count -ne 1 -or [int64]$addon[0].size -ne 225044 -or $addon[0].sha256 -ne '3a20fcd552b363ebc05e26854a8fe010ffe50e5c756ebd3d7fca54011e8a8b86'){throw 'Addon Manager r9 identity mismatch.'}
+          if($agent.Count -ne 1 -or [int64]$agent[0].size -ne 4855 -or $agent[0].sha256 -ne '2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278'){throw 'Resident agent changed.'}
+          $edge=@($m.updates|Where-Object{$_.from_version -eq '0.6.19' -and $_.to_version -eq '0.6.20'})
+          if($edge.Count -ne 1 -or @($edge[0].patches).Count -ne 2){throw 'Exact v0.6.19 -> v0.6.20 edge missing or ambiguous.'}
+          Write-Host 'V0620_MANIFEST_IDENTITY_PASS'
+
+      - name: Verify runtime-acceptance decision and exact Star target
+        shell: powershell
+        run: |
+          $meta=Get-Content validation/v0.6.20/candidate-metadata.json -Raw|ConvertFrom-Json
+          if($meta.runtime_acceptance.profiler_version -ne '0.5.3' -or $meta.runtime_acceptance.baseline_confidence -ne 'high'){throw 'Runtime acceptance provenance changed.'}
+          if([double]$meta.runtime_acceptance.baseline_cpu_p95_drift_points -ne 0.33 -or [double]$meta.runtime_acceptance.baseline_renderer_p95_drift_points -ne 1.36){throw 'Baseline confidence metrics changed.'}
+          if([double]$meta.runtime_acceptance.star_cpu_p95_saving_points -ne 2.22 -or [double]$meta.runtime_acceptance.star_renderer_p95_saving_points -ne 1.66){throw 'Accepted Star Ratings savings changed.'}
+          if($meta.runtime_acceptance.popup_promoted -ne $false -or $meta.runtime_acceptance.combined_promoted -ne $false -or [double]$meta.runtime_acceptance.combined_cpu_p95_saving_points -ne -0.99){throw 'Popup/combined rejection decision changed.'}
+          if($meta.star_ratings.active_original.size -ne 43396 -or $meta.star_ratings.active_original.sha256 -ne '198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1'){throw 'Pinned Star Ratings original identity changed.'}
+          if($meta.star_ratings.transformed_sha256 -ne '6e0d1c84408294a619d91191eec83a6d10794ef31093d31ccf1f1bd39ea8c8a3'){throw 'Pinned transformed Star Ratings identity changed.'}
+          if($meta.star_ratings.source_revision -ne '33aa3d293f9fbb58d7a749a8cea10c318351e6c6'){throw 'Star Ratings source revision changed.'}
+          if($meta.star_ratings.engine.sha256 -ne '5c6945e0ec78845dad80062dd88521e841ebbaab57844f5c8abe1eca8c71932c' -or [int64]$meta.star_ratings.engine.size -ne 12199){throw 'Star Ratings engine identity changed.'}
+          Write-Host 'V0620_ACCEPTANCE_AND_TARGET_PASS'
+
+      - name: PowerShell 5.1 parser and candidate contract
+        shell: powershell
+        run: |
+          $files=@(
+            'validation/v0.6.20/out/bin/spotify-control.ps1',
+            'validation/v0.6.20/out/bin/addon-manager.ps1',
+            'performance/star-ratings/apply-star-ratings-patch.ps1',
+            'validation/v0.6.20-bootstrap-e2e/run_bootstrap_cycle.ps1',
+            'validation/v0.6.20-bootstrap-e2e/run_bootstrap_main_cycle.ps1'
+          )
+          foreach($file in $files){$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw "PowerShell parser failed: $file"}}
+          $main=Get-Content validation/v0.6.20/out/bin/spotify-control.ps1
+          if($main[0] -ne '# Spotify Control v0.6.20 Star Ratings Performance' -or @($main|Where-Object{$_ -eq '$ScriptVersion = "0.6.20"'}).Count -ne 1){throw 'v0.6.20 main marker mismatch.'}
+          $addon=Get-Content validation/v0.6.20/out/bin/addon-manager.ps1 -Raw
+          if($addon.IndexOf('$Version = "0.6.5-r9"',[StringComparison]::Ordinal) -lt 0){throw 'Addon Manager r9 marker missing.'}
+          if(([regex]::Matches($addon,'Invoke-StarRatingsPerformanceBestEffort -Reason')).Count -ne 3 -or ([regex]::Matches($addon,'Invoke-PerformanceOverlayBestEffort -Reason')).Count -ne 3){throw 'Production hook count mismatch.'}
+          $checkStart=$addon.IndexOf('"Check" {',[StringComparison]::Ordinal);$updateStart=$addon.IndexOf('"Update" {',[StringComparison]::Ordinal);$check=$addon.Substring($checkStart,$updateStart-$checkStart)
+          if($check.Contains('Invoke-StarRatingsPerformanceBestEffort') -or $check.Contains('Invoke-PerformanceOverlayBestEffort')){throw 'Check action must remain mutation-free.'}
+          $mainRunner=Get-Content validation/v0.6.20-bootstrap-e2e/run_bootstrap_main_cycle.ps1 -Raw
+          if($mainRunner.IndexOf('spotify-control-self-updater-ci-local-manifest.ps1',[StringComparison]::OrdinalIgnoreCase) -ge 0 -or $mainRunner.IndexOf('http://127.0.0.1',[StringComparison]::OrdinalIgnoreCase) -ge 0){throw 'Post-merge main runner must use unmodified Bootstrap and production main manifest only.'}
+          Write-Host 'V0620_POWERSHELL51_PASS'
+
+      - name: Download immutable Star Ratings fixture and validate transactional engine
+        shell: powershell
+        run: |
+          $fixture=Join-Path $env:RUNNER_TEMP 'star-ratings-33aa3d293f9fbb58d7a749a8cea10c318351e6c6.js'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/brimell/spicetify-star-ratings/33aa3d293f9fbb58d7a749a8cea10c318351e6c6/dist/star-ratings.js' -OutFile $fixture
+          if((Get-Item $fixture).Length -ne 43396 -or (Get-FileHash $fixture -Algorithm SHA256).Hash.ToLowerInvariant() -ne '198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1'){throw 'Immutable Star Ratings fixture mismatch.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/star-ratings/tests/test-star-ratings-patch.ps1 -FixturePath $fixture
+          if($LASTEXITCODE -ne 0){throw 'Star Ratings transactional regression failed.'}
+
+      - name: Candidate Addon Manager read-only SelfTest
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/v0.6.20/out/bin/addon-manager.ps1 -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Addon Manager r9 SelfTest failed.'}
+
+      - name: Existing v0.6.19 overlay regressions remain green
+        shell: powershell
+        run: |
+          node --check performance/overlay/lazy-custom-app-loader.js
+          node performance/overlay/tests/test-loader.js
+          if($LASTEXITCODE -ne 0){throw 'Existing overlay loader regression failed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/overlay/tests/test-overlay.ps1
+          if($LASTEXITCODE -ne 0){throw 'Existing overlay PowerShell regression failed.'}
+
+      - name: Final protected-surface and fail-open invariants
+        shell: powershell
+        run: |
+          $surface=(Get-Content performance/star-ratings/apply-star-ratings-patch.ps1 -Raw)+"`n"+(Get-Content performance/star-ratings/target.json -Raw)+"`n"+(Get-Content validation/v0.6.20/star_ratings_wrapper.ps1.inc -Raw)
+          foreach($bad in @('popupLyrics','ivLyrics','tagify','splitify','sc-cover-ambience','SC Cover Ambience','user.css','colors.css','Marketplace','spicetify apply','spicetify backup','spicetify restore','config-xpui.ini','\Browser\','\Default\')){if($surface.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Forbidden Star Ratings optimization surface: $bad"}}
+          $engine=Get-Content performance/star-ratings/apply-star-ratings-patch.ps1 -Raw
+          foreach($required in @('active-bytes-not-exact-pinned-upstream','toctou-active-bytes-changed','conflict-newer-or-unknown-active-bytes','original.bin','Write-BytesAtomic')){if($engine.IndexOf($required,[StringComparison]::Ordinal) -lt 0){throw "Missing fail-open/transactional invariant: $required"}}
+          $target=Get-Content performance/star-ratings/target.json -Raw|ConvertFrom-Json
+          if($target.target.id -ne 'star-ratings-observer-debounce-v1'){throw 'Unexpected Star Ratings target id.'}
+          Write-Host 'V0620_FINAL_SAFETY_PASS'
