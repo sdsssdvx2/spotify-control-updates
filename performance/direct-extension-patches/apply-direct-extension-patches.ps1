@@ -79,59 +79,27 @@ function Replace-ExactOnce([string]$Text,[string]$Old,[string]$New,[string]$Labe
 
 function Transform-PopupLyrics([string]$Text) {
     $nl=$(if($Text.Contains("`r`n")){"`r`n"}else{"`n"});$tab="`t"
-    $old=@(
-        $tab+'let workerIsRunning = null;',
-        $tab+'document.addEventListener("visibilitychange", (e) => {',
-        $tab+$tab+'if (e.target.hidden) {',
-        $tab+$tab+$tab+'if (!workerIsRunning) {',
-        $tab+$tab+$tab+$tab+'worker.postMessage("popup-lyric-request-update");',
-        $tab+$tab+$tab+$tab+'workerIsRunning = true;',
-        $tab+$tab+$tab+'}',
-        $tab+$tab+'} else {',
-        $tab+$tab+$tab+'if (workerIsRunning) {',
-        $tab+$tab+$tab+$tab+'worker.postMessage("popup-lyric-stop-update");',
-        $tab+$tab+$tab+$tab+'workerIsRunning = false;',
-        $tab+$tab+$tab+'}',
-        $tab+$tab+'}',
-        $tab+'});'
-    ) -join $nl
-    $new=@(
-        $tab+'let workerIsRunning = false;',
-        $tab+'function syncWorkerState() {',
-        $tab+$tab+'const shouldRun = lyricVideoIsOpen && document.hidden;',
-        $tab+$tab+'if (shouldRun === workerIsRunning) return;',
-        $tab+$tab+'worker.postMessage(shouldRun ? "popup-lyric-request-update" : "popup-lyric-stop-update");',
-        $tab+$tab+'workerIsRunning = shouldRun;',
-        $tab+'}',
-        $tab+'document.addEventListener("visibilitychange", syncWorkerState);'
-    ) -join $nl
-    $Text=Replace-ExactOnce $Text $old $new 'popup visibility worker gate'
+    $Text=Replace-ExactOnce $Text ($tab+$tab+'if (e.target.hidden) {') ($tab+$tab+'if (e.target.hidden && lyricVideoIsOpen) {') 'popup hidden worker start gate'
 
-    $old2=@(
-        $tab+'lyricVideo.onenterpictureinpicture = () => {',
-        $tab+$tab+'lyricVideo.play();',
+    $enterOld=$tab+$tab+'lyricVideoIsOpen = true;'
+    $enterNew=@(
         $tab+$tab+'lyricVideoIsOpen = true;',
-        $tab+$tab+'tick(userConfigs);',
-        $tab+$tab+'updateTrack();',
-        $tab+'};',
-        $tab+'lyricVideo.onleavepictureinpicture = () => {',
-        $tab+$tab+'lyricVideoIsOpen = false;',
-        $tab+'};'
+        $tab+$tab+'if (document.hidden && !workerIsRunning) {',
+        $tab+$tab+$tab+'worker.postMessage("popup-lyric-request-update");',
+        $tab+$tab+$tab+'workerIsRunning = true;',
+        $tab+$tab+'}'
     ) -join $nl
-    $new2=@(
-        $tab+'lyricVideo.onenterpictureinpicture = () => {',
-        $tab+$tab+'lyricVideo.play();',
-        $tab+$tab+'lyricVideoIsOpen = true;',
-        $tab+$tab+'syncWorkerState();',
-        $tab+$tab+'tick(userConfigs);',
-        $tab+$tab+'updateTrack();',
-        $tab+'};',
-        $tab+'lyricVideo.onleavepictureinpicture = () => {',
+    $Text=Replace-ExactOnce $Text $enterOld $enterNew 'popup PiP enter hidden worker start'
+
+    $leaveOld=$tab+$tab+'lyricVideoIsOpen = false;'
+    $leaveNew=@(
         $tab+$tab+'lyricVideoIsOpen = false;',
-        $tab+$tab+'syncWorkerState();',
-        $tab+'};'
+        $tab+$tab+'if (workerIsRunning) {',
+        $tab+$tab+$tab+'worker.postMessage("popup-lyric-stop-update");',
+        $tab+$tab+$tab+'workerIsRunning = false;',
+        $tab+$tab+'}'
     ) -join $nl
-    return Replace-ExactOnce $Text $old2 $new2 'popup PiP lifecycle worker sync'
+    return Replace-ExactOnce $Text $leaveOld $leaveNew 'popup PiP leave worker stop'
 }
 
 function Transform-StarRatings([string]$Text) {
