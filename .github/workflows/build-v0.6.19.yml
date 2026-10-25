@@ -30,17 +30,44 @@ jobs:
           if ($main -ne '635358a620a9d28d99a52571085558906af967b6') { throw "Frozen production main moved unexpectedly: $main" }
           Write-Host "FROZEN_PRODUCTION_PASS $main"
 
-      - name: Correct builder hook-count assertion source
+      - name: Correct builder one-time source defects
         shell: powershell
         run: |
           $path='validation/v0.6.19/build_v0619.py'
           $text=[IO.File]::ReadAllText($path)
-          $old="assert text.count('Invoke-PerformanceOverlayBestEffort -Reason')==4  # function definition + 3 calls"
-          $new="assert text.count('Invoke-PerformanceOverlayBestEffort -Reason')==3  # exactly three production hook calls"
-          if(-not $text.Contains($old)) { throw 'Expected one-time builder assertion source not found.' }
-          $text=$text.Replace($old,$new)
+
+          $oldHook="assert text.count('Invoke-PerformanceOverlayBestEffort -Reason')==4  # function definition + 3 calls"
+          $newHook="assert text.count('Invoke-PerformanceOverlayBestEffort -Reason')==3  # exactly three production hook calls"
+          if($text.Contains($oldHook)) {
+            $text=$text.Replace($oldHook,$newHook)
+          } elseif(-not $text.Contains($newHook)) {
+            throw 'Builder hook-count assertion is neither known-old nor known-corrected form.'
+          }
+
+          $oldManifest=@'
+    latest={x['path']:x for x in m['latest_files']}
+    latest['bin/spotify-control.ps1']=meta['candidate_main']
+    latest['bin/addon-manager.ps1']=meta['candidate_addon']
+    assert latest['bin/spotify-control-agent.vbs']==meta['agent']
+'@
+          $newManifest=@'
+    original_latest={x['path']:x for x in m['latest_files']}
+    assert original_latest['bin/spotify-control-agent.vbs']==meta['agent']
+    m['latest_files']=[
+        meta['candidate_main'] if x['path']=='bin/spotify-control.ps1'
+        else meta['candidate_addon'] if x['path']=='bin/addon-manager.ps1'
+        else x
+        for x in m['latest_files']
+    ]
+'@
+          if($text.Contains($oldManifest)) {
+            $text=$text.Replace($oldManifest,$newManifest)
+          } elseif(-not $text.Contains($newManifest)) {
+            throw 'Builder latest_files publication block is neither known-old nor known-corrected form.'
+          }
+
           [IO.File]::WriteAllText($path,$text,(New-Object Text.UTF8Encoding($false)))
-          Write-Host 'V0619_BUILDER_ASSERTION_SOURCE_CORRECTED'
+          Write-Host 'V0619_BUILDER_SOURCE_CORRECTIONS_PASS'
 
       - name: Build exact v0.6.19 and r8 candidates
         shell: powershell
