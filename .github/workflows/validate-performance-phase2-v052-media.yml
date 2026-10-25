@@ -1,0 +1,48 @@
+name: Validate Performance Phase 2 v0.5.2 Media Control
+
+on:
+  push:
+    branches:
+      - validate/performance-phase2-v0.5.2
+    paths:
+      - 'validation/performance-phase2-v0.5.2/runtime_media_v052.ps1.inc'
+      - '.github/workflows/validate-performance-phase2-v052-media.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'validation/performance-phase2-v0.5.2/runtime_media_v052.ps1.inc'
+      - '.github/workflows/validate-performance-phase2-v052-media.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: PowerShell 5.1 parse and no global media-key contract
+        shell: powershell
+        run: |
+          $p='validation/performance-phase2-v0.5.2/runtime_media_v052.ps1.inc'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'v0.5.2 media helper failed PowerShell 5.1 parse.'}
+          $s=Get-Content $p -Raw
+          foreach($required in @('GlobalSystemMediaTransportControlsSessionManager','TrySkipNextAsync','TryPlayAsync','TryPauseAsync','TryGetMediaPropertiesAsync','Wait-SpotifyTrackChange','SpotifyControlAudioSession','CaptureAndMute','Restore-SpotifyAudioForTest','other applications are untouched')){if($s.IndexOf($required,[StringComparison]::Ordinal)-lt0){throw "Missing media-control contract: $required"}}
+          foreach($forbidden in @('keybd_event','0xB0','0xB3','Send-MediaKey')){if($s.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "Global media-key surface survived in v0.5.2 helper: $forbidden"}}
+          Write-Host 'V052_MEDIA_STATIC_CONTRACT_PASS'
+      - name: Compile CoreAudio helper and load WinRT types
+        shell: powershell
+        run: |
+          function Write-LabLog { param([string]$Message,[string]$Level='INFO') Write-Host "[$Level] $Message" }
+          . ./validation/performance-phase2-v0.5.2/runtime_media_v052.ps1.inc
+          Add-SpotifyAudioSessionType
+          if(-not ('SpotifyControlAudioSession' -as [type])){throw 'SpotifyControlAudioSession type did not compile.'}
+          $null=[Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager,Windows.Media.Control,ContentType=WindowsRuntime]
+          $generic=@([System.WindowsRuntimeSystemExtensions].GetMethods()|Where-Object{$_.Name -eq 'AsTask' -and $_.IsGenericMethodDefinition -and $_.GetParameters().Count -eq 1})
+          if($generic.Count-lt1){throw 'WinRT AsTask<T> bridge unavailable.'}
+          try { Initialize-SpotifyWinRtMedia; Write-Host ('V052_WINRT_MANAGER_PASS sessions='+@($script:SpotifyMediaManager.GetSessions()).Count) } catch { Write-Host ('V052_WINRT_MANAGER_HEADLESS_WARNING '+$_.Exception.Message) }
+          Write-Host 'V052_COREAUDIO_COMPILE_PASS'
