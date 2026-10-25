@@ -36,7 +36,7 @@ jobs:
       - name: Build v0.5.2 package from exact v0.5.1 provenance
         shell: powershell
         run: |
-          python validation/performance-phase2-v0.5.2/build_v052.py
+          python validation/performance-phase2-v0.5.2/build_v052_final.py
           if($LASTEXITCODE-ne0){throw 'v0.5.2 builder failed.'}
           $zip='SpotifyControl-Track-Transition-Silent-Targeted-Acceptance-v0.5.2.zip'
           Expand-Archive -LiteralPath $zip -DestinationPath phase2-v052 -Force
@@ -78,7 +78,7 @@ jobs:
         run: |
           $zip='SpotifyControl-Track-Transition-Silent-Targeted-Acceptance-v0.5.2.zip'
           $a=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant();$len=(Get-Item $zip).Length
-          python validation/performance-phase2-v0.5.2/build_v052.py
+          python validation/performance-phase2-v0.5.2/build_v052_final.py
           if($LASTEXITCODE-ne0){throw 'Second v0.5.2 build failed.'}
           $b=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant();if($a-ne$b -or $len-ne(Get-Item $zip).Length){throw "Non-deterministic v0.5.2 build: $a / $b"}
           Write-Host "V052_DETERMINISTIC_PASS size=$len sha=$b"
