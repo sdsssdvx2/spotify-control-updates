@@ -1,0 +1,39 @@
+name: Fix v0.5.3 builder version identity
+
+on:
+  push:
+    branches:
+      - validate/performance-phase2-v0.5.3
+    paths:
+      - '.github/workflows/fix-v053-builder-version.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: validate/performance-phase2-v0.5.3
+          fetch-depth: 0
+      - name: Pin integrated script Version to 0.5.3
+        shell: powershell
+        run: |
+          $p='validation/performance-phase2-v0.5.3/build_v053.py'
+          $s=Get-Content $p -Raw
+          $old="s=s.replace('v0.5.2','v0.5.3').replace('v052','v053')"
+          $new="s=r1(s,'`$Version = `"0.5.2`"','`$Version = `"0.5.3`"')`r`n$old"
+          if($s.Contains($new)){
+            Write-Host 'V053_BUILDER_VERSION_ALREADY_FIXED'
+            exit 0
+          }
+          if(-not $s.Contains($old)){throw 'Expected v0.5.3 version transform anchor not found.'}
+          $s=$s.Replace($old,$new)
+          [IO.File]::WriteAllText((Resolve-Path $p),$s,(New-Object Text.UTF8Encoding($false)))
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- $p
+          git commit -m 'Pin v0.5.3 integrated profiler version identity'
+          git push origin HEAD:validate/performance-phase2-v0.5.3
