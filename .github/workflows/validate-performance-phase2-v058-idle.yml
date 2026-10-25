@@ -29,7 +29,7 @@ jobs:
           if($bad.Count){throw "Validation branch touched production/out-of-scope files: $($bad -join ', ')"}
           if($changed.Count -ne 3){throw "Expected exactly 3 validation-only files, found $($changed.Count): $($changed -join ', ')"}
           Write-Host 'PHASE2_V058_SCOPE_PASS'
-      - name: Build deterministic Windows candidate package
+      - name: Build exact deterministic package
         shell: powershell
         run: |
           python validation/performance-phase2-v0.5.8/build_v058.py
@@ -44,8 +44,8 @@ jobs:
           $zipSize=(Get-Item $zip).Length
           $zipHash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           if($scriptSize -ne 127185 -or $scriptHash -ne 'e189dd1b5b07f54feaf6015c10501359446033cb0fa800e52e2bd83e0fef45d1'){throw "Generated script identity drifted: $scriptSize/$scriptHash"}
-          if($zipSize -ne 160175 -or $zipHash -notmatch '^[0-9a-f]{64}$'){throw "Generated package identity malformed: $zipSize/$zipHash"}
-          Write-Host "PHASE2_V058_WINDOWS_CANDIDATE_IDENTITY package_size=$zipSize package_sha=$zipHash script_size=$scriptSize script_sha=$scriptHash"
+          if($zipSize -ne 160175 -or $zipHash -ne '7d7ce45f2783347514261ec37f8b7af075f568400f568a6110e353f572777442'){throw "Generated package identity drifted: $zipSize/$zipHash"}
+          Write-Host "PHASE2_V058_IMMUTABLE_IDENTITY_PASS package_size=$zipSize package_sha=$zipHash script_size=$scriptSize script_sha=$scriptHash"
       - name: PowerShell 5.1 parse and zero-media-command static contract
         shell: powershell
         run: |
@@ -107,7 +107,7 @@ jobs:
         run: |
           powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File phase2-v058-unpacked\idle-overlay-media-command-free-revalidation.ps1 -Action SelfTest
           if($LASTEXITCODE -ne 0){throw "v0.5.8 SelfTest failed: $LASTEXITCODE"}
-      - name: Verify internal checksums and deterministic Windows rebuild
+      - name: Verify internal checksums and deterministic rebuild
         shell: powershell
         run: |
           foreach($line in Get-Content phase2-v058-unpacked\SHA256SUMS.txt){if($line -notmatch '^([0-9a-f]{64})  (.+)$'){throw "Bad checksum row: $line"};$p=Join-Path phase2-v058-unpacked ($Matches[2]-replace '/','\');$h=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant();if($h -ne $Matches[1]){throw "Checksum mismatch: $($Matches[2])"}}
@@ -116,8 +116,8 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Second deterministic build failed.'}
           $size2=(Get-Item $zip).Length;$sha2=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           if($size1 -ne $size2 -or $sha1 -ne $sha2){throw "Non-deterministic Windows v0.5.8 package: $size1/$sha1 vs $size2/$sha2"}
-          if($size2 -ne 160175){throw "Second build size drifted: $size2/$sha2"}
-          Write-Host "PHASE2_V058_WINDOWS_DETERMINISTIC_CANDIDATE_PASS size=$size2 sha=$sha2"
+          if($size2 -ne 160175 -or $sha2 -ne '7d7ce45f2783347514261ec37f8b7af075f568400f568a6110e353f572777442'){throw "Second build no longer matches immutable Windows artifact identity: $size2/$sha2"}
+          Write-Host "PHASE2_V058_DETERMINISTIC_IDENTITY_PASS size=$size2 sha=$sha2"
       - uses: actions/upload-artifact@v4
         with:
           name: SpotifyControl-Production-Lazy-Overlay-Media-Command-Free-Idle-Revalidation-v0.5.8
