@@ -85,6 +85,8 @@ jobs:
       - name: Candidate Addon Manager read-only SelfTest
         shell: powershell
         run: |
+          $spotifyRoot=Join-Path $env:LOCALAPPDATA 'Spotify'
+          New-Item -ItemType Directory -Force -Path $spotifyRoot | Out-Null
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/v0.6.19/out/bin/addon-manager.ps1' -Action SelfTest
           if($LASTEXITCODE -ne 0) { throw "Candidate Addon Manager SelfTest failed: $LASTEXITCODE" }
 
