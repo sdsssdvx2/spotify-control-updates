@@ -1,0 +1,27 @@
+name: Inspect Performance Phase 2 v0.5.2 Runtime
+
+on:
+  push:
+    branches:
+      - validate/performance-phase2-v0.5.2
+    paths:
+      - 'validation/performance-phase2-v0.5.2/**'
+      - '.github/workflows/inspect-performance-phase2-v052-runtime.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-windows:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rebuild exact v0.5.1 and print runtime control functions
+        shell: powershell
+        run: |
+          python validation/performance-phase2-v0.5.2/inspect_v051_runtime.py
+          if($LASTEXITCODE -ne 0){throw 'v0.5.1 runtime inspection failed.'}
