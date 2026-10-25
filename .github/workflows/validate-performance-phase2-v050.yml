@@ -1,0 +1,151 @@
+name: Validate performance Phase 2 focused direct-patch v0.5.0
+
+on:
+  push:
+    branches:
+      - validate/performance-phase2-v0.5.0
+    paths:
+      - 'validation/performance-phase2-v0.5.0/**'
+      - 'performance/direct-extension-patches/**'
+      - '.github/workflows/validate-performance-phase2-v050.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/performance-phase2-v0.5.0/**'
+      - 'performance/direct-extension-patches/**'
+      - '.github/workflows/validate-performance-phase2-v050.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove frozen production surface is untouched
+        shell: powershell
+        run: |
+          $base='6e2dd5cec54ca795457935d6bee83f63d39722bf'
+          git cat-file -e "$base^{commit}"
+          $changed=@(git diff --name-only "$base...HEAD")
+          foreach($path in $changed){
+            if($path -eq 'manifest.json' -or $path.StartsWith('packages/') -or $path.StartsWith('performance/overlay/') -or $path.StartsWith('validation/v0.6.19/') -or $path.StartsWith('bin/')){
+              throw "Frozen production surface changed in validation branch: $path"
+            }
+          }
+          Write-Host 'PHASE2_V050_PRODUCTION_ISOLATION_PASS'
+
+      - name: Build deterministic focused acceptance package
+        shell: powershell
+        run: python validation/performance-phase2-v0.5.0/build_and_validate.py
+
+      - name: Expand package and verify checksums
+        shell: powershell
+        run: |
+          $zip='SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.0.zip'
+          Expand-Archive -LiteralPath $zip -DestinationPath phase2-v050 -Force
+          Push-Location phase2-v050
+          foreach($line in Get-Content SHA256SUMS.txt){
+            if($line -notmatch '^([0-9a-f]{64})  (.+)$'){throw "Bad SHA256SUMS row: $line"}
+            $actual=(Get-FileHash -LiteralPath $Matches[2] -Algorithm SHA256).Hash.ToLowerInvariant()
+            if($actual -ne $Matches[1]){throw "Checksum mismatch: $($Matches[2])"}
+          }
+          Pop-Location
+          Write-Host 'PHASE2_V050_PACKAGE_CHECKSUMS_PASS'
+
+      - name: PowerShell 5.1 parser and focused static audit
+        shell: powershell
+        run: |
+          $files=@(
+            'phase2-v050/track-transition-direct-patch-acceptance.ps1',
+            'phase2-v050/apply-direct-extension-patches.ps1',
+            'performance/direct-extension-patches/tests/test-direct-extension-patches.ps1'
+          )
+          foreach($file in $files){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw "PowerShell parser failed: $file"}
+          }
+          $profiler=Get-Content 'phase2-v050/track-transition-direct-patch-acceptance.ps1' -Raw
+          foreach($required in @(
+            '$Version = "0.5.0"',
+            '45795b9622953a10c6eca2ee2f5a19fc4467c5143d5bdf7a9f2ad64841b9416f',
+            'df17018bdb5f62f55624070d047933387f62c049dae73cf5cefcc541bc412afa',
+            'BASELINE_A','POPUP_PATCH','STAR_PATCH','BOTH_PATCHES','BASELINE_B',
+            'Assert-DirectPatchEligibility','Restore-DirectPatches',
+            "mutation_engine='exact-active-xpui-direct-extension-byte-patches'",
+            'xpui_index_mutated=$false'
+          )){if($profiler.IndexOf($required,[StringComparison]::Ordinal) -lt 0){throw "Focused profiler invariant missing: $required"}}
+          foreach($forbidden in @("Arguments @('apply'","Arguments @('backup'","Arguments @('restore'","Set-Ini","Remove-Item -LiteralPath $XpuiRoot")){
+            if($profiler.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Forbidden production mutation pattern in profiler: $forbidden"}
+          }
+          if(([regex]::Matches($profiler,"label='BASELINE_A'|label='POPUP_PATCH'|label='STAR_PATCH'|label='BOTH_PATCHES'|label='BASELINE_B'")).Count -lt 5){throw 'Focused five-condition matrix missing.'}
+          Write-Host 'PHASE2_V050_STATIC_AUDIT_PASS'
+
+      - name: Profiler self-test including residual cleanup fixture
+        shell: powershell
+        run: |
+          $env:SPOTIFYCONTROL_TEST_RESIDUAL_CLEANUP='1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'phase2-v050/track-transition-direct-patch-acceptance.ps1' -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw "v0.5.0 profiler SelfTest failed: $LASTEXITCODE"}
+
+      - name: Download and verify immutable upstream fixtures
+        shell: powershell
+        run: |
+          $popup=Join-Path $env:RUNNER_TEMP 'popupLyrics-v2.46.2.js'
+          $stars=Join-Path $env:RUNNER_TEMP 'star-ratings-33aa3d293f9fbb58d7a749a8cea10c318351e6c6.js'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/spicetify/cli/v2.46.2/Extensions/popupLyrics.js' -OutFile $popup
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/brimell/spicetify-star-ratings/33aa3d293f9fbb58d7a749a8cea10c318351e6c6/dist/star-ratings.js' -OutFile $stars
+          if((Get-Item $popup).Length -ne 39553 -or (Get-FileHash $popup -Algorithm SHA256).Hash.ToLowerInvariant() -ne '2b280aea8514bd15044c36403257ca6ac21f1f98e6798beb4aa319bf19a70e4f'){throw 'PopupLyrics pinned upstream identity mismatch.'}
+          if((Get-Item $stars).Length -ne 43396 -or (Get-FileHash $stars -Algorithm SHA256).Hash.ToLowerInvariant() -ne '198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1'){throw 'Star Ratings pinned upstream identity mismatch.'}
+          node --check $popup
+          node --check $stars
+          "POPUP_FIXTURE=$popup"|Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "STAR_FIXTURE=$stars"|Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host 'PHASE2_V050_PINNED_FIXTURES_PASS'
+
+      - name: Direct extension behavior policy tests
+        shell: powershell
+        run: node performance/direct-extension-patches/tests/test-behavior.js
+
+      - name: Exact-byte patch apply idempotence rollback and conflict regression
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'performance/direct-extension-patches/tests/test-direct-extension-patches.ps1' -PopupFixture $env:POPUP_FIXTURE -StarFixture $env:STAR_FIXTURE
+          if($LASTEXITCODE -ne 0){throw "Direct-extension regression failed: $LASTEXITCODE"}
+
+      - name: Package engine equals validated repository engine
+        shell: powershell
+        run: |
+          $a=(Get-FileHash 'phase2-v050/apply-direct-extension-patches.ps1' -Algorithm SHA256).Hash
+          $b=(Get-FileHash 'performance/direct-extension-patches/apply-direct-extension-patches.ps1' -Algorithm SHA256).Hash
+          if($a -ne $b){throw 'Packaged patch engine differs from validated repository engine.'}
+          $a=(Get-FileHash 'phase2-v050/targets.json' -Algorithm SHA256).Hash
+          $b=(Get-FileHash 'performance/direct-extension-patches/targets.json' -Algorithm SHA256).Hash
+          if($a -ne $b){throw 'Packaged target metadata differs from validated repository metadata.'}
+          Write-Host 'PHASE2_V050_PACKAGE_ENGINE_IDENTITY_PASS'
+
+      - name: Final deterministic rebuild identity
+        shell: powershell
+        run: |
+          $before=(Get-FileHash 'SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.0.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+          python validation/performance-phase2-v0.5.0/build_and_validate.py
+          $after=(Get-FileHash 'SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.0.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($before -ne $after){throw "Deterministic rebuild mismatch: $before vs $after"}
+          $size=(Get-Item 'SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.0.zip').Length
+          Write-Host "PHASE2_V050_FINAL_IDENTITY_PASS size=$size sha256=$after"
+
+      - name: Upload focused acceptance package
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.0
+          path: SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.0.zip
+          if-no-files-found: error
+          retention-days: 14
