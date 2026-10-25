@@ -8,39 +8,30 @@ if marker not in s:
 head, selftest = s.split(marker, 1)
 before = selftest
 
-# Normalize only the known glued comparison/match tokens inside Invoke-SelfTest.
-# Keep this deliberately scoped so no production/runtime orchestration outside SelfTest changes.
-repls = {
-    ')-ne95': ') -ne 95',
-    ')-ne2.5': ') -ne 2.5',
-    ")-ne'current-v0620-r9'": ") -ne 'current-v0620-r9'",
-    ")-ne'previous-v0619-r8'": ") -ne 'previous-v0619-r8'",
-    ")-ne'previous-v0618-r7'": ") -ne 'previous-v0618-r7'",
-    ")-ne'unknown-or-partial'": ") -ne 'unknown-or-partial'",
-    '$matrix.Count-ne5': '$matrix.Count -ne 5',
-    ")-ne'BASELINE_A,BLF_ORIGINAL,PLAYLIST_MAKER_ORIGINAL,BOTH_ORIGINAL,BASELINE_B'": ") -ne 'BASELINE_A,BLF_ORIGINAL,PLAYLIST_MAKER_ORIGINAL,BOTH_ORIGINAL,BASELINE_B'",
-    ').Count-ne2': ').Count -ne 2',
-    ').Count-ne1': ').Count -ne 1',
-    "status-ne'applied'": "status -ne 'applied'",
-    ')-eq$origSha': ') -eq $origSha',
-    "$txt-notmatch'spotify-control-performance-overlay:lazy:better-local-files'": "$txt -notmatch 'spotify-control-performance-overlay:lazy:better-local-files'",
-    "$txt-notmatch'spotify-control-performance-overlay:lazy:playlist-maker'": "$txt -notmatch 'spotify-control-performance-overlay:lazy:playlist-maker'",
-    ')-ne$origSha': ') -ne $origSha',
-    "$txt-match'spotify-control-performance-overlay:lazy:better-local-files'": "$txt -match 'spotify-control-performance-overlay:lazy:better-local-files'",
-    "$txt-notmatch'extensions/better-local-files/extension.js'": "$txt -notmatch 'extensions/better-local-files/extension.js'",
-    "reason-ne'no-exactly-proven-targets'": "reason -ne 'no-exactly-proven-targets'",
-}
-for old, new in repls.items():
+# Normalize only known glued PowerShell operators inside Invoke-SelfTest.
+repls = [
+    (')-ne95', ') -ne 95'),
+    (')-ne2.5', ') -ne 2.5'),
+    (")-ne'", ") -ne '"),
+    ('$matrix.Count-ne5', '$matrix.Count -ne 5'),
+    (').Count-ne2', ').Count -ne 2'),
+    (').Count-ne1', ').Count -ne 1'),
+    ("status-ne'", "status -ne '"),
+    ("reason-ne'", "reason -ne '"),
+    (')-eq$origSha', ') -eq $origSha'),
+    (')-ne$origSha', ') -ne $origSha'),
+    ("$txt-notmatch'", "$txt -notmatch '"),
+    ("$txt-match'", "$txt -match '"),
+]
+for old, new in repls:
     selftest = selftest.replace(old, new)
 
 if selftest == before:
     raise SystemExit('spacing fixer made no changes')
 
 for bad in [
-    '-ne95', '-ne2.5', 'Count-ne', 'status-ne', 'reason-ne',
+    '-ne95', '-ne2.5', ")-ne'", 'Count-ne', 'status-ne', 'reason-ne',
     '$txt-notmatch', '$txt-match', '-eq$origSha', '-ne$origSha',
-    ")-ne'current-v0620-r9'", ")-ne'previous-v0619-r8'",
-    ")-ne'previous-v0618-r7'", ")-ne'unknown-or-partial'",
 ]:
     if bad in selftest:
         raise SystemExit(f'glued operator survived: {bad}')
