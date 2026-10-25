@@ -1,5 +1,5 @@
 from pathlib import Path
-import hashlib, io, subprocess, sys, tempfile, zipfile, re, shutil
+import hashlib, io, subprocess, sys, tempfile, zipfile, shutil
 ROOT=Path.cwd()
 COMMIT='ba031d1fd4bc01a1a1ee54d7f15cb998a6640785'
 ZIP='SpotifyControl-Track-Transition-Background-Guarded-Acceptance-v0.5.3.zip'
@@ -19,12 +19,9 @@ try:
     subprocess.run([sys.executable,'validation/performance-phase2-v0.5.3/build_v053.py'],cwd=wd,check=True)
     raw=(wd/ZIP).read_bytes(); assert len(raw)==SIZE and h(raw)==SHA,(len(raw),h(raw))
     with zipfile.ZipFile(io.BytesIO(raw)) as z: s=z.read('track-transition-direct-patch-acceptance.ps1').decode('utf-8-sig').replace('\r\n','\n')
-    for n in ['Build-FocusedPatchVariantMatrix','Assert-DirectPatchEligibility','Restore-DirectPatches','Prepare-Variant','Build-TextReport']:
+    for n in ['Build-FocusedPatchVariantMatrix','Assert-DirectPatchEligibility','Restore-DirectPatches','Prepare-Variant','Invoke-Lab','Invoke-SelfTest','Restore-OriginalXpui','Build-TextReport']:
         print('\n===== FUNCTION',n,'=====')
         print(function(s,n))
-    print('\n===== MAIN TAIL =====')
-    idx=s.rfind('\ntry{')
-    print(s[idx:])
 finally:
     try: subprocess.run(['git','worktree','remove','--force',str(wd)],check=False)
     finally: shutil.rmtree(wd,ignore_errors=True)
