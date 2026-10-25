@@ -1,0 +1,103 @@
+name: Validate v0.6.20 Bootstrap 1.0.6 E2E
+
+on:
+  push:
+    branches:
+      - release/v0.6.20-star-ratings-performance
+    paths:
+      - 'manifest.json'
+      - 'packages/v0.6.20/**'
+      - 'validation/v0.6.20-bootstrap-e2e/**'
+      - '.github/workflows/validate-v0.6.20-bootstrap-e2e.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'manifest.json'
+      - 'packages/v0.6.20/**'
+      - 'validation/v0.6.20-bootstrap-e2e/**'
+      - '.github/workflows/validate-v0.6.20-bootstrap-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  bootstrap-e2e-windows:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify exact v0.6.20 manifest edges and Bootstrap identity
+        shell: powershell
+        run: |
+          $m=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($m.latest_version -ne '0.6.20'){throw "Expected v0.6.20 manifest, got $($m.latest_version)"}
+          if($m.source_commit -ne '3543ee39bd9afa353a4d276c2b6b0f86dccafd74'){throw 'v0.6.20 transport source commit mismatch.'}
+          if($m.payload_set_sha256 -ne '65bf8dff2f563ce5caf80f660db64b1f6b34ced3029c24dfbfa3463f2ba3bf52'){throw 'v0.6.20 payload set mismatch.'}
+          if($m.bootstrap.version -ne '1.0.6' -or $m.bootstrap.sha256 -ne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' -or [int64]$m.bootstrap.size -ne 42963){throw 'Bootstrap 1.0.6 identity changed.'}
+          $edge19=@($m.updates|Where-Object{$_.from_version -eq '0.6.19' -and $_.to_version -eq '0.6.20'})
+          $edge18=@($m.updates|Where-Object{$_.from_version -eq '0.6.18' -and $_.to_version -eq '0.6.19'})
+          if($edge19.Count -ne 1 -or @($edge19[0].patches).Count -ne 2){throw 'Exact v0.6.19 -> v0.6.20 edge missing or ambiguous.'}
+          if($edge18.Count -ne 1 -or @($edge18[0].patches).Count -ne 2){throw 'Released v0.6.18 -> v0.6.19 edge missing or ambiguous.'}
+          Write-Host 'V0620_BOOTSTRAP_E2E_MANIFEST_PASS'
+
+      - name: Download exact previously validated Bootstrap 1.0.6 carrier
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' > validated-v0614-repair-artifact.zip
+          python - <<'PY'
+          from pathlib import Path
+          from io import BytesIO
+          import hashlib,zipfile
+          outer=Path('validated-v0614-repair-artifact.zip').read_bytes()
+          with zipfile.ZipFile(BytesIO(outer)) as z:
+              assert z.testzip() is None
+              inner=z.read('SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip')
+          assert len(inner)==30856
+          assert hashlib.sha256(inner).hexdigest()=='6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdfd267bd95f6c6ddcf06'
+          with zipfile.ZipFile(BytesIO(inner)) as z:
+              boot=z.read('bootstrap/spotify-control-self-updater.ps1')
+          assert len(boot)==42963
+          assert hashlib.sha256(boot).hexdigest()=='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
+          print('VALIDATED_BOOTSTRAP_V106_CARRIER_PASS',len(outer),len(inner),len(boot))
+          PY
+
+      - name: Prepare exact v0.6.19 and v0.6.18 installed fixtures
+        shell: powershell
+        run: |
+          python validation/v0.6.20-bootstrap-e2e/prepare_fixtures.py
+          if($LASTEXITCODE -ne 0){throw 'v0.6.20 Bootstrap fixture preparation failed.'}
+
+      - name: Exact Bootstrap 1.0.6 v0.6.19 to v0.6.20 one-edge cycle
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/v0.6.20-bootstrap-e2e/run_bootstrap_cycle.ps1 `
+            -Fixture ci-bootstrap-fixture-v0619 -StartVersion 0.6.19 -ExpectedEdges 1 `
+            -StartMainSha 45795b9622953a10c6eca2ee2f5a19fc4467c5143d5bdf7a9f2ad64841b9416f -StartMainSize 281580 `
+            -StartAddonSha df17018bdb5f62f55624070d047933387f62c049dae73cf5cefcc541bc412afa -StartAddonSize 202849
+          if($LASTEXITCODE -ne 0){throw "Bootstrap v0.6.19 -> v0.6.20 one-edge E2E failed: $LASTEXITCODE"}
+
+      - name: Exact Bootstrap 1.0.6 v0.6.18 to v0.6.20 two-edge cycle
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/v0.6.20-bootstrap-e2e/run_bootstrap_cycle.ps1 `
+            -Fixture ci-bootstrap-fixture-v0618 -StartVersion 0.6.18 -ExpectedEdges 2 `
+            -StartMainSha 27783abc40c446aadf6f2a9373b4525ada89759075f37e934958c8e449f2d98f -StartMainSize 281593 `
+            -StartAddonSha b7d1a4bc7707533400402fe42e60d724f88656c2477d4d4a5c0f47be60f47977 -StartAddonSize 154926
+          if($LASTEXITCODE -ne 0){throw "Bootstrap v0.6.18 -> v0.6.20 two-edge E2E failed: $LASTEXITCODE"}
+
+      - name: Cleanup fixture trees
+        if: always()
+        shell: powershell
+        run: |
+          Remove-Item -LiteralPath ci-bootstrap-fixture-v0619 -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath ci-bootstrap-fixture-v0618 -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath validated-v0614-repair-artifact.zip -Force -ErrorAction SilentlyContinue
