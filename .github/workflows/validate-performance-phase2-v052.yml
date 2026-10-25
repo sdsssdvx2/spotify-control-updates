@@ -39,21 +39,26 @@ jobs:
           python validation/performance-phase2-v0.5.2/build_v052_final.py
           if($LASTEXITCODE-ne0){throw 'v0.5.2 builder failed.'}
           $zip='SpotifyControl-Track-Transition-Silent-Targeted-Acceptance-v0.5.2.zip'
+          if((Get-Item $zip).Length-ne115926){throw "Unexpected v0.5.2 package size: $((Get-Item $zip).Length)"}
+          $zipSha=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($zipSha-ne'8956f1a2be3628d9e7f8b9efa0c3aaf5f4ca9e633037a6a8f9460e575fc7cc31'){throw "Unexpected v0.5.2 package SHA: $zipSha"}
           Expand-Archive -LiteralPath $zip -DestinationPath phase2-v052 -Force
           foreach($line in Get-Content phase2-v052/SHA256SUMS.txt){if($line-notmatch '^([0-9a-f]{64})  (.+)$'){throw "Bad checksum row: $line"};$actual=(Get-FileHash -LiteralPath (Join-Path phase2-v052 $Matches[2]) -Algorithm SHA256).Hash.ToLowerInvariant();if($actual-ne$Matches[1]){throw "Checksum mismatch: $($Matches[2])"}}
-          Write-Host ('V052_PACKAGE_SIZE '+(Get-Item $zip).Length)
-          Write-Host ('V052_PACKAGE_SHA '+(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant())
+          Write-Host "V052_EXACT_PACKAGE_PASS size=115926 sha=$zipSha"
       - name: Integrated PowerShell 5.1 parser and media isolation audit
         shell: powershell
         run: |
           $p='phase2-v052/track-transition-direct-patch-acceptance.ps1'
+          if((Get-Item $p).Length-ne98061){throw "Unexpected integrated v0.5.2 script size: $((Get-Item $p).Length)"}
+          $psSha=(Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($psSha-ne'30244d3ac6229e0c15e5d091a4915ca19e409ba0abc3b9f9ad01c72ee44162b1'){throw "Unexpected integrated v0.5.2 script SHA: $psSha"}
           $tokens=$null;$errors=$null
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
           if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Integrated v0.5.2 failed PowerShell 5.1 parse.'}
           $s=Get-Content $p -Raw
           foreach($bad in @('keybd_event','SpotifyControlMediaKeys','Send-MediaKey','[byte]0xB0','[byte]0xB3')){if($s.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "Legacy global media-key surface survived: $bad"}}
           foreach($good in @('$Version = "0.5.2"','TrySkipNextAsync','TryPlayAsync','TryPauseAsync','SPOTIFY_NEXT_CONFIRMED','SpotifyControlAudioSession','CaptureAndMute','Restore-SpotifyAudioForTest','global_media_keys_used=$false','$NextOffsets = @(5,13,21)','$TransitionSeconds = 27','$PlaybackWarmupSeconds = 8')){if($s.IndexOf($good,[StringComparison]::Ordinal)-lt0){throw "Missing v0.5.2 integrated contract: $good"}}
-          Write-Host 'V052_INTEGRATED_MEDIA_ISOLATION_PASS'
+          Write-Host "V052_INTEGRATED_MEDIA_ISOLATION_PASS sha=$psSha"
       - name: Profiler self-test
         shell: powershell
         run: |
@@ -87,8 +92,9 @@ jobs:
           $a=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant();$len=(Get-Item $zip).Length
           python validation/performance-phase2-v0.5.2/build_v052_final.py
           if($LASTEXITCODE-ne0){throw 'Second v0.5.2 build failed.'}
-          $b=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant();if($a-ne$b -or $len-ne(Get-Item $zip).Length){throw "Non-deterministic v0.5.2 build: $a / $b"}
-          Write-Host "V052_DETERMINISTIC_PASS size=$len sha=$b"
+          $b=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($a-ne$b -or $len-ne(Get-Item $zip).Length -or $len-ne115926 -or $b-ne'8956f1a2be3628d9e7f8b9efa0c3aaf5f4ca9e633037a6a8f9460e575fc7cc31'){throw "v0.5.2 deterministic pinned identity mismatch: $a / $b / $len"}
+          Write-Host "V052_DETERMINISTIC_PINNED_PASS size=$len sha=$b"
       - name: Upload exact v0.5.2 package
         uses: actions/upload-artifact@v4
         with:
