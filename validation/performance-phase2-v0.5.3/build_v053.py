@@ -48,6 +48,7 @@ a,_=span(s,'Stop-SpotifyForVariant')
 s=s[:a]+helper+'\n\n'+s[a:]
 
 # Version/report identity and user-facing behavior.
+s=r1(s,'$Version = "0.5.2"','$Version = "0.5.3"')
 s=s.replace('v0.5.2','v0.5.3').replace('v052','v053')
 s=s.replace('Spotify Control Track Transition Silent Targeted Acceptance Report','Spotify Control Track Transition Background Guarded Acceptance Report')
 s=s.replace('Media control: Spotify-targeted Windows media session; global media keys used=False; Spotify audio muted during workload=True; other applications untouched=True',
