@@ -1,0 +1,126 @@
+name: Prepare Spotify Control v0.6.20 Release Candidate
+
+on:
+  push:
+    branches:
+      - release/v0.6.20-star-ratings-performance
+    paths:
+      - 'performance/star-ratings/**'
+      - 'validation/v0.6.20/**'
+      - '.github/workflows/prepare-v0.6.20-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prepare-windows:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Assert exact production base
+        shell: powershell
+        run: |
+          $base='6e2dd5cec54ca795457935d6bee83f63d39722bf'
+          git cat-file -e "$base^{commit}"
+          $m=Get-Content manifest.json -Raw | ConvertFrom-Json
+          if($m.latest_version -ne '0.6.19') { throw "Expected v0.6.19 base manifest, got $($m.latest_version)" }
+          $main=@($m.latest_files | Where-Object path -eq 'bin/spotify-control.ps1')[0]
+          $addon=@($m.latest_files | Where-Object path -eq 'bin/addon-manager.ps1')[0]
+          if($main.sha256 -ne '45795b9622953a10c6eca2ee2f5a19fc4467c5143d5bdf7a9f2ad64841b9416f' -or [int64]$main.size -ne 281580){throw 'v0.6.19 main base mismatch.'}
+          if($addon.sha256 -ne 'df17018bdb5f62f55624070d047933387f62c049dae73cf5cefcc541bc412afa' -or [int64]$addon.size -ne 202849){throw 'v0.6.19 Addon Manager r8 base mismatch.'}
+          Write-Host 'V0620_BASE_PASS'
+
+      - name: Build deterministic v0.6.20 candidates
+        shell: powershell
+        run: |
+          python validation/v0.6.20/build_v0620.py --build
+          if($LASTEXITCODE -ne 0){throw 'v0.6.20 build failed.'}
+
+      - name: PowerShell 5.1 parse and static safety checks
+        shell: powershell
+        run: |
+          $files=@(
+            'performance/star-ratings/apply-star-ratings-patch.ps1',
+            'validation/v0.6.20/out/bin/spotify-control.ps1',
+            'validation/v0.6.20/out/bin/addon-manager.ps1'
+          )
+          foreach($file in $files){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw "PowerShell 5.1 parse failed: $file"}
+          }
+          $main=Get-Content validation/v0.6.20/out/bin/spotify-control.ps1
+          if($main[0] -ne '# Spotify Control v0.6.20 Star Ratings Performance'){throw 'v0.6.20 title mismatch.'}
+          if(@($main|Where-Object{$_ -eq '$ScriptVersion = "0.6.20"'}).Count -ne 1){throw 'v0.6.20 ScriptVersion mismatch.'}
+          $addon=Get-Content validation/v0.6.20/out/bin/addon-manager.ps1 -Raw
+          if($addon.IndexOf('$Version = "0.6.5-r9"',[StringComparison]::Ordinal) -lt 0){throw 'Addon Manager r9 marker missing.'}
+          if(([regex]::Matches($addon,'Invoke-StarRatingsPerformanceBestEffort -Reason')).Count -ne 3){throw 'Expected exactly three Star Ratings production calls.'}
+          if(([regex]::Matches($addon,'Invoke-PerformanceOverlayBestEffort -Reason')).Count -ne 3){throw 'Existing performance overlay calls changed.'}
+          $checkStart=$addon.IndexOf('"Check" {',[StringComparison]::Ordinal);$updateStart=$addon.IndexOf('"Update" {',[StringComparison]::Ordinal)
+          if($checkStart -lt 0 -or $updateStart -le $checkStart){throw 'Action switch layout changed.'}
+          $check=$addon.Substring($checkStart,$updateStart-$checkStart)
+          if($check.Contains('Invoke-StarRatingsPerformanceBestEffort') -or $check.Contains('Invoke-PerformanceOverlayBestEffort')){throw 'Check action must remain mutation-free.'}
+          foreach($bad in @('popup-lyrics-worker-gate','SC Cover Ambience','ivLyrics','tagify','splitify')){if($addon.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Forbidden promoted target/surface: $bad"}}
+          Write-Host 'V0620_PARSE_AND_STATIC_PASS'
+
+      - name: Download exact Star Ratings fixture and run transactional tests
+        shell: powershell
+        run: |
+          $fixture=Join-Path $env:RUNNER_TEMP 'star-ratings-33aa3d293f9fbb58d7a749a8cea10c318351e6c6.js'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/brimell/spicetify-star-ratings/33aa3d293f9fbb58d7a749a8cea10c318351e6c6/dist/star-ratings.js' -OutFile $fixture
+          if((Get-Item $fixture).Length -ne 43396 -or (Get-FileHash $fixture -Algorithm SHA256).Hash.ToLowerInvariant() -ne '198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1'){throw 'Pinned Star Ratings fixture mismatch.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/star-ratings/tests/test-star-ratings-patch.ps1 -FixturePath $fixture
+          if($LASTEXITCODE -ne 0){throw "Star Ratings patch regression failed: $LASTEXITCODE"}
+          Write-Host 'V0620_STAR_RUNTIME_ENGINE_PASS'
+
+      - name: Candidate Addon Manager read-only SelfTest
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify') | Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/v0.6.20/out/bin/addon-manager.ps1 -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw "Candidate Addon Manager SelfTest failed: $LASTEXITCODE"}
+
+      - name: Prove existing v0.6.19 overlay regression stays green
+        shell: powershell
+        run: |
+          node --check performance/overlay/lazy-custom-app-loader.js
+          node performance/overlay/tests/test-loader.js
+          if($LASTEXITCODE -ne 0){throw 'Existing overlay loader regression failed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/overlay/tests/test-overlay.ps1
+          if($LASTEXITCODE -ne 0){throw 'Existing overlay PowerShell regression failed.'}
+
+      - name: Commit immutable v0.6.20 transports
+        id: source
+        shell: powershell
+        run: |
+          if(git ls-files 'validation/v0.6.20/out/**'){throw 'Raw generated candidates must not be tracked.'}
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add packages/v0.6.20 validation/v0.6.20/candidate-metadata.json
+          if(-not (git diff --cached --quiet)){git commit -m 'Build v0.6.20 Star Ratings release transports'}
+          $source=(git rev-parse HEAD).Trim()
+          if($source -notmatch '^[0-9a-f]{40}$'){throw "Bad source commit: $source"}
+          "source_commit=$source" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "V0620_SOURCE_COMMIT=$source"
+
+      - name: Write and validate v0.6.20 manifest
+        shell: powershell
+        run: |
+          $source='${{ steps.source.outputs.source_commit }}'
+          python validation/v0.6.20/build_v0620.py --write-manifest --source-commit $source
+          if($LASTEXITCODE -ne 0){throw 'Manifest publication failed.'}
+          python validation/v0.6.20/build_v0620.py --validate-published
+          if($LASTEXITCODE -ne 0){throw 'Published manifest validation failed.'}
+          git add manifest.json
+          if(-not (git diff --cached --quiet)){git commit -m 'Publish Spotify Control v0.6.20 Star Ratings optimization'}
+
+      - name: Push prepared candidate branch
+        shell: powershell
+        run: |
+          git push origin HEAD:release/v0.6.20-star-ratings-performance
+          Write-Host 'V0620_PREPARE_AND_PUSH_PASS'
