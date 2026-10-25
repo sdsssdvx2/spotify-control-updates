@@ -50,7 +50,14 @@ jobs:
           $s=Get-Content $p -Raw
           foreach($x in @('TrySkipNextAsync','SPOTIFY_NEXT_CONFIRMED','RegisterSessionNotification','WaitForSpotifyCapture(5000,5)','current-v0620-r9','BASELINE_A','BLF_ORIGINAL','PLAYLIST_MAKER_ORIGINAL','BOTH_ORIGINAL','production_overlay_state_unchanged_exact','exact-production-lazy-overlay-index-policy-only','Refusing overlay reset because current index SHA-256 is not a profiler-owned/known state')){if($s.IndexOf($x,[StringComparison]::Ordinal) -lt 0){throw "Missing v0.5.4 safety/runtime contract: $x"}}
           foreach($x in @('keybd_event','SpotifyControlMediaKeys','Send-MediaKey','[byte]0xB0','[byte]0xB3')){if($s.IndexOf($x,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Legacy global media-key surface survived: $x"}}
-          $labStart=$s.IndexOf('function Invoke-Lab {');$labEnd=$s.IndexOf('function ',($labStart+20));$lab=$s.Substring($labStart,$labEnd-$labStart)
+          $labStart=$s.IndexOf('function Invoke-Lab {')
+          if($labStart -lt 0){throw 'Invoke-Lab was not found in generated v0.5.4 script.'}
+          $labEnd=$s.IndexOf("`r`nfunction ",$labStart+20)
+          if($labEnd -lt 0){$labEnd=$s.IndexOf("`nfunction ",$labStart+20)}
+          if($labEnd -lt 0){$labEnd=$s.IndexOf("`r`ntry{",$labStart+20)}
+          if($labEnd -lt 0){$labEnd=$s.IndexOf("`ntry{",$labStart+20)}
+          if($labEnd -lt 0){$labEnd=$s.Length}
+          $lab=$s.Substring($labStart,$labEnd-$labStart)
           foreach($x in @('Assert-DirectPatchEligibility','Invoke-DirectPatchEngine','Write-PatchSubsetMetadata','PatchMetadataPaths')){if($lab.IndexOf($x,[StringComparison]::Ordinal) -ge 0){throw "Direct-patch path survived in v0.5.4 Invoke-Lab: $x"}}
           if(Test-Path phase2-v054-unpacked\apply-direct-extension-patches.ps1){throw 'Direct extension patch engine must not be shipped in v0.5.4 package.'}
           Write-Host 'PHASE2_V054_PS51_STATIC_PASS'
