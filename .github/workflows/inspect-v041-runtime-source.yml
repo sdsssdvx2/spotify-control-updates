@@ -1,0 +1,47 @@
+name: Inspect v0.4.1 runtime source anchors
+
+on:
+  push:
+    branches:
+      - validate/direct-extension-runtime-v0.1.0
+    paths:
+      - '.github/workflows/inspect-v041-runtime-source.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-windows:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rebuild exact validated v0.4.1 and print focused anchors
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          git show validate/performance-phase2-v0.4.1:validation/performance-phase2-v0.4.1/build_and_validate.py | Set-Content -LiteralPath build_v041.py -Encoding utf8
+          python build_v041.py
+          if($LASTEXITCODE -ne 0){throw 'v0.4.1 rebuild failed.'}
+          $zip=(Resolve-Path 'SpotifyControl-Track-Transition-Single-Hook-Isolation-v0.4.1.zip').Path
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z=[IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $entry=$z.GetEntry('track-transition-isolation.ps1')
+            $reader=New-Object IO.StreamReader($entry.Open(),[Text.Encoding]::UTF8,$true)
+            try{$text=$reader.ReadToEnd()}finally{$reader.Dispose()}
+          } finally {$z.Dispose()}
+          $lines=$text -split "`r?`n"
+          $patterns=@('function Measure-Condition','function Apply-Variant','function Restore-Original','function Start-Spotify','function Stop-Spotify','function Send-MediaKey','function Analyze-Transitions','$variants=','$variants =','foreach($v in $variants)','Write-ProgressCheckpoint','function Get-ProcessSnapshot')
+          foreach($p in $patterns){
+            $hits=@(0..($lines.Count-1)|Where-Object{$lines[$_].Contains($p)})
+            foreach($i in $hits){
+              Write-Host "=== ANCHOR $p line=$($i+1) ==="
+              $start=[Math]::Max(0,$i-12);$end=[Math]::Min($lines.Count-1,$i+70)
+              for($j=$start;$j -le $end;$j++){Write-Host ('{0:D5}: {1}' -f ($j+1),$lines[$j])}
+            }
+          }
+          Write-Host 'V041_RUNTIME_ANCHOR_INSPECTION_PASS'
