@@ -47,9 +47,10 @@ try {
     if($LASTEXITCODE -ne 0){throw 'Patched Star Ratings failed Node parse.'}
 
     $popupText=Get-Content $popup -Raw
-    foreach($needle in @('const shouldRun = lyricVideoIsOpen && document.hidden;','document.addEventListener("visibilitychange", syncWorkerState);','lyricVideoIsOpen = true;'+"`n"+"`t"+'syncWorkerState();','lyricVideoIsOpen = false;'+"`n"+"`t"+'syncWorkerState();')){
+    foreach($needle in @('if (e.target.hidden && lyricVideoIsOpen) {','if (document.hidden && !workerIsRunning) {','lyricVideoIsOpen = false;','worker.postMessage("popup-lyric-stop-update");')){
         if($popupText.IndexOf($needle,[StringComparison]::Ordinal) -lt 0){throw "Popup patch marker missing: $needle"}
     }
+    if($popupText.IndexOf('if (e.target.hidden) {',[StringComparison]::Ordinal) -ge 0){throw 'Ungated PopupLyrics hidden worker start remains.'}
     $starText=Get-Content $star -Raw
     foreach($needle in @('c.__spotifyControlPerfTimer=setTimeout(()=>De(),75)','a.__spotifyControlPerfTimer=setTimeout(()=>{Be(e)},75)','f[e]!==y[e]&&(t=!0)','(l=document.querySelector("main"))&&l!==a&&')){
         if($starText.IndexOf($needle,[StringComparison]::Ordinal) -lt 0){throw "Star Ratings patch marker missing: $needle"}
