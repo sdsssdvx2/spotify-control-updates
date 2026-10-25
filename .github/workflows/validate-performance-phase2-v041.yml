@@ -31,8 +31,8 @@ jobs:
           import hashlib,re
           p=Path('phase2-v041/track-transition-isolation.ps1')
           b=p.read_bytes(); s=b.decode('utf-8-sig')
-          assert len(b)==64123,len(b)
-          assert hashlib.sha256(b).hexdigest()=='e888ba8a238a307dd5b5afe44fefcefa813c19ac0167efed143d3350c9c0f582'
+          assert len(b)==64005,len(b)
+          assert hashlib.sha256(b).hexdigest()=='c345e5fbd346b817ad434d1396aa52a84898494eacea53ad47f4d4614ab6ab87'
           required=[
             '$Version = "0.4.1"',
             'Get-WorkloadPolicy','Write-ProgressCheckpoint','low-response-accepted','baseline-invalid',
@@ -101,8 +101,8 @@ jobs:
           import hashlib,zipfile
           p=Path('SpotifyControl-Track-Transition-Single-Hook-Isolation-v0.4.1.zip')
           data=p.read_bytes()
-          assert len(data)==71035,len(data)
-          assert hashlib.sha256(data).hexdigest()=='3ca30ec18e6cbeaa2541f84cd8b7e79b061333ef2e9a1f96dedc95bccf5f221d'
+          assert len(data)==70917,len(data)
+          assert hashlib.sha256(data).hexdigest()=='2c857fa0988cb73d3930c599c30655b8315f53ebb2b425e67fb79b2e0244d5b1'
           with zipfile.ZipFile(p) as z:
               assert z.testzip() is None
               assert sorted(z.namelist())==sorted(['README.md','RUN_TRACK_TRANSITION_ISOLATION.cmd','SELFTEST.cmd','SHA256SUMS.txt','track-transition-isolation.ps1'])
@@ -110,8 +110,8 @@ jobs:
               for line in lines:
                   h,n=line.split('  ',1); assert hashlib.sha256(z.read(n)).hexdigest()==h,(n,h)
               script=z.read('track-transition-isolation.ps1')
-              assert len(script)==64123
-              assert hashlib.sha256(script).hexdigest()=='e888ba8a238a307dd5b5afe44fefcefa813c19ac0167efed143d3350c9c0f582'
+              assert len(script)==64005
+              assert hashlib.sha256(script).hexdigest()=='c345e5fbd346b817ad434d1396aa52a84898494eacea53ad47f4d4614ab6ab87'
               for n in z.namelist():
                   if not n.lower().endswith(('.md','.cmd','.ps1','.txt')): continue
                   b=z.read(n)
