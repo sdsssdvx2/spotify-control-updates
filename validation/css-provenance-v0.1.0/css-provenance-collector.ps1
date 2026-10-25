@@ -78,8 +78,8 @@ function Get-IniThemeSettings([string]$ConfigPath) {
         $trim = $line.Trim()
         if ($trim -match '^\[(.+)\]$') { $section = $Matches[1]; continue }
         if ($section -ne 'Setting' -or $trim.StartsWith(';') -or $trim.StartsWith('#') -or $trim.IndexOf('=') -lt 0) { continue }
-        $parts = $trim.Split(@('='), 2)
-        $key = $parts[0].Trim(); $value = $parts[1].Trim()
+        $eq = $trim.IndexOf('=')
+        $key = $trim.Substring(0,$eq).Trim(); $value = $trim.Substring($eq+1).Trim()
         if ($wanted -contains $key) { $result[$key] = $value }
     }
     return $result
