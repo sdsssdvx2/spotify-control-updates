@@ -1,0 +1,90 @@
+name: Validate Performance Phase 2 v0.5.1 Alignment
+
+on:
+  push:
+    branches:
+      - validate/performance-phase2-v0.5.1
+    paths:
+      - 'validation/performance-phase2-v0.5.1/**'
+      - '.github/workflows/validate-performance-phase2-v051-alignment.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'validation/performance-phase2-v0.5.1/**'
+      - '.github/workflows/validate-performance-phase2-v051-alignment.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove production surface is untouched
+        shell: powershell
+        run: |
+          $base='0e367abdc61e8fdf7125032b51bba0ce9550f6ea'
+          git cat-file -e "$base^{commit}"
+          $changed=@(git diff --name-only "$base...HEAD")
+          foreach($path in $changed){
+            if($path -eq 'manifest.json' -or $path.StartsWith('packages/') -or $path.StartsWith('bin/') -or $path.StartsWith('performance/overlay/') -or $path.StartsWith('validation/v0.6.19/')){
+              throw "Production surface changed in v0.5.1 validation branch: $path"
+            }
+          }
+          Write-Host 'V051_PRODUCTION_ISOLATION_PASS'
+
+      - name: PowerShell 5.1 parser and helper contract
+        shell: powershell
+        run: |
+          $path='validation/performance-phase2-v0.5.1/runtime_alignment.ps1.inc'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'v0.5.1 alignment helper failed PowerShell 5.1 parse.'}
+          $s=Get-Content $path -Raw
+          foreach($required in @(
+            'Get-ComponentHashSnapshot','Get-ComponentBaselineKind','Write-ComponentHashDiagnostics',
+            'Invoke-BootstrapJson','Align-ReleasedAddonManagerBaseline','Assert-AcceptedRuntimeBaseline',
+            'current-v0619-r8','previous-v0618-r7','unknown-or-partial',
+            '45795b9622953a10c6eca2ee2f5a19fc4467c5143d5bdf7a9f2ad64841b9416f',
+            'df17018bdb5f62f55624070d047933387f62c049dae73cf5cefcc541bc412afa',
+            '27783abc40c446aadf6f2a9373b4525ada89759075f37e934958c8e449f2d98f',
+            'b7d1a4bc7707533400402fe42e60d724f88656c2477d4d4a5c0f47be60f47977',
+            'No production files were changed'
+          )){if($s.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Missing v0.5.1 alignment contract: $required"}}
+          foreach($forbidden in @('Remove-AppxPackage','Uninstall','spicetify apply','spicetify restore','Remove-Item -LiteralPath $Root -Recurse')){
+            if($s.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Forbidden destructive alignment surface: $forbidden"}
+          }
+          Write-Host 'V051_PS51_ALIGNMENT_HELPER_PASS'
+
+      - name: Verify released v0.6.19 and previous v0.6.18 identities
+        shell: powershell
+        run: |
+          $m=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($m.latest_version -ne '0.6.19'){throw "Expected v0.6.19 release, got $($m.latest_version)"}
+          if($m.bootstrap.version -ne '1.0.6' -or $m.bootstrap.sha256 -ne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' -or [int64]$m.bootstrap.size -ne 42963){throw 'Bootstrap 1.0.6 identity changed.'}
+          $main=@($m.latest_files|Where-Object path -eq 'bin/spotify-control.ps1')
+          $addon=@($m.latest_files|Where-Object path -eq 'bin/addon-manager.ps1')
+          $agent=@($m.latest_files|Where-Object path -eq 'bin/spotify-control-agent.vbs')
+          if($main.Count-ne1 -or $main[0].sha256-ne'45795b9622953a10c6eca2ee2f5a19fc4467c5143d5bdf7a9f2ad64841b9416f'){throw 'Current main identity changed.'}
+          if($addon.Count-ne1 -or $addon[0].sha256-ne'df17018bdb5f62f55624070d047933387f62c049dae73cf5cefcc541bc412afa'){throw 'Current addon identity changed.'}
+          if($agent.Count-ne1 -or $agent[0].sha256-ne'2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278'){throw 'Agent identity changed.'}
+          $edge=@($m.updates|Where-Object{$_.from_version-eq'0.6.18'-and$_.to_version-eq'0.6.19'})
+          if($edge.Count-ne1 -or @($edge[0].patches).Count-ne2){throw 'Exact v0.6.18 -> v0.6.19 edge missing.'}
+          $pMain=@($edge[0].patches|Where-Object path -eq 'bin/spotify-control.ps1')[0]
+          $pAddon=@($edge[0].patches|Where-Object path -eq 'bin/addon-manager.ps1')[0]
+          if($pMain.from_sha256-ne'27783abc40c446aadf6f2a9373b4525ada89759075f37e934958c8e449f2d98f' -or $pMain.to_sha256-ne$main[0].sha256){throw 'Main one-edge identity changed.'}
+          if($pAddon.from_sha256-ne'b7d1a4bc7707533400402fe42e60d724f88656c2477d4d4a5c0f47be60f47977' -or $pAddon.to_sha256-ne$addon[0].sha256){throw 'Addon one-edge identity changed.'}
+          Write-Host 'V051_RELEASE_IDENTITY_CONTRACT_PASS'
+
+      - name: Revalidate published v0.6.19 transports
+        shell: powershell
+        run: |
+          python validation/v0.6.19/build_v0619.py --validate-published
+          if($LASTEXITCODE -ne 0){throw 'Published v0.6.19 transport validation failed.'}
+          Write-Host 'V051_PUBLISHED_TRANSPORT_PASS'
