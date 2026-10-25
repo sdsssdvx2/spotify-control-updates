@@ -1,0 +1,129 @@
+name: Validate Performance Phase 2 v0.5.3 Background Guarded
+
+on:
+  push:
+    branches:
+      - validate/performance-phase2-v0.5.3
+    paths:
+      - 'validation/performance-phase2-v0.5.3/**'
+      - '.github/workflows/validate-performance-phase2-v053.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'validation/performance-phase2-v0.5.3/**'
+      - '.github/workflows/validate-performance-phase2-v053.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove production surface untouched
+        shell: powershell
+        run: |
+          $base='6e2dd5cec54ca795457935d6bee83f63d39722bf'
+          git cat-file -e "$base^{commit}"
+          $changed=@(git diff --name-only "$base...HEAD")
+          foreach($path in $changed){if($path -eq 'manifest.json' -or $path.StartsWith('packages/') -or $path.StartsWith('bin/') -or $path.StartsWith('performance/overlay/')){throw "Production surface changed: $path"}}
+          Write-Host 'V053_PRODUCTION_ISOLATION_PASS'
+
+      - name: Compile background audio guard and window host
+        shell: powershell
+        run: |
+          $p='validation/performance-phase2-v0.5.3/runtime_background_v053.ps1.inc'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'v0.5.3 helper failed PowerShell 5.1 parse.'}
+          $s=Get-Content $p -Raw
+          foreach($required in @('RegisterSessionNotification','WaitForSpotifyCapture','Thread.Sleep','SW_SHOWNOACTIVATE','HWND_BOTTOM','GetBestUserForegroundWindow','Start-Process -FilePath $SpotifyExe -WindowStyle Hidden','spotify audio guard')){if($s.IndexOf($required,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "Missing v0.5.3 helper contract: $required"}}
+          foreach($forbidden in @('keybd_event','Send-MediaKey','SW_MINIMIZE')){if($s.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "Forbidden v0.5.3 helper surface: $forbidden"}}
+          function Write-LabLog { param([string]$Message,[string]$Level='INFO') Write-Host "[$Level] $Message" }
+          $SpotifyExe='C:\not-used\Spotify.exe'
+          Invoke-Expression $s
+          Add-SpotifyBackgroundTypes
+          if(-not ('SpotifyControlAudioGuard' -as [type])){throw 'SpotifyControlAudioGuard did not compile.'}
+          if(-not ('SpotifyControlWindowHost' -as [type])){throw 'SpotifyControlWindowHost did not compile.'}
+          $audioMethods=@([SpotifyControlAudioGuard].GetMethods()|Select-Object -ExpandProperty Name)
+          foreach($m in @('Arm','CaptureNow','WaitForSpotifyCapture','RestoreAndDisarm')){if($audioMethods -notcontains $m){throw "Missing audio guard method: $m"}}
+          $windowMethods=@([SpotifyControlWindowHost].GetMethods()|Select-Object -ExpandProperty Name)
+          foreach($m in @('GetBestUserForegroundWindow','GetSpotifyTopLevelWindows','Hide','ShowBehind','CloseHidden')){if($windowMethods -notcontains $m){throw "Missing window host method: $m"}}
+          Write-Host 'V053_HELPER_COMPILE_PASS'
+
+      - name: Build exact v0.5.3 package from v0.5.2 provenance
+        shell: powershell
+        run: |
+          python validation/performance-phase2-v0.5.3/build_v053.py
+          if($LASTEXITCODE-ne0){throw 'v0.5.3 builder failed.'}
+          $zip='SpotifyControl-Track-Transition-Background-Guarded-Acceptance-v0.5.3.zip'
+          Expand-Archive -LiteralPath $zip -DestinationPath phase2-v053 -Force
+          foreach($line in Get-Content phase2-v053/SHA256SUMS.txt){if($line-notmatch '^([0-9a-f]{64})  (.+)$'){throw "Bad checksum row: $line"};$actual=(Get-FileHash -LiteralPath (Join-Path phase2-v053 $Matches[2]) -Algorithm SHA256).Hash.ToLowerInvariant();if($actual-ne$Matches[1]){throw "Checksum mismatch: $($Matches[2])"}}
+          Write-Host ('V053_PACKAGE_SIZE '+(Get-Item $zip).Length)
+          Write-Host ('V053_PACKAGE_SHA '+(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant())
+          Write-Host ('V053_SCRIPT_SIZE '+(Get-Item phase2-v053/track-transition-direct-patch-acceptance.ps1).Length)
+          Write-Host ('V053_SCRIPT_SHA '+(Get-FileHash phase2-v053/track-transition-direct-patch-acceptance.ps1 -Algorithm SHA256).Hash.ToLowerInvariant())
+
+      - name: Integrated PowerShell 5.1 parser and UX safety audit
+        shell: powershell
+        run: |
+          $p='phase2-v053/track-transition-direct-patch-acceptance.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Integrated v0.5.3 failed PowerShell 5.1 parse.'}
+          $s=Get-Content $p -Raw
+          foreach($bad in @('keybd_event','SpotifyControlMediaKeys','Send-MediaKey','[byte]0xB0','[byte]0xB3','Set-SpotifySilentForTest','SpotifyControlAudioSession','SpotifyAudioOriginalStates','SW_MINIMIZE')){if($s.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "Retired/forbidden surface survived: $bad"}}
+          foreach($good in @('$Version = "0.5.3"','RegisterSessionNotification','WaitForSpotifyCapture(5000,5)','Start-Process -FilePath $SpotifyExe -WindowStyle Hidden','Show-SpotifyBehindUserForMeasurement','SW_SHOWNOACTIVATE','HWND_BOTTOM','spotify_minimized_during_measurement=$false','TrySkipNextAsync','SPOTIFY_NEXT_CONFIRMED')){if($s.IndexOf($good,[StringComparison]::Ordinal)-lt0){throw "Missing v0.5.3 integrated contract: $good"}}
+          Write-Host 'V053_INTEGRATED_UX_SAFETY_PASS'
+
+      - name: Profiler self-test
+        shell: powershell
+        run: |
+          $env:SPOTIFYCONTROL_TEST_RESIDUAL_CLEANUP='1'
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File phase2-v053/track-transition-direct-patch-acceptance.ps1 -Action SelfTest
+          if($LASTEXITCODE-ne0){throw "v0.5.3 SelfTest failed: $LASTEXITCODE"}
+          Write-Host 'V053_SELFTEST_PASS'
+
+      - name: Download immutable upstream fixtures and revalidate patch engine behavior
+        shell: powershell
+        run: |
+          $repoEngine=(Get-FileHash performance/direct-extension-patches/apply-direct-extension-patches.ps1 -Algorithm SHA256).Hash.ToLowerInvariant()
+          $pkgEngine=(Get-FileHash phase2-v053/apply-direct-extension-patches.ps1 -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($repoEngine-ne$pkgEngine -or $pkgEngine-ne'486254bc032bbcb2380f69ba01470bb2bda2e23718cc7bbaef1063fdb18c1803'){throw 'Patch engine identity changed.'}
+          $repoTargets=(Get-FileHash performance/direct-extension-patches/targets.json -Algorithm SHA256).Hash.ToLowerInvariant()
+          $pkgTargets=(Get-FileHash phase2-v053/targets.json -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($repoTargets-ne$pkgTargets -or $pkgTargets-ne'9b49d43bb8ff568f9e1a4f7009e2958edce0f77b857d948e563b81bb514aefa3'){throw 'Patch targets identity changed.'}
+          $popup=Join-Path $env:RUNNER_TEMP 'popupLyrics-v2.46.2.js';$stars=Join-Path $env:RUNNER_TEMP 'star-ratings-33aa3d293f9fbb58d7a749a8cea10c318351e6c6.js'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/spicetify/cli/v2.46.2/Extensions/popupLyrics.js' -OutFile $popup
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/brimell/spicetify-star-ratings/33aa3d293f9fbb58d7a749a8cea10c318351e6c6/dist/star-ratings.js' -OutFile $stars
+          if((Get-Item $popup).Length-ne39553 -or (Get-FileHash $popup -Algorithm SHA256).Hash.ToLowerInvariant()-ne'2b280aea8514bd15044c36403257ca6ac21f1f98e6798beb4aa319bf19a70e4f'){throw 'Popup fixture mismatch.'}
+          if((Get-Item $stars).Length-ne43396 -or (Get-FileHash $stars -Algorithm SHA256).Hash.ToLowerInvariant()-ne'198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1'){throw 'Star fixture mismatch.'}
+          node performance/direct-extension-patches/tests/test-behavior.js
+          if($LASTEXITCODE-ne0){throw 'Behavior policy test failed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/direct-extension-patches/tests/test-direct-extension-patches.ps1 -PopupFixture $popup -StarFixture $stars
+          if($LASTEXITCODE-ne0){throw 'Direct patch regression failed.'}
+          Write-Host 'V053_PATCH_REGRESSION_PASS'
+
+      - name: Deterministic rebuild
+        shell: powershell
+        run: |
+          $zip='SpotifyControl-Track-Transition-Background-Guarded-Acceptance-v0.5.3.zip'
+          $a=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant();$len=(Get-Item $zip).Length
+          python validation/performance-phase2-v0.5.3/build_v053.py
+          if($LASTEXITCODE-ne0){throw 'Second v0.5.3 build failed.'}
+          $b=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant();if($a-ne$b -or $len-ne(Get-Item $zip).Length){throw "Non-deterministic v0.5.3 build: $a / $b"}
+          Write-Host "V053_DETERMINISTIC_PASS size=$len sha=$b"
+
+      - name: Upload exact v0.5.3 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-Track-Transition-Background-Guarded-Acceptance-v0.5.3
+          path: SpotifyControl-Track-Transition-Background-Guarded-Acceptance-v0.5.3.zip
+          if-no-files-found: error
+          retention-days: 14
