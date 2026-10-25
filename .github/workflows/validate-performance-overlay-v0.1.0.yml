@@ -152,15 +152,22 @@ jobs:
         shell: powershell
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File performance/overlay/tests/test-overlay.ps1
 
-      - name: Verify overlay scope stays isolated
+      - name: Verify validation scope stays isolated
         shell: powershell
         run: |
           $changed = @(git diff --name-only origin/main...HEAD)
+          $allowedExact = @(
+            '.github/workflows/validate-performance-overlay-v0.1.0.yml',
+            '.github/workflows/validate-performance-overlay-runtime-v010-r2.yml',
+            'validation/performance-overlay-runtime-v0.1.0/build_and_validate.py',
+            'validation/performance-overlay-runtime-v0.1.0/build_and_validate_r2.py'
+          )
           $unexpected = @($changed | Where-Object {
-            $_ -ne '.github/workflows/validate-performance-overlay-v0.1.0.yml' -and
-            -not $_.StartsWith('performance/overlay/')
+            $path = $_
+            -not $path.StartsWith('performance/overlay/') -and
+            -not ($allowedExact -contains $path)
           })
           if ($unexpected.Count -gt 0) {
-            throw "Unexpected files in validation branch: $($unexpected -join ', ')"
+            throw "Unexpected files in overlay/runtime validation branch: $($unexpected -join ', ')"
           }
-          Write-Host "PASS: validation branch changes are overlay-only."
+          Write-Host "PASS: validation branch changes are isolated to overlay/runtime-validation files."
