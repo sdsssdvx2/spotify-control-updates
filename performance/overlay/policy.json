@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "mode": "fail-open-for-upstream-fail-closed-for-optimization",
+  "principles": {
+    "upstream_update_precedence": true,
+    "never_block_upstream_update_for_optimization": true,
+    "exact_provenance_required_for_transform": true,
+    "unknown_upstream_revision": "skip-optimization",
+    "rollback_scope": "optimization-files-only",
+    "preserve_user_data": true
+  },
+  "protected": [
+    "Spotify login/settings",
+    "Users/Browser/Default/IndexedDB/localStorage",
+    "Marketplace data",
+    "playlist-backed Star Ratings",
+    "Tagify data",
+    "ivLyrics",
+    "Splitify",
+    "extensions/apps/config"
+  ],
+  "targets": []
+}

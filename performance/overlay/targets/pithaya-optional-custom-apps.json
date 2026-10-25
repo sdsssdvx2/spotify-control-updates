@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "source_repository": "Pithaya/spicetify-apps",
+  "source_commit": "9a7da4e7c34dd3000e103a4f842e782feb5c29c9",
+  "distribution_repository": "Pithaya/spicetify-apps-dist",
+  "targets": [
+    {
+      "id": "better-local-files",
+      "dist_revision": "bf467fab93e6c1f8b8d4189dc1054bd1cafb3f3a",
+      "extension_path": "extensions/better-local-files/extension.js",
+      "extension_git_blob_sha1": "7a0d0fa3fa7d6213ff8add05f849c5deba2004c8",
+      "extension_size": 23643,
+      "extension_sha256": "56512ad3d2e01281f388f9a0ae53909340e1221f6ec0f96941eeb992c4a5fbbe",
+      "route_prefixes": ["/better-local-files"],
+      "load_policy": "before-navigation",
+      "readiness": {
+        "kind": "global-property",
+        "property": "localTracksService",
+        "timeoutMs": 10000
+      },
+      "reason": "The app dereferences window.localTracksService during render; the original extension must finish loading before the route is entered."
+    },
+    {
+      "id": "playlist-maker",
+      "dist_revision": "9fd89fb40a53e4cfbf0953d34f806f4a8a36fc64",
+      "extension_path": "extensions/playlist-maker/extension.js",
+      "extension_git_blob_sha1": "b8bae78aa4417e718e8c06b1fe4e42201b505c29",
+      "extension_size": 97410,
+      "extension_sha256": "ed57ddc470e65b5b01084cad221354f288053afe710773fa105327c747d1c0e8",
+      "route_prefixes": ["/playlist-maker"],
+      "load_policy": "before-navigation",
+      "readiness": {
+        "kind": "playlist-maker-migrations",
+        "timeoutMs": 10000
+      },
+      "reason": "The original extension performs update checking and legacy storage migrations; preserve ordering by completing observable migration cleanup before route entry."
+    }
+  ]
+}
