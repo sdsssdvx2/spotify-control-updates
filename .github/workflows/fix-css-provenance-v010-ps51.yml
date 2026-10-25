@@ -20,10 +20,11 @@ jobs:
         run: |
           $p='validation/css-provenance-v0.1.0/css-provenance-collector.ps1'
           $s=[IO.File]::ReadAllText((Resolve-Path $p))
-          $old="        `$parts = `$trim.Split(@('='), 2)`n        `$key = `$parts[0].Trim(); `$value = `$parts[1].Trim()"
-          $new="        `$eq = `$trim.IndexOf('=')`n        `$key = `$trim.Substring(0,`$eq).Trim(); `$value = `$trim.Substring(`$eq+1).Trim()"
-          if(([regex]::Matches($s,[regex]::Escape($old))).Count -ne 1){throw 'Expected exact INI parser block not found once.'}
-          $s=$s.Replace($old,$new)
+          $pattern='(?m)^\s*\$parts = \$trim\.Split\(@\(''=''\), 2\)\r?\n\s*\$key = \$parts\[0\]\.Trim\(\); \$value = \$parts\[1\]\.Trim\(\)$'
+          $rx=New-Object Text.RegularExpressions.Regex($pattern,[Text.RegularExpressions.RegexOptions]::Multiline)
+          if($rx.Matches($s).Count -ne 1){throw 'Expected exact INI parser block not found once.'}
+          $new="        `$eq = `$trim.IndexOf('=')`r`n        `$key = `$trim.Substring(0,`$eq).Trim(); `$value = `$trim.Substring(`$eq+1).Trim()"
+          $s=$rx.Replace($s,$new,1)
           [IO.File]::WriteAllText((Resolve-Path $p),$s,(New-Object Text.UTF8Encoding($false)))
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
