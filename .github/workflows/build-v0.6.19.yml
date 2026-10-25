@@ -30,6 +30,18 @@ jobs:
           if ($main -ne '635358a620a9d28d99a52571085558906af967b6') { throw "Frozen production main moved unexpectedly: $main" }
           Write-Host "FROZEN_PRODUCTION_PASS $main"
 
+      - name: Correct builder hook-count assertion source
+        shell: powershell
+        run: |
+          $path='validation/v0.6.19/build_v0619.py'
+          $text=[IO.File]::ReadAllText($path)
+          $old="assert text.count('Invoke-PerformanceOverlayBestEffort -Reason')==4  # function definition + 3 calls"
+          $new="assert text.count('Invoke-PerformanceOverlayBestEffort -Reason')==3  # exactly three production hook calls"
+          if(-not $text.Contains($old)) { throw 'Expected one-time builder assertion source not found.' }
+          $text=$text.Replace($old,$new)
+          [IO.File]::WriteAllText($path,$text,(New-Object Text.UTF8Encoding($false)))
+          Write-Host 'V0619_BUILDER_ASSERTION_SOURCE_CORRECTED'
+
       - name: Build exact v0.6.19 and r8 candidates
         shell: powershell
         run: python validation/v0.6.19/build_v0619.py --build
@@ -63,7 +75,7 @@ jobs:
           foreach($needle in @('spicetify apply','spicetify backup','spicetify restore','config-xpui.ini','\Browser\','\Default\','ivLyrics','tagify','splitify')) {
             if($wrapper.IndexOf($needle,[StringComparison]::OrdinalIgnoreCase) -ge 0) { throw "Forbidden production wrapper mutation surface: $needle" }
           }
-          if(([regex]::Matches($addon,'Invoke-PerformanceOverlayBestEffort -Reason')).Count -ne 4) { throw 'Expected wrapper definition plus exactly three production hook calls.' }
+          if(([regex]::Matches($addon,'Invoke-PerformanceOverlayBestEffort -Reason')).Count -ne 3) { throw 'Expected exactly three production overlay hook calls.' }
           $checkStart=$addon.IndexOf('"Check" {',[StringComparison]::Ordinal)
           $updateStart=$addon.IndexOf('"Update" {',[StringComparison]::Ordinal)
           if($checkStart -lt 0 -or $updateStart -le $checkStart) { throw 'Addon action switch not found.' }
@@ -110,7 +122,7 @@ jobs:
         run: |
           git config user.name 'spotify-control-ci'
           git config user.email '98333820+sdsssdvx2@users.noreply.github.com'
-          git add packages/v0.6.19 validation/v0.6.19/candidate-metadata.json
+          git add packages/v0.6.19 validation/v0.6.19/candidate-metadata.json validation/v0.6.19/build_v0619.py
           if((git diff --cached --name-only).Count -eq 0) { throw 'Builder produced no payload changes.' }
           git commit -m 'Build Spotify Control v0.6.19 performance overlay payload'
           $sha=(git rev-parse HEAD).Trim()
