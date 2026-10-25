@@ -115,7 +115,7 @@ function Get-Plan([string]$IndexText, [object]$TargetsDoc, [object]$Provenance) 
             readiness = $target.readiness
         })
     }
-    return @($results)
+    return $results.ToArray()
 }
 
 function Build-TransformedIndex([string]$IndexText, [object[]]$Plan) {
