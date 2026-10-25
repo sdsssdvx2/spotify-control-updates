@@ -13,6 +13,7 @@ on:
       - '.github/workflows/prepare-v0.6.20-release.yml'
       - '.github/workflows/validate-v0.6.20-release.yml'
       - '.github/workflows/validate-v0.6.20-bootstrap-e2e.yml'
+      - '.github/workflows/validate-v0.6.20-bootstrap-main-e2e.yml'
   pull_request:
     branches:
       - main
@@ -25,6 +26,7 @@ on:
       - '.github/workflows/prepare-v0.6.20-release.yml'
       - '.github/workflows/validate-v0.6.20-release.yml'
       - '.github/workflows/validate-v0.6.20-bootstrap-e2e.yml'
+      - '.github/workflows/validate-v0.6.20-bootstrap-main-e2e.yml'
   workflow_dispatch:
 
 permissions:
@@ -53,7 +55,8 @@ jobs:
             $_ -ne 'manifest.json' -and
             $_ -ne '.github/workflows/prepare-v0.6.20-release.yml' -and
             $_ -ne '.github/workflows/validate-v0.6.20-release.yml' -and
-            $_ -ne '.github/workflows/validate-v0.6.20-bootstrap-e2e.yml'
+            $_ -ne '.github/workflows/validate-v0.6.20-bootstrap-e2e.yml' -and
+            $_ -ne '.github/workflows/validate-v0.6.20-bootstrap-main-e2e.yml'
           })
           if($unexpected.Count){throw "Unexpected v0.6.20 release files: $($unexpected -join ', ')"}
           $raw=@(git ls-files 'validation/v0.6.20/out/**')
@@ -108,7 +111,13 @@ jobs:
       - name: PowerShell 5.1 parser and candidate contract
         shell: powershell
         run: |
-          $files=@('validation/v0.6.20/out/bin/spotify-control.ps1','validation/v0.6.20/out/bin/addon-manager.ps1','performance/star-ratings/apply-star-ratings-patch.ps1')
+          $files=@(
+            'validation/v0.6.20/out/bin/spotify-control.ps1',
+            'validation/v0.6.20/out/bin/addon-manager.ps1',
+            'performance/star-ratings/apply-star-ratings-patch.ps1',
+            'validation/v0.6.20-bootstrap-e2e/run_bootstrap_cycle.ps1',
+            'validation/v0.6.20-bootstrap-e2e/run_bootstrap_main_cycle.ps1'
+          )
           foreach($file in $files){$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw "PowerShell parser failed: $file"}}
           $main=Get-Content validation/v0.6.20/out/bin/spotify-control.ps1
           if($main[0] -ne '# Spotify Control v0.6.20 Star Ratings Performance' -or @($main|Where-Object{$_ -eq '$ScriptVersion = "0.6.20"'}).Count -ne 1){throw 'v0.6.20 main marker mismatch.'}
@@ -117,6 +126,8 @@ jobs:
           if(([regex]::Matches($addon,'Invoke-StarRatingsPerformanceBestEffort -Reason')).Count -ne 3 -or ([regex]::Matches($addon,'Invoke-PerformanceOverlayBestEffort -Reason')).Count -ne 3){throw 'Production hook count mismatch.'}
           $checkStart=$addon.IndexOf('"Check" {',[StringComparison]::Ordinal);$updateStart=$addon.IndexOf('"Update" {',[StringComparison]::Ordinal);$check=$addon.Substring($checkStart,$updateStart-$checkStart)
           if($check.Contains('Invoke-StarRatingsPerformanceBestEffort') -or $check.Contains('Invoke-PerformanceOverlayBestEffort')){throw 'Check action must remain mutation-free.'}
+          $mainRunner=Get-Content validation/v0.6.20-bootstrap-e2e/run_bootstrap_main_cycle.ps1 -Raw
+          if($mainRunner.IndexOf('spotify-control-self-updater-ci-local-manifest.ps1',[StringComparison]::OrdinalIgnoreCase) -ge 0 -or $mainRunner.IndexOf('http://127.0.0.1',[StringComparison]::OrdinalIgnoreCase) -ge 0){throw 'Post-merge main runner must use unmodified Bootstrap and production main manifest only.'}
           Write-Host 'V0620_POWERSHELL51_PASS'
 
       - name: Download immutable Star Ratings fixture and validate transactional engine
