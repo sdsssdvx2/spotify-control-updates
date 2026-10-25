@@ -37,12 +37,20 @@ jobs:
             try{$text=$reader.ReadToEnd()}finally{$reader.Dispose()}
           } finally {$z.Dispose()}
           $lines=$text -split "`r?`n"
-          $patterns=@('function Measure-Condition','function Apply-Variant','function Restore-Original','function Start-Spotify','function Stop-Spotify','function Send-MediaKey','function Analyze-Transitions','$variants=','$variants =','foreach($v in $variants)','Write-ProgressCheckpoint','function Get-ProcessSnapshot')
+          $patterns=@(
+            '$Version =', '$AcceptedMainShas', '$ExpectedAddonSha', '$ExpectedAgentSha', '$ExpectedBootstrapSha', '$ExpectedSpotifyVersion', '$ExpectedSpicetifyVersion',
+            '$XpuiRoot', '$IndexPath', '$ConfigPath', '$BackupRoot', '$LatestJson', '$LatestTxt', '$ProgressJson',
+            'function Get-ResidentProcesses','function Suspend-Resident','function Restore-Resident','function Backup-ProtectedPersistence','function Wait-SpotifyReady',
+            'function Assert-AcceptedRuntimeBaseline','function Measure-TransitionCondition','function Analyze-Transitions','function Invoke-Lab','function Show-Status',
+            '$variants=','$variants =','foreach($v in $variants)','Write-ProgressCheckpoint'
+          )
+          $printed=@{}
           foreach($p in $patterns){
             $hits=@(0..($lines.Count-1)|Where-Object{$lines[$_].Contains($p)})
             foreach($i in $hits){
+              $key="$p@$i";if($printed.ContainsKey($key)){continue};$printed[$key]=$true
               Write-Host "=== ANCHOR $p line=$($i+1) ==="
-              $start=[Math]::Max(0,$i-12);$end=[Math]::Min($lines.Count-1,$i+70)
+              $start=[Math]::Max(0,$i-12);$end=[Math]::Min($lines.Count-1,$i+75)
               for($j=$start;$j -le $end;$j++){Write-Host ('{0:D5}: {1}' -f ($j+1),$lines[$j])}
             }
           }
