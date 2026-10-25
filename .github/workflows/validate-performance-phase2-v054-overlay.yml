@@ -37,9 +37,13 @@ jobs:
           $script='phase2-v054-unpacked\track-transition-overlay-revalidation.ps1'
           if(Test-Path phase2-v054-unpacked){Remove-Item phase2-v054-unpacked -Recurse -Force}
           Expand-Archive -LiteralPath $zip -DestinationPath phase2-v054-unpacked
+          $scriptSize=(Get-Item $script).Length
           $scriptHash=(Get-FileHash $script -Algorithm SHA256).Hash.ToLowerInvariant()
+          $zipSize=(Get-Item $zip).Length
           $zipHash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          Write-Host "PHASE2_V054_BUILT package_size=$((Get-Item $zip).Length) package_sha=$zipHash script_size=$((Get-Item $script).Length) script_sha=$scriptHash"
+          if($scriptSize -ne 117574 -or $scriptHash -ne 'ac90fa5ecdcdb260dcc14d8b38d99d5d6b421068a3797089a4a13eb1a0206179'){throw "Generated script identity drifted: $scriptSize/$scriptHash"}
+          if($zipSize -ne 150788 -or $zipHash -ne '7aae6cf469fc70e5c6484ac88adf06c7eed8fdc27db4ee6725b414c1d3d127f3'){throw "Generated package identity drifted: $zipSize/$zipHash"}
+          Write-Host "PHASE2_V054_IMMUTABLE_IDENTITY_PASS package_size=$zipSize package_sha=$zipHash script_size=$scriptSize script_sha=$scriptHash"
       - name: PowerShell 5.1 parse and static safety contract
         shell: powershell
         run: |
@@ -90,7 +94,8 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Second deterministic build failed.'}
           $size2=(Get-Item $zip).Length;$sha2=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           if($size1 -ne $size2 -or $sha1 -ne $sha2){throw "Non-deterministic v0.5.4 package: $size1/$sha1 vs $size2/$sha2"}
-          Write-Host "PHASE2_V054_DETERMINISTIC_PASS size=$size2 sha=$sha2"
+          if($size2 -ne 150788 -or $sha2 -ne '7aae6cf469fc70e5c6484ac88adf06c7eed8fdc27db4ee6725b414c1d3d127f3'){throw "Second build no longer matches immutable artifact identity: $size2/$sha2"}
+          Write-Host "PHASE2_V054_DETERMINISTIC_IDENTITY_PASS size=$size2 sha=$sha2"
       - uses: actions/upload-artifact@v4
         with:
           name: SpotifyControl-Production-Lazy-Overlay-Revalidation-v0.5.4
