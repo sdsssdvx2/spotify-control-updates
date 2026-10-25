@@ -78,58 +78,58 @@ function Replace-ExactOnce([string]$Text,[string]$Old,[string]$New,[string]$Labe
 }
 
 function Transform-PopupLyrics([string]$Text) {
-    $nl="`n";$tab="`t"
+    $nl=$(if($Text.Contains("`r`n")){"`r`n"}else{"`n"});$tab="`t"
     $old=@(
-        'let workerIsRunning = null;',
-        'document.addEventListener("visibilitychange", (e) => {',
-        $tab+'if (e.target.hidden) {',
-        $tab+$tab+'if (!workerIsRunning) {',
-        $tab+$tab+$tab+'worker.postMessage("popup-lyric-request-update");',
-        $tab+$tab+$tab+'workerIsRunning = true;',
+        $tab+'let workerIsRunning = null;',
+        $tab+'document.addEventListener("visibilitychange", (e) => {',
+        $tab+$tab+'if (e.target.hidden) {',
+        $tab+$tab+$tab+'if (!workerIsRunning) {',
+        $tab+$tab+$tab+$tab+'worker.postMessage("popup-lyric-request-update");',
+        $tab+$tab+$tab+$tab+'workerIsRunning = true;',
+        $tab+$tab+$tab+'}',
+        $tab+$tab+'} else {',
+        $tab+$tab+$tab+'if (workerIsRunning) {',
+        $tab+$tab+$tab+$tab+'worker.postMessage("popup-lyric-stop-update");',
+        $tab+$tab+$tab+$tab+'workerIsRunning = false;',
+        $tab+$tab+$tab+'}',
         $tab+$tab+'}',
-        $tab+'} else {',
-        $tab+$tab+'if (workerIsRunning) {',
-        $tab+$tab+$tab+'worker.postMessage("popup-lyric-stop-update");',
-        $tab+$tab+$tab+'workerIsRunning = false;',
-        $tab+$tab+'}',
-        $tab+'}',
-        '});'
+        $tab+'});'
     ) -join $nl
     $new=@(
-        'let workerIsRunning = false;',
-        'function syncWorkerState() {',
-        $tab+'const shouldRun = lyricVideoIsOpen && document.hidden;',
-        $tab+'if (shouldRun === workerIsRunning) return;',
-        $tab+'worker.postMessage(shouldRun ? "popup-lyric-request-update" : "popup-lyric-stop-update");',
-        $tab+'workerIsRunning = shouldRun;',
-        '}',
-        'document.addEventListener("visibilitychange", syncWorkerState);'
+        $tab+'let workerIsRunning = false;',
+        $tab+'function syncWorkerState() {',
+        $tab+$tab+'const shouldRun = lyricVideoIsOpen && document.hidden;',
+        $tab+$tab+'if (shouldRun === workerIsRunning) return;',
+        $tab+$tab+'worker.postMessage(shouldRun ? "popup-lyric-request-update" : "popup-lyric-stop-update");',
+        $tab+$tab+'workerIsRunning = shouldRun;',
+        $tab+'}',
+        $tab+'document.addEventListener("visibilitychange", syncWorkerState);'
     ) -join $nl
     $Text=Replace-ExactOnce $Text $old $new 'popup visibility worker gate'
 
     $old2=@(
-        'lyricVideo.onenterpictureinpicture = () => {',
-        $tab+'lyricVideo.play();',
-        $tab+'lyricVideoIsOpen = true;',
-        $tab+'tick(userConfigs);',
-        $tab+'updateTrack();',
-        '};',
-        'lyricVideo.onleavepictureinpicture = () => {',
-        $tab+'lyricVideoIsOpen = false;',
-        '};'
+        $tab+'lyricVideo.onenterpictureinpicture = () => {',
+        $tab+$tab+'lyricVideo.play();',
+        $tab+$tab+'lyricVideoIsOpen = true;',
+        $tab+$tab+'tick(userConfigs);',
+        $tab+$tab+'updateTrack();',
+        $tab+'};',
+        $tab+'lyricVideo.onleavepictureinpicture = () => {',
+        $tab+$tab+'lyricVideoIsOpen = false;',
+        $tab+'};'
     ) -join $nl
     $new2=@(
-        'lyricVideo.onenterpictureinpicture = () => {',
-        $tab+'lyricVideo.play();',
-        $tab+'lyricVideoIsOpen = true;',
-        $tab+'syncWorkerState();',
-        $tab+'tick(userConfigs);',
-        $tab+'updateTrack();',
-        '};',
-        'lyricVideo.onleavepictureinpicture = () => {',
-        $tab+'lyricVideoIsOpen = false;',
-        $tab+'syncWorkerState();',
-        '};'
+        $tab+'lyricVideo.onenterpictureinpicture = () => {',
+        $tab+$tab+'lyricVideo.play();',
+        $tab+$tab+'lyricVideoIsOpen = true;',
+        $tab+$tab+'syncWorkerState();',
+        $tab+$tab+'tick(userConfigs);',
+        $tab+$tab+'updateTrack();',
+        $tab+'};',
+        $tab+'lyricVideo.onleavepictureinpicture = () => {',
+        $tab+$tab+'lyricVideoIsOpen = false;',
+        $tab+$tab+'syncWorkerState();',
+        $tab+'};'
     ) -join $nl
     return Replace-ExactOnce $Text $old2 $new2 'popup PiP lifecycle worker sync'
 }
