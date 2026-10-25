@@ -69,8 +69,8 @@ jobs:
           python validation/performance-phase2-v0.5.1/build_v051.py
           if($LASTEXITCODE-ne0){throw 'v0.5.1 assembly failed.'}
           $zip='SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.1.zip'
-          if((Get-Item $zip).Length-ne98432){throw 'Unexpected v0.5.1 ZIP size.'}
-          if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()-ne'7793bcc8ac60f201ec8cd68fe4b4355d966dd35bca214809bcacebc18e8188eb'){throw 'Unexpected v0.5.1 ZIP SHA.'}
+          if((Get-Item $zip).Length-ne98457){throw 'Unexpected v0.5.1 ZIP size.'}
+          if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()-ne'db2d8836a7d865376c38688dfc3467b999e18437215ef4d5c44b7b9829cd0e11'){throw 'Unexpected v0.5.1 ZIP SHA.'}
           Expand-Archive $zip phase2-v051 -Force
           foreach($line in Get-Content phase2-v051/SHA256SUMS.txt){if($line-notmatch'^([0-9a-f]{64})  (.+)$'){throw "Bad checksum row: $line"};$a=(Get-FileHash (Join-Path phase2-v051 $Matches[2]) -Algorithm SHA256).Hash.ToLowerInvariant();if($a-ne$Matches[1]){throw "Checksum mismatch: $($Matches[2])"}}
           $p='phase2-v051/track-transition-direct-patch-acceptance.ps1'
@@ -115,7 +115,7 @@ jobs:
       - name: Deterministic rebuild identity
         shell: powershell
         run: |
-          $before=(Get-FileHash 'SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.1.zip' -Algorithm SHA256).Hash.ToLowerInvariant();python validation/performance-phase2-v0.5.1/build_v051.py;$after=(Get-FileHash 'SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.1.zip' -Algorithm SHA256).Hash.ToLowerInvariant();if($before-ne$after-or$after-ne'7793bcc8ac60f201ec8cd68fe4b4355d966dd35bca214809bcacebc18e8188eb'){throw 'Deterministic rebuild mismatch.'}
+          $before=(Get-FileHash 'SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.1.zip' -Algorithm SHA256).Hash.ToLowerInvariant();python validation/performance-phase2-v0.5.1/build_v051.py;$after=(Get-FileHash 'SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.1.zip' -Algorithm SHA256).Hash.ToLowerInvariant();if($before-ne$after-or$after-ne'db2d8836a7d865376c38688dfc3467b999e18437215ef4d5c44b7b9829cd0e11'){throw 'Deterministic rebuild mismatch.'}
           Write-Host 'V051_FINAL_DETERMINISTIC_REBUILD_PASS'
 
       - name: Upload exact final v0.5.1 package
