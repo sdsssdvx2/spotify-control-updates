@@ -32,35 +32,11 @@ function Invoke-BootstrapJson {
     try{return ([string]$jsonLine[0]|ConvertFrom-Json)}catch{throw "Bootstrap $BootstrapAction JSON parse failed: $($_.Exception.Message)"}
 }
 
-function Assert-PackageOverlayIntegrity {
-    foreach($row in @(
-        [pscustomobject]@{path=$OverlayApplyPath;sha=$ExpectedOverlayApplySha;name='apply-overlay.ps1'},
-        [pscustomobject]@{path=$OverlayCollectorPath;sha=$ExpectedOverlayCollectorSha;name='collect-active-provenance.ps1'},
-        [pscustomobject]@{path=$OverlayLoaderPath;sha=$ExpectedOverlayLoaderSha;name='lazy-custom-app-loader.js'},
-        [pscustomobject]@{path=$OverlayTargetsPath;sha=$ExpectedOverlayTargetsSha;name='pithaya-optional-custom-apps.json'}
-    )){
-        if(-not(Test-SafePath $row.path 'Leaf')){throw "Production overlay package file missing: $($row.name)"}
-        $actual=Get-Sha256Lower $row.path
-        if($actual -ne [string]$row.sha){throw "Production overlay package integrity mismatch for $($row.name): actual=$actual expected=$($row.sha)"}
-    }
-}
-
-function Align-ProductionOverlayBaseline {
-    Assert-PackageOverlayIntegrity
-    $stateRoot=Join-Path $Root 'performance-overlay'
-    New-Item -ItemType Directory -Force -Path $stateRoot|Out-Null
-    $provenancePath=Join-Path $stateRoot 'active-provenance-v051.json'
-    $collect=Invoke-Native -FilePath 'powershell.exe' -Arguments @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$OverlayCollectorPath,'-XpuiRoot',$XpuiRoot,'-OutputPath',$provenancePath,'-TargetMetadataPath',$OverlayTargetsPath) -TimeoutSeconds 120
-    if($collect.ExitCode -ne 0){throw "Production overlay provenance collection failed: $($collect.Output)"}
-    $apply=Invoke-Native -FilePath 'powershell.exe' -Arguments @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$OverlayApplyPath,'-Mode','Apply','-XpuiRoot',$XpuiRoot,'-ProvenancePath',$provenancePath,'-StateRoot',$stateRoot,'-TargetMetadataPath',$OverlayTargetsPath) -TimeoutSeconds 120
-    if($apply.ExitCode -ne 0){throw "Production overlay alignment failed: $($apply.Output)"}
-    $lines=@([string]$apply.Output -split "`r?`n")
-    $jsonLine=@($lines|Where-Object{([string]$_).TrimStart().StartsWith('{')}|Select-Object -Last 1)
-    $status='completed-no-json'
-    $value=$null
-    if($jsonLine.Count -eq 1){try{$value=[string]$jsonLine[0]|ConvertFrom-Json;$status=[string]$value.status}catch{}}
-    Write-LabLog ("Production performance overlay baseline alignment status: {0}" -f $status) 'OK'
-    return [pscustomobject]@{status=$status;provenance_path=$provenancePath;result=$value}
+function Align-ReleasedAddonManagerBaseline {
+    $r=Invoke-Native -FilePath 'powershell.exe' -Arguments @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$AddonPath,'-Action','Update') -TimeoutSeconds 900
+    if($r.ExitCode -ne 0){throw "Released Addon Manager r8 Update/alignment failed with exit $($r.ExitCode): $($r.Output)"}
+    Write-LabLog 'Released Addon Manager r8 Update/alignment completed before the measurement snapshot.' 'OK'
+    return [pscustomobject]@{status='addon-manager-r8-update-completed';output=$r.Output}
 }
 
 function Assert-AcceptedRuntimeBaseline {
