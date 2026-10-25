@@ -1,0 +1,68 @@
+Spotify Control Production Lazy-Overlay Revalidation v0.5.4
+============================================================
+
+Validation-only package. DO NOT MERGE THIS BRANCH TO PRODUCTION.
+
+Identity source
+---------------
+Clean Windows push validation run: 40224155894
+Source head observed by that run: 4ea2e1c953193b361aca32fd5b97597d61139191
+Production base: 29d6c52c6a79559e513b367ec57edcccebae5fd0
+Exact v0.5.3 sampler source commit: ba031d1fd4bc01a1a1ee54d7f15cb998a6640785
+
+Base v0.5.3 package
+-------------------
+Filename: SpotifyControl-Track-Transition-Background-Guarded-Acceptance-v0.5.3.zip
+Size: 126853 bytes
+SHA-256: b7aea344cd9a67c0b46886b41118bc3a33c76d2a2d7d6c8facdfa284b5baea43
+Generated script size: 108497 bytes
+Generated script SHA-256: 73793f14137b0eb8c2f008f5990e984f40650d4b566a974a30411cdfad94be84
+
+Exact released production overlay bytes (Windows CRLF identities)
+-----------------------------------------------------------------
+apply-overlay.ps1
+  Size: 16748 bytes
+  SHA-256: 053a597e834aab959a588350160ce81046ceda66e2a2ac233eeff8af78fea544
+lazy-custom-app-loader.js
+  Size: 10600 bytes
+  SHA-256: c38af0f6266747f50d2a0c05e9a49d5ffb34135738715fab6321ff4ae79623d9
+targets.json
+  Size: 1756 bytes
+  SHA-256: c255e53066abbd730467e0c1d92e81dd907e1ea2f245daf6f0d080d2239fea35
+
+v0.5.4 generated runtime
+------------------------
+Filename: track-transition-overlay-revalidation.ps1
+Size: 117574 bytes
+SHA-256: ac90fa5ecdcdb260dcc14d8b38d99d5d6b421068a3797089a4a13eb1a0206179
+
+v0.5.4 final runtime package
+----------------------------
+Filename: SpotifyControl-Production-Lazy-Overlay-Revalidation-v0.5.4.zip
+Size: 150788 bytes
+SHA-256: 7aae6cf469fc70e5c6484ac88adf06c7eed8fdc27db4ee6725b414c1d3d127f3
+
+Normalized source helper identities used by builder
+---------------------------------------------------
+runtime_alignment_v054.ps1.inc
+  UTF-8 normalized content size: 8512 bytes
+  SHA-256: ab058261de6282a24cbecae955efd2cb96a76212f1581766a891d8c4df91f178
+runtime_overlay_v054.ps1.inc
+  UTF-8 normalized content size: 38619 bytes
+  SHA-256: 7491a70ba5f4b508a8e5746d30d96693604ab7c903734f88da399bb3b2d06438
+
+Validated contracts in run 40224155894
+--------------------------------------
+- validation-only scope: PASS
+- exact deterministic v0.5.3 reconstruction: PASS
+- v0.5.3 Spotify-targeted GSMTC / verified-transition measurement core preserved text-identically: PASS
+- no legacy global media-key surface: PASS
+- Windows PowerShell 5.1 parse: PASS
+- exact released production overlay CRLF identities: PASS
+- real production overlay engine synthetic both-target apply: PASS
+- real production overlay engine synthetic one-target subset apply: PASS
+- unknown/drifted extension bytes fail-open with no overlay mutation: PASS
+- internal SHA256SUMS verification: PASS
+- second deterministic package rebuild: PASS
+
+Only a subsequent build matching the exact generated script and package identities above is eligible for user runtime testing.
