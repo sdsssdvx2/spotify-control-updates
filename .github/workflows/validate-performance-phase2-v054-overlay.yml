@@ -1,0 +1,91 @@
+name: Validate Performance Phase 2 v0.5.4 Overlay
+on:
+  push:
+    branches:
+      - validate/performance-phase2-v0.5.4-overlay
+    paths:
+      - 'validation/performance-phase2-v0.5.4/**'
+      - '.github/workflows/validate-performance-phase2-v054-overlay.yml'
+  pull_request:
+    paths:
+      - 'validation/performance-phase2-v0.5.4/**'
+      - '.github/workflows/validate-performance-phase2-v054-overlay.yml'
+permissions:
+  contents: read
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Prove validation-only scope
+        shell: powershell
+        run: |
+          $base='29d6c52c6a79559e513b367ec57edcccebae5fd0'
+          git cat-file -e "$base^{commit}"
+          $changed=@(git diff --name-only "$base...HEAD")
+          $bad=@($changed|Where-Object{$_ -notlike 'validation/performance-phase2-v0.5.4/*' -and $_ -notin @('.github/workflows/validate-performance-phase2-v054-overlay.yml','.github/workflows/inspect-performance-phase2-v054-base.yml')})
+          if($bad.Count){throw "Validation branch touched production/out-of-scope files: $($bad -join ', ')"}
+          Write-Host 'PHASE2_V054_SCOPE_PASS'
+      - name: Build exact deterministic package
+        shell: powershell
+        run: |
+          python validation/performance-phase2-v0.5.4/build_v054.py
+          if($LASTEXITCODE -ne 0){throw "v0.5.4 build failed: $LASTEXITCODE"}
+          $zip='SpotifyControl-Production-Lazy-Overlay-Revalidation-v0.5.4.zip'
+          $script='phase2-v054-unpacked\track-transition-overlay-revalidation.ps1'
+          if(Test-Path phase2-v054-unpacked){Remove-Item phase2-v054-unpacked -Recurse -Force}
+          Expand-Archive -LiteralPath $zip -DestinationPath phase2-v054-unpacked
+          $scriptHash=(Get-FileHash $script -Algorithm SHA256).Hash.ToLowerInvariant()
+          $zipHash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "PHASE2_V054_BUILT package_size=$((Get-Item $zip).Length) package_sha=$zipHash script_size=$((Get-Item $script).Length) script_sha=$scriptHash"
+      - name: PowerShell 5.1 parse and static safety contract
+        shell: powershell
+        run: |
+          $p='phase2-v054-unpacked\track-transition-overlay-revalidation.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error ("line {0}: {1}" -f $_.Extent.StartLineNumber,$_.Message)};throw 'Generated v0.5.4 failed PowerShell 5.1 parse.'}
+          $s=Get-Content $p -Raw
+          foreach($x in @('TrySkipNextAsync','SPOTIFY_NEXT_CONFIRMED','RegisterSessionNotification','WaitForSpotifyCapture(5000,5)','current-v0620-r9','BASELINE_A','BLF_ORIGINAL','PLAYLIST_MAKER_ORIGINAL','BOTH_ORIGINAL','production_overlay_state_unchanged_exact','exact-production-lazy-overlay-index-policy-only','Refusing overlay reset because current index SHA-256 is not a profiler-owned/known state')){if($s.IndexOf($x,[StringComparison]::Ordinal)-lt0){throw "Missing v0.5.4 safety/runtime contract: $x"}}
+          foreach($x in @('keybd_event','SpotifyControlMediaKeys','Send-MediaKey','[byte]0xB0','[byte]0xB3')){if($s.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "Legacy global media-key surface survived: $x"}}
+          $labStart=$s.IndexOf('function Invoke-Lab {');$labEnd=$s.IndexOf('function ',($labStart+20));$lab=$s.Substring($labStart,$labEnd-$labStart)
+          foreach($x in @('Assert-DirectPatchEligibility','Invoke-DirectPatchEngine','Write-PatchSubsetMetadata','PatchMetadataPaths')){if($lab.IndexOf($x,[StringComparison]::Ordinal)-ge0){throw "Direct-patch path survived in v0.5.4 Invoke-Lab: $x"}}
+          if(Test-Path phase2-v054-unpacked\apply-direct-extension-patches.ps1){throw 'Direct extension patch engine must not be shipped in v0.5.4 package.'}
+          Write-Host 'PHASE2_V054_PS51_STATIC_PASS'
+      - name: Verify exact packaged production overlay sources
+        shell: powershell
+        run: |
+          $expected=@{
+            'phase2-v054-unpacked\overlay\apply-overlay.ps1'='ce4501f7e9b6273907b672b54c41067feaeffdba'
+            'phase2-v054-unpacked\overlay\lazy-custom-app-loader.js'='a6a84ac7edef51c1fc2a73278e3980b563ae6ca7'
+            'phase2-v054-unpacked\overlay\targets.json'='f92342a6ea63a007e15bf25bc74ad1463e9a841a'
+          }
+          foreach($p in $expected.Keys){$h=(Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant();if($h-ne$expected[$p]){throw "Overlay source identity mismatch: $p $h"}}
+          $t=Get-Content phase2-v054-unpacked\overlay\targets.json -Raw|ConvertFrom-Json
+          if((@($t.targets|ForEach-Object{$_.id}|Sort-Object)-join ',')-ne'better-local-files,playlist-maker'){throw 'Packaged production overlay target set drifted.'}
+          Write-Host 'PHASE2_V054_OVERLAY_SOURCE_PASS'
+      - name: Run generated real-engine synthetic SelfTest
+        shell: powershell
+        env:
+          SPOTIFYCONTROL_TEST_RESIDUAL_CLEANUP: '0'
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File phase2-v054-unpacked\track-transition-overlay-revalidation.ps1 -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw "v0.5.4 SelfTest failed: $LASTEXITCODE"}
+      - name: Verify internal checksums and deterministic rebuild
+        shell: powershell
+        run: |
+          foreach($line in Get-Content phase2-v054-unpacked\SHA256SUMS.txt){if($line -notmatch '^([0-9a-f]{64})  (.+)$'){throw "Bad checksum row: $line"};$p=Join-Path phase2-v054-unpacked ($Matches[2]-replace '/','\');$h=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant();if($h-ne$Matches[1]){throw "Checksum mismatch: $($Matches[2])"}}
+          $zip='SpotifyControl-Production-Lazy-Overlay-Revalidation-v0.5.4.zip';$size1=(Get-Item $zip).Length;$sha1=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          python validation/performance-phase2-v0.5.4/build_v054.py
+          if($LASTEXITCODE -ne 0){throw 'Second deterministic build failed.'}
+          $size2=(Get-Item $zip).Length;$sha2=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($size1-ne$size2 -or $sha1-ne$sha2){throw "Non-deterministic v0.5.4 package: $size1/$sha1 vs $size2/$sha2"}
+          Write-Host "PHASE2_V054_DETERMINISTIC_PASS size=$size2 sha=$sha2"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-Production-Lazy-Overlay-Revalidation-v0.5.4
+          path: SpotifyControl-Production-Lazy-Overlay-Revalidation-v0.5.4.zip
+          if-no-files-found: error
+          retention-days: 14
