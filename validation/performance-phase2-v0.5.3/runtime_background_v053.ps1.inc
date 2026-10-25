@@ -135,7 +135,7 @@ public static class SpotifyControlAudioGuard {
         return "pid:"+pid.ToString();
     }
 
-    internal static void TryMuteControl(IAudioSessionControl control) {
+    static void TryMuteControl(IAudioSessionControl control) {
         if(control==null) return;
         var c2=(IAudioSessionControl2)control; uint pid; Check(c2.GetProcessId(out pid));
         if(!IsSpotify(pid)) return;
