@@ -60,12 +60,20 @@ function ConvertTo-Utf8ExactBytes([string]$Text, [bool]$HasBom) {
 
 function Write-BytesAtomic([string]$Path, [byte[]]$Bytes) {
     $dir = Split-Path -Parent $Path
-    $tmp = Join-Path $dir (([IO.Path]::GetFileName($Path)) + '.scperf.' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    $leaf = [IO.Path]::GetFileName($Path)
+    $nonce = [Guid]::NewGuid().ToString('N')
+    $tmp = Join-Path $dir ($leaf + '.scperf.' + $nonce + '.tmp')
+    $replaceBackup = Join-Path $dir ($leaf + '.scperf.' + $nonce + '.replace-backup')
     try {
         [IO.File]::WriteAllBytes($tmp, $Bytes)
-        [IO.File]::Replace($tmp, $Path, $null)
+        if (Test-Path -LiteralPath $Path) {
+            [IO.File]::Replace($tmp, $Path, $replaceBackup)
+        } else {
+            [IO.File]::Move($tmp, $Path)
+        }
     } finally {
         if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $replaceBackup) { Remove-Item -LiteralPath $replaceBackup -Force -ErrorAction SilentlyContinue }
     }
 }
 
