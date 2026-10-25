@@ -6,8 +6,12 @@ BASE_ZIP='SpotifyControl-Track-Transition-Background-Guarded-Acceptance-v0.5.3.z
 BASE_SIZE=126853
 BASE_SHA='b7aea344cd9a67c0b46886b41118bc3a33c76d2a2d7d6c8facdfa284b5baea43'
 OUT='SpotifyControl-Production-Lazy-Overlay-Revalidation-v0.5.4.zip'
+PROD_OVERLAY_APPLY_SHA='053a597e834aab959a588350160ce81046ceda66e2a2ac233eeff8af78fea544'
+PROD_OVERLAY_LOADER_SHA='c38af0f6266747f50d2a0c05e9a49d5ffb34135738715fab6321ff4ae79623d9'
+PROD_OVERLAY_TARGETS_SHA='c255e53066abbd730467e0c1d92e81dd907e1ea2f245daf6f0d080d2239fea35'
 
 def h(b):return hashlib.sha256(b).hexdigest()
+def production_crlf(b):return b.replace(b'\r\n',b'\n').replace(b'\n',b'\r\n')
 def span(s,name):
     a=s.index('function '+name+' {');b=s.find('\nfunction ',a+1)
     if b<0:b=s.find('\ntry{',a+1)
@@ -53,7 +57,7 @@ $PreviousMainSha = "27783abc40c446aadf6f2a9373b4525ada89759075f37e934958c8e449f2
 $PreviousAddonSha = "b7d1a4bc7707533400402fe42e60d724f88656c2477d4d4a5c0f47be60f47977"
 $Previous2MainSha = "5ff7990564287bc409626d8835e27679fb8de434868443313be42fdc0d9cce3b"
 $Previous2AddonSha = "b7d1a4bc7707533400402fe42e60d724f88656c2477d4d4a5c0f47be60f47977"'''
-new_block='''$Version = "0.5.4"
+new_block=f'''$Version = "0.5.4"
 $ExpectedMainSha = "e9f0181756cfb84c505c30f54b6067e321f6d178d3a1936489714b8f4441ba18"
 $ExpectedAddonSha = "3a20fcd552b363ebc05e26854a8fe010ffe50e5c756ebd3d7fca54011e8a8b86"
 $PreviousMainSha = "45795b9622953a10c6eca2ee2f5a19fc4467c5143d5bdf7a9f2ad64841b9416f"
@@ -64,9 +68,9 @@ $OverlayRoot = Join-Path $PSScriptRoot 'overlay'
 $OverlayApplyPath = Join-Path $OverlayRoot 'apply-overlay.ps1'
 $OverlayLoaderPath = Join-Path $OverlayRoot 'lazy-custom-app-loader.js'
 $OverlayTargetsPath = Join-Path $OverlayRoot 'targets.json'
-$ExpectedOverlayApplySha = "ce4501f7e9b6273907b672b54c41067feaeffdba"
-$ExpectedOverlayLoaderSha = "a6a84ac7edef51c1fc2a73278e3980b563ae6ca7"
-$ExpectedOverlayTargetsSha = "f92342a6ea63a007e15bf25bc74ad1463e9a841a"'''
+$ExpectedOverlayApplySha = "{PROD_OVERLAY_APPLY_SHA}"
+$ExpectedOverlayLoaderSha = "{PROD_OVERLAY_LOADER_SHA}"
+$ExpectedOverlayTargetsSha = "{PROD_OVERLAY_TARGETS_SHA}"'''
 s=r1(s,old_block,new_block)
 
 # Move accepted runtime from v0.6.19/r8 to current released v0.6.20/r9, while accepting exact v0.6.19/r8 and v0.6.18/r7 for self-healing alignment.
@@ -98,11 +102,14 @@ lab=func(s,'Invoke-Lab')
 for forbidden in ['Assert-DirectPatchEligibility','Invoke-DirectPatchEngine','Write-PatchSubsetMetadata','PatchMetadataPaths']:
     assert forbidden not in lab,forbidden
 
-# Pin the exact production overlay implementation shipped on current main.
-apply=(R/'performance/overlay/apply-overlay.ps1').read_bytes();loader=(R/'performance/overlay/lazy-custom-app-loader.js').read_bytes();targets=(R/'performance/overlay/targets/pithaya-optional-custom-apps.json').read_bytes()
-assert h(apply)=='ce4501f7e9b6273907b672b54c41067feaeffdba'
-assert h(loader)=='a6a84ac7edef51c1fc2a73278e3980b563ae6ca7'
-assert h(targets)=='f92342a6ea63a007e15bf25bc74ad1463e9a841a'
+# The release builder embedded Windows-CRLF overlay bytes into Addon Manager r8/r9.
+# GitHub stores the source normalized to LF, so normalize deterministically back to the exact released byte identities.
+apply=production_crlf((R/'performance/overlay/apply-overlay.ps1').read_bytes())
+loader=production_crlf((R/'performance/overlay/lazy-custom-app-loader.js').read_bytes())
+targets=production_crlf((R/'performance/overlay/targets/pithaya-optional-custom-apps.json').read_bytes())
+assert len(apply)==16748 and h(apply)==PROD_OVERLAY_APPLY_SHA,(len(apply),h(apply))
+assert len(loader)==10600 and h(loader)==PROD_OVERLAY_LOADER_SHA,(len(loader),h(loader))
+assert len(targets)==1756 and h(targets)==PROD_OVERLAY_TARGETS_SHA,(len(targets),h(targets))
 
 script=('\r\n'.join(s.split('\n'))).encode('utf-8-sig')
 readme=("Spotify Control Production Lazy-Overlay Revalidation v0.5.4\r\n\r\n"
@@ -126,6 +133,7 @@ with zipfile.ZipFile(io.BytesIO(out)) as z:
     for line in z.read('SHA256SUMS.txt').decode('ascii').splitlines():
         x,n=line.split('  ',1);assert h(z.read(n))==x,(n,x)
 print('PHASE2_V054_BASE_V053_PASS',BASE_SIZE,BASE_SHA)
+print('PHASE2_V054_PRODUCTION_OVERLAY_CRLF',len(apply),h(apply),len(loader),h(loader),len(targets),h(targets))
 print('PHASE2_V054_ALIGNMENT_HELPER',len(align.encode()),h(align.encode()))
 print('PHASE2_V054_OVERLAY_HELPER',len(overlay.encode()),h(overlay.encode()))
 print('PHASE2_V054_SCRIPT',len(script),h(script))
