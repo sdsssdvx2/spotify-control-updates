@@ -45,21 +45,21 @@ jobs:
           }
 
           $oldManifest=@'
-    latest={x['path']:x for x in m['latest_files']}
-    latest['bin/spotify-control.ps1']=meta['candidate_main']
-    latest['bin/addon-manager.ps1']=meta['candidate_addon']
-    assert latest['bin/spotify-control-agent.vbs']==meta['agent']
-'@
+              latest={x['path']:x for x in m['latest_files']}
+              latest['bin/spotify-control.ps1']=meta['candidate_main']
+              latest['bin/addon-manager.ps1']=meta['candidate_addon']
+              assert latest['bin/spotify-control-agent.vbs']==meta['agent']
+          '@
           $newManifest=@'
-    original_latest={x['path']:x for x in m['latest_files']}
-    assert original_latest['bin/spotify-control-agent.vbs']==meta['agent']
-    m['latest_files']=[
-        meta['candidate_main'] if x['path']=='bin/spotify-control.ps1'
-        else meta['candidate_addon'] if x['path']=='bin/addon-manager.ps1'
-        else x
-        for x in m['latest_files']
-    ]
-'@
+              original_latest={x['path']:x for x in m['latest_files']}
+              assert original_latest['bin/spotify-control-agent.vbs']==meta['agent']
+              m['latest_files']=[
+                  meta['candidate_main'] if x['path']=='bin/spotify-control.ps1'
+                  else meta['candidate_addon'] if x['path']=='bin/addon-manager.ps1'
+                  else x
+                  for x in m['latest_files']
+              ]
+          '@
           if($text.Contains($oldManifest)) {
             $text=$text.Replace($oldManifest,$newManifest)
           } elseif(-not $text.Contains($newManifest)) {
