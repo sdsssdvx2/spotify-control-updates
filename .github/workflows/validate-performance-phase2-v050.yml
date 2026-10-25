@@ -50,6 +50,9 @@ jobs:
         shell: powershell
         run: |
           $zip='SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.0.zip'
+          if((Get-Item $zip).Length -ne 90517){throw 'Unexpected v0.5.0 package size.'}
+          $zipSha=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($zipSha -ne '8bbd3465f99426b485d1a400aecd87b9ce7f75978f18b786b6b14d11727227c0'){throw "Unexpected v0.5.0 package SHA: $zipSha"}
           Expand-Archive -LiteralPath $zip -DestinationPath phase2-v050 -Force
           Push-Location phase2-v050
           foreach($line in Get-Content SHA256SUMS.txt){
@@ -83,7 +86,13 @@ jobs:
             "mutation_engine='exact-active-xpui-direct-extension-byte-patches'",
             'xpui_index_mutated=$false'
           )){if($profiler.IndexOf($required,[StringComparison]::Ordinal) -lt 0){throw "Focused profiler invariant missing: $required"}}
-          foreach($forbidden in @("Arguments @('apply'","Arguments @('backup'","Arguments @('restore'","Set-Ini","Remove-Item -LiteralPath $XpuiRoot")){
+          foreach($forbidden in @(
+            "Arguments @('apply'",
+            "Arguments @('backup'",
+            "Arguments @('restore'",
+            'Set-Ini',
+            'Remove-Item -LiteralPath $XpuiRoot -Recurse'
+          )){
             if($profiler.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Forbidden production mutation pattern in profiler: $forbidden"}
           }
           if(([regex]::Matches($profiler,"label='BASELINE_A'|label='POPUP_PATCH'|label='STAR_PATCH'|label='BOTH_PATCHES'|label='BASELINE_B'")).Count -lt 5){throw 'Focused five-condition matrix missing.'}
@@ -140,6 +149,7 @@ jobs:
           $after=(Get-FileHash 'SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.0.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
           if($before -ne $after){throw "Deterministic rebuild mismatch: $before vs $after"}
           $size=(Get-Item 'SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.0.zip').Length
+          if($size -ne 90517 -or $after -ne '8bbd3465f99426b485d1a400aecd87b9ce7f75978f18b786b6b14d11727227c0'){throw "Pinned package identity mismatch: size=$size sha=$after"}
           Write-Host "PHASE2_V050_FINAL_IDENTITY_PASS size=$size sha256=$after"
 
       - name: Upload focused acceptance package
