@@ -1,0 +1,125 @@
+name: Validate Spotify Control Performance Phase 2 v0.3.2
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'validation/performance-phase2-v0.3.2/**'
+      - '.github/workflows/validate-performance-phase2-v032.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-powershell51-phase2-v032:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch exact validated v0.3.1 source anchor
+        shell: bash
+        run: git fetch origin a6e9fe489c4535ddfcefe85a0017c8dd36debed6 --depth=1
+
+      - name: Reconstruct exact v0.3.2 package from validated v0.3.1 anchor
+        shell: python
+        run: |
+          import runpy
+          runpy.run_path('validation/performance-phase2-v0.3.2/build_and_validate.py',run_name='__main__')
+
+      - name: Static fail-closed startup residual-process safety audit
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          s=Path('phase2-v032/track-transition-isolation.ps1').read_text(encoding='utf-8-sig')
+          required=[
+            '$Version = "0.3.2"',
+            '5ff7990564287bc409626d8835e27679fb8de434868443313be42fdc0d9cce3b',
+            '27783abc40c446aadf6f2a9373b4525ada89759075f37e934958c8e449f2d98f',
+            'b7d1a4bc7707533400402fe42e60d724f88656c2477d4d4a5c0f47be60f47977',
+            '2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278',
+            'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6',
+            '$ExpectedSpotifyVersion = "1.3.6.1921"',
+            '$ExpectedSpicetifyVersion = "2.46.2"',
+            '$preflightSpotifyCount=@(Get-Process Spotify -ErrorAction SilentlyContinue).Count',
+            'Residual Spotify processes closed before any xpui mutation.',
+            'preflight_spotify_processes_autoclosed=$preflightSpotifyCount',
+            'SPOTIFYCONTROL_TEST_RESIDUAL_CLEANUP',
+            'SELFTEST PASS: residual Spotify process cleanup before xpui mutation.',
+            "mutation_engine='direct-active-xpui-index-hooks'",
+            'spicetify_apply_used=$false','spicetify_config_mutated=$false',
+          ]
+          for x in required: assert x in s,x
+          assert 'Close Spotify completely, including tray, before starting Phase 2.' not in s
+          a=s.index('$accepted=Assert-AcceptedRuntimeBaseline')
+          b=s.index('Suspend-Resident',a)
+          c=s.index('$preflightSpotifyCount=',b)
+          d=s.index('Stop-SpotifyForVariant',c)
+          e=s.index('$stamp=Get-Date',d)
+          f=s.index('$script:OriginalIndexBackup=',e)
+          assert a < b < c < d < e < f,(a,b,c,d,e,f)
+          native_calls=[line.strip() for line in s.splitlines() if 'Invoke-Native ' in line and not line.lstrip().startswith('function ')]
+          assert len(native_calls)==2,native_calls
+          assert any('robocopy' in x.lower() for x in native_calls)
+          assert any("@('--version')" in x for x in native_calls)
+          for x in native_calls:
+              low=x.lower(); assert ' apply' not in low and ' backup' not in low and ' restore' not in low and ' config ' not in low,x
+          assert not re.search(r'(?im)^\s*spicetify(?:\.exe)?\s+(?:apply|backup|restore|config)\b',s)
+          print('PHASE2_V032_STATIC_SAFETY_AUDIT_PASS')
+
+      - name: Windows PowerShell 5.1 parser direct-xpui SelfTest and residual Spotify cleanup fixture
+        shell: powershell
+        env:
+          SPOTIFYCONTROL_TEST_RESIDUAL_CLEANUP: '1'
+        run: |
+          $ErrorActionPreference='Stop'
+          $scriptPath=(Resolve-Path '.\phase2-v032\track-transition-isolation.ps1').Path
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($scriptPath,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'PowerShell 5.1 parser rejected v0.3.2 profiler.'}
+          $sandbox=Join-Path $env:RUNNER_TEMP 'phase2-v032-selftest'
+          Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $sandbox | Out-Null
+          $env:LOCALAPPDATA=Join-Path $sandbox 'LocalAppData'
+          $env:APPDATA=Join-Path $sandbox 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA | Out-Null
+          $out=& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scriptPath -Action SelfTest 2>&1
+          $code=$LASTEXITCODE;$out|ForEach-Object{Write-Host $_}
+          if($code -ne 0){throw "Phase 2 v0.3.2 SelfTest failed with exit $code"}
+          $joined=($out -join "`n")
+          foreach($marker in @('SELFTEST PASS: residual Spotify process cleanup before xpui mutation.','SELFTEST PASS: direct-xpui hook inventory/matrix, UTF-8 BOM+CRLF preservation, exact tree restore, percentile/process/transition math.')){
+            if($joined -notmatch [regex]::Escape($marker)){throw ('Expected v0.3.2 SelfTest marker missing: '+$marker)}
+          }
+          if(Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'SpotifyControl')){throw 'SelfTest mutated a production-shaped SpotifyControl path.'}
+          if(@(Get-Process Spotify -ErrorAction SilentlyContinue).Count -ne 0){throw 'Residual Spotify fixture left a Spotify-named process running.'}
+          Write-Host 'PHASE2_V032_WINDOWS_PS51_SELFTEST_PASS'
+
+      - name: Verify exact final ZIP CRC checksums and text controls
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib,zipfile
+          p=Path('SpotifyControl-Track-Transition-Isolation-v0.3.2.zip'); data=p.read_bytes()
+          assert len(data)==18630,len(data)
+          assert hashlib.sha256(data).hexdigest()=='384469d4b554a08e9c6d43e4efd5a548bb8f1bc7733dc0bacdc25798e640b3c7'
+          with zipfile.ZipFile(p) as z:
+              assert z.testzip() is None
+              assert sorted(z.namelist())==sorted(['README.md','RUN_TRACK_TRANSITION_ISOLATION.cmd','SELFTEST.cmd','SHA256SUMS.txt','track-transition-isolation.ps1'])
+              lines=z.read('SHA256SUMS.txt').decode('ascii').splitlines(); assert len(lines)==4
+              for line in lines:
+                  h,name=line.split('  ',1); assert hashlib.sha256(z.read(name)).hexdigest()==h,(name,h)
+              for name in z.namelist():
+                  if not name.lower().endswith(('.md','.cmd','.ps1','.txt')): continue
+                  b=z.read(name); assert not [i for i,x in enumerate(b) if x==13 and (i+1>=len(b) or b[i+1]!=10)],name; assert b'\t' not in b,name
+          print('PHASE2_V032_FINAL_ZIP_PASS',len(data),hashlib.sha256(data).hexdigest())
+
+      - name: Upload exact validated Phase 2 v0.3.2 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-Track-Transition-Isolation-v0.3.2
+          path: SpotifyControl-Track-Transition-Isolation-v0.3.2.zip
+          if-no-files-found: error
+          compression-level: 0
