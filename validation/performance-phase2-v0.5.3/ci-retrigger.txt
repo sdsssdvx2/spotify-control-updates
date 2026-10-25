@@ -1,0 +1,1 @@
+Retrigger Windows validation after the exact one-line audio guard accessibility correction.
