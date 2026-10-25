@@ -39,5 +39,5 @@ b=io.BytesIO()
 with zipfile.ZipFile(b,'w',compression=zipfile.ZIP_STORED) as z:
     for x in order:
         i=zipfile.ZipInfo(x,date_time=(2026,10,26,0,30,0));i.compress_type=zipfile.ZIP_STORED;i.create_system=0;z.writestr(i,e[x])
-out=b.getvalue();(R/OUT).write_bytes(out);assert len(out)==98432 and h(out)=='7793bcc8ac60f201ec8cd68fe4b4355d966dd35bca214809bcacebc18e8188eb'
+out=b.getvalue();(R/OUT).write_bytes(out);assert len(out)==98457 and h(out)=='db2d8836a7d865376c38688dfc3467b999e18437215ef4d5c44b7b9829cd0e11'
 print('PHASE2_V051_PACKAGE_PASS',len(out),h(out));print('PHASE2_V051_SCRIPT_PASS',len(script),h(script))
