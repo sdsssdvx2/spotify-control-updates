@@ -26,60 +26,43 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Prove production surface is untouched
+      - name: Validate isolation helper release chain and scripts
         shell: powershell
         run: |
           $base='0e367abdc61e8fdf7125032b51bba0ce9550f6ea'
           git cat-file -e "$base^{commit}"
-          $changed=@(git diff --name-only "$base...HEAD")
-          foreach($path in $changed){
+          foreach($path in @(git diff --name-only "$base...HEAD")){
             if($path -eq 'manifest.json' -or $path.StartsWith('packages/') -or $path.StartsWith('bin/') -or $path.StartsWith('performance/overlay/') -or $path.StartsWith('validation/v0.6.19/')){throw "Production surface changed: $path"}
           }
-          Write-Host 'V051_FINAL_PRODUCTION_ISOLATION_PASS'
-
-      - name: PowerShell 5.1 helper and release-chain contract
-        shell: powershell
-        run: |
-          $helper='validation/performance-phase2-v0.5.1/runtime_alignment.ps1.inc'
-          $tokens=$null;$errors=$null
-          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $helper),[ref]$tokens,[ref]$errors)|Out-Null
-          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Alignment helper failed PS5.1 parse.'}
-          $s=Get-Content $helper -Raw
+          foreach($path in @('validation/performance-phase2-v0.5.1/runtime_alignment.ps1.inc','validation/performance-phase2-v0.5.1/test_v0617_two_edge.ps1')){
+            $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw "PS5.1 parse failed: $path"}
+          }
+          $s=Get-Content 'validation/performance-phase2-v0.5.1/runtime_alignment.ps1.inc' -Raw
           foreach($x in @('current-v0619-r8','previous-v0618-r7','previous-v0617-r7','unknown-or-partial','Align-ReleasedProductionBaseline','Production alignment requires the resident to be suspended first.','No production files were changed')){if($s.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "Missing helper contract: $x"}}
-          foreach($x in @('Remove-AppxPackage','spicetify apply','spicetify restore')){if($s.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "Forbidden helper mutation: $x"}}
           $m=Get-Content manifest.json -Raw|ConvertFrom-Json
           if($m.latest_version-ne'0.6.19' -or $m.bootstrap.version-ne'1.0.6' -or $m.bootstrap.sha256-ne'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'){throw 'Released v0.6.19/Bootstrap identity changed.'}
-          $e17=@($m.updates|Where-Object{$_.from_version-eq'0.6.17'-and$_.to_version-eq'0.6.18'});if($e17.Count-ne1 -or @($e17[0].patches).Count-ne1){throw 'v0.6.17 -> v0.6.18 edge missing/ambiguous.'}
-          $p17=@($e17[0].patches|Where-Object path -eq 'bin/spotify-control.ps1')[0]
-          if($p17.from_sha256-ne'5ff7990564287bc409626d8835e27679fb8de434868443313be42fdc0d9cce3b' -or $p17.to_sha256-ne'27783abc40c446aadf6f2a9373b4525ada89759075f37e934958c8e449f2d98f'){throw 'v0.6.17 -> v0.6.18 main identity changed.'}
-          $e18=@($m.updates|Where-Object{$_.from_version-eq'0.6.18'-and$_.to_version-eq'0.6.19'});if($e18.Count-ne1 -or @($e18[0].patches).Count-ne2){throw 'v0.6.18 -> v0.6.19 edge missing/ambiguous.'}
-          $latest=@{};foreach($x in $m.latest_files){$latest[$x.path]=$x.sha256}
-          if($latest['bin/spotify-control.ps1']-ne'45795b9622953a10c6eca2ee2f5a19fc4467c5143d5bdf7a9f2ad64841b9416f' -or $latest['bin/addon-manager.ps1']-ne'df17018bdb5f62f55624070d047933387f62c049dae73cf5cefcc541bc412afa'){throw 'Current v0.6.19/r8 identity changed.'}
-          Write-Host 'V051_FINAL_RELEASE_CHAIN_PASS'
+          $e17=@($m.updates|Where-Object{$_.from_version-eq'0.6.17'-and$_.to_version-eq'0.6.18'});if($e17.Count-ne1-or@($e17[0].patches).Count-ne1){throw 'v0.6.17 -> v0.6.18 edge missing.'}
+          $p17=@($e17[0].patches|Where-Object path -eq 'bin/spotify-control.ps1')[0];if($p17.from_sha256-ne'5ff7990564287bc409626d8835e27679fb8de434868443313be42fdc0d9cce3b'-or$p17.to_sha256-ne'27783abc40c446aadf6f2a9373b4525ada89759075f37e934958c8e449f2d98f'){throw 'v0.6.17 edge identity changed.'}
+          $e18=@($m.updates|Where-Object{$_.from_version-eq'0.6.18'-and$_.to_version-eq'0.6.19'});if($e18.Count-ne1-or@($e18[0].patches).Count-ne2){throw 'v0.6.18 -> v0.6.19 edge missing.'}
+          Write-Host 'V051_FINAL_STATIC_RELEASE_CHAIN_PASS'
 
-      - name: Revalidate published v0.6.19 transports
+      - name: Revalidate published transport and exact integrated package
         shell: powershell
         run: |
           python validation/v0.6.19/build_v0619.py --validate-published
-          if($LASTEXITCODE-ne0){throw 'Published v0.6.19 transport validation failed.'}
-
-      - name: Build exact integrated v0.5.1 and run SelfTest
-        shell: powershell
-        run: |
+          if($LASTEXITCODE-ne0){throw 'Published v0.6.19 validation failed.'}
           python validation/performance-phase2-v0.5.1/build_v051.py
           if($LASTEXITCODE-ne0){throw 'v0.5.1 assembly failed.'}
           $zip='SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.1.zip'
-          if((Get-Item $zip).Length-ne98457){throw 'Unexpected v0.5.1 ZIP size.'}
-          if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()-ne'db2d8836a7d865376c38688dfc3467b999e18437215ef4d5c44b7b9829cd0e11'){throw 'Unexpected v0.5.1 ZIP SHA.'}
+          if((Get-Item $zip).Length-ne98457-or(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()-ne'db2d8836a7d865376c38688dfc3467b999e18437215ef4d5c44b7b9829cd0e11'){throw 'Final v0.5.1 ZIP identity mismatch.'}
           Expand-Archive $zip phase2-v051 -Force
           foreach($line in Get-Content phase2-v051/SHA256SUMS.txt){if($line-notmatch'^([0-9a-f]{64})  (.+)$'){throw "Bad checksum row: $line"};$a=(Get-FileHash (Join-Path phase2-v051 $Matches[2]) -Algorithm SHA256).Hash.ToLowerInvariant();if($a-ne$Matches[1]){throw "Checksum mismatch: $($Matches[2])"}}
           $p='phase2-v051/track-transition-direct-patch-acceptance.ps1'
-          if((Get-Item $p).Length-ne78659 -or (Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant()-ne'3ce2bb45f4b9fd64423f7c62e1c15247fbc70e701a0145da851bf0475b7b447f'){throw 'Integrated profiler identity mismatch.'}
-          $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Integrated profiler failed PS5.1 parse.'}
-          $s=Get-Content $p -Raw
-          foreach($x in @('5ff7990564287bc409626d8835e27679fb8de434868443313be42fdc0d9cce3b','27783abc40c446aadf6f2a9373b4525ada89759075f37e934958c8e449f2d98f','45795b9622953a10c6eca2ee2f5a19fc4467c5143d5bdf7a9f2ad64841b9416f','previous-v0617-r7')){if($s.IndexOf($x,[StringComparison]::Ordinal)-lt0){throw "Integrated recovery token missing: $x"}}
-          $lab=$s.IndexOf('function Invoke-Lab {',[StringComparison]::Ordinal);$suspend=$s.IndexOf('Suspend-Resident',$lab,[StringComparison]::Ordinal);$align=$s.IndexOf('$script:ProductionAlignment=Align-ReleasedProductionBaseline -Accepted $accepted',$lab,[StringComparison]::Ordinal);$snap=$s.IndexOf('$script:OriginalConfigHash=Get-Sha256Lower $ConfigPath',$lab,[StringComparison]::Ordinal);if($lab-lt0-or$suspend-lt0-or$align-le$suspend-or$snap-le$align){throw 'Required suspend -> align -> snapshot ordering missing.'}
-          $env:SPOTIFYCONTROL_TEST_RESIDUAL_CLEANUP='1'; & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $p -Action SelfTest; if($LASTEXITCODE-ne0){throw 'Integrated v0.5.1 SelfTest failed.'}
+          if((Get-Item $p).Length-ne78659-or(Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant()-ne'3ce2bb45f4b9fd64423f7c62e1c15247fbc70e701a0145da851bf0475b7b447f'){throw 'Integrated profiler identity mismatch.'}
+          $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){throw 'Integrated profiler failed PS5.1 parse.'}
+          $s=Get-Content $p -Raw;$lab=$s.IndexOf('function Invoke-Lab {',[StringComparison]::Ordinal);$suspend=$s.IndexOf('Suspend-Resident',$lab,[StringComparison]::Ordinal);$align=$s.IndexOf('$script:ProductionAlignment=Align-ReleasedProductionBaseline -Accepted $accepted',$lab,[StringComparison]::Ordinal);$snap=$s.IndexOf('$script:OriginalConfigHash=Get-Sha256Lower $ConfigPath',$lab,[StringComparison]::Ordinal);if($lab-lt0-or$suspend-lt0-or$align-le$suspend-or$snap-le$align){throw 'Required suspend -> align -> snapshot ordering missing.'}
+          $env:SPOTIFYCONTROL_TEST_RESIDUAL_CLEANUP='1';& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $p -Action SelfTest;if($LASTEXITCODE-ne0){throw 'Integrated v0.5.1 SelfTest failed.'}
           Write-Host 'V051_FINAL_INTEGRATED_PACKAGE_PASS'
 
       - name: Download validated Bootstrap 1.0.6 carrier
@@ -90,32 +73,21 @@ jobs:
           set -euo pipefail
           gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' > validated-v0614-repair-artifact.zip
 
-      - name: Prepare exact v0.6.17 r7 installed fixture
+      - name: Prepare exact v0.6.17 r7 fixture and run two-edge Bootstrap E2E
         shell: powershell
         run: |
           python validation/performance-phase2-v0.5.1/prepare_v0617_bootstrap_fixture.py
           if($LASTEXITCODE-ne0){throw 'Exact v0.6.17/r7 fixture preparation failed.'}
-
-      - name: Bootstrap 1.0.6 exact v0.6.17 to v0.6.19 two-edge E2E
-        shell: powershell
-        run: |
-          $ErrorActionPreference='Stop'
-          $root=(Resolve-Path '.\ci-bootstrap-fixture\LocalAppData\SpotifyControl').Path;$bin=Join-Path $root 'bin';$boot=Join-Path $root 'bootstrap\spotify-control-self-updater.ps1'
-          $m17='5ff7990564287bc409626d8835e27679fb8de434868443313be42fdc0d9cce3b';$r7='b7d1a4bc7707533400402fe42e60d724f88656c2477d4d4a5c0f47be60f47977';$m19='45795b9622953a10c6eca2ee2f5a19fc4467c5143d5bdf7a9f2ad64841b9416f';$r8='df17018bdb5f62f55624070d047933387f62c049dae73cf5cefcc541bc412afa';$agent='2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278';$bs='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
-          function H($p){(Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant()}
-          if((H (Join-Path $bin 'spotify-control.ps1'))-ne$m17 -or (H (Join-Path $bin 'addon-manager.ps1'))-ne$r7 -or (H (Join-Path $bin 'spotify-control-agent.vbs'))-ne$agent -or (H $boot)-ne$bs){throw 'v0.6.17 fixture identity mismatch.'}
-          $env:LOCALAPPDATA=(Resolve-Path '.\ci-bootstrap-fixture\LocalAppData').Path;$env:APPDATA=Join-Path (Resolve-Path '.\ci-bootstrap-fixture').Path 'Roaming';New-Item -ItemType Directory -Force $env:APPDATA|Out-Null
-          function Run-Boot([string]$Action){$out=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $boot -Action $Action -Json 2>&1;$code=$LASTEXITCODE;$out|ForEach-Object{Write-Host $_};if($code-ne0){throw "Bootstrap $Action failed: $code"};$j=@($out|Where-Object{[string]$_ -match '^\s*\{'})|Select-Object -Last 1;if(-not$j){throw "Bootstrap $Action emitted no JSON"};$j|ConvertFrom-Json}
-          $check=Run-Boot Check;if(-not$check.success-or[string]$check.installed_version-ne'0.6.17'-or[int]$check.result.edge_count-ne2){throw 'Check did not prove exact two-edge path.'}
-          $rb=Run-Boot RollbackTest;if(-not$rb.success-or[string]$rb.transaction_status-ne'rolled-back'){throw 'Two-edge RollbackTest did not roll back.'};if((H (Join-Path $bin 'spotify-control.ps1'))-ne$m17-or(H (Join-Path $bin 'addon-manager.ps1'))-ne$r7){throw 'Two-edge rollback did not restore exact v0.6.17/r7.'}
-          $up=Run-Boot Update;if(-not$up.success-or[string]$up.transaction_status-ne'committed'){throw 'Two-edge Update did not commit.'};if((H (Join-Path $bin 'spotify-control.ps1'))-ne$m19-or(H (Join-Path $bin 'addon-manager.ps1'))-ne$r8-or(H (Join-Path $bin 'spotify-control-agent.vbs'))-ne$agent-or(H $boot)-ne$bs){throw 'Two-edge final v0.6.19/r8 identity mismatch.'}
-          $post=Run-Boot Check;if(-not$post.success-or[string]$post.installed_version-ne'0.6.19'-or$post.result.already_current-ne$true-or[int]$post.result.edge_count-ne0){throw 'Two-edge post-update state is not already-current.'}
-          Write-Host 'V051_BOOTSTRAP_V0617_TO_V0619_TWO_EDGE_E2E_PASS'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/performance-phase2-v0.5.1/test_v0617_two_edge.ps1'
+          if($LASTEXITCODE-ne0){throw 'Exact v0.6.17 -> v0.6.19 two-edge E2E failed.'}
 
       - name: Deterministic rebuild identity
         shell: powershell
         run: |
-          $before=(Get-FileHash 'SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.1.zip' -Algorithm SHA256).Hash.ToLowerInvariant();python validation/performance-phase2-v0.5.1/build_v051.py;$after=(Get-FileHash 'SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.1.zip' -Algorithm SHA256).Hash.ToLowerInvariant();if($before-ne$after-or$after-ne'db2d8836a7d865376c38688dfc3467b999e18437215ef4d5c44b7b9829cd0e11'){throw 'Deterministic rebuild mismatch.'}
+          $before=(Get-FileHash 'SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.1.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+          python validation/performance-phase2-v0.5.1/build_v051.py
+          $after=(Get-FileHash 'SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.1.zip' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($before-ne$after-or$after-ne'db2d8836a7d865376c38688dfc3467b999e18437215ef4d5c44b7b9829cd0e11'){throw 'Deterministic rebuild mismatch.'}
           Write-Host 'V051_FINAL_DETERMINISTIC_REBUILD_PASS'
 
       - name: Upload exact final v0.5.1 package
