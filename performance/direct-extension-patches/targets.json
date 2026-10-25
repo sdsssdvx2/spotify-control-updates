@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "targets": [
+    {
+      "id": "popup-lyrics-worker-gate",
+      "relative_path": "extensions/popupLyrics.js",
+      "source_repository": "spicetify/cli",
+      "source_revision": "v2.46.2",
+      "expected_size": 39553,
+      "expected_sha256": "2b280aea8514bd15044c36403257ca6ac21f1f98e6798beb4aa319bf19a70e4f",
+      "patch_kind": "popup-worker-gate",
+      "reason": "Do not run the hidden-window 60 Hz worker unless Popup Lyrics PiP is actually open."
+    },
+    {
+      "id": "star-ratings-observer-debounce",
+      "relative_path": "extensions/sc-star-ratings.js",
+      "source_repository": "brimell/spicetify-star-ratings",
+      "source_revision": "33aa3d293f9fbb58d7a749a8cea10c318351e6c6",
+      "expected_size": 43396,
+      "expected_sha256": "198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1",
+      "patch_kind": "star-ratings-observer-debounce",
+      "reason": "Collapse mutation bursts and replace unnecessary deep DOM equality checks while preserving playlist-backed rating data and UI behavior."
+    }
+  ]
+}
