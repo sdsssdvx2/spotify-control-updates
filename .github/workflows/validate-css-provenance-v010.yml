@@ -1,0 +1,93 @@
+name: Validate CSS Provenance Collector v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/performance-phase2-css-provenance-v0.1.0
+    paths:
+      - 'validation/css-provenance-v0.1.0/**'
+      - '.github/workflows/validate-css-provenance-v010.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/css-provenance-v0.1.0/**'
+      - '.github/workflows/validate-css-provenance-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove validation-only scope
+        shell: powershell
+        run: |
+          $base='29d6c52c6a79559e513b367ec57edcccebae5fd0'
+          git cat-file -e "$base^{commit}"
+          $changed=@(git diff --name-only "$base...HEAD")
+          $bad=@($changed|Where-Object{$_ -notlike 'validation/css-provenance-v0.1.0/*' -and $_ -ne '.github/workflows/validate-css-provenance-v010.yml'})
+          if($bad.Count){throw "Validation branch touched production/out-of-scope files: $($bad -join ', ')"}
+          Write-Host 'CSS_PROVENANCE_SCOPE_PASS'
+
+      - name: PowerShell 5.1 parse and read-only static contract
+        shell: powershell
+        run: |
+          $p='validation/css-provenance-v0.1.0/css-provenance-collector.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Collector failed PowerShell 5.1 parse.'}
+          $s=Get-Content $p -Raw
+          foreach($required in @("$Version = '0.1.0'",'active-user.css','active-colors.css','theme-user.css','theme-color.ini','Get-SourceFingerprint','Assert-FingerprintEqual','current_theme','color_scheme','inject_css','replace_colors','overwrite_assets')){if($s.IndexOf($required,[StringComparison]::Ordinal) -lt 0){throw "Missing collector contract: $required"}}
+          foreach($bad in @('spicetify.exe','spicetify apply','spicetify backup','spicetify restore','-Action Update','Stop-Process -Name Spotify','taskkill','config-xpui.ini -Value','Set-Content','Add-Content')){if($s.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Forbidden collector mutation surface: $bad"}}
+          if([regex]::IsMatch($s,'(?i)Join-Path[^\r\n]+["''](?:Browser|Default|Users|IndexedDB|Local Storage|localStorage)["'']')){throw 'Collector contains forbidden persistence-path construction.'}
+          Write-Host 'CSS_PROVENANCE_PS51_READONLY_STATIC_PASS'
+
+      - name: Execute synthetic read-only self-test
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/css-provenance-v0.1.0/css-provenance-collector.ps1 -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw "Collector SelfTest failed: $LASTEXITCODE"}
+
+      - name: Verify official Spicetify v2.46.2 active CSS path contract
+        shell: powershell
+        run: |
+          $url='https://raw.githubusercontent.com/spicetify/cli/v2.46.2/src/apply/apply.go'
+          $p=Join-Path $env:RUNNER_TEMP 'spicetify-apply-v2.46.2.go'
+          Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $p
+          $s=Get-Content $p -Raw
+          foreach($needle in @('filepath.Join(appsFolderPath, "xpui", "colors.css")','filepath.Join(appsFolderPath, "xpui", "user.css")')){if($s.IndexOf($needle,[StringComparison]::Ordinal) -lt 0){throw "Spicetify v2.46.2 CSS path contract missing: $needle"}}
+          Write-Host 'CSS_PROVENANCE_SPICETIFY_V2462_PATH_PASS'
+
+      - name: Build deterministic collector package
+        shell: powershell
+        run: |
+          python validation/css-provenance-v0.1.0/build_package.py
+          if($LASTEXITCODE -ne 0){throw 'Collector package build failed.'}
+          $zip='SpotifyControl-CSS-Provenance-Collector-v0.1.0.zip'
+          $size=(Get-Item $zip).Length
+          $sha=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "CSS_PROVENANCE_PACKAGE_IDENTITY size=$size sha=$sha"
+          Expand-Archive -LiteralPath $zip -DestinationPath css-prov-package -Force
+          foreach($line in Get-Content css-prov-package/SHA256SUMS.txt){if($line -notmatch '^([0-9a-f]{64})  (.+)$'){throw "Bad checksum row: $line"};$actual=(Get-FileHash -LiteralPath (Join-Path css-prov-package $Matches[2]) -Algorithm SHA256).Hash.ToLowerInvariant();if($actual -ne $Matches[1]){throw "Package checksum mismatch: $($Matches[2])"}}
+          $firstSize=$size;$firstSha=$sha
+          python validation/css-provenance-v0.1.0/build_package.py
+          if($LASTEXITCODE -ne 0){throw 'Second collector package build failed.'}
+          $secondSize=(Get-Item $zip).Length;$secondSha=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($firstSize -ne $secondSize -or $firstSha -ne $secondSha){throw "Non-deterministic collector package: $firstSize/$firstSha vs $secondSize/$secondSha"}
+          Write-Host "CSS_PROVENANCE_DETERMINISTIC_PASS size=$secondSize sha=$secondSha"
+
+      - name: Upload exact collector package
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-CSS-Provenance-Collector-v0.1.0
+          path: SpotifyControl-CSS-Provenance-Collector-v0.1.0.zip
+          if-no-files-found: error
+          retention-days: 14
