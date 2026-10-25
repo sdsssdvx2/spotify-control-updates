@@ -94,6 +94,19 @@ jobs:
           if (@($targets.targets | Where-Object { $_.id -eq 'sc-cover-ambience' }).Count -ne 0) { throw 'SC Cover Ambience must not be an optimization target' }
           Write-Host "PASS: exact target provenance and exclusion policy."
 
+      - name: Derive exact immutable upstream extension hashes
+        shell: powershell
+        run: |
+          $targets = Get-Content 'performance/overlay/targets/pithaya-optional-custom-apps.json' -Raw | ConvertFrom-Json
+          foreach ($target in @($targets.targets)) {
+            $url = "https://raw.githubusercontent.com/Pithaya/spicetify-apps-dist/$($target.dist_revision)/extension.js"
+            $dest = Join-Path $env:RUNNER_TEMP ($target.id + '-extension.js')
+            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $dest
+            $sha = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLowerInvariant()
+            $size = (Get-Item -LiteralPath $dest).Length
+            Write-Host "TRUSTED_EXTENSION_SHA256 id=$($target.id) revision=$($target.dist_revision) size=$size sha256=$sha"
+          }
+
       - name: JavaScript syntax check
         shell: powershell
         run: |
