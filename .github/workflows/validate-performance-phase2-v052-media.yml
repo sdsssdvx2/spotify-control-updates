@@ -38,7 +38,8 @@ jobs:
         shell: powershell
         run: |
           function Write-LabLog { param([string]$Message,[string]$Level='INFO') Write-Host "[$Level] $Message" }
-          . ./validation/performance-phase2-v0.5.2/runtime_media_v052.ps1.inc
+          $helper=Get-Content ./validation/performance-phase2-v0.5.2/runtime_media_v052.ps1.inc -Raw
+          Invoke-Expression $helper
           Add-SpotifyAudioSessionType
           if(-not ('SpotifyControlAudioSession' -as [type])){throw 'SpotifyControlAudioSession type did not compile.'}
           $null=[Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager,Windows.Media.Control,ContentType=WindowsRuntime]
