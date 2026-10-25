@@ -52,10 +52,6 @@ jobs:
             'Invoke-BootstrapJson','Align-ReleasedProductionBaseline','Assert-AcceptedRuntimeBaseline',
             'Production alignment requires the resident to be suspended first.',
             'current-v0619-r8','previous-v0618-r7','unknown-or-partial',
-            '45795b9622953a10c6eca2ee2f5a19fc4467c5143d5bdf7a9f2ad64841b9416f',
-            'df17018bdb5f62f55624070d047933387f62c049dae73cf5cefcc541bc412afa',
-            '27783abc40c446aadf6f2a9373b4525ada89759075f37e934958c8e449f2d98f',
-            'b7d1a4bc7707533400402fe42e60d724f88656c2477d4d4a5c0f47be60f47977',
             'No production files were changed'
           )){if($s.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Missing v0.5.1 alignment contract: $required"}}
           foreach($forbidden in @('Remove-AppxPackage','Uninstall','spicetify apply','spicetify restore','Remove-Item -LiteralPath $Root -Recurse')){
@@ -118,10 +114,17 @@ jobs:
           [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)|Out-Null
           if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Integrated v0.5.1 profiler failed PowerShell 5.1 parse.'}
           $s=Get-Content $path -Raw
-          $suspend=$s.IndexOf('Suspend-Resident',[StringComparison]::Ordinal)
-          $align=$s.IndexOf('$script:ProductionAlignment=Align-ReleasedProductionBaseline -Accepted $accepted',[StringComparison]::Ordinal)
-          $snapshot=$s.IndexOf('$script:OriginalConfigHash=Get-Sha256Lower $ConfigPath',[StringComparison]::Ordinal)
-          if($suspend-lt0 -or $align-le$suspend -or $snapshot-le$align){throw 'Production alignment ordering is not suspend -> align -> snapshot.'}
+          foreach($hash in @(
+            '45795b9622953a10c6eca2ee2f5a19fc4467c5143d5bdf7a9f2ad64841b9416f',
+            'df17018bdb5f62f55624070d047933387f62c049dae73cf5cefcc541bc412afa',
+            '27783abc40c446aadf6f2a9373b4525ada89759075f37e934958c8e449f2d98f',
+            'b7d1a4bc7707533400402fe42e60d724f88656c2477d4d4a5c0f47be60f47977'
+          )){if($s.IndexOf($hash,[StringComparison]::Ordinal)-lt0){throw "Integrated component identity missing: $hash"}}
+          $lab=$s.IndexOf('function Invoke-Lab {',[StringComparison]::Ordinal)
+          $suspend=$s.IndexOf('Suspend-Resident',$lab,[StringComparison]::Ordinal)
+          $align=$s.IndexOf('$script:ProductionAlignment=Align-ReleasedProductionBaseline -Accepted $accepted',$lab,[StringComparison]::Ordinal)
+          $snapshot=$s.IndexOf('$script:OriginalConfigHash=Get-Sha256Lower $ConfigPath',$lab,[StringComparison]::Ordinal)
+          if($lab-lt0 -or $suspend-lt0 -or $align-le$suspend -or $snapshot-le$align){throw 'Production alignment ordering is not Invoke-Lab: suspend -> align -> snapshot.'}
           if($s.IndexOf('production_alignment_precedes_snapshot=$true',[StringComparison]::Ordinal)-lt0){throw 'Production alignment report marker missing.'}
           $env:SPOTIFYCONTROL_TEST_RESIDUAL_CLEANUP='1'
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $path -Action SelfTest
