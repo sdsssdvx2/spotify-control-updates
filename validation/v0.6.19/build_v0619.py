@@ -28,10 +28,7 @@ def git_bytes(ref,path): return subprocess.check_output(['git','show',f'{ref}:{p
 def git_text(ref,path): return git_bytes(ref,path).decode('utf-8-sig')
 
 def load_base_manifest():
-    try:
-        raw=git_bytes('origin/main','manifest.json')
-    except Exception:
-        raw=(ROOT/'manifest.json').read_bytes()
+    raw=git_bytes(FROZEN_MAIN_COMMIT,'manifest.json')
     m=json.loads(raw.decode('utf-8-sig'))
     assert m['latest_version']==BASE_VERSION,m['latest_version']
     assert m['bootstrap']==BOOTSTRAP,m['bootstrap']
@@ -167,7 +164,7 @@ def build_addon(base):
     new='"CommitLast" {'+newline+'            Commit-LastTransaction'+newline+'            Invoke-PerformanceOverlayBestEffort -Reason "commit-last"'+newline+'        }'
     assert text.count(old)==1; text=text.replace(old,new,1)
     assert text.count('# BEGIN SPOTIFY CONTROL PERFORMANCE OVERLAY v0.1.0 / r8')==1
-    assert text.count('Invoke-PerformanceOverlayBestEffort -Reason')==4  # function definition + 3 calls
+    assert text.count('Invoke-PerformanceOverlayBestEffort -Reason')==3  # exactly three production hook calls
     assert '"Check" {' in text
     check_block=text[text.index('"Check" {'):text.index('"Update" {')]
     assert 'Invoke-PerformanceOverlayBestEffort' not in check_block
@@ -260,10 +257,14 @@ def write_manifest(source_commit):
         assert m['source_commit']==source_commit
         validate_published(); return
     assert m['latest_version']==BASE_VERSION
-    latest={x['path']:x for x in m['latest_files']}
-    latest['bin/spotify-control.ps1']=meta['candidate_main']
-    latest['bin/addon-manager.ps1']=meta['candidate_addon']
-    assert latest['bin/spotify-control-agent.vbs']==meta['agent']
+    original_latest={x['path']:x for x in m['latest_files']}
+    assert original_latest['bin/spotify-control-agent.vbs']==meta['agent']
+    m['latest_files']=[
+        meta['candidate_main'] if x['path']=='bin/spotify-control.ps1'
+        else meta['candidate_addon'] if x['path']=='bin/addon-manager.ps1'
+        else x
+        for x in m['latest_files']
+    ]
     m['latest_version']=NEW_VERSION
     m['source_commit']=source_commit
     m['payload_set_sha256']=meta['payload_set_sha256']
