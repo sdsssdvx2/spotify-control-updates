@@ -66,6 +66,25 @@ jobs:
             throw 'Builder latest_files publication block is neither known-old nor known-corrected form.'
           }
 
+          $oldBase=@'
+          def load_base_manifest():
+              try:
+                  raw=git_bytes('origin/main','manifest.json')
+              except Exception:
+                  raw=(ROOT/'manifest.json').read_bytes()
+              m=json.loads(raw.decode('utf-8-sig'))
+          '@
+          $newBase=@'
+          def load_base_manifest():
+              raw=git_bytes(FROZEN_MAIN_COMMIT,'manifest.json')
+              m=json.loads(raw.decode('utf-8-sig'))
+          '@
+          if($text.Contains($oldBase)) {
+            $text=$text.Replace($oldBase,$newBase)
+          } elseif(-not $text.Contains($newBase)) {
+            throw 'Builder frozen-base loader is neither known-old nor known-corrected form.'
+          }
+
           [IO.File]::WriteAllText($path,$text,(New-Object Text.UTF8Encoding($false)))
           Write-Host 'V0619_BUILDER_SOURCE_CORRECTIONS_PASS'
 
