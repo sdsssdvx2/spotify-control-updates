@@ -1,5 +1,5 @@
 from pathlib import Path
-import runpy, zipfile
+import re,runpy,zipfile
 R=Path.cwd()
 runpy.run_path('validation/performance-phase2-v0.5.1/build_v051.py', run_name='__main__')
 z=R/'SpotifyControl-Track-Transition-Direct-Patch-Acceptance-v0.5.1.zip'
@@ -12,5 +12,9 @@ def body(name):
     b=s.find('\nfunction ',a+1)
     if b<0:b=s.find('\ntry{',a+1)
     print('\n===== '+name+' =====\n'+s[a:b].strip()+'\n')
-for n in ['Send-MediaKey','Wait-SpotifyReady','Start-SpotifyForCondition','Stop-SpotifyForCondition','Measure-TransitionCondition','Analyze-Transitions','Get-WorkloadPolicy']:
-    body(n)
+
+names=re.findall(r'(?m)^function\s+([A-Za-z0-9_-]+)\s*\{',s)
+print('FUNCTIONS',','.join(names))
+for n in names:
+    if any(k in n.lower() for k in ['media','spotify','transition','workload']):
+        body(n)
