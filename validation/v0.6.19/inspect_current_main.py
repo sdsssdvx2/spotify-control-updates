@@ -32,9 +32,6 @@ def extract_seed():
         names=z.namelist(); print('SEED_ENTRIES',names)
         candidates=[n for n in names if n.lower().endswith('spotify-control.ps1')]
         assert len(candidates)==1,candidates
-        # The historical archive contains a known-corrupt old addon-manager entry, so do not
-        # reject the unrelated main entry via whole-archive testzip(). Reading this entry itself
-        # performs its own CRC verification; the next manifest edge additionally pins its SHA.
         raw=z.read(candidates[0])
     return candidates[0],raw
 
@@ -54,7 +51,9 @@ while current!=manifest['latest_version']:
         assert len(comp)==p['compressed_size'] and sha(comp)==p['compressed_sha256']
         patch=json.loads(gzip.decompress(comp))
         raw=apply_line_patch(raw,patch)
-        assert len(raw)==p['target_size'] and sha(raw)==p['to_sha256'],(edge['to_version'],len(raw),sha(raw),p['target_size'],p['to_sha256'])
+        assert sha(raw)==p['to_sha256'],(edge['to_version'],len(raw),sha(raw),p['to_sha256'])
+        if 'target_size' in p:
+            assert len(raw)==p['target_size'],(edge['to_version'],len(raw),p['target_size'])
     current=edge['to_version']
     print('APPLIED_MAIN',current,len(raw),sha(raw))
 latest=next(x for x in manifest['latest_files'] if x['path']=='bin/spotify-control.ps1')
