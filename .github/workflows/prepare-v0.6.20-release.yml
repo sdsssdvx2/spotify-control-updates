@@ -65,7 +65,9 @@ jobs:
           if($checkStart -lt 0 -or $updateStart -le $checkStart){throw 'Action switch layout changed.'}
           $check=$addon.Substring($checkStart,$updateStart-$checkStart)
           if($check.Contains('Invoke-StarRatingsPerformanceBestEffort') -or $check.Contains('Invoke-PerformanceOverlayBestEffort')){throw 'Check action must remain mutation-free.'}
-          foreach($bad in @('popup-lyrics-worker-gate','SC Cover Ambience','ivLyrics','tagify','splitify')){if($addon.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Forbidden promoted target/surface: $bad"}}
+          if($addon.IndexOf('popup-lyrics-worker-gate',[StringComparison]::OrdinalIgnoreCase) -ge 0){throw 'PopupLyrics optimization must not be promoted.'}
+          $starSurface=(Get-Content performance/star-ratings/apply-star-ratings-patch.ps1 -Raw)+"`n"+(Get-Content performance/star-ratings/target.json -Raw)+"`n"+(Get-Content validation/v0.6.20/star_ratings_wrapper.ps1.inc -Raw)
+          foreach($bad in @('popupLyrics','ivLyrics','tagify','splitify','sc-cover-ambience','SC Cover Ambience','spicetify apply','spicetify backup','spicetify restore','config-xpui.ini','\Browser\','\Default\')){if($starSurface.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Forbidden Star Ratings optimization surface: $bad"}}
           Write-Host 'V0620_PARSE_AND_STATIC_PASS'
 
       - name: Download exact Star Ratings fixture and run transactional tests
