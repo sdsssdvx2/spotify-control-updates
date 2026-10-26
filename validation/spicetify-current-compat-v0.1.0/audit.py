@@ -51,20 +51,19 @@ def main():
     if addon.count('$Version = "0.6.5-r9"') != 1:
         raise RuntimeError('generated production Addon Manager version marker mismatch')
 
-    # Known current Spicetify releases must never be hard-pinned in production Addon Manager.
-    direct_pins = sorted(set(re.findall(r'(?<![0-9])2\\.46\\.[0-9]+(?![0-9])', addon)))
+    # Current Spicetify releases must never be hard-pinned in production Addon Manager.
+    direct_pins = sorted(set(re.findall(r'(?<![0-9])2\.46\.[0-9]+(?![0-9])', addon)))
     if direct_pins:
         raise RuntimeError('production Addon Manager contains Spicetify 2.46.x literal pin(s): ' + ', '.join(direct_pins))
 
-    # Record all Spicetify/version/comparison lines for human evidence. A literal semver near
-    # Spicetify is treated as a compatibility-gate candidate and fails the audit.
+    # Record all Spicetify-related production lines. A semantic-version literal adjacent to
+    # Spicetify logic is treated as a compatibility-gate candidate and fails the audit.
     lines = addon.splitlines()
     spicetify_lines = []
     gate_candidates = []
-    semver = re.compile(r'(?<![0-9])([0-9]+\\.[0-9]+\\.[0-9]+)(?![0-9])')
+    semver = re.compile(r'(?<![0-9])([0-9]+\.[0-9]+\.[0-9]+)(?![0-9])')
     for i, line in enumerate(lines, 1):
-        lower = line.lower()
-        if 'spicetify' in lower:
+        if 'spicetify' in line.lower():
             spicetify_lines.append({'line': i, 'text': line[:500]})
             nearby = '\n'.join(lines[max(0, i-3):min(len(lines), i+2)])
             versions = semver.findall(nearby)
@@ -112,9 +111,11 @@ def main():
             'template_lines': template_lines,
         }
 
+    # Existing regression test covers both double-quoted ./ paths and the current Spicetify
+    # single-quoted + defer form. This static marker proves the matcher still accepts ./.
     overlay = (ROOT / 'performance/overlay/apply-overlay.ps1').read_text(encoding='utf-8-sig')
-    if '(?:\\./)?' not in overlay or '["'']' not in overlay:
-        raise RuntimeError('overlay hook matcher lost optional ./ or quote-tolerant source matching')
+    if 'Get-TagPattern' not in overlay or '(?:\\./)?' not in overlay:
+        raise RuntimeError('overlay hook matcher lost its optional ./ source-path compatibility')
 
     report = {
         'schema': 1,
