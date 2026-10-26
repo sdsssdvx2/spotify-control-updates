@@ -1,0 +1,44 @@
+name: Validate v0.6.25 Builder Source Pin v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/v0.6.25-validated-builder-source-pin-v0.1.0
+
+permissions:
+  contents: read
+
+jobs:
+  pin-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove validation-only scope and pin exact validated source
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='c3dca564f70d4c85a84d5f895309d30d5a2d80c1'
+          validated='8c32c9e98038893dd117af1636a4774c2f39630f'
+          path='validation/splitify-release-provenance-v0.1.1/build_candidate.py'
+          test "$(git merge-base "$base" HEAD)" = "$base"
+          mapfile -t changed < <(git diff --name-only "$base...HEAD")
+          test "${#changed[@]}" -eq 1
+          test "${changed[0]}" = '.github/workflows/validate-v0.6.25-builder-source-pin-v010.yml'
+          git cat-file -e "$validated^{commit}"
+          git cat-file -e "$validated:$path"
+          blob="$(git rev-parse "$validated:$path")"
+          bytes="$(git show "$validated:$path" | wc -c | tr -d ' ')"
+          sha256="$(git show "$validated:$path" | sha256sum | awk '{print $1}')"
+          printf 'VALIDATED_BUILDER_SOURCE_PIN_PASS commit=%s path=%s blob=%s bytes=%s sha256=%s\n' "$validated" "$path" "$blob" "$bytes" "$sha256"
+          git show "$validated:$path" > validated-builder-source.py
+          test "$(git hash-object validated-builder-source.py)" = "$blob"
+          test "$(sha256sum validated-builder-source.py | awk '{print $1}')" = "$sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v0625-validated-builder-source-pin-v010
+          path: validated-builder-source.py
+          if-no-files-found: error
