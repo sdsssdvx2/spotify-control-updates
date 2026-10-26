@@ -70,7 +70,8 @@ jobs:
               if(-not $raw.EndsWith('/')){$expanded += [int64]$entry.Length;if([int64]$entry.Length -gt 16MB){throw "Unexpectedly large Splitify entry: $raw"};if($expanded -gt 32MB){throw 'Splitify expanded total exceeds audit cap.'}}
               $rows.Add([pscustomobject]@{path=$raw;length=[int64]$entry.Length;compressed_length=[int64]$entry.CompressedLength;external_attributes=[int64]$entry.ExternalAttributes})
             }
-            if($rows.Count -lt 3 -or $rows.Count -gt 100){throw "Unexpected Splitify entry count: $($rows.Count)"}
+            if($rows.Count -ne 7){throw "Unexpected Splitify entry count: $($rows.Count)"}
+            if($expanded -ne 19409){throw "Unexpected Splitify expanded byte total: $expanded"}
             $top=@($rows|ForEach-Object{($_.path.TrimEnd('/') -split '/')[0]}|Sort-Object -Unique)
             if($top.Count -ne 1 -or $top[0] -cne 'splitify-dist'){throw "Unexpected Splitify top-level layout: $($top -join ',')"}
             $report=[pscustomobject]@{schema=1;tag='v1.1.0';asset_sha256='5de51a885815f78067b8d6f7f3ebe40c93b5a7c7e3c8c841fcd26147a13010ca';asset_size=7822;entry_count=$rows.Count;expanded_bytes=$expanded;top_level=$top[0];entries=$rows.ToArray()}
@@ -89,7 +90,7 @@ jobs:
           $root=Join-Path $extract 'splitify-dist'
           if(-not(Test-Path -LiteralPath $root -PathType Container)){throw 'Authenticated Splitify root missing after extraction.'}
           $files=@(Get-ChildItem -LiteralPath $root -File -Recurse|Sort-Object{$_.FullName.Substring($root.Length).Replace('\','/').ToLowerInvariant()})
-          if(-not $files.Count){throw 'Splitify release tree contains no files.'}
+          if($files.Count -ne 6){throw "Unexpected Splitify file count: $($files.Count)"}
           $rows=New-Object System.Collections.Generic.List[object]
           $lines=New-Object System.Collections.Generic.List[string]
           foreach($file in $files){
@@ -101,20 +102,35 @@ jobs:
           }
           $payload=($lines.ToArray() -join "`n")+"`n"
           $bytes=[Text.Encoding]::UTF8.GetBytes($payload);$sha=[Security.Cryptography.SHA256]::Create();try{$treeHash=([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+          if($treeHash -cne 'a138d868d219028d7498a6a4138aef4900da9583c04e572e5505e2ce971a4440'){throw "Splitify canonical release tree fingerprint drifted: $treeHash"}
           $manifests=@($files|Where-Object{$_.Name -ceq 'manifest.json'})
           if($manifests.Count -ne 1){throw "Expected exactly one manifest.json in release tree, got $($manifests.Count)"}
-          $manifest=Get-Content -LiteralPath $manifests[0].FullName -Raw|ConvertFrom-Json
-          $summary=[pscustomobject]@{schema=1;file_count=$files.Count;tree_sha256=$treeHash;manifest_relative_path=$manifests[0].FullName.Substring($root.Length).TrimStart('\','/').Replace('\','/');manifest_name=[string]$manifest.name;manifest_version=[string]$manifest.version;files=$rows.ToArray()}
+          $manifestText=Get-Content -LiteralPath $manifests[0].FullName -Raw
+          $manifest=$manifestText|ConvertFrom-Json
+          $manifestHash=(Get-FileHash -LiteralPath $manifests[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($manifestHash -cne '479702032425706a66738b0744bac326c5bb07ab23ce988dd68c4e0ad1c78155'){throw "Splitify release manifest hash drifted: $manifestHash"}
+          $hasVersion=$null -ne ($manifest.PSObject.Properties['version'])
+          $summary=[pscustomobject]@{schema=1;file_count=$files.Count;tree_sha256=$treeHash;manifest_relative_path=$manifests[0].FullName.Substring($root.Length).TrimStart('\','/').Replace('\','/');manifest_sha256=$manifestHash;manifest_name=[string]$manifest.name;manifest_has_version=$hasVersion;manifest_version=$(if($hasVersion){[string]$manifest.version}else{$null});files=$rows.ToArray()}
           $summary|ConvertTo-Json -Depth 8|Set-Content -LiteralPath splitify-layout-evidence/tree-fingerprint.json -Encoding UTF8
-          Write-Host "SPLITIFY_RELEASE_TREE_PASS files=$($files.Count) tree=$treeHash manifest_name=$($manifest.name) manifest_version=$($manifest.version)"
+          Write-Host "SPLITIFY_RELEASE_TREE_PASS files=$($files.Count) tree=$treeHash manifest_name=$($manifest.name) manifest_has_version=$hasVersion"
 
-      - name: Prove manifest version cannot identify v1.1.0
+      - name: Prove release metadata must drive provenance
         shell: powershell
         run: |
           $r=Get-Content splitify-layout-evidence/tree-fingerprint.json -Raw|ConvertFrom-Json
-          if([string]$r.manifest_version -cne '1.0.0'){throw "Upstream manifest version changed; provenance strategy must be reassessed: $($r.manifest_version)"}
-          if([string]$r.manifest_name -notmatch 'Splitify'){throw "Unexpected Splitify manifest name: $($r.manifest_name)"}
-          Write-Host "SPLITIFY_MANIFEST_VERSION_UNRELIABLE_CONFIRMED release=v1.1.0 manifest=$($r.manifest_version) tree=$($r.tree_sha256)"
+          if([string]$r.tree_sha256 -cne 'a138d868d219028d7498a6a4138aef4900da9583c04e572e5505e2ce971a4440'){throw 'Pinned Splitify release tree mismatch.'}
+          if([string]$r.manifest_name -cne 'Splitify'){throw "Unexpected Splitify release manifest name: $($r.manifest_name)"}
+          if([bool]$r.manifest_has_version){throw "Splitify release asset unexpectedly gained a manifest version: $($r.manifest_version)"}
+          $expected=@{
+            'icon.svg'=@(537,'ba8b5882ff0ff66f4f3ca4064dcc0e2032bc89a9f51a7f5416d9948160e16121');
+            'icon-active.svg'=@(694,'b14c6211f37f8a70900aa6116fd3bcd6a45ab940b788d396cd92556f91494c25');
+            'index.js'=@(11952,'528ff1a9393d2d42942ece3e5761f97021f605ed6ed407f4ad013425bbdc59ec');
+            'manifest.json'=@(1428,'479702032425706a66738b0744bac326c5bb07ab23ce988dd68c4e0ad1c78155');
+            'README.md'=@(4002,'ed19c5d9cdd6eeabb9fdfdbfd59091fc0027c6469847309fcd82cca2a0b9f798');
+            'style.css'=@(796,'bcfb1d0d2adca5f20d719912efdacf0d805101e45729a4257c374f20282676a6')
+          }
+          foreach($name in $expected.Keys){$rows=@($r.files|Where-Object{[string]$_.path -ceq $name});if($rows.Count -ne 1 -or [int64]$rows[0].size -ne [int64]$expected[$name][0] -or [string]$rows[0].sha256 -cne [string]$expected[$name][1]){throw "Pinned Splitify release file drifted: $name"}}
+          Write-Host "SPLITIFY_RELEASE_METADATA_PROVENANCE_REQUIRED_CONFIRMED release=v1.1.0 manifest_version=absent tree=$($r.tree_sha256)"
 
       - uses: actions/upload-artifact@v4
         with:
