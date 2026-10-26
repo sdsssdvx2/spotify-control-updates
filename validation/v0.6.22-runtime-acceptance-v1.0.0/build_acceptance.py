@@ -92,8 +92,6 @@ def transform(name: str, data: bytes) -> bytes:
     data = shift_pair(data, b'0.6.5-r10', b'0.6.5-r9', b'0.6.5-r10', b'0.6.5-r11', 'ADDONVER')
     data = shift_pair(data, b'v0621', b'v0620', b'v0621', b'v0622', 'LOWERNUM')
     data = shift_pair(data, b'V0621', b'V0620', b'V0621', b'V0622', 'UPPERNUM')
-    data = shift_pair(data, b'r10', b'r9', b'r10', b'r11', 'LOWERR')
-    data = shift_pair(data, b'R10', b'R9', b'R10', b'R11', 'UPPERR')
 
     data = data.replace(b'2.0.3', b'1.0.0')
     data = data.replace(b'v203', b'v100')
@@ -196,7 +194,7 @@ def validate_sources(files: dict) -> dict:
         ck('runner-forbidden-absent:' + token, token not in runner)
     ck('runner-exact-bootstrap-no-copy', 'ExecutionCopy' not in runner and 'Replace($MainManifestUrl' not in runner)
     ck('precheck-includes-runner', 'BOOTSTRAP_RUNNER.ps1' in pre and 'LOCAL_MANIFEST_SERVER' not in pre)
-    ck('cmd-version', 'v0.6.22' in cmd or '0.6.22' in cmd)
+    ck('cmd-launches-precheck', 'PRECHECK_RUNTIME_ACCEPTANCE.ps1' in cmd and 'powershell' in cmd.lower())
     ck('readme-target', 'v0.6.22' in readme and 'r11' in readme)
     ck('readme-no-localhost', 'removes localhost HTTP entirely' in readme)
     ck('readme-exact-bootstrap', 'exact installed Bootstrap 1.0.6 file is executed byte-for-byte unchanged' in readme)
