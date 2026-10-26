@@ -24,10 +24,21 @@ Unreferenced experimental or superseded transport files are not trusted. Only pa
 
 ## Runtime acceptance
 
-Stage14 hands-off Windows runtime acceptance completed successfully on 2026-10-25 with acceptance package v1.4.1 against the stable v0.6.17 / Addon Manager v0.6.5-r7 payload.
+The current stable release is Spotify Control v0.6.21 with Addon Manager v0.6.5-r10. Real-PC Windows runtime acceptance completed successfully on 2026-10-26 with acceptance harness v2.0.3 against exact release head `5eac4f39920b84f22e2a5ee07422f6080bfc7ef7`.
 
-The accepted runtime evidence covered the chained v0.6.15 -> v0.6.16 -> v0.6.17 self-update rollback test and fresh commit, exact target hashes, Windows-native Marketplace/Pithaya/installed-only-ivLyrics failure-injection rollback sandboxes, running-state check-only behavior, SpotifyExit unattended maintenance, actionable-pending drain to zero, protected Spotify/Spicetify data preservation, native Spotify updater blocking, resident mutation arming, single-instance persistence, and console-free managed launch.
+The accepted v0.6.21 evidence covered exact Bootstrap 1.0.6 `Check -> RollbackTest -> Update -> post-Check`, a real v0.6.20 -> v0.6.21 one-edge transaction, exact rollback to the prior v0.6.20/r9 tree, a fresh committed v0.6.21/r10 update, and an already-current final check with zero remaining edges. Addon Manager r10 exposed exactly nine registry entries and automatic mutation authority remained limited to the already-approved installed-only set: `better-local-files`, `eternal-jukebox`, `ivLyrics`, and `playlist-maker`. Tagify, Splitify, Star Ratings, SC Cover Ambience, Spotify/Spicetify persistence, Marketplace data, and other protected surfaces remained unchanged. The acceptance harness restored the exact pre-test production tree and exactly one resident process before exit.
 
-The production bootstrap remains v1.0.6. The stable source anchor for the repaired v0.6.15 -> v0.6.17 transport is `36b15a2ed2f9a23fffbeaf91de78b7854f6108b2`, with payload set SHA-256 `0f7fe384630e027466aa734ac669b410774b4569db231982212b7fa565b691a0`.
+The current stable transport source commit is `9a90d5f13eb63023d8f965a004be14d309d99429` with payload set SHA-256 `7bd1bd7559eee615f4e0aa049b3ec1574f6b215dbdf7417a0a57ea99b20b6c55`. Stable payload identities are:
+
+- Spotify Control v0.6.21: 281,579 bytes / SHA-256 `f97c78c905b83e90e58a24035febcaccc27cb12113ae9cbc64acdc79f5853828`
+- Addon Manager v0.6.5-r10: 250,616 bytes / SHA-256 `7991b8eaa5a943957aebb9d3dd84d455ed6266430da442a672c05c145fe497a2`
+- resident agent 0.1.1: 4,855 bytes / SHA-256 `2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278`
+- Bootstrap 1.0.6: 42,963 bytes / SHA-256 `d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6`
+
+The earlier Stage14 hands-off acceptance remains historical evidence for the v0.6.15 -> v0.6.17 chain and its failure-injection coverage; the v0.6.21 acceptance above is the current stable release gate.
+
+## Version-pinned validator lifecycle
+
+Version-pinned release validators are automatic only while their release branch is active. After a version is promoted to stable, its historical release/E2E workflows are retained on that release branch and, where useful, through `workflow_dispatch`, but they must not continue attaching to future `main` pull requests. One-time exact-main post-release validators are retired after their release has been superseded. This prevents a correct future manifest version bump from creating false-red CI while preserving historical validation evidence.
 
 Machine-specific runtime reports and backups are intentionally not committed to this public repository.
