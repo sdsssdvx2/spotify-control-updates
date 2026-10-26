@@ -71,7 +71,7 @@ def build():
 
     selftest=function_block(text,'Invoke-AddonSelfTest')
     old='        Invoke-AddonPolicyRegistrySelfTest'+newline+'        Write-AddonLog "Addon policy registry self-test passed: deterministic fingerprint, exact current auto-authority, and denied protected/unknown sources."'
-    new='        Invoke-AddonPolicyRegistrySelfTest'+newline+'        Invoke-AddonTransactionRegistrySelfTest'+newline+'        Write-AddonLog "Addon policy registry self-test passed: deterministic fingerprint, exact current auto-authority, denied protected/unknown sources, legacy transaction compatibility, and registry drift rejection."'
+    new='        Invoke-AddonPolicyRegistrySelfTest'+newline+'        Invoke-AddonTransactionRegistrySelfTest'+newline+'        Invoke-AddonRegistryCommitCycleSelfTest'+newline+'        Write-AddonLog "Addon policy registry self-test passed: deterministic fingerprint, exact current auto-authority, denied protected/unknown sources, legacy transaction compatibility, registry drift rejection, and filesystem-backed registry CommitLast."'
     selftest=replace_once(selftest,old,new,'transaction guard fixture integration')
     old_self=function_block(text,'Invoke-AddonSelfTest')
     text=replace_once(text,old_self,selftest,'replace selftest with transaction registry fixtures')
@@ -87,6 +87,7 @@ def build():
     ctext=candidate.decode('utf-8-sig')
     if ctext.count('# BEGIN SPOTIFY CONTROL ADDON TRANSACTION REGISTRY GUARD v1 / r10')!=1:raise RuntimeError('transaction registry guard count invalid')
     if ctext.count('Invoke-AddonTransactionRegistrySelfTest')!=2:raise RuntimeError('transaction registry selftest definition/call count invalid')
+    if ctext.count('Invoke-AddonRegistryCommitCycleSelfTest')!=2:raise RuntimeError('registry CommitLast selftest definition/call count invalid')
     commit_check=function_block(ctext,'Commit-LastTransaction')
     if commit_check.count('Assert-AddonTransactionRegistryAuthorization -Tx $tx')!=1:raise RuntimeError('CommitLast pure registry guard call missing/ambiguous')
     if 'Get-AddonPolicyRegistryFingerprint' in commit_check:raise RuntimeError('CommitLast still contains duplicated inline registry fingerprint logic')
