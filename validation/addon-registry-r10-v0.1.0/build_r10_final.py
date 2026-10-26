@@ -22,8 +22,24 @@ def replace_once(text,old,new,label):
     if n!=1:raise RuntimeError(f'{label}: expected exactly one match, got {n}')
     return text.replace(old,new,1)
 
+def run_stage1_builder():
+    # The production r9 source uses the more specific "CustomApp source" failure text.
+    # Stage-1 was intentionally authored fail-closed around an older equivalent marker;
+    # normalize exactly that one builder literal in an ephemeral copy rather than weakening
+    # any production-source match or mutating the tracked builder during validation.
+    source=BASE_BUILDER.read_text(encoding='utf-8')
+    old='update=replace_once(update,\'            throw "Unsupported auto-managed source for $($item.name): $($item.source)"\',\'            throw "Unsupported registry mutation handler for $($item.name): $($authorization.Handler)"\',\'phase1 unsupported handler\')'
+    new='update=replace_once(update,\'            throw "Unsupported auto-managed CustomApp source: $($item.source)"\',\'            throw "Unsupported registry mutation handler for $($item.name): $($authorization.Handler)"\',\'phase1 unsupported handler\')'
+    source=replace_once(source,old,new,'stage1 exact r9 unsupported-source compatibility marker')
+    generated=DIR/'build_r10_stage1_compat.generated.py'
+    try:
+        generated.write_text(source,encoding='utf-8',newline='\n')
+        subprocess.check_call([sys.executable,str(generated)],cwd=ROOT)
+    finally:
+        generated.unlink(missing_ok=True)
+
 def build():
-    subprocess.check_call([sys.executable,str(BASE_BUILDER)],cwd=ROOT)
+    run_stage1_builder()
     raw=OUT.read_bytes()
     bom=b'\xef\xbb\xbf' if raw.startswith(b'\xef\xbb\xbf') else b''
     text=raw[len(bom):].decode('utf-8')
