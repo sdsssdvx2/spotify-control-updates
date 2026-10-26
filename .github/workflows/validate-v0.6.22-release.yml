@@ -51,7 +51,8 @@ jobs:
             $_ -ne 'manifest.json' -and
             $_ -ne '.github/workflows/prepare-v0.6.22-release.yml' -and
             $_ -ne '.github/workflows/validate-v0.6.22-release.yml' -and
-            $_ -ne '.github/workflows/validate-v0.6.22-bootstrap-e2e.yml'
+            $_ -ne '.github/workflows/validate-v0.6.22-bootstrap-e2e.yml' -and
+            $_ -ne '.github/workflows/validate-v0.6.14-r4.yml'
           })
           if($bad.Count){throw "Unexpected v0.6.22 release files: $($bad -join ', ')"}
           $raw=@(git ls-files 'validation/v0.6.22/out/**')
