@@ -160,8 +160,6 @@ jobs:
           $fixture=Join-Path $env:RUNNER_TEMP 'star-ratings-33aa3d293f9fbb58d7a749a8cea10c318351e6c6.js'
           Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/brimell/spicetify-star-ratings/33aa3d293f9fbb58d7a749a8cea10c318351e6c6/dist/star-ratings.js' -OutFile $fixture
           if((Get-Item $fixture).Length -ne 43396 -or (Get-FileHash $fixture -Algorithm SHA256).Hash.ToLowerInvariant() -ne '198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1'){throw 'Immutable Star Ratings fixture mismatch.'}
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $engine -FixturePath $fixture 2>$null
-          # Engine is not invoked directly for regression; use its official test harness below.
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/star-ratings/tests/test-star-ratings-patch.ps1 -FixturePath $fixture
           if($LASTEXITCODE -ne 0){throw 'Star Ratings transactional regression failed.'}
           Write-Host 'V0621_STAR_IDENTITY_AND_REGRESSION_PASS'
