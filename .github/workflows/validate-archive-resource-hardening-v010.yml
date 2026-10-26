@@ -36,12 +36,29 @@ jobs:
           if($changed.Count -ne $allowed.Count){throw "Expected exactly $($allowed.Count) validation files, got $($changed.Count)."}
           Write-Host "VALIDATION_SCOPE_PASS head=$((git rev-parse HEAD).Trim())"
 
-      - name: Build exact v0.6.24 r13 candidate
+      - name: Build and pin exact v0.6.24 r13 candidate
         shell: pwsh
         run: |
+          $main='validation/archive-resource-hardening-v0.1.0/out/bin/spotify-control.ps1'
+          $addon='validation/archive-resource-hardening-v0.1.0/out/bin/addon-manager.ps1'
           python validation/archive-resource-hardening-v0.1.0/build_candidate.py
           if($LASTEXITCODE -ne 0){throw 'Candidate build failed.'}
+          if((Get-Item $main).Length -ne 284312 -or (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'dc5d7ec17f18f7546786c81f3172c08f6fb1692842c2e6c0a69a86171e6b1151'){throw 'Pinned candidate main identity mismatch.'}
+          if((Get-Item $addon).Length -ne 275414 -or (Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -cne '81343687c475f7f48f1311b09c98205a021776f26e8d55082e0ec47f8ebfb470'){throw 'Pinned candidate addon identity mismatch.'}
           Get-Content validation/archive-resource-hardening-v0.1.0/candidate-report.json
+
+      - name: Prove deterministic rebuild
+        shell: pwsh
+        run: |
+          $main='validation/archive-resource-hardening-v0.1.0/out/bin/spotify-control.ps1'
+          $addon='validation/archive-resource-hardening-v0.1.0/out/bin/addon-manager.ps1'
+          $m1=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant();$a1=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant()
+          python validation/archive-resource-hardening-v0.1.0/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'Second candidate build failed.'}
+          $m2=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant();$a2=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($m1 -cne $m2 -or $a1 -cne $a2){throw 'Candidate rebuild is not deterministic.'}
+          if($m2 -cne 'dc5d7ec17f18f7546786c81f3172c08f6fb1692842c2e6c0a69a86171e6b1151' -or $a2 -cne '81343687c475f7f48f1311b09c98205a021776f26e8d55082e0ec47f8ebfb470'){throw 'Deterministic rebuild drifted from pinned identities.'}
+          Write-Host "DETERMINISTIC_REBUILD_PASS main=$m2 addon=$a2"
 
       - name: Parse candidate with Windows PowerShell 5.1
         shell: powershell
@@ -170,10 +187,16 @@ jobs:
       - name: Run Addon Manager read-only SelfTest
         shell: powershell
         run: |
-          $addon=(Resolve-Path 'validation/archive-resource-hardening-v0.1.0/out/bin/addon-manager.ps1').Path
-          & $addon -Action SelfTest
-          if($LASTEXITCODE -ne 0){throw "Addon Manager SelfTest failed: $LASTEXITCODE"}
-          Write-Host 'ADDON_MANAGER_SELFTEST_PASS'
+          $spotifyRoot=Join-Path $env:LOCALAPPDATA 'Spotify'
+          New-Item -ItemType Directory -Force -Path $spotifyRoot | Out-Null
+          try {
+            $addon=(Resolve-Path 'validation/archive-resource-hardening-v0.1.0/out/bin/addon-manager.ps1').Path
+            & $addon -Action SelfTest
+            if($LASTEXITCODE -ne 0){throw "Addon Manager SelfTest failed: $LASTEXITCODE"}
+            Write-Host 'ADDON_MANAGER_SELFTEST_PASS'
+          } finally {
+            Remove-Item -LiteralPath $spotifyRoot -Recurse -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Prove no production file changed
         shell: pwsh
