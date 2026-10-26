@@ -1,0 +1,173 @@
+name: Validate Splitify Release Provenance v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/splitify-release-provenance-v0.1.0
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/splitify-release-provenance-v0.1.0/**'
+      - '.github/workflows/validate-splitify-release-provenance-v010.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove exact validation-only scope
+        shell: powershell
+        run: |
+          $base='c3dca564f70d4c85a84d5f895309d30d5a2d80c1'
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Candidate branch is not based on exact current stable main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allowed=@('.github/workflows/validate-splitify-release-provenance-v010.yml','validation/splitify-release-provenance-v0.1.0/build_candidate.py')
+          foreach($p in $changed){if($allowed -cnotcontains $p){throw "Unexpected candidate path: $p"}}
+          if($changed.Count -ne 2){throw "Expected exactly two validation files, got $($changed.Count)."}
+          Write-Host "SPLITIFY_PROVENANCE_SCOPE_PASS head=$((git rev-parse HEAD).Trim())"
+
+      - name: Build candidate twice and prove deterministic bytes
+        shell: powershell
+        run: |
+          $main='validation/splitify-release-provenance-v0.1.0/out/bin/spotify-control.ps1'
+          $addon='validation/splitify-release-provenance-v0.1.0/out/bin/addon-manager.ps1'
+          python validation/splitify-release-provenance-v0.1.0/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'First candidate build failed.'}
+          $m1=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant();$a1=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant();$ms1=(Get-Item $main).Length;$as1=(Get-Item $addon).Length
+          python validation/splitify-release-provenance-v0.1.0/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'Second candidate build failed.'}
+          $m2=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant();$a2=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant();$ms2=(Get-Item $main).Length;$as2=(Get-Item $addon).Length
+          if($m1 -cne $m2 -or $a1 -cne $a2 -or $ms1 -ne $ms2 -or $as1 -ne $as2){throw 'Candidate rebuild is not deterministic.'}
+          Write-Host "SPLITIFY_PROVENANCE_DETERMINISTIC_PASS main_size=$ms2 main_sha=$m2 addon_size=$as2 addon_sha=$a2"
+          "TARGET_MAIN_SIZE=$ms2"|Out-File $env:GITHUB_ENV -Append -Encoding utf8;"TARGET_MAIN_SHA=$m2"|Out-File $env:GITHUB_ENV -Append -Encoding utf8;"TARGET_ADDON_SIZE=$as2"|Out-File $env:GITHUB_ENV -Append -Encoding utf8;"TARGET_ADDON_SHA=$a2"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Parse exact candidate with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          foreach($path in @('validation/splitify-release-provenance-v0.1.0/out/bin/spotify-control.ps1','validation/splitify-release-provenance-v0.1.0/out/bin/addon-manager.ps1')){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Format-List|Out-String|Write-Host;throw "PowerShell parse failed: $path"}
+          }
+          Write-Host 'SPLITIFY_PROVENANCE_POWERSHELL_51_PARSE_PASS'
+
+      - name: Assert registry, adapter, mutation authority, and protected policies are unchanged
+        shell: python
+        run: |
+          from pathlib import Path
+          import json,re,subprocess,sys,hashlib
+          root=Path('.')
+          subprocess.check_call([sys.executable,'validation/v0.6.24/build_v0624.py','--build'])
+          base=(root/'validation/v0.6.24/out/bin/addon-manager.ps1').read_text(encoding='utf-8-sig')
+          cand=(root/'validation/splitify-release-provenance-v0.1.0/out/bin/addon-manager.ps1').read_text(encoding='utf-8-sig')
+          def fn(text,name):
+              marker=f'function {name} {{';a=text.index(marker);b=text.find('\nfunction ',a+len(marker));return text[a:len(text) if b<0 else b]
+          for name in ('Get-AddonPolicyRegistry','Get-AddonSourceAdapterCatalog'):
+              if fn(base,name)!=fn(cand,name):raise SystemExit(f'{name} changed')
+          reg=fn(cand,'Get-AddonPolicyRegistry')
+          auto=re.findall(r"name='([^']+)'.*?mutation_mode='auto'",reg,re.I)
+          expected=['better-local-files','eternal-jukebox','ivLyrics','playlist-maker']
+          if sorted(x.lower() for x in auto)!=sorted(x.lower() for x in expected):raise SystemExit(f'auto authority drift: {auto}')
+          for marker in ("name='splitify'","source='alexander-rebello/splitify'","inventory_policy='monitor-only'","mutation_mode='deny'","data_policy='preserve-installed-content'","protect-ratings-tags-notes","playlist-backed-ratings-preserve","never-disable-or-optimize"):
+              if marker.lower() not in reg.lower():raise SystemExit(f'protected policy missing: {marker}')
+          inv=fn(cand,'Get-AddonInventory')
+          start=inv.index('# Splitify - official latest release')
+          block=inv[start:]
+          for forbidden in ('Copy-Item','Move-Item','Start-Process','spicetify apply','spicetify backup','spicetify restore'):
+              if forbidden.lower() in block.lower():raise SystemExit(f'Splitify inventory mutation verb appeared: {forbidden}')
+          for required in ('Get-SplitifyOfficialReleaseProof','Test-SplitifyInstalledReleaseProof','current-proven-latest-release','github-release-asset-tree-mismatch'):
+              if required not in block:raise SystemExit(f'Splitify proof path missing: {required}')
+          report=json.loads((root/'validation/splitify-release-provenance-v0.1.0/candidate-report.json').read_text())
+          if report['authority_expanded'] is not False:raise SystemExit('authority_expanded changed')
+          print('SPLITIFY_PROVENANCE_AUTHORITY_PRESERVATION_PASS')
+
+      - name: Generate malicious ZIP fixtures for the new Splitify verifier
+        shell: python
+        run: |
+          from pathlib import Path
+          import zipfile
+          root=Path('validation/splitify-release-provenance-v0.1.0/fixtures');root.mkdir(parents=True,exist_ok=True)
+          def tiny(name,entries):
+              with zipfile.ZipFile(root/name,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=1) as z:
+                  for p,d in entries:z.writestr(p,d)
+          tiny('benign.zip',[('splitify-dist/manifest.json','{"name":"Splitify"}'),('splitify-dist/index.js','x')])
+          tiny('traversal.zip',[('splitify-dist/../evil.txt','x')]);tiny('absolute.zip',[('/splitify-dist/evil.txt','x')]);tiny('drive.zip',[('C:/splitify-dist/evil.txt','x')]);tiny('wrong-root.zip',[('other/index.js','x')]);tiny('duplicate-case.zip',[('splitify-dist/File.txt','a'),('splitify-dist/file.txt','b')])
+          with zipfile.ZipFile(root/'symlink.zip','w',compression=zipfile.ZIP_DEFLATED,compresslevel=1) as z:
+              zi=zipfile.ZipInfo('splitify-dist/link');zi.create_system=3;zi.external_attr=(0o120777<<16);z.writestr(zi,'target')
+          with zipfile.ZipFile(root/'too-many.zip','w',compression=zipfile.ZIP_DEFLATED,compresslevel=1) as z:
+              for i in range(101):z.writestr(f'splitify-dist/f{i:03d}.txt','x')
+          zero=b'\0'*(1024*1024)
+          with zipfile.ZipFile(root/'oversized-entry.zip','w',compression=zipfile.ZIP_DEFLATED,compresslevel=1) as z:
+              with z.open('splitify-dist/big.bin','w') as f:
+                  for _ in range(17):f.write(zero)
+          with zipfile.ZipFile(root/'expanded-total.zip','w',compression=zipfile.ZIP_DEFLATED,compresslevel=1) as z:
+              for i in range(3):
+                  with z.open(f'splitify-dist/big{i}.bin','w') as f:
+                      for _ in range(11):f.write(zero)
+          print('SPLITIFY_PROVENANCE_ZIP_FIXTURES_BUILT')
+
+      - name: Exercise exact new helper functions including online official release proof
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          function Get-FunctionText([string]$Path,[string]$Name){$text=Get-Content -LiteralPath $Path -Raw;$marker="function $Name {";$start=$text.IndexOf($marker,[StringComparison]::Ordinal);if($start -lt 0){throw "Missing function $Name"};$next=$text.IndexOf("`nfunction ",$start+$marker.Length,[StringComparison]::Ordinal);if($next -lt 0){$next=$text.Length};return $text.Substring($start,$next-$start)}
+          function Test-PathSafe([string]$Path,[string]$Type){if($Type -ceq 'Leaf'){return(Test-Path -LiteralPath $Path -PathType Leaf)};if($Type -ceq 'Container'){return(Test-Path -LiteralPath $Path -PathType Container)};return(Test-Path -LiteralPath $Path)}
+          $Version='0.6.5-r14'
+          $addon='validation/splitify-release-provenance-v0.1.0/out/bin/addon-manager.ps1'
+          foreach($name in @('Get-SplitifyTreeFingerprint','Test-SplitifyReleaseZipSafety','Get-SplitifyOfficialReleaseProof','Test-SplitifyInstalledReleaseProof')){Invoke-Expression (Get-FunctionText $addon $name)}
+          function Assert-Rejected([scriptblock]$Body,[string]$Label){$ok=$false;try{&$Body|Out-Null}catch{$ok=$true;Write-Host "REJECTED $Label :: $($_.Exception.Message)"};if(-not$ok){throw "Malicious Splitify fixture accepted: $Label"}}
+          $fx=(Resolve-Path 'validation/splitify-release-provenance-v0.1.0/fixtures').Path
+          $benign=Test-SplitifyReleaseZipSafety -ZipPath (Join-Path $fx 'benign.zip');if($benign.EntryCount -ne 2){throw 'Benign Splitify ZIP fixture failed.'}
+          foreach($bad in @('traversal.zip','absolute.zip','drive.zip','wrong-root.zip','duplicate-case.zip','symlink.zip','too-many.zip','oversized-entry.zip','expanded-total.zip')){Assert-Rejected {Test-SplitifyReleaseZipSafety -ZipPath (Join-Path $fx $bad)} $bad}
+          $headers=@{'User-Agent'='SpotifyControl-Splitify-Provenance-CI/0.1.0'}
+          $release=Invoke-RestMethod -Uri 'https://api.github.com/repos/alexander-rebello/splitify/releases/latest' -Headers $headers
+          $proof=Get-SplitifyOfficialReleaseProof -Release $release
+          if([string]$proof.Version -cne '1.1.0'){throw "Official proof version mismatch: $($proof.Version)"}
+          if([string]$proof.Revision -cne 'v1.1.0'){throw "Official proof revision mismatch: $($proof.Revision)"}
+          if([string]$proof.AssetDigest -cne 'sha256:5de51a885815f78067b8d6f7f3ebe40c93b5a7c7e3c8c841fcd26147a13010ca' -or [int64]$proof.AssetSize -ne 7822){throw 'Official proof asset identity mismatch.'}
+          if([string]$proof.TreeSha256 -cne 'a138d868d219028d7498a6a4138aef4900da9583c04e572e5505e2ce971a4440' -or [int]$proof.FileCount -ne 6){throw "Official proof tree mismatch: $($proof.TreeSha256) files=$($proof.FileCount)"}
+          if([bool]$proof.ManifestHasVersion){throw "Release manifest version must not be trusted; official asset unexpectedly has version=$($proof.ManifestVersion)"}
+          $temp=Join-Path $env:TEMP ('SplitifyInstalledFixture-'+[guid]::NewGuid().ToString('N'));$zip=Join-Path $temp 'splitify.zip';$extract=Join-Path $temp 'extract';New-Item -ItemType Directory -Force -Path $temp,$extract|Out-Null
+          try{
+              $asset=@($release.assets|Where-Object{[string]$_.name -ceq 'splitify.zip'})[0]
+              Invoke-WebRequest -Uri ([string]$asset.browser_download_url) -Headers $headers -OutFile $zip -UseBasicParsing
+              [void](Test-SplitifyReleaseZipSafety -ZipPath $zip);Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
+              $installed=Join-Path $extract 'splitify-dist'
+              $exact=Test-SplitifyInstalledReleaseProof -InstalledPath $installed -OfficialProof $proof
+              if(-not $exact.Valid -or [string]$exact.InstalledTreeSha256 -cne [string]$proof.TreeSha256){throw 'Exact official Splitify tree was not proven.'}
+              $extra=Join-Path $installed '__spotify_control_extra_probe__.txt';Set-Content -LiteralPath $extra -Value 'extra' -NoNewline
+              if((Test-SplitifyInstalledReleaseProof -InstalledPath $installed -OfficialProof $proof).Valid){throw 'Splitify proof accepted an extra local file.'};Remove-Item -LiteralPath $extra -Force
+              $index=Join-Path $installed 'index.js';$indexBytes=[IO.File]::ReadAllBytes($index);try{[IO.File]::AppendAllText($index,"`n// provenance-drift",[Text.UTF8Encoding]::new($false));if((Test-SplitifyInstalledReleaseProof -InstalledPath $installed -OfficialProof $proof).Valid){throw 'Splitify proof accepted content drift.'}}finally{[IO.File]::WriteAllBytes($index,$indexBytes)}
+              $style=Join-Path $installed 'style.css';$styleBytes=[IO.File]::ReadAllBytes($style);Remove-Item -LiteralPath $style -Force;try{if((Test-SplitifyInstalledReleaseProof -InstalledPath $installed -OfficialProof $proof).Valid){throw 'Splitify proof accepted a missing file.'}}finally{[IO.File]::WriteAllBytes($style,$styleBytes)}
+              if(-not (Test-SplitifyInstalledReleaseProof -InstalledPath $installed -OfficialProof $proof).Valid){throw 'Splitify exact proof did not recover after drift probes were restored.'}
+          }finally{Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue}
+          Write-Host "SPLITIFY_PROVENANCE_ONLINE_PROOF_PASS version=$($proof.Version) tree=$($proof.TreeSha256) files=$($proof.FileCount) manifest_version=absent"
+
+      - name: Run full Addon Manager read-only SelfTest
+        shell: powershell
+        run: |
+          $spotifyRoot=Join-Path $env:LOCALAPPDATA 'Spotify';New-Item -ItemType Directory -Force -Path $spotifyRoot|Out-Null
+          try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/splitify-release-provenance-v0.1.0/out/bin/addon-manager.ps1 -Action SelfTest;if($LASTEXITCODE -ne 0){throw "Addon Manager r14 SelfTest failed: $LASTEXITCODE"};Write-Host 'SPLITIFY_PROVENANCE_ADDON_SELFTEST_PASS'}finally{Remove-Item -LiteralPath $spotifyRoot -Recurse -Force -ErrorAction SilentlyContinue}
+
+      - name: Prove no production files changed
+        shell: powershell
+        run: |
+          $base='c3dca564f70d4c85a84d5f895309d30d5a2d80c1';$changed=@(git diff --name-only "$base...HEAD")
+          foreach($p in $changed){if($p -notlike 'validation/splitify-release-provenance-v0.1.0/*' -and $p -cne '.github/workflows/validate-splitify-release-provenance-v010.yml'){throw "Unexpected production change: $p"}}
+          git diff --exit-code -- manifest.json packages performance README.md validation/v0.6.24
+          if($LASTEXITCODE -ne 0){throw 'Candidate changed a stable production/validation surface.'}
+          Write-Host 'SPLITIFY_PROVENANCE_NO_PRODUCTION_CHANGE_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: splitify-release-provenance-v010
+          path: validation/splitify-release-provenance-v0.1.0/candidate-report.json
+          if-no-files-found: error
