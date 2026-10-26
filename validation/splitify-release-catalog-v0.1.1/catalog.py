@@ -46,10 +46,10 @@ def decode_manifest(raw):
     return value
 
 
-def inspect_release(rel):
-    tag = rel['tag_name']
+def inspect_release(release):
+    tag = release['tag_name']
     version = tag[1:]
-    assets = [a for a in rel.get('assets', []) if a.get('name') == 'splitify.zip']
+    assets = [a for a in release.get('assets', []) if a.get('name') == 'splitify.zip']
     if len(assets) != 1:
         return None, {'version': version, 'tag': tag, 'reason': 'no-splitify-zip' if not assets else f'ambiguous-splitify-zip-assets:{len(assets)}'}
     asset = assets[0]
@@ -104,15 +104,15 @@ def inspect_release(rel):
                 parts = info.filename.replace('\\', '/').rstrip('/').split('/')
                 if parts[0] != root:
                     raise ValueError('root-drift')
-                rel = '/'.join(parts[1:])
-                if not rel:
+                relpath = '/'.join(parts[1:])
+                if not relpath:
                     raise ValueError('file-at-top-level-root')
                 data = z.read(info)
                 if len(data) != info.file_size:
                     raise ValueError(f'size-mismatch:{info.filename}')
-                file_row = {'path': rel, 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+                file_row = {'path': relpath, 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
                 files.append(file_row)
-                if rel == 'manifest.json':
+                if relpath == 'manifest.json':
                     manifest_bytes = data
         if not files:
             raise ValueError('no-files')
@@ -127,7 +127,7 @@ def inspect_release(rel):
         return {
             'version': version,
             'tag': tag,
-            'published_at': rel.get('published_at'),
+            'published_at': release.get('published_at'),
             'asset_size': len(raw),
             'asset_sha256': actual,
             'asset_digest': digest,
@@ -151,8 +151,8 @@ if not stable:
 
 catalog = []
 unsupported = []
-for rel in stable:
-    release_row, bad = inspect_release(rel)
+for release in stable:
+    release_row, bad = inspect_release(release)
     if release_row:
         catalog.append(release_row)
         print('SPLITIFY_RELEASE', release_row['tag'], release_row['asset_size'], release_row['asset_sha256'], release_row['tree_sha256'], release_row['file_count'])
