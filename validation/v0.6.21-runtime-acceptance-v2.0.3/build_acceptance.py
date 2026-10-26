@@ -94,11 +94,11 @@ def build():
     rels=SOURCE_FILES+['evidence/SELF_VALIDATION_REPORT.json','evidence/SELF_VALIDATION_REPORT.txt']
     (PKG/'SHA256SUMS.txt').write_text(''.join(f"{sha_path(PKG/r)}  {r}\n" for r in rels),encoding='ascii',newline='\n')
     if ZIP.exists(): ZIP.unlink()
-    # ZIP_STORED intentionally used: exact bytes remain cross-platform deterministic across zlib versions.
+    # ZIP_STORED + create_system=3 intentionally make exact bytes cross-platform deterministic.
     with zipfile.ZipFile(ZIP,'w',compression=zipfile.ZIP_STORED) as z:
         for p in sorted(PKG.rglob('*')):
             if not p.is_file(): continue
-            rel=p.relative_to(PKG).as_posix();info=zipfile.ZipInfo(rel,(2026,10,26,0,0,0));info.compress_type=zipfile.ZIP_STORED;info.external_attr=(0o100644<<16);z.writestr(info,p.read_bytes())
+            rel=p.relative_to(PKG).as_posix();info=zipfile.ZipInfo(rel,(2026,10,26,0,0,0));info.create_system=3;info.compress_type=zipfile.ZIP_STORED;info.external_attr=(0o100644<<16);z.writestr(info,p.read_bytes())
     with zipfile.ZipFile(ZIP) as z:
         if z.testzip() is not None: raise RuntimeError('final package CRC failure')
         for line in z.read('SHA256SUMS.txt').decode('ascii').splitlines():
