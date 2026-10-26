@@ -88,7 +88,7 @@ jobs:
           $policy=(Resolve-Path 'validation/v0.6.21/addon_policy_registry.ps1.inc').Path
           . ([scriptblock]::Create((Get-Content -LiteralPath $policy -Raw)))
           & validation/addon-source-registry-v0.1.0/test_source_adapter_engine.ps1 -ReportPath validation/addon-source-registry-v0.1.0/engine-report.json
-          if($LASTEXITCODE -ne 0){throw 'Generic source adapter fixtures failed.'}
+          if(-not $?){throw 'Generic source adapter fixtures failed.'}
 
       - name: Re-run fixtures and require deterministic report
         shell: powershell
@@ -97,7 +97,7 @@ jobs:
           $policy=(Resolve-Path 'validation/v0.6.21/addon_policy_registry.ps1.inc').Path
           . ([scriptblock]::Create((Get-Content -LiteralPath $policy -Raw)))
           & validation/addon-source-registry-v0.1.0/test_source_adapter_engine.ps1 -ReportPath validation/addon-source-registry-v0.1.0/engine-report-2.json
-          if($LASTEXITCODE -ne 0){throw 'Second adapter fixture run failed.'}
+          if(-not $?){throw 'Second adapter fixture run failed.'}
           $second=(Get-FileHash validation/addon-source-registry-v0.1.0/engine-report-2.json -Algorithm SHA256).Hash.ToLowerInvariant()
           if($first -ne $second){throw "Nondeterministic adapter evidence: $first != $second"}
           $r=Get-Content validation/addon-source-registry-v0.1.0/engine-report.json -Raw|ConvertFrom-Json
