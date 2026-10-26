@@ -1,0 +1,116 @@
+name: Validate Current Stable Manifest
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'manifest.json'
+      - 'manifest.schema.json'
+      - 'packages/**'
+      - 'validation/**'
+      - '.github/workflows/validate-stable-main.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'manifest.json'
+      - 'manifest.schema.json'
+      - 'packages/**'
+      - 'validation/**'
+      - '.github/workflows/validate-stable-main.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stable-windows:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact event head
+        shell: powershell
+        run: |
+          $actual=(git rev-parse HEAD).Trim()
+          $expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -ne $expected){throw "Checkout is not exact event head: $actual != $expected"}
+          Write-Host "STABLE_EXACT_HEAD_PASS head=$actual"
+
+      - name: Parse and verify version-agnostic stable transport
+        shell: powershell
+        run: |
+          python -m py_compile validation/stable/validate_stable.py
+          if($LASTEXITCODE -ne 0){throw 'Stable validator failed Python compile.'}
+          python validation/stable/validate_stable.py
+          if($LASTEXITCODE -ne 0){throw 'Stable manifest/transport integrity validation failed.'}
+
+      - name: Discover current version-specific release validator
+        shell: powershell
+        run: |
+          $m=Get-Content manifest.json -Raw | ConvertFrom-Json
+          $version=[string]$m.latest_version
+          if($version -notmatch '^\d+\.\d+\.\d+$'){throw "Invalid latest_version: $version"}
+          $releaseDir="validation/v$version"
+          if(-not(Test-Path -LiteralPath $releaseDir -PathType Container)){throw "Missing current release validation directory: $releaseDir"}
+          $builders=@(Get-ChildItem -LiteralPath $releaseDir -Filter 'build_v*.py' -File)
+          if($builders.Count -ne 1){throw "Expected exactly one current release builder in $releaseDir; found $($builders.Count)"}
+          $validator=Join-Path $releaseDir 'validate_release.ps1'
+          if(-not(Test-Path -LiteralPath $validator -PathType Leaf)){throw "Missing current exact release validator: $validator"}
+          "STABLE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "STABLE_RELEASE_DIR=$releaseDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "STABLE_BUILDER=$($builders[0].FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "STABLE_RELEASE_VALIDATOR=$validator" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "STABLE_VALIDATOR_DISCOVERY_PASS version=$version builder=$($builders[0].Name)"
+
+      - name: Validate current published release contract
+        shell: powershell
+        run: |
+          python "$env:STABLE_BUILDER" --validate-published
+          if($LASTEXITCODE -ne 0){throw "Published $env:STABLE_VERSION release validation failed."}
+
+      - name: Rebuild current release deterministically
+        shell: powershell
+        run: |
+          python "$env:STABLE_BUILDER" --build
+          if($LASTEXITCODE -ne 0){throw "Deterministic $env:STABLE_VERSION build failed."}
+          git diff --exit-code -- "packages/v$env:STABLE_VERSION" "$env:STABLE_RELEASE_DIR/candidate-metadata.json"
+          if($LASTEXITCODE -ne 0){throw "Committed $env:STABLE_VERSION transports differ from deterministic rebuild."}
+          Write-Host "STABLE_DETERMINISTIC_REBUILD_PASS version=$env:STABLE_VERSION"
+
+      - name: Run exact current release validator
+        shell: powershell
+        run: |
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $env:STABLE_RELEASE_VALIDATOR),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Current release validator failed PowerShell 5.1 parse.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $env:STABLE_RELEASE_VALIDATOR
+          if($LASTEXITCODE -ne 0){throw "Exact $env:STABLE_VERSION release contract validation failed."}
+
+      - name: Parse current managed candidates and SelfTest Addon Manager
+        shell: powershell
+        run: |
+          $main=Join-Path $env:STABLE_RELEASE_DIR 'out/bin/spotify-control.ps1'
+          $addon=Join-Path $env:STABLE_RELEASE_DIR 'out/bin/addon-manager.ps1'
+          foreach($file in @($main,$addon)){
+            if(-not(Test-Path -LiteralPath $file -PathType Leaf)){throw "Current candidate missing after build: $file"}
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0}: {1}" -f $file,$_.Message)};throw "PowerShell 5.1 parser failed: $file"}
+          }
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Current Addon Manager SelfTest failed.'}
+          Write-Host "STABLE_MANAGED_PARSE_AND_ADDON_SELFTEST_PASS version=$env:STABLE_VERSION"
+
+      - name: Prove stable validation does not rewrite committed transport
+        shell: powershell
+        run: |
+          git diff --exit-code -- manifest.json manifest.schema.json packages "$env:STABLE_RELEASE_DIR/candidate-metadata.json"
+          if($LASTEXITCODE -ne 0){throw 'Stable validation mutated committed release transport or metadata.'}
+          Write-Host "CURRENT_STABLE_VALIDATION_PASS version=$env:STABLE_VERSION"
