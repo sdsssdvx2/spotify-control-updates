@@ -1,0 +1,70 @@
+name: Validate Addon Manager Roadmap Audit v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/addon-roadmap-audit-v0.1.0
+    paths:
+      - 'validation/addon-roadmap-audit-v0.1.0/**'
+      - '.github/workflows/validate-addon-roadmap-audit-v010.yml'
+  pull_request:
+    paths:
+      - 'validation/addon-roadmap-audit-v0.1.0/**'
+      - '.github/workflows/validate-addon-roadmap-audit-v010.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove validation-only exact-head scope
+        shell: powershell
+        run: |
+          $base='29d6c52c6a79559e513b367ec57edcccebae5fd0'
+          $actual=(git rev-parse HEAD).Trim()
+          $eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -ne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Wrong production merge base.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allowed=@('validation/addon-roadmap-audit-v0.1.0/audit.py','.github/workflows/validate-addon-roadmap-audit-v010.yml')
+          $bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Out-of-scope files: $($bad -join ', ')"}
+          if($changed.Count -ne 2){throw "Expected exactly 2 validation-only files; got $($changed.Count)"}
+          Write-Host "ADDON_ROADMAP_SCOPE_PASS head=$actual"
+
+      - name: Compile audit
+        shell: powershell
+        run: |
+          python -m py_compile validation/addon-roadmap-audit-v0.1.0/audit.py
+          if($LASTEXITCODE -ne 0){throw 'Audit failed Python compile.'}
+
+      - name: Reconstruct exact production and audit Addon Manager
+        shell: powershell
+        run: |
+          python validation/addon-roadmap-audit-v0.1.0/audit.py
+          if($LASTEXITCODE -ne 0){throw "Addon roadmap audit failed: $LASTEXITCODE"}
+
+      - name: Validate report identity
+        shell: powershell
+        run: |
+          $r=Get-Content addon-roadmap-audit.json -Raw|ConvertFrom-Json
+          if($r.result -ne 'AUDIT_PASS'){throw "Unexpected audit result: $($r.result)"}
+          if($r.validation_head -ne (git rev-parse HEAD).Trim()){throw 'Report exact-head mismatch.'}
+          if([int64]$r.production_addon.size -ne 225044 -or $r.production_addon.sha256 -ne '3a20fcd552b363ebc05e26854a8fe010ffe50e5c756ebd3d7fca54011e8a8b86'){throw 'Production addon identity mismatch.'}
+          if([int]$r.function_count -lt 20){throw 'Unexpectedly small Addon Manager function count.'}
+          if(@($r.matched_functions).Count -lt 10){throw 'Roadmap audit extracted too few relevant functions.'}
+          Write-Host ("ADDON_ROADMAP_REPORT_PASS functions={0} matched={1} lines={2} urls={3}" -f $r.function_count,@($r.matched_functions).Count,@($r.matched_lines).Count,@($r.urls).Count)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-Addon-Roadmap-Audit-v0.1.0
+          path: addon-roadmap-audit.json
+          if-no-files-found: error
+          retention-days: 14
