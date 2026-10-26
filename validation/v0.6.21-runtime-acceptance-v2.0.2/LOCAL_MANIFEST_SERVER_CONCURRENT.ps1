@@ -113,3 +113,4 @@ public sealed class SpotifyControlLoopbackManifestServer
 Add-Type -TypeDefinition $serverSource -Language CSharp -ErrorAction Stop
 $server=New-Object SpotifyControlLoopbackManifestServer($Port,(Resolve-Path -LiteralPath $ManifestPath).Path)
 $server.Run()
+# exact-head validation trigger; no runtime behavior change
