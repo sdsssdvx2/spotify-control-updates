@@ -63,7 +63,7 @@ jobs:
         run: |
           python -m py_compile validation/v0.6.21-runtime-acceptance-v0.1.0/build_acceptance.py
           if($LASTEXITCODE -ne 0){throw 'Acceptance builder failed Python compile.'}
-          python - <<'PY'
+          $py=@'
           import hashlib,json,subprocess
           h='5eac4f39920b84f22e2a5ee07422f6080bfc7ef7'
           raw=subprocess.check_output(['git','show',f'{h}:manifest.json'])
@@ -79,7 +79,8 @@ jobs:
           assert latest['bin/spotify-control-agent.vbs']=={'path':'bin/spotify-control-agent.vbs','sha256':'2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278','size':4855}
           open('release-manifest.json','wb').write(raw)
           print('V0621_ACCEPTANCE_RELEASE_MANIFEST_PASS',len(raw),hashlib.sha256(raw).hexdigest())
-          PY
+          '@
+          $py | python -
           if($LASTEXITCODE -ne 0){throw 'Pinned release manifest contract failed.'}
 
       - name: Download exact validated Stage14 and Bootstrap carriers
@@ -145,7 +146,7 @@ jobs:
       - name: Prove Bootstrap URL-only patch and bundled manifest bytes
         shell: powershell
         run: |
-          python - <<'PY'
+          $py=@'
           import hashlib,io,subprocess,zipfile
           root='final-unpacked'
           carrier=open('bootstrap-carrier.zip','rb').read()
@@ -163,7 +164,8 @@ jobs:
           bundled=open(root+'/release/manifest.json','rb').read()
           assert bundled==manifest
           print('V0621_ACCEPTANCE_BOOTSTRAP_URL_ONLY_AND_MANIFEST_BYTES_PASS',len(patched),hashlib.sha256(patched).hexdigest(),len(bundled),hashlib.sha256(bundled).hexdigest())
-          PY
+          '@
+          $py | python -
           if($LASTEXITCODE -ne 0){throw 'Bootstrap URL-only or bundled-manifest byte proof failed.'}
 
       - name: Final safety surface audit
