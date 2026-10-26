@@ -1,4 +1,4 @@
-name: Validate Current Spicetify Updater Discovery v0.1.0
+name: Validate Current Spicetify Updater v0.1.0
 
 on:
   push:
@@ -16,7 +16,7 @@ permissions:
   contents: read
 
 jobs:
-  discover-windows:
+  validate-windows:
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
@@ -37,37 +37,125 @@ jobs:
           $bad=@($changed|Where-Object{$_ -notin $allowed})
           if($bad.Count){throw "Out-of-scope files: $($bad -join ', ')"}
           if($changed.Count -ne 2){throw "Expected exactly 2 validation-only files; got $($changed.Count): $($changed -join ', ')"}
-          Write-Host "SPICETIFY_UPDATER_DISCOVERY_SCOPE_PASS head=$actual"
+          Write-Host "SPICETIFY_UPDATER_SCOPE_PASS head=$actual"
 
-      - name: Compile discovery audit
+      - name: Compile current-release audit
         shell: powershell
         run: |
           python -m py_compile validation/spicetify-updater-current-v0.1.0/audit.py
-          if($LASTEXITCODE -ne 0){throw 'Discovery audit failed Python compile.'}
+          if($LASTEXITCODE -ne 0){throw 'Current-release audit failed Python compile.'}
 
-      - name: Reconstruct exact production and discover updater path
+      - name: Reconstruct exact production and audit updater path
         shell: powershell
         run: |
           python validation/spicetify-updater-current-v0.1.0/audit.py
-          if($LASTEXITCODE -ne 0){throw "Discovery audit failed: $LASTEXITCODE"}
+          if($LASTEXITCODE -ne 0){throw "Current-release audit failed: $LASTEXITCODE"}
 
-      - name: Validate discovery report
+      - name: Prove production updater safety contracts
         shell: powershell
         run: |
           $r=Get-Content spicetify-updater-current-audit.json -Raw | ConvertFrom-Json
-          if($r.result -ne 'DISCOVERY_PASS'){throw "Unexpected report result $($r.result)"}
+          if($r.result -ne 'AUDIT_PASS'){throw "Unexpected report result $($r.result)"}
           if($r.validation_head -ne (git rev-parse HEAD).Trim()){throw 'Report head mismatch.'}
           if($r.production_main.sha256 -ne 'e9f0181756cfb84c505c30f54b6067e321f6d178d3a1936489714b8f4441ba18'){throw 'Production main identity mismatch.'}
           if($r.production_addon.sha256 -ne '3a20fcd552b363ebc05e26854a8fe010ffe50e5c756ebd3d7fca54011e8a8b86'){throw 'Production addon identity mismatch.'}
-          if([string]::IsNullOrWhiteSpace([string]$r.current_latest_release.tag_name)){throw 'No current Spicetify latest release returned.'}
+          $names=@($r.candidate_updater_functions|ForEach-Object{[string]$_.name})
+          foreach($n in @('ConvertFrom-SpicetifyReleaseCompatibility','Get-SpicetifyManagedInstallInfo','ConvertFrom-SpicetifyReleaseInfo','Get-SpicetifyReleaseInfoForVersion','Get-SpicetifyLatestReleaseInfo','Expand-AndValidateSpicetifyAsset','Invoke-SpicetifyPreflight','Start-SpicetifyCliTransaction','Rollback-SpicetifyCliTransaction','Commit-SpicetifyCliTransaction','Repair-PendingSpicetifyTransaction','Invoke-SpicetifyTransactionalMaintenance','Invoke-MaintenanceCheckPhase','Invoke-MaintenanceMutationPhase')){
+            if($n -notin $names){throw "Required production updater function missing from exact source audit: $n"}
+          }
+          $main=Get-Content validation/v0.6.20/out/bin/spotify-control.ps1 -Raw
+          foreach($x in @(
+            "https://api.github.com/repos/spicetify/cli/releases/latest",
+            "https://api.github.com/repos/spicetify/cli/releases/tags/",
+            "Spicetify release asset is missing a valid GitHub-published SHA-256 digest.",
+            "Spicetify published digest mismatch.",
+            "Spicetify asset size mismatch.",
+            "Unexpected top-level path in Spicetify archive",
+            "Symlink entry refused in Spicetify archive",
+            "Installed Spicetify executable does not match the exact official",
+            "Spicetify persistent rollback backup tree mismatch",
+            "preserving $($baseline.ExtraFileCount) extra file(s)",
+            "Current Spotify compatibility became unverified after Spicetify apply.",
+            "post_apply_guard_succeeded = $true",
+            "extras_preserved=$true",
+            "refusing downgrade",
+            "Spotify is running; Spicetify CLI transaction requires Spotify to be fully closed."
+          )){if($main.IndexOf($x,[StringComparison]::Ordinal) -lt 0){throw "Production updater safety contract missing: $x"}}
+          Write-Host ("SPICETIFY_UPDATER_STATIC_CONTRACT_PASS latest={0} functions={1}" -f $r.current_latest_release.tag_name,$names.Count)
+
+      - name: Validate current latest Windows x64 asset in isolated runner staging
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $r=Get-Content spicetify-updater-current-audit.json -Raw | ConvertFrom-Json
+          if([bool]$r.current_latest_release.draft -or [bool]$r.current_latest_release.prerelease){throw 'Latest Spicetify release is not a stable release.'}
+          if(@($r.current_latest_release.windows_compatibility_versions).Count -ne 2){throw 'Windows compatibility range did not parse to exactly two versions.'}
+          $a=@($r.current_latest_release.assets|Where-Object{$_.name -like '*windows-x64.zip'})
+          if($a.Count -ne 1){throw "Expected exactly one Windows x64 asset; got $($a.Count)"}
+          $a=$a[0]
+          if([string]$a.state -ne 'uploaded'){throw "Windows x64 asset is not uploaded: $($a.state)"}
+          if([string]$a.digest -notmatch '^sha256:[0-9a-f]{64}$'){throw 'Windows x64 asset has no valid GitHub-published digest.'}
+          $version=[string]$r.current_latest_release.version
+          $expectedName="spicetify-$version-windows-x64.zip"
+          if([string]$a.name -cne $expectedName){throw "Unexpected asset name: $($a.name) != $expectedName"}
+          $expectedUrl="https://github.com/spicetify/cli/releases/download/v$version/$expectedName"
+          if([string]$a.browser_download_url -cne $expectedUrl){throw "Unexpected asset URL: $($a.browser_download_url)"}
+          $work=Join-Path $env:RUNNER_TEMP ('spotify-control-spicetify-current-'+[guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Force -Path $work|Out-Null
+          try{
+            $zip=Join-Path $work $expectedName
+            Invoke-WebRequest -UseBasicParsing -Uri ([string]$a.browser_download_url) -OutFile $zip
+            $actualDigest='sha256:'+((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant())
+            if($actualDigest -cne [string]$a.digest){throw "Current asset digest mismatch: $actualDigest != $($a.digest)"}
+            if((Get-Item $zip).Length -ne [int64]$a.size){throw "Current asset size mismatch: $((Get-Item $zip).Length) != $($a.size)"}
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $archive=[IO.Compression.ZipFile]::OpenRead($zip)
+            $seen=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+            $groups=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+            $allowed=@('spicetify.exe','CustomApps','Extensions','Themes','jsHelper','globals.d.ts','css-map.json')
+            [int]$exeCount=0;[int64]$total=0
+            try{
+              foreach($e in $archive.Entries){
+                $raw=([string]$e.FullName).Replace('\','/')
+                if([string]::IsNullOrWhiteSpace($raw)){continue}
+                if($raw.StartsWith('/') -or $raw.Contains(':')){throw "Unsafe archive path: $raw"}
+                $dir=$raw.EndsWith('/');$name=$raw.TrimEnd('/');$parts=$name.Split('/')
+                if(@($parts|Where-Object{$_ -eq '' -or $_ -eq '.' -or $_ -eq '..'}).Count){throw "Unsafe archive component: $raw"}
+                if($allowed -notcontains $parts[0]){throw "Unexpected top-level archive path: $raw"}
+                if(-not $seen.Add($name)){throw "Duplicate/case-colliding archive path: $name"}
+                [void]$groups.Add($parts[0])
+                $unixMode=(($e.ExternalAttributes -shr 16) -band 0xF000)
+                if($unixMode -eq 0xA000){throw "Symlink archive entry refused: $raw"}
+                if(-not $dir){$total += [int64]$e.Length;if([int64]$e.Length -gt 134217728 -or $total -gt 268435456){throw 'Archive size safety limit exceeded.'}}
+                if($name -ieq 'spicetify.exe' -and -not $dir -and $parts.Count -eq 1){$exeCount++}
+              }
+            }finally{$archive.Dispose()}
+            if($exeCount -ne 1){throw "Expected one root spicetify.exe; got $exeCount"}
+            foreach($req in @('spicetify.exe','globals.d.ts','css-map.json')){if(-not $seen.Contains($req)){throw "Required file missing: $req"}}
+            foreach($req in @('CustomApps','Extensions','Themes','jsHelper')){if(-not $groups.Contains($req)){throw "Required archive group missing: $req"}}
+            $payload=Join-Path $work 'payload';Expand-Archive -LiteralPath $zip -DestinationPath $payload
+            $exe=Join-Path $payload 'spicetify.exe'
+            if((Get-Item $exe).Length -lt 1048576){throw 'Staged Spicetify executable is unexpectedly small.'}
+            $out=& $exe --version 2>&1;$code=$LASTEXITCODE;$joined=($out -join "`n")
+            if($code -ne 0){throw "Staged current Spicetify --version failed: $joined"}
+            $m=[regex]::Match($joined,'(?<!\d)(?<v>\d+\.\d+\.\d+)(?!\d)')
+            if(-not $m.Success -or $m.Groups['v'].Value -cne $version){throw "Staged current version mismatch: expected=$version output=$joined"}
+            Write-Host "SPICETIFY_CURRENT_ASSET_SANDBOX_PASS version=$version size=$($a.size) digest=$($a.digest) uncompressed=$total"
+          }finally{Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue}
+
+      - name: Validate audit report
+        shell: powershell
+        run: |
+          $r=Get-Content spicetify-updater-current-audit.json -Raw | ConvertFrom-Json
+          if($r.result -ne 'AUDIT_PASS'){throw "Unexpected report result $($r.result)"}
+          if($r.validation_head -ne (git rev-parse HEAD).Trim()){throw 'Report head mismatch.'}
           $x64=@($r.current_latest_release.assets|Where-Object{$_.name -like '*windows-x64*'})
-          if($x64.Count -ne 1){throw "Expected exactly one Windows x64 asset, got $($x64.Count)"}
-          if([string]::IsNullOrWhiteSpace([string]$x64[0].digest)){throw 'Current Windows x64 asset has no release digest metadata.'}
-          Write-Host ("SPICETIFY_UPDATER_DISCOVERY_REPORT_PASS latest={0} functions={1} lines={2} urls={3}" -f $r.current_latest_release.tag_name,@($r.candidate_updater_functions).Count,@($r.spicetify_related_lines).Count,@($r.production_spicetify_urls).Count)
+          if($x64.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$x64[0].digest)){throw 'Current Windows x64 asset evidence incomplete.'}
+          Write-Host ("SPICETIFY_UPDATER_REPORT_PASS latest={0} compat={1} functions={2} lines={3} urls={4}" -f $r.current_latest_release.tag_name,(@($r.current_latest_release.windows_compatibility_versions)-join '->'),@($r.candidate_updater_functions).Count,@($r.spicetify_related_lines).Count,@($r.production_spicetify_urls).Count)
 
       - uses: actions/upload-artifact@v4
         with:
-          name: SpotifyControl-Spicetify-Updater-Discovery-v0.1.0
+          name: SpotifyControl-Spicetify-Updater-Current-v0.1.0
           path: spicetify-updater-current-audit.json
           if-no-files-found: error
           retention-days: 14
