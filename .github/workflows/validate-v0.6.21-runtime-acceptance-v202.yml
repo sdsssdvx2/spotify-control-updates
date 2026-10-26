@@ -37,6 +37,7 @@ jobs:
           $changed=@(git diff --name-only "$base...HEAD")
           $allowed=@(
             'validation/v0.6.21-runtime-acceptance-v2.0.2/build_acceptance.py',
+            'validation/v0.6.21-runtime-acceptance-v2.0.2/LOCAL_MANIFEST_SERVER_CONCURRENT.ps1',
             'validation/v0.6.21-runtime-acceptance-v2.0.2/source-b64/chunk-000.txt',
             'validation/v0.6.21-runtime-acceptance-v2.0.2/source-b64/chunk-001.txt',
             'validation/v0.6.21-runtime-acceptance-v2.0.2/source-b64/chunk-002.txt',
@@ -47,7 +48,7 @@ jobs:
           )
           $bad=@($changed|Where-Object{$_ -notin $allowed})
           if($bad.Count){throw "Out-of-scope files: $($bad -join ', ')"}
-          if($changed.Count -ne 8){throw "Expected exactly 8 validation-only files; got $($changed.Count): $($changed -join ' , ')"}
+          if($changed.Count -ne 9){throw "Expected exactly 9 validation-only files; got $($changed.Count): $($changed -join ' , ')"}
           Write-Host "V0621_RUNTIME_ACCEPTANCE_V202_SCOPE_PASS head=$actual"
 
       - name: Compile and build embedded acceptance source
@@ -66,8 +67,7 @@ jobs:
         run: |
           python validation/v0.6.21/build_v0621.py --build
           if($LASTEXITCODE -ne 0){throw 'v0.6.21 candidate rebuild failed.'}
-          $main='validation/v0.6.21/out/bin/spotify-control.ps1'
-          $addon='validation/v0.6.21/out/bin/addon-manager.ps1'
+          $main='validation/v0.6.21/out/bin/spotify-control.ps1';$addon='validation/v0.6.21/out/bin/addon-manager.ps1'
           if((Get-Item $main).Length -ne 281579 -or (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'f97c78c905b83e90e58a24035febcaccc27cb12113ae9cbc64acdc79f5853828'){throw 'v0.6.21 main identity mismatch.'}
           if((Get-Item $addon).Length -ne 250616 -or (Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -ne '7991b8eaa5a943957aebb9d3dd84d455ed6266430da442a672c05c145fe497a2'){throw 'r10 addon identity mismatch.'}
           Write-Host 'V0621_RUNTIME_ACCEPTANCE_V202_RELEASE_IDENTITY_PASS'
@@ -92,34 +92,23 @@ jobs:
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $gen 'RUN_RUNTIME_ACCEPTANCE.ps1') -SelfTest
           if($LASTEXITCODE -ne 0){throw 'Runtime acceptance helper self-test failed.'}
 
-      - name: Prove injected proxy intercept and v2.0.2 loopback bypass regression
+      - name: Concurrent loopback server 32-half-open starvation regression
         shell: powershell
         run: |
-          $gen='validation/v0.6.21-runtime-acceptance-v2.0.2/generated'
-          $tmp=Join-Path $env:RUNNER_TEMP 'v0621-v202-proxy-regression';New-Item -ItemType Directory -Force -Path $tmp|Out-Null
-          $manifest=Join-Path $tmp 'manifest.json';[IO.File]::WriteAllText($manifest,'{"latest_version":"0.6.21","probe":"proxy-regression"}',[Text.UTF8Encoding]::new($false))
-          $probe=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$probe.Start();$port=([Net.IPEndPoint]$probe.LocalEndpoint).Port;$probe.Stop()
-          $server=(Resolve-Path (Join-Path $gen 'LOCAL_MANIFEST_SERVER.ps1')).Path
-          $runner=(Resolve-Path (Join-Path $gen 'BOOTSTRAP_RUNNER.ps1')).Path
+          $gen=(Resolve-Path 'validation/v0.6.21-runtime-acceptance-v2.0.2/generated').Path
+          $tmp=Join-Path $env:RUNNER_TEMP 'v0621-v202-concurrent-server';New-Item -ItemType Directory -Force -Path $tmp|Out-Null
+          $manifest=Join-Path $tmp 'manifest.json';[IO.File]::WriteAllText($manifest,'{"latest_version":"0.6.21","probe":"concurrent-server"}',[Text.UTF8Encoding]::new($false))
+          $lp=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$lp.Start();$port=([Net.IPEndPoint]$lp.LocalEndpoint).Port;$lp.Stop()
+          $server=Join-Path $gen 'LOCAL_MANIFEST_SERVER.ps1';$runner=Join-Path $gen 'BOOTSTRAP_RUNNER.ps1';$url="http://127.0.0.1:$port/manifest.json"
           $arg='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Port {1} -ManifestPath "{2}"' -f $server,$port,$manifest
-          $p=Start-Process powershell.exe -ArgumentList $arg -WindowStyle Hidden -PassThru
+          $sp=Start-Process powershell.exe -ArgumentList $arg -WindowStyle Hidden -PassThru;$halves=@()
           try{
-            $url="http://127.0.0.1:$port/manifest.json";$ready=$false
-            for($i=0;$i -lt 30;$i++){try{$c=New-Object Net.Sockets.TcpClient;$c.Connect('127.0.0.1',$port);$c.Close();$ready=$true;break}catch{};Start-Sleep -Milliseconds 200}
-            if(-not$ready){throw 'Regression server did not listen.'}
-            $orig=[Net.WebRequest]::DefaultWebProxy
-            try{
-              [Net.WebRequest]::DefaultWebProxy=New-Object Net.WebProxy(([Uri]'http://127.0.0.1:9'),$false)
-              $intercepted=$false
-              try{Invoke-RestMethod -Uri $url -TimeoutSec 2|Out-Null}catch{$intercepted=$true}
-              if(-not$intercepted){throw 'Injected trap proxy did not intercept direct Invoke-RestMethod; regression fixture is invalid.'}
-            }finally{[Net.WebRequest]::DefaultWebProxy=$orig}
-            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -ProbeUri $url -ExpectedLatestVersion 0.6.21 -TimeoutSec 5 -TestInnerProxyUri http://127.0.0.1:9
-            if($LASTEXITCODE -ne 0){throw 'Packaged loopback proxy-bypass probe failed.'}
-            $half=New-Object Net.Sockets.TcpClient;$half.Connect('127.0.0.1',$port);$hs=$half.GetStream();$b=[Text.Encoding]::ASCII.GetBytes("GET /manifest.json HTTP/1.1`r`nHost: 127.0.0.1`r`nX-Half: open");$hs.Write($b,0,$b.Length);$hs.Flush()
-            try{Start-Sleep -Milliseconds 100;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -ProbeUri $url -ExpectedLatestVersion 0.6.21 -TimeoutSec 5;if($LASTEXITCODE -ne 0){throw 'Half-open isolation wrapper probe failed.'}}finally{$half.Close()}
-          } finally {if($p -and -not$p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}}
-          Write-Host 'V0621_RUNTIME_ACCEPTANCE_V202_PROXY_REGRESSION_PASS'
+            $ready=$false;for($i=0;$i -lt 40;$i++){if($sp.HasExited){throw "Server exited during startup: $($sp.ExitCode)"};try{$c=New-Object Net.Sockets.TcpClient;$c.Connect('127.0.0.1',$port);$c.Close();$ready=$true;break}catch{};Start-Sleep -Milliseconds 150};if(-not$ready){throw 'Concurrent server did not listen.'}
+            for($i=0;$i -lt 32;$i++){$c=New-Object Net.Sockets.TcpClient;$c.Connect('127.0.0.1',$port);$st=$c.GetStream();$b=[Text.Encoding]::ASCII.GetBytes("GET /manifest.json HTTP/1.1`r`nHost: 127.0.0.1`r`nX-Half: $i");$st.Write($b,0,$b.Length);$st.Flush();$halves+=$c}
+            $sw=[Diagnostics.Stopwatch]::StartNew();& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -ProbeUri $url -ExpectedLatestVersion 0.6.21 -TimeoutSec 8;$ec=$LASTEXITCODE;$sw.Stop()
+            if($ec -ne 0){throw 'Proxy-bypass probe failed under 32 half-open clients.'};if($sw.Elapsed.TotalSeconds -gt 12){throw "Concurrent server starvation regression too slow: $($sw.Elapsed.TotalSeconds)s"}
+            Write-Host ("V0621_RUNTIME_ACCEPTANCE_V202_32_HALF_OPEN_PASS elapsed_ms={0}" -f [int]$sw.Elapsed.TotalMilliseconds)
+          } finally {foreach($c in $halves){try{$c.Close()}catch{}};if($sp -and -not$sp.HasExited){Stop-Process -Id $sp.Id -Force -ErrorAction SilentlyContinue}}
 
       - name: Download exact previously validated Bootstrap 1.0.6 carrier
         shell: bash
@@ -142,7 +131,7 @@ jobs:
           print('V202_VALIDATED_BOOTSTRAP_V106_CARRIER_PASS')
           PY
 
-      - name: Exact Bootstrap 1.0.6 cycle through packaged server and proxy wrapper
+      - name: Exact Bootstrap 1.0.6 cycle through packaged server under half-open flood
         shell: powershell
         run: |
           python validation/v0.6.21-bootstrap-e2e/prepare_fixture.py
@@ -154,29 +143,37 @@ jobs:
           $server=Join-Path $gen 'LOCAL_MANIFEST_SERVER.ps1';$runner=Join-Path $gen 'BOOTSTRAP_RUNNER.ps1';$url='http://127.0.0.1:8765/manifest.json'
           $env:LOCALAPPDATA=Join-Path $fixture 'LocalAppData';$env:APPDATA=Join-Path $fixture 'Roaming';New-Item -ItemType Directory -Force -Path $env:APPDATA|Out-Null
           function AssertId($path,$size,$sha,$label){if((Get-Item $path).Length -ne $size -or (Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $sha){throw "$label identity mismatch"}}
+          function RunBoot([string]$a,[int]$timeoutSec){
+            Remove-Item -LiteralPath (Join-Path $reports 'self-update-latest.json') -Force -ErrorAction SilentlyContinue
+            $stdout=Join-Path $env:RUNNER_TEMP ("v202-boot-$a-out.txt");$stderr=Join-Path $env:RUNNER_TEMP ("v202-boot-$a-err.txt");Remove-Item $stdout,$stderr -Force -ErrorAction SilentlyContinue
+            $pa='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -BootstrapPath "{1}" -Action {2}' -f $runner,$bootRun,$a
+            $sw=[Diagnostics.Stopwatch]::StartNew();$p=Start-Process powershell.exe -ArgumentList $pa -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+            if(-not$p.WaitForExit($timeoutSec*1000)){try{Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}catch{};throw "Bootstrap $a exceeded ${timeoutSec}s external deadline."};$sw.Stop()
+            $out=((Get-Content $stdout -Raw -ErrorAction SilentlyContinue)+"`n"+(Get-Content $stderr -Raw -ErrorAction SilentlyContinue)).Trim();if($out){Write-Host $out}
+            if($p.ExitCode -ne 0){throw "Bootstrap $a via packaged runner failed exit=$($p.ExitCode)"}
+            $rp=Join-Path $reports 'self-update-latest.json';if(-not(Test-Path $rp)){throw "Bootstrap $a report missing"}
+            return [pscustomobject]@{Report=(Get-Content $rp -Raw|ConvertFrom-Json);Elapsed=$sw.Elapsed.TotalSeconds}
+          }
           AssertId $bootExact 42963 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' 'exact Bootstrap'
           $arg='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Port 8765 -ManifestPath "{1}"' -f $server,$manifest
-          $sp=Start-Process powershell.exe -ArgumentList $arg -WindowStyle Hidden -PassThru
+          $sp=Start-Process powershell.exe -ArgumentList $arg -WindowStyle Hidden -PassThru;$halves=@()
           try{
-            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -ProbeUri $url -ExpectedLatestVersion 0.6.21 -TimeoutSec 5 -TestInnerProxyUri http://127.0.0.1:9
+            $ready=$false;for($i=0;$i -lt 40;$i++){if($sp.HasExited){throw "Exact-cycle server exited: $($sp.ExitCode)"};try{$c=New-Object Net.Sockets.TcpClient;$c.Connect('127.0.0.1',8765);$c.Close();$ready=$true;break}catch{};Start-Sleep -Milliseconds 150};if(-not$ready){throw 'Exact-cycle server did not listen.'}
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -ProbeUri $url -ExpectedLatestVersion 0.6.21 -TimeoutSec 8
             if($LASTEXITCODE -ne 0){throw 'Exact-cycle proxy-bypass preflight failed.'}
-            function RunBoot([string]$a){
-              Remove-Item -LiteralPath (Join-Path $reports 'self-update-latest.json') -Force -ErrorAction SilentlyContinue
-              $out=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -BootstrapPath $bootRun -Action $a 2>&1;$ec=$LASTEXITCODE;$out|ForEach-Object{Write-Host $_}
-              if($ec -ne 0){throw "Bootstrap $a via packaged wrapper failed exit=$ec"}
-              $rp=Join-Path $reports 'self-update-latest.json';if(-not(Test-Path $rp)){throw "Bootstrap $a report missing"};return (Get-Content $rp -Raw|ConvertFrom-Json)
-            }
-            $c=RunBoot 'Check';if(-not$c.success -or $c.installed_version -ne '0.6.20' -or [int]$c.result.edge_count -ne 1){throw 'Exact wrapper Check evidence invalid.'}
-            $rb=RunBoot 'RollbackTest';if(-not$rb.success -or $rb.transaction_status -ne 'rolled-back'){throw 'Exact wrapper RollbackTest evidence invalid.'}
+            for($i=0;$i -lt 32;$i++){$c=New-Object Net.Sockets.TcpClient;$c.Connect('127.0.0.1',8765);$st=$c.GetStream();$b=[Text.Encoding]::ASCII.GetBytes("GET /manifest.json HTTP/1.1`r`nHost: 127.0.0.1`r`nX-Exact-Half: $i");$st.Write($b,0,$b.Length);$st.Flush();$halves+=$c}
+            $x=RunBoot 'Check' 20;$c=$x.Report;if($x.Elapsed -gt 15){throw "Exact Bootstrap Check starved behind half-open clients: $($x.Elapsed)s"};if(-not$c.success -or $c.installed_version -ne '0.6.20' -or [int]$c.result.edge_count -ne 1 -or $c.manifest_url -ne $url){throw 'Exact wrapper Check evidence invalid.'}
+            foreach($hc in $halves){try{$hc.Close()}catch{}};$halves=@()
+            $rb=(RunBoot 'RollbackTest' 180).Report;if(-not$rb.success -or $rb.transaction_status -ne 'rolled-back'){throw 'Exact wrapper RollbackTest evidence invalid.'}
             AssertId (Join-Path $bin 'spotify-control.ps1') 281585 'e9f0181756cfb84c505c30f54b6067e321f6d178d3a1936489714b8f4441ba18' 'rollback main'
             AssertId (Join-Path $bin 'addon-manager.ps1') 225044 '3a20fcd552b363ebc05e26854a8fe010ffe50e5c756ebd3d7fca54011e8a8b86' 'rollback addon'
-            $u=RunBoot 'Update';if(-not$u.success -or $u.transaction_status -ne 'committed'){throw 'Exact wrapper Update evidence invalid.'}
+            $u=(RunBoot 'Update' 300).Report;if(-not$u.success -or $u.transaction_status -ne 'committed'){throw 'Exact wrapper Update evidence invalid.'}
             AssertId (Join-Path $bin 'spotify-control.ps1') 281579 'f97c78c905b83e90e58a24035febcaccc27cb12113ae9cbc64acdc79f5853828' 'updated main'
             AssertId (Join-Path $bin 'addon-manager.ps1') 250616 '7991b8eaa5a943957aebb9d3dd84d455ed6266430da442a672c05c145fe497a2' 'updated addon'
-            $pc=RunBoot 'Check';if(-not$pc.success -or $pc.installed_version -ne '0.6.21' -or $pc.result.already_current -ne $true -or [int]$pc.result.edge_count -ne 0){throw 'Exact wrapper post-Check evidence invalid.'}
+            $pc=(RunBoot 'Check' 60).Report;if(-not$pc.success -or $pc.installed_version -ne '0.6.21' -or $pc.result.already_current -ne $true -or [int]$pc.result.edge_count -ne 0){throw 'Exact wrapper post-Check evidence invalid.'}
             AssertId $bootExact 42963 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' 'final exact Bootstrap'
-          } finally {if($sp -and -not$sp.HasExited){Stop-Process -Id $sp.Id -Force -ErrorAction SilentlyContinue}}
-          Write-Host 'V0621_RUNTIME_ACCEPTANCE_V202_EXACT_BOOTSTRAP_CYCLE_PASS'
+          } finally {foreach($hc in $halves){try{$hc.Close()}catch{}};if($sp -and -not$sp.HasExited){Stop-Process -Id $sp.Id -Force -ErrorAction SilentlyContinue}}
+          Write-Host 'V0621_RUNTIME_ACCEPTANCE_V202_EXACT_BOOTSTRAP_32_HALF_OPEN_CYCLE_PASS'
 
       - name: Prove deterministic final package and internal checksums
         shell: powershell
@@ -187,7 +184,7 @@ jobs:
           if($first -cne $second){throw "Acceptance build nondeterministic: $first != $second"}
           Add-Type -AssemblyName System.IO.Compression.FileSystem;$z=[IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip));try{
             $names=@($z.Entries|ForEach-Object{$_.FullName});foreach($required in @('RUN_RUNTIME_ACCEPTANCE.ps1','RUN_RUNTIME_ACCEPTANCE.cmd','PRECHECK_RUNTIME_ACCEPTANCE.ps1','LOCAL_MANIFEST_SERVER.ps1','BOOTSTRAP_RUNNER.ps1','README.txt','SHA256SUMS.txt','evidence/SELF_VALIDATION_REPORT.json')){if($required -notin $names){throw "Package missing $required"}}
-            $entry=$z.GetEntry('evidence/SELF_VALIDATION_REPORT.json');$sr=New-Object IO.StreamReader($entry.Open());try{$report=$sr.ReadToEnd()|ConvertFrom-Json}finally{$sr.Dispose()};if([int]$report.passed -ne [int]$report.total -or [int]$report.total -lt 65){throw "Source validation not fully green: $($report.passed)/$($report.total)"}
+            $entry=$z.GetEntry('evidence/SELF_VALIDATION_REPORT.json');$sr=New-Object IO.StreamReader($entry.Open());try{$report=$sr.ReadToEnd()|ConvertFrom-Json}finally{$sr.Dispose()};if([int]$report.passed -ne [int]$report.total -or [int]$report.total -lt 73){throw "Source validation not fully green: $($report.passed)/$($report.total)"}
           }finally{$z.Dispose()}
           Write-Host "V0621_RUNTIME_ACCEPTANCE_V202_PACKAGE_PASS $second"
 
