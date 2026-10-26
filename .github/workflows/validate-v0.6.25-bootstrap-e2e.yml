@@ -1,0 +1,63 @@
+name: Validate v0.6.25 Bootstrap E2E
+
+on:
+  push:
+    branches:
+      - release/v0.6.25-splitify-release-provenance-r14
+    paths:
+      - '.github/workflows/validate-v0.6.25-bootstrap-e2e.yml'
+      - 'validation/v0.6.25/bootstrap_prepare_fixture.py'
+      - 'validation/v0.6.25/bootstrap_run_cycle.ps1'
+      - 'manifest.json'
+      - 'packages/v0.6.25/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/validate-v0.6.25-bootstrap-e2e.yml'
+      - 'validation/v0.6.25/bootstrap_prepare_fixture.py'
+      - 'validation/v0.6.25/bootstrap_run_cycle.ps1'
+      - 'manifest.json'
+      - 'packages/v0.6.25/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap-e2e-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Assert exact published release inputs
+        shell: powershell
+        run: |
+          $m=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($m.latest_version -ne '0.6.25' -or $m.source_commit -ne '7c23a470ecf9c83dff5c42caeed03ff20f669072' -or $m.payload_set_sha256 -ne 'bb6c5f63d3b65fb61f3f03ca64d43060de4508a2b0bb72e77df868c64337079a'){throw 'v0.6.25 manifest identity drifted before Bootstrap E2E.'}
+          if($m.bootstrap.version -ne '1.0.6' -or $m.bootstrap.sha256 -ne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' -or [int64]$m.bootstrap.size -ne 42963){throw 'Bootstrap 1.0.6 identity drifted.'}
+          $edge=@($m.updates|Where-Object{$_.from_version -eq '0.6.24' -and $_.to_version -eq '0.6.25'});if($edge.Count -ne 1 -or @($edge[0].patches).Count -ne 2){throw 'Expected exact one-edge v0.6.24 -> v0.6.25 path.'}
+          Write-Host 'V0625_BOOTSTRAP_INPUT_CONTRACT_PASS'
+
+      - name: Build exact local-manifest Bootstrap fixture
+        shell: powershell
+        run: |
+          python validation/v0.6.25/bootstrap_prepare_fixture.py
+          if($LASTEXITCODE -ne 0){throw 'v0.6.25 Bootstrap fixture preparation failed.'}
+
+      - name: Run Check RollbackTest Update post-Check transaction cycle
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/v0.6.25/bootstrap_run_cycle.ps1 -Fixture ci-bootstrap-fixture-v0624-to-v0625
+          if($LASTEXITCODE -ne 0){throw "v0.6.25 Bootstrap transaction E2E failed: $LASTEXITCODE"}
+          Write-Host 'V0625_BOOTSTRAP_E2E_PASS'
+
+      - name: Prove fixture never changed released Bootstrap bytes
+        shell: powershell
+        run: |
+          $exact='ci-bootstrap-fixture-v0624-to-v0625/LocalAppData/SpotifyControl/bootstrap/spotify-control-self-updater.ps1'
+          if((Get-Item $exact).Length -ne 42963 -or (Get-FileHash $exact -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'){throw 'Released Bootstrap bytes changed during E2E.'}
+          Write-Host 'V0625_BOOTSTRAP_EXACT_BYTES_PRESERVED_PASS'
