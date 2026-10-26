@@ -1,0 +1,52 @@
+{
+  "adapter_fingerprint": "c0611a7b96f6ff09d1e235119efce2f2def6eb6d0a4e8e93e276cfa622c3c42d",
+  "addon_version": "0.6.5-r12",
+  "authority_expanded": false,
+  "auto_authority": [
+    "better-local-files",
+    "eternal-jukebox",
+    "ivLyrics",
+    "playlist-maker"
+  ],
+  "base_addon": {
+    "sha256": "0ee8d30bf7c2fda9d0d8d112b7191b0d0439a1071d284d0cc04a87fe8937c7bc",
+    "size": 268670
+  },
+  "base_main": {
+    "sha256": "b5ba4dc98b10ea922ce30401b5cddf5a1ab01171366e09b3546ce3cc6fcd80fe",
+    "size": 281586
+  },
+  "base_version": "0.6.22",
+  "candidate_addon": {
+    "sha256": "23ad2210aea4352f535d1cf0b3ebb827a82200dcba2b70bf1ebae96499d82687",
+    "size": 272494
+  },
+  "candidate_main": {
+    "sha256": "bc9861bdd64ff8af94f68f0f065739f82b235271dcd18ad6325b819205528a08",
+    "size": 281588
+  },
+  "new_auto_install_authority": false,
+  "prior_registry_compatibility": "05c40a5339fe59b001ca0f4c4929643fd59e33a3002bae7067425845c85e2f6e",
+  "registry_fingerprint": "0f05406d7152de1d975f888cb8270be8249115211ba9f41e0157342cd42efbd8",
+  "schema": 1,
+  "splitify": {
+    "asset_digest": "sha256:5de51a885815f78067b8d6f7f3ebe40c93b5a7c7e3c8c841fcd26147a13010ca",
+    "asset_size": 7822,
+    "install_mode": "never-auto-install",
+    "local_release_provenance": "unproven",
+    "mutation_mode": "deny",
+    "policy": "monitor-only",
+    "release": "v1.1.0",
+    "repository": "alexander-rebello/splitify"
+  },
+  "validation": {
+    "head": "0f4f374bf491c0460ff3d51d06676a808117cc2d",
+    "pr": 71,
+    "pr_artifact_digest": "sha256:b105a33b9070419378949a2f4011a543c84aa91c76da1186e214ed7551831f74",
+    "pr_artifact_id": "12670949500",
+    "pr_closed_unmerged": true,
+    "pr_run": "40368586584",
+    "push_run": "40368420078"
+  },
+  "version": "0.6.23"
+}

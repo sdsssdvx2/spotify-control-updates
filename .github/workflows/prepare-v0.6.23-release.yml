@@ -1,0 +1,35 @@
+name: Audit Prepared Spotify Control v0.6.23 Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-prepared-windows:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: release/v0.6.23-splitify-source-monitor-r12
+
+      - name: Verify completed immutable release publication
+        shell: powershell
+        run: |
+          $m=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($m.latest_version -ne '0.6.23'){throw "Expected prepared v0.6.23 manifest, got $($m.latest_version)"}
+          if($m.source_commit -ne 'ac895090c6db586e16089f143e6d494f74cab124'){throw 'Prepared immutable source commit mismatch.'}
+          if($m.payload_set_sha256 -ne 'a0c61cec440b9a2143cf2b564f4d6907453f52acbcd2bc145010b32078e83326'){throw 'Prepared payload set mismatch.'}
+          if($m.bootstrap.version -ne '1.0.6' -or $m.bootstrap.sha256 -ne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' -or [int64]$m.bootstrap.size -ne 42963){throw 'Bootstrap 1.0.6 identity changed.'}
+          python -m py_compile validation/v0.6.23/build_v0623.py validation/v0.6.23/release_transport.py
+          if($LASTEXITCODE -ne 0){throw 'Prepared release source compile failed.'}
+          python validation/v0.6.23/release_transport.py --validate-published
+          if($LASTEXITCODE -ne 0){throw 'Prepared published transport validation failed.'}
+          python validation/v0.6.23/release_transport.py --build-packages
+          if($LASTEXITCODE -ne 0){throw 'Prepared deterministic transport rebuild failed.'}
+          git diff --exit-code -- packages/v0.6.23 validation/v0.6.23/candidate-validation.json validation/v0.6.23/release-metadata.json manifest.json
+          if($LASTEXITCODE -ne 0){throw 'Prepared release differs from deterministic source.'}
+          Write-Host 'V0623_PREPARED_RELEASE_AUDIT_PASS'
