@@ -1,0 +1,30 @@
+name: Temporary export v2.0.2 package
+
+on:
+  push:
+    branches:
+      - validate/v0.6.21-runtime-acceptance-v2.0.2
+    paths:
+      - '.github/workflows/temporary-export-v202-package.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Build exact current v2.0.2 package
+        shell: powershell
+        run: |
+          python validation/v0.6.21-runtime-acceptance-v2.0.2/build_acceptance.py
+          if($LASTEXITCODE -ne 0){throw 'v2.0.2 package build failed.'}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v202-exact-pre-hardening-package
+          path: validation/v0.6.21-runtime-acceptance-v2.0.2/out/SpotifyControl-v0.6.21-r10-Runtime-Acceptance-v2.0.2.zip
+          if-no-files-found: error
+          retention-days: 1
