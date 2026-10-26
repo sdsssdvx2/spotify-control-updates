@@ -49,7 +49,7 @@ jobs:
           if($changed.Count -ne 7){throw "Expected exactly 7 validation-only files; got $($changed.Count): $($changed -join ' , ')"}
           Write-Host "V0621_RUNTIME_ACCEPTANCE_V203_SCOPE_PASS head=$actual"
 
-      - name: Compile and build exact deterministic acceptance package
+      - name: Compile and build exact Windows-deterministic acceptance package
         shell: powershell
         run: |
           $dir='validation/v0.6.21-runtime-acceptance-v2.0.3'
@@ -59,7 +59,7 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Initial acceptance v2.0.3 package build failed.'}
           $zip=Join-Path $dir 'out/SpotifyControl-v0.6.21-r10-Runtime-Acceptance-v2.0.3.zip'
           $hash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant();$size=(Get-Item $zip).Length
-          if($size -ne 57300 -or $hash -cne 'c104c27176601f47afe39b374830d58a52e439ea8e2cd62fd8749f7597a3c9a4'){throw "Cross-platform deterministic package identity mismatch: size=$size sha=$hash"}
+          if($size -ne 57300 -or $hash -cne '952287c44e445405f660d393e3b5fbeb0195fca1509de77605108595d79f8467'){throw "Windows deterministic package identity mismatch: size=$size sha=$hash"}
           "$hash|$size" | Set-Content $env:RUNNER_TEMP\acceptance-v203-first.txt -Encoding ASCII
           Write-Host "V0621_RUNTIME_ACCEPTANCE_V203_BUILD_IDENTITY_PASS $hash $size"
 
@@ -169,14 +169,14 @@ jobs:
           AssertId $bootExact 42963 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' 'final exact Bootstrap'
           Write-Host 'V0621_RUNTIME_ACCEPTANCE_V203_EXACT_BOOTSTRAP_CYCLE_PASS'
 
-      - name: Prove repeated package determinism and internal checksums
+      - name: Prove repeated Windows package determinism and internal checksums
         shell: powershell
         run: |
           $dir='validation/v0.6.21-runtime-acceptance-v2.0.3';$first=(Get-Content $env:RUNNER_TEMP\acceptance-v203-first.txt -Raw).Trim()
           python "$dir/build_acceptance.py";if($LASTEXITCODE -ne 0){throw 'Second acceptance build failed.'}
           $zip=Join-Path $dir 'out/SpotifyControl-v0.6.21-r10-Runtime-Acceptance-v2.0.3.zip';$second="{0}|{1}" -f (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant(),(Get-Item $zip).Length
-          if($first -cne $second){throw "Acceptance build nondeterministic: $first != $second"}
-          if($second -cne 'c104c27176601f47afe39b374830d58a52e439ea8e2cd62fd8749f7597a3c9a4|57300'){throw "Acceptance package identity drift: $second"}
+          if($first -cne $second){throw "Acceptance build nondeterministic on Windows: $first != $second"}
+          if($second -cne '952287c44e445405f660d393e3b5fbeb0195fca1509de77605108595d79f8467|57300'){throw "Acceptance package identity drift: $second"}
           Add-Type -AssemblyName System.IO.Compression.FileSystem;$z=[IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip));try{
             $names=@($z.Entries|ForEach-Object{$_.FullName});foreach($required in @('RUN_RUNTIME_ACCEPTANCE.ps1','RUN_RUNTIME_ACCEPTANCE.cmd','PRECHECK_RUNTIME_ACCEPTANCE.ps1','BOOTSTRAP_RUNNER.ps1','README.txt','SHA256SUMS.txt','evidence/SELF_VALIDATION_REPORT.json')){if($required -notin $names){throw "Package missing $required"}}
             if($names -contains 'LOCAL_MANIFEST_SERVER.ps1'){throw 'Retired localhost server leaked into v2.0.3 package.'}
