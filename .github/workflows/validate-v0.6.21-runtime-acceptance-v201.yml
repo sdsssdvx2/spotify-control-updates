@@ -1,0 +1,172 @@
+name: Validate v0.6.21 r10 Runtime Acceptance v2.0.1
+
+on:
+  push:
+    branches:
+      - validate/v0.6.21-runtime-acceptance-v2.0.1
+    paths:
+      - 'validation/v0.6.21-runtime-acceptance-v2.0.1/**'
+      - '.github/workflows/validate-v0.6.21-runtime-acceptance-v201.yml'
+  pull_request:
+    paths:
+      - 'validation/v0.6.21-runtime-acceptance-v2.0.1/**'
+      - '.github/workflows/validate-v0.6.21-runtime-acceptance-v201.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact release-derived validation scope
+        shell: powershell
+        run: |
+          $base='5eac4f39920b84f22e2a5ee07422f6080bfc7ef7'
+          $actual=(git rev-parse HEAD).Trim()
+          $eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -ne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Runtime acceptance branch is not based on exact release head.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allowed=@(
+            'validation/v0.6.21-runtime-acceptance-v2.0.1/build_acceptance.py',
+            'validation/v0.6.21-runtime-acceptance-v2.0.1/source-b64/chunk-000.txt',
+            'validation/v0.6.21-runtime-acceptance-v2.0.1/source-b64/chunk-001.txt',
+            'validation/v0.6.21-runtime-acceptance-v2.0.1/source-b64/chunk-002.txt',
+            'validation/v0.6.21-runtime-acceptance-v2.0.1/source-b64/chunk-003.txt',
+            'validation/v0.6.21-runtime-acceptance-v2.0.1/source-b64/chunk-004.txt',
+            '.github/workflows/validate-v0.6.21-runtime-acceptance-v201.yml'
+          )
+          $bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Out-of-scope files: $($bad -join ', ')"}
+          if($changed.Count -ne 7){throw "Expected exactly 7 acceptance-validation files; got $($changed.Count): $($changed -join ' , ')"}
+          Write-Host "V0621_RUNTIME_ACCEPTANCE_V201_SCOPE_PASS head=$actual"
+
+      - name: Compile and build embedded acceptance source
+        shell: powershell
+        run: |
+          $dir='validation/v0.6.21-runtime-acceptance-v2.0.1'
+          python -m py_compile "$dir/build_acceptance.py"
+          if($LASTEXITCODE -ne 0){throw 'Acceptance builder Python compile failed.'}
+          python "$dir/build_acceptance.py"
+          if($LASTEXITCODE -ne 0){throw 'Initial acceptance package build failed.'}
+          $zip=Join-Path $dir 'out/SpotifyControl-v0.6.21-r10-Runtime-Acceptance-v2.0.1.zip'
+          "{0}|{1}" -f (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant(),(Get-Item $zip).Length | Set-Content $env:RUNNER_TEMP\acceptance-first.txt -Encoding ASCII
+
+      - name: Reconstruct exact release candidate identities
+        shell: powershell
+        run: |
+          python validation/v0.6.21/build_v0621.py --build
+          if($LASTEXITCODE -ne 0){throw 'v0.6.21 candidate rebuild failed.'}
+          $main='validation/v0.6.21/out/bin/spotify-control.ps1'
+          $addon='validation/v0.6.21/out/bin/addon-manager.ps1'
+          if((Get-Item $main).Length -ne 281579 -or (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'f97c78c905b83e90e58a24035febcaccc27cb12113ae9cbc64acdc79f5853828'){throw 'v0.6.21 main identity mismatch.'}
+          if((Get-Item $addon).Length -ne 250616 -or (Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -ne '7991b8eaa5a943957aebb9d3dd84d455ed6266430da442a672c05c145fe497a2'){throw 'r10 addon identity mismatch.'}
+          Write-Host 'V0621_RUNTIME_ACCEPTANCE_V201_RELEASE_IDENTITY_PASS'
+
+      - name: Parse generated package sources with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $gen='validation/v0.6.21-runtime-acceptance-v2.0.1/generated'
+          foreach($name in @('RUN_RUNTIME_ACCEPTANCE.ps1','PRECHECK_RUNTIME_ACCEPTANCE.ps1','LOCAL_MANIFEST_SERVER.ps1')){
+            $p=Join-Path $gen $name
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0}:{1}: {2}" -f $name,$_.Extent.StartLineNumber,$_.Message)};throw "PowerShell 5.1 parse failed: $name"}
+          }
+          Write-Host 'V0621_RUNTIME_ACCEPTANCE_V201_PS51_PARSE_PASS'
+
+      - name: Runtime helper self-test
+        shell: powershell
+        run: |
+          $script='validation/v0.6.21-runtime-acceptance-v2.0.1/generated/RUN_RUNTIME_ACCEPTANCE.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Runtime acceptance helper self-test failed.'}
+
+      - name: Local manifest server half-open regression and loopback self-test
+        shell: powershell
+        run: |
+          $tmp=Join-Path $env:RUNNER_TEMP 'v0621-acceptance-server-v201'
+          New-Item -ItemType Directory -Force -Path $tmp|Out-Null
+          $manifest=Join-Path $tmp 'manifest.json'
+          [IO.File]::WriteAllText($manifest,'{"latest_version":"0.6.21","probe":"loopback-only"}',[Text.UTF8Encoding]::new($false))
+          $probe=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$probe.Start();$port=([Net.IPEndPoint]$probe.LocalEndpoint).Port;$probe.Stop()
+          $server=(Resolve-Path 'validation/v0.6.21-runtime-acceptance-v2.0.1/generated/LOCAL_MANIFEST_SERVER.ps1').Path
+          $argString='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Port {1} -ManifestPath "{2}"' -f $server,$port,$manifest
+          $p=Start-Process -FilePath powershell.exe -ArgumentList $argString -WindowStyle Hidden -PassThru
+          $half=$null
+          try{
+            $deadline=[DateTime]::UtcNow.AddSeconds(10)
+            do{
+              if($p.HasExited){throw "Local manifest server exited during startup: $($p.ExitCode)"}
+              try{$c=New-Object Net.Sockets.TcpClient;$c.Connect([Net.IPAddress]::Loopback,$port);$c.Close();$listening=$true}catch{$listening=$false;Start-Sleep -Milliseconds 100}
+            }while(-not$listening -and [DateTime]::UtcNow -lt $deadline)
+            if(-not$listening){throw 'Loopback server did not start listening.'}
+
+            # Reproduce the real-PC failure mode: connect and send an incomplete HTTP header, then leave it open.
+            $half=New-Object Net.Sockets.TcpClient
+            $half.Connect([Net.IPAddress]::Loopback,$port)
+            $hs=$half.GetStream()
+            $partial=[Text.Encoding]::ASCII.GetBytes("GET /manifest.json HTTP/1.1`r`nHost: 127.0.0.1:$port`r`n")
+            $hs.Write($partial,0,$partial.Length);$hs.Flush()
+            Start-Sleep -Milliseconds 200
+
+            # A second complete request must succeed despite the stalled first client.
+            $full=New-Object Net.Sockets.TcpClient
+            try{
+              $full.ReceiveTimeout=5000;$full.SendTimeout=5000;$full.Connect([Net.IPAddress]::Loopback,$port)
+              $fs=$full.GetStream();$fs.ReadTimeout=5000;$fs.WriteTimeout=5000
+              $req=[Text.Encoding]::ASCII.GetBytes("GET /manifest.json HTTP/1.1`r`nHost: 127.0.0.1:$port`r`nConnection: close`r`n`r`n")
+              $sw=[Diagnostics.Stopwatch]::StartNew();$fs.Write($req,0,$req.Length);$fs.Flush()
+              $ms=New-Object IO.MemoryStream;$buf=New-Object byte[] 4096
+              while($true){$n=$fs.Read($buf,0,$buf.Length);if($n -le 0){break};$ms.Write($buf,0,$n);if($ms.Length -gt 1048576){throw 'Regression response too large.'}}
+              $sw.Stop();$raw=[Text.Encoding]::UTF8.GetString($ms.ToArray())
+              if(-not$raw.StartsWith('HTTP/1.1 200 ')){throw 'Half-open regression complete request did not get HTTP 200.'}
+              if($raw.IndexOf('"latest_version":"0.6.21"',[StringComparison]::Ordinal) -lt 0){throw 'Half-open regression response body mismatch.'}
+              if($sw.Elapsed.TotalSeconds -gt 4.5){throw "Half-open recovery too slow: $($sw.Elapsed.TotalSeconds)s"}
+              Write-Host ("V0621_RUNTIME_ACCEPTANCE_V201_HALF_OPEN_PASS elapsed_ms={0}" -f [int]$sw.Elapsed.TotalMilliseconds)
+            } finally {if($full){$full.Close()}}
+
+            if($half){$half.Close();$half=$null}
+            $url="http://127.0.0.1:$port/manifest.json";$ok=$false
+            for($i=0;$i -lt 20;$i++){try{$r=Invoke-RestMethod -Uri $url -TimeoutSec 3;if($r.latest_version -eq '0.6.21' -and $r.probe -eq 'loopback-only'){$ok=$true;break}}catch{};Start-Sleep -Milliseconds 200}
+            if(-not$ok){throw 'Loopback manifest server normal PowerShell request failed after half-open recovery.'}
+            $nf=$null;try{Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$port/not-found" -TimeoutSec 3|Out-Null}catch{$nf=$_.Exception.Response.StatusCode.value__}
+            if($nf -ne 404){throw "Loopback server non-manifest path did not return 404: $nf"}
+          } finally {
+            if($half){$half.Close()}
+            if($p -and -not$p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
+          }
+          Write-Host 'V0621_RUNTIME_ACCEPTANCE_V201_LOOPBACK_SERVER_PASS'
+
+      - name: Prove deterministic final package and internal checksums
+        shell: powershell
+        run: |
+          $dir='validation/v0.6.21-runtime-acceptance-v2.0.1'
+          $first=(Get-Content $env:RUNNER_TEMP\acceptance-first.txt -Raw).Trim()
+          python "$dir/build_acceptance.py"
+          if($LASTEXITCODE -ne 0){throw 'Second acceptance package build failed.'}
+          $zip=Join-Path $dir 'out/SpotifyControl-v0.6.21-r10-Runtime-Acceptance-v2.0.1.zip'
+          $second="{0}|{1}" -f (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant(),(Get-Item $zip).Length
+          if($first -cne $second){throw "Acceptance package build nondeterministic: $first != $second"}
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z=[IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip));try{
+            $names=@($z.Entries|ForEach-Object{$_.FullName})
+            foreach($required in @('RUN_RUNTIME_ACCEPTANCE.ps1','RUN_RUNTIME_ACCEPTANCE.cmd','PRECHECK_RUNTIME_ACCEPTANCE.ps1','LOCAL_MANIFEST_SERVER.ps1','README.txt','SHA256SUMS.txt','evidence/SELF_VALIDATION_REPORT.json')){if($required -notin $names){throw "Package missing $required"}}
+            $reportEntry=$z.GetEntry('evidence/SELF_VALIDATION_REPORT.json');$sr=New-Object IO.StreamReader($reportEntry.Open());try{$report=($sr.ReadToEnd()|ConvertFrom-Json)}finally{$sr.Dispose()}
+            if([int]$report.passed -ne [int]$report.total -or [int]$report.total -lt 58){throw "Embedded source validation not fully green: $($report.passed)/$($report.total)"}
+          } finally {$z.Dispose()}
+          Write-Host "V0621_RUNTIME_ACCEPTANCE_V201_PACKAGE_PASS $second"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-v0.6.21-r10-Runtime-Acceptance-v2.0.1
+          path: validation/v0.6.21-runtime-acceptance-v2.0.1/out/SpotifyControl-v0.6.21-r10-Runtime-Acceptance-v2.0.1.zip
+          if-no-files-found: error
+          retention-days: 14
