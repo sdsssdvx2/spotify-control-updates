@@ -22,6 +22,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Prove validation-only scope
         shell: powershell
@@ -38,7 +39,10 @@ jobs:
           $bad=@($changed|Where-Object{$_ -notin $allowed})
           if($bad.Count){throw "Out-of-scope file(s): $($bad -join ', ')"}
           if($changed.Count -ne 2){throw "Expected exactly 2 validation-only files, found $($changed.Count): $($changed -join ', ')"}
-          Write-Host 'SPICETIFY_COMPAT_SCOPE_PASS'
+          $actual=(git rev-parse HEAD).Trim()
+          $eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -ne $eventHead){throw "Checkout is not exact event head: actual=$actual expected=$eventHead"}
+          Write-Host "SPICETIFY_COMPAT_SCOPE_PASS exact_head=$actual"
 
       - name: Compile audit script
         shell: powershell
@@ -93,13 +97,14 @@ jobs:
         run: |
           $r=Get-Content spicetify-current-compat-audit.json -Raw | ConvertFrom-Json
           if($r.result -ne 'PASS'){throw "Audit report result is not PASS: $($r.result)"}
+          if($r.validation_head -ne (git rev-parse HEAD).Trim()){throw "Audit report head is not exact checkout head: $($r.validation_head)"}
           if(@($r.spicetify_literal_pins).Count -ne 0){throw 'Spicetify 2.46.x literal pin unexpectedly present.'}
           if(@($r.spicetify_semver_gate_candidates).Count -ne 0){throw 'Spicetify semantic-version gate candidate unexpectedly present.'}
           foreach($v in @('2.46.2','2.46.3','2.46.4')){
             $p=$r.upstream_apply_contracts.PSObject.Properties[$v]
             if(-not $p -or -not [bool]$p.Value.required_templates_present){throw "Missing upstream apply contract evidence for $v"}
           }
-          Write-Host ("SPICETIFY_COMPAT_REPORT_PASS spicetify_logic_lines={0}" -f [int]$r.spicetify_logic_line_count)
+          Write-Host ("SPICETIFY_COMPAT_REPORT_PASS head={0} spicetify_logic_lines={1}" -f $r.validation_head,[int]$r.spicetify_logic_line_count)
 
       - uses: actions/upload-artifact@v4
         with:
