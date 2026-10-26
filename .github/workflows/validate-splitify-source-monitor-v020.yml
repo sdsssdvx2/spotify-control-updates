@@ -1,0 +1,133 @@
+name: Validate Splitify Source Monitor v0.2.0
+
+on:
+  push:
+    branches:
+      - validate/splitify-source-monitor-v0.1.0
+    paths:
+      - 'validation/splitify-source-monitor-v0.2.0/**'
+      - '.github/workflows/validate-splitify-source-monitor-v020.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/splitify-source-monitor-v0.2.0/**'
+      - '.github/workflows/validate-splitify-source-monitor-v020.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact validation-only scope
+        shell: powershell
+        run: |
+          $base='0fd4a8aa5b8f8e97cf1dc9a1e8d3b7bb9b4d1f2f'
+          $actual=(git rev-parse HEAD).Trim()
+          $eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -ne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Validation branch is not based on exact stable v0.6.22 main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          $bad=@($changed|Where-Object{
+            $_ -ne '.github/workflows/validate-splitify-source-monitor-v010.yml' -and
+            $_ -ne '.github/workflows/validate-splitify-source-monitor-v020.yml' -and
+            $_ -notlike 'validation/splitify-source-monitor-v0.2.0/*'
+          })
+          if($bad.Count){throw "Unexpected non-validation files: $($bad -join ', ')"}
+          if($changed -contains 'manifest.json' -or @($changed|Where-Object{$_ -like 'packages/*' -or $_ -like 'performance/*'}).Count){throw 'Production transport/performance surface changed.'}
+          Write-Host "SPLITIFY_R12_SCOPE_PASS head=$actual files=$($changed.Count)"
+
+      - name: Parse builder and deterministically build candidate
+        shell: powershell
+        run: |
+          python -m py_compile validation/splitify-source-monitor-v0.2.0/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'Candidate builder failed Python compile.'}
+          python validation/splitify-source-monitor-v0.2.0/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'Candidate build failed.'}
+          $report=Get-Content validation/splitify-source-monitor-v0.2.0/candidate-report.json -Raw|ConvertFrom-Json
+          if($report.candidate.main_version -ne '0.6.23' -or $report.candidate.addon_version -ne '0.6.5-r12'){throw 'Candidate version report mismatch.'}
+          Write-Host "SPLITIFY_R12_CANDIDATE main=$($report.candidate.main.size)/$($report.candidate.main.sha256) addon=$($report.candidate.addon.size)/$($report.candidate.addon.sha256)"
+
+      - name: Windows PowerShell 5.1 parse and candidate SelfTest
+        shell: powershell
+        run: |
+          $main='validation/splitify-source-monitor-v0.2.0/out/bin/spotify-control.ps1'
+          $addon='validation/splitify-source-monitor-v0.2.0/out/bin/addon-manager.ps1'
+          foreach($file in @($main,$addon)){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0}:{1}: {2}" -f $file,$_.Extent.StartLineNumber,$_.Message)};throw "PowerShell 5.1 parse failed: $file"}
+          }
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'r12 candidate Addon Manager SelfTest failed.'}
+          Write-Host 'SPLITIFY_R12_PS51_AND_SELFTEST_PASS'
+
+      - name: Prove Splitify source monitor is non-mutating and fail-closed
+        shell: powershell
+        run: |
+          $addon=Get-Content validation/splitify-source-monitor-v0.2.0/out/bin/addon-manager.ps1 -Raw
+          $invStart=$addon.IndexOf('function Get-AddonInventory {',[StringComparison]::Ordinal);$invNext=$addon.IndexOf("`nfunction ",$invStart+1,[StringComparison]::Ordinal);if($invNext -lt 0){$invNext=$addon.Length};$inv=$addon.Substring($invStart,$invNext-$invStart)
+          foreach($must in @('source="alexander-rebello/splitify"','policy="monitor-only"','monitor-local-release-unproven','releases/latest','splitify.zip','automatic update/install remains denied')){if($inv.IndexOf($must,[StringComparison]::Ordinal) -lt 0){throw "Splitify monitor contract missing: $must"}}
+          foreach($forbidden in @('Expand-Archive','Remove-Item','Move-Item','Copy-Item','Start-Process','spicetify apply','spicetify backup','spicetify restore')){if($inv.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Splitify inventory gained forbidden side effect: $forbidden"}}
+          $updateStart=$addon.IndexOf('function Update-AutoApps {',[StringComparison]::Ordinal);$updateNext=$addon.IndexOf("`nfunction ",$updateStart+1,[StringComparison]::Ordinal);$update=$addon.Substring($updateStart,$updateNext-$updateStart)
+          if($update.IndexOf('splitify',[StringComparison]::OrdinalIgnoreCase) -ge 0){throw 'Splitify gained a direct Update-AutoApps mutation route.'}
+          $policyStart=$addon.IndexOf('function Get-AddonPolicyRegistry {',[StringComparison]::Ordinal);$policyNext=$addon.IndexOf("`nfunction ",$policyStart+1,[StringComparison]::Ordinal);$policy=$addon.Substring($policyStart,$policyNext-$policyStart)
+          if($policy.IndexOf("name='splitify'; kind='custom-app'; source='alexander-rebello/splitify'; inventory_policy='monitor-only'; mutation_mode='deny'",[StringComparison]::Ordinal) -lt 0){throw 'Splitify policy is not exact monitor-only deny.'}
+          if($policy.IndexOf("name='sc-cover-ambience.js'",[StringComparison]::Ordinal) -lt 0 -or $policy.IndexOf("data_policy='never-disable-or-optimize'",[StringComparison]::Ordinal) -lt 0){throw 'SC Cover Ambience protection changed.'}
+          Write-Host 'SPLITIFY_R12_NON_MUTATING_MONITOR_PASS'
+
+      - name: Verify upstream latest release and GitHub asset digest
+        shell: powershell
+        run: |
+          $headers=@{'User-Agent'='spotify-control-splitify-validation'}
+          $repo=Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri 'https://api.github.com/repos/alexander-rebello/splitify'
+          $release=Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri 'https://api.github.com/repos/alexander-rebello/splitify/releases/latest'
+          if([string]$repo.full_name -cne 'alexander-rebello/splitify' -or [bool]$repo.archived -or [bool]$repo.disabled){throw 'Splitify repository identity/state mismatch.'}
+          if([bool]$release.draft -or [bool]$release.prerelease -or [string]$release.tag_name -notmatch '^v?\d+\.\d+\.\d+$'){throw 'Splitify latest release contract mismatch.'}
+          $asset=@($release.assets|Where-Object{[string]$_.name -ceq 'splitify.zip'})
+          if($asset.Count -ne 1 -or [string]$asset[0].digest -notmatch '^sha256:[0-9a-f]{64}$'){throw 'Splitify release asset digest contract mismatch.'}
+          Write-Host "SPLITIFY_R12_UPSTREAM_PASS release=$($release.tag_name) size=$($asset[0].size) digest=$($asset[0].digest)"
+
+      - name: Audit registry-transition compatibility and authority invariants
+        shell: powershell
+        run: |
+          $addon=Get-Content validation/splitify-source-monitor-v0.2.0/out/bin/addon-manager.ps1 -Raw
+          foreach($must in @('registry-v1-compatible-prior','05c40a5339fe59b001ca0f4c4929643fd59e33a3002bae7067425845c85e2f6e','current-source-adapter-compatible-prior-registry')){if($addon.IndexOf($must,[StringComparison]::Ordinal) -lt 0){throw "Registry transition compatibility missing: $must"}}
+          $report=Get-Content validation/splitify-source-monitor-v0.2.0/candidate-report.json -Raw|ConvertFrom-Json
+          if([string]$report.prior_registry_compatibility -cne '05c40a5339fe59b001ca0f4c4929643fd59e33a3002bae7067425845c85e2f6e'){throw 'Prior registry compatibility pin drift.'}
+          # SelfTest above proves automatic authority remains exactly the four existing names.
+          Write-Host 'SPLITIFY_R12_REGISTRY_TRANSITION_PASS'
+
+      - name: Deterministic second build and no tracked production mutation
+        shell: powershell
+        run: |
+          $beforeMain=(Get-FileHash validation/splitify-source-monitor-v0.2.0/out/bin/spotify-control.ps1 -Algorithm SHA256).Hash.ToLowerInvariant()
+          $beforeAddon=(Get-FileHash validation/splitify-source-monitor-v0.2.0/out/bin/addon-manager.ps1 -Algorithm SHA256).Hash.ToLowerInvariant()
+          python validation/splitify-source-monitor-v0.2.0/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'Second candidate build failed.'}
+          $afterMain=(Get-FileHash validation/splitify-source-monitor-v0.2.0/out/bin/spotify-control.ps1 -Algorithm SHA256).Hash.ToLowerInvariant()
+          $afterAddon=(Get-FileHash validation/splitify-source-monitor-v0.2.0/out/bin/addon-manager.ps1 -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($beforeMain -cne $afterMain -or $beforeAddon -cne $afterAddon){throw 'Candidate build is nondeterministic.'}
+          git diff --exit-code -- manifest.json packages performance README.md
+          if($LASTEXITCODE -ne 0){throw 'Validation changed a production tracked surface.'}
+          Write-Host "SPLITIFY_R12_DETERMINISM_PASS main=$afterMain addon=$afterAddon"
+
+      - name: Upload candidate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: splitify-source-monitor-v020
+          path: |
+            validation/splitify-source-monitor-v0.2.0/candidate-report.json
+            validation/splitify-source-monitor-v0.2.0/out/bin/spotify-control.ps1
+            validation/splitify-source-monitor-v0.2.0/out/bin/addon-manager.ps1
+          if-no-files-found: error
