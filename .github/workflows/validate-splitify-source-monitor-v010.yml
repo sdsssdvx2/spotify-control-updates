@@ -73,10 +73,8 @@ jobs:
           $repo=Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri 'https://api.github.com/repos/alexander-rebello/splitify'
           if([string]$repo.full_name -cne 'alexander-rebello/splitify'){throw "Unexpected repo identity: $($repo.full_name)"}
           if([bool]$repo.archived -or [bool]$repo.disabled){throw 'Splitify upstream is archived/disabled.'}
-          $releases=@(Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri 'https://api.github.com/repos/alexander-rebello/splitify/releases?per_page=20')
-          $stable=@($releases|Where-Object{-not $_.draft -and -not $_.prerelease}|Sort-Object {[datetime]$_.published_at} -Descending|Select-Object -First 1)
-          if($stable.Count -ne 1){throw 'No unique stable Splitify release discovered.'}
-          $release=$stable[0]
+          $release=Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri 'https://api.github.com/repos/alexander-rebello/splitify/releases/latest'
+          if([bool]$release.draft -or [bool]$release.prerelease){throw 'GitHub latest Splitify release is not a stable release.'}
           if([string]$release.tag_name -notmatch '^v?\d+\.\d+\.\d+$'){throw "Unexpected Splitify release tag: $($release.tag_name)"}
           $assets=@($release.assets|Where-Object{[string]$_.name -ceq 'splitify.zip'})
           if($assets.Count -ne 1){throw "Expected exactly one splitify.zip asset, got $($assets.Count)"}
