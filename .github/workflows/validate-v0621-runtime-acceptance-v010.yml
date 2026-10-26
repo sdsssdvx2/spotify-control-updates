@@ -179,7 +179,7 @@ jobs:
             'WINDOWS V0.6.21 RUNTIME ACCEPTANCE VERIFIED / BASELINE RESTORED',
             "Invoke-AcceptanceBootstrap 'Rollback' -Force",
             'Restore-BinFromAcceptanceBackup',
-            'Assert-ProtectedUnchanged',
+            'Snapshot-Equal $ProtectedBefore (Get-FullSpicetifySnapshot)',
             "Invoke-PowerShellScript `$Addon @('-Action','Check')",
             'e9f0181756cfb84c505c30f54b6067e321f6d178d3a1936489714b8f4441ba18',
             '3a20fcd552b363ebc05e26854a8fe010ffe50e5c756ebd3d7fca54011e8a8b86',
