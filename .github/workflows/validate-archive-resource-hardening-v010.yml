@@ -1,0 +1,194 @@
+name: Validate Archive Resource Hardening v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/archive-resource-hardening-v0.1.0
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/archive-resource-hardening-v0.1.0/**'
+      - '.github/workflows/validate-archive-resource-hardening-v010.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove validation-only scope
+        shell: pwsh
+        run: |
+          $base='23e91427fd745227825d94eb48d804654ca54ee4'
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Validation branch is not based on exact stable main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allowed=@(
+            '.github/workflows/validate-archive-resource-hardening-v010.yml',
+            'validation/archive-resource-hardening-v0.1.0/build_candidate.py'
+          )
+          foreach($p in $changed){if($allowed -cnotcontains $p){throw "Unexpected changed path: $p"}}
+          if($changed.Count -ne $allowed.Count){throw "Expected exactly $($allowed.Count) validation files, got $($changed.Count)."}
+          Write-Host "VALIDATION_SCOPE_PASS head=$((git rev-parse HEAD).Trim())"
+
+      - name: Build exact v0.6.24 r13 candidate
+        shell: pwsh
+        run: |
+          python validation/archive-resource-hardening-v0.1.0/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'Candidate build failed.'}
+          Get-Content validation/archive-resource-hardening-v0.1.0/candidate-report.json
+
+      - name: Parse candidate with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          foreach($path in @(
+            'validation/archive-resource-hardening-v0.1.0/out/bin/spotify-control.ps1',
+            'validation/archive-resource-hardening-v0.1.0/out/bin/addon-manager.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Format-List|Out-String|Write-Host;throw "PowerShell parse failed: $path"}
+          }
+          Write-Host 'POWERSHELL_51_PARSE_PASS'
+
+      - name: Generate benign and malicious ZIP fixtures
+        shell: python
+        run: |
+          from pathlib import Path
+          import zipfile
+          root=Path('validation/archive-resource-hardening-v0.1.0/fixtures')
+          root.mkdir(parents=True,exist_ok=True)
+          def tiny(name, entries):
+              with zipfile.ZipFile(root/name,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=1) as z:
+                  for path,data in entries: z.writestr(path,data)
+          tiny('benign.zip',[('root/manifest.json','{}'),('root/index.js','ok')])
+          tiny('traversal.zip',[('../evil.txt','x')])
+          tiny('absolute.zip',[('/evil.txt','x')])
+          tiny('drive.zip',[('C:/evil.txt','x')])
+          tiny('duplicate-case.zip',[('Root/file.txt','a'),('root/FILE.txt','b')])
+          with zipfile.ZipFile(root/'symlink.zip','w',compression=zipfile.ZIP_DEFLATED,compresslevel=1) as z:
+              zi=zipfile.ZipInfo('root/link')
+              zi.create_system=3
+              zi.external_attr=(0o120777 << 16)
+              z.writestr(zi,'target')
+          def many(name,count):
+              with zipfile.ZipFile(root/name,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=1) as z:
+                  for i in range(count): z.writestr(f'root/f{i:05d}.txt','x')
+          many('too-many-ivlyrics.zip',4097)
+          many('too-many-pithaya.zip',8193)
+          many('too-many-marketplace.zip',16385)
+          zero=b'\0'*(1024*1024)
+          with zipfile.ZipFile(root/'oversized-entry.zip','w',compression=zipfile.ZIP_DEFLATED,compresslevel=1) as z:
+              with z.open('root/big.bin','w') as f:
+                  for _ in range(129): f.write(zero)
+          with zipfile.ZipFile(root/'expanded-total.zip','w',compression=zipfile.ZIP_DEFLATED,compresslevel=1) as z:
+              for n in range(5):
+                  with z.open(f'root/big-{n}.bin','w') as f:
+                      for _ in range(110): f.write(zero)
+          print('ZIP_FIXTURES_PASS',sorted(p.name for p in root.glob('*.zip')))
+
+      - name: Execute archive safety helpers against malicious fixtures
+        shell: powershell
+        run: |
+          function Get-FunctionText([string]$Path,[string]$Name){
+            $text=Get-Content -LiteralPath $Path -Raw
+            $marker="function $Name {"
+            $start=$text.IndexOf($marker,[StringComparison]::Ordinal)
+            if($start -lt 0){throw "Missing function $Name"}
+            $next=$text.IndexOf("`nfunction ",$start+$marker.Length,[StringComparison]::Ordinal)
+            if($next -lt 0){$next=$text.Length}
+            return $text.Substring($start,$next-$start)
+          }
+          $main='validation/archive-resource-hardening-v0.1.0/out/bin/spotify-control.ps1'
+          $addon='validation/archive-resource-hardening-v0.1.0/out/bin/addon-manager.ps1'
+          Invoke-Expression (Get-FunctionText $main 'Test-SpotifyControlZipArchiveSafety')
+          Invoke-Expression (Get-FunctionText $addon 'Test-IvLyricsZipArchiveSafety')
+          Invoke-Expression (Get-FunctionText $addon 'Test-PithayaZipArchiveSafety')
+          function Test-PathSafe([string]$Path,[string]$Type){
+            if($Type -ceq 'Leaf'){return (Test-Path -LiteralPath $Path -PathType Leaf)}
+            if($Type -ceq 'Container'){return (Test-Path -LiteralPath $Path -PathType Container)}
+            return (Test-Path -LiteralPath $Path)
+          }
+          function Assert-Rejected([scriptblock]$Body,[string]$Label){
+            $rejected=$false
+            try { & $Body | Out-Null } catch { $rejected=$true; Write-Host "REJECTED $Label :: $($_.Exception.Message)" }
+            if(-not $rejected){throw "Malicious fixture was accepted: $Label"}
+          }
+          $fx=(Resolve-Path 'validation/archive-resource-hardening-v0.1.0/fixtures').Path
+          $benign=Join-Path $fx 'benign.zip'
+          $m=Test-SpotifyControlZipArchiveSafety -ZipPath $benign -Label 'Marketplace'
+          $i=Test-IvLyricsZipArchiveSafety -ZipPath $benign
+          $p=Test-PithayaZipArchiveSafety -ZipPath $benign -Name 'fixture'
+          if($m.EntryCount -ne 2 -or $i.EntryCount -ne 2 -or $p.EntryCount -ne 2){throw 'Benign fixture result mismatch.'}
+          foreach($bad in @('traversal.zip','absolute.zip','drive.zip','duplicate-case.zip','symlink.zip','oversized-entry.zip','expanded-total.zip')){
+            $path=Join-Path $fx $bad
+            Assert-Rejected { Test-SpotifyControlZipArchiveSafety -ZipPath $path -Label 'Marketplace' } "marketplace/$bad"
+            Assert-Rejected { Test-IvLyricsZipArchiveSafety -ZipPath $path } "ivlyrics/$bad"
+            Assert-Rejected { Test-PithayaZipArchiveSafety -ZipPath $path -Name 'fixture' } "pithaya/$bad"
+          }
+          Assert-Rejected { Test-IvLyricsZipArchiveSafety -ZipPath (Join-Path $fx 'too-many-ivlyrics.zip') } 'ivlyrics/too-many'
+          Assert-Rejected { Test-PithayaZipArchiveSafety -ZipPath (Join-Path $fx 'too-many-pithaya.zip') -Name 'fixture' } 'pithaya/too-many'
+          Assert-Rejected { Test-SpotifyControlZipArchiveSafety -ZipPath (Join-Path $fx 'too-many-marketplace.zip') -Label 'Marketplace' } 'marketplace/too-many'
+          Write-Host 'ARCHIVE_MALICIOUS_FIXTURES_PASS'
+
+      - name: Assert exact pre-extraction gate placement and preserved authority
+        shell: python
+        run: |
+          from pathlib import Path
+          import json,re
+          root=Path('validation/archive-resource-hardening-v0.1.0')
+          main=(root/'out/bin/spotify-control.ps1').read_text(encoding='utf-8-sig')
+          addon=(root/'out/bin/addon-manager.ps1').read_text(encoding='utf-8-sig')
+          def fn(text,name):
+              marker=f'function {name} {{'; a=text.index(marker); b=text.find('\nfunction ',a+len(marker)); return text[a:len(text) if b<0 else b]
+          market=fn(main,'Expand-AndValidateMarketplaceAsset')
+          iv=fn(addon,'Download-IvLyricsReleaseStage')
+          pith=fn(addon,'Download-PithayaPinnedStage')
+          online=fn(addon,'Invoke-IvLyricsOfficialTagProofOnlineSelfTest')
+          checks=[
+            ('marketplace',market,'Test-SpotifyControlZipArchiveSafety','Expand-Archive'),
+            ('ivlyrics',iv,'Test-IvLyricsZipArchiveSafety','Expand-Archive'),
+            ('pithaya',pith,'Test-PithayaZipArchiveSafety','Expand-Archive'),
+            ('ivlyrics-online',online,'Test-IvLyricsZipArchiveSafety','Expand-Archive'),
+          ]
+          for label,block,guard,extract in checks:
+              if block.count(guard)!=1 or block.count(extract)!=1 or block.index(guard)>block.index(extract): raise SystemExit(f'{label} gate placement invalid')
+          spic=fn(main,'Expand-AndValidateSpicetifyAsset')
+          for required in ('ZipFile]::OpenRead','134217728','268435456','Unsafe path component','Symlink entry refused'):
+              if required.lower() not in spic.lower(): raise SystemExit(f'Spicetify hardening regressed: {required}')
+          report=json.loads((root/'candidate-report.json').read_text())
+          for key in ('authority_expanded','spicetify_extractor_unchanged','protected_registry_unchanged','source_adapter_catalog_unchanged'):
+              expected=False if key=='authority_expanded' else True
+              if report[key] is not expected: raise SystemExit(f'candidate report mismatch: {key}')
+          print('ARCHIVE_GATE_PLACEMENT_AND_AUTHORITY_PASS')
+
+      - name: Run Addon Manager read-only SelfTest
+        shell: powershell
+        run: |
+          $addon=(Resolve-Path 'validation/archive-resource-hardening-v0.1.0/out/bin/addon-manager.ps1').Path
+          & $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw "Addon Manager SelfTest failed: $LASTEXITCODE"}
+          Write-Host 'ADDON_MANAGER_SELFTEST_PASS'
+
+      - name: Prove no production file changed
+        shell: pwsh
+        run: |
+          $base='23e91427fd745227825d94eb48d804654ca54ee4'
+          $changed=@(git diff --name-only "$base...HEAD")
+          if(@($changed|Where-Object{$_ -notlike 'validation/archive-resource-hardening-v0.1.0/*' -and $_ -cne '.github/workflows/validate-archive-resource-hardening-v010.yml'}).Count){throw 'Validation gained production changes.'}
+          git diff --exit-code -- manifest.json packages performance README.md
+          if($LASTEXITCODE -ne 0){throw 'Production surface changed.'}
+          Write-Host 'NO_PRODUCTION_CHANGE_PASS'
+
+      - name: Upload candidate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: archive-resource-hardening-v010
+          path: |
+            validation/archive-resource-hardening-v0.1.0/candidate-report.json
+          if-no-files-found: error
