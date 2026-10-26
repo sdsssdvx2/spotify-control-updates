@@ -14,7 +14,8 @@ def get_bundle_b64():
     parts=[]
     files=sorted(CHUNK_DIR.glob('chunk-*.txt'))
     if not files: raise RuntimeError('source bundle chunks missing')
-    for p in files: parts.append(p.read_text(encoding='ascii').strip())
+    for p in files:
+        parts.append(''.join(p.read_text(encoding='ascii').split()))
     return ''.join(parts)
 
 def sha_bytes(b): return hashlib.sha256(b).hexdigest()
