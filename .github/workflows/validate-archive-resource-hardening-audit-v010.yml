@@ -1,0 +1,141 @@
+name: Audit Current Archive Resource Hardening v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/archive-resource-hardening-audit-v0.1.0
+    paths:
+      - '.github/workflows/validate-archive-resource-hardening-audit-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-windows:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove exact validation-only scope and rebuild current stable
+        shell: powershell
+        run: |
+          $base='23e91427fd745227825d94eb48d804654ca54ee4'
+          $actual=(git rev-parse HEAD).Trim()
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Audit branch is not based on exact current stable main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          if(($changed -join '|') -cne '.github/workflows/validate-archive-resource-hardening-audit-v010.yml'){throw "Audit changed unexpected files: $($changed -join ', ')"}
+          python validation/v0.6.23/build_v0623.py --build
+          if($LASTEXITCODE -ne 0){throw 'Current v0.6.23/r12 rebuild failed.'}
+          $main='validation/v0.6.23/out/bin/spotify-control.ps1';$addon='validation/v0.6.23/out/bin/addon-manager.ps1'
+          if((Get-Item $main).Length -ne 281588 -or (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'bc9861bdd64ff8af94f68f0f065739f82b235271dcd18ad6325b819205528a08'){throw 'Current main identity mismatch.'}
+          if((Get-Item $addon).Length -ne 272494 -or (Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -ne '23ad2210aea4352f535d1cf0b3ebb827a82200dcba2b70bf1ebae96499d82687'){throw 'Current Addon Manager identity mismatch.'}
+          Write-Host "ARCHIVE_AUDIT_BASE_PASS head=$actual"
+
+      - name: Inventory archive and download surfaces by function
+        shell: python
+        run: |
+          from pathlib import Path
+          import hashlib,json,re
+          root=Path('.')
+          files={
+            'main':root/'validation/v0.6.23/out/bin/spotify-control.ps1',
+            'addon':root/'validation/v0.6.23/out/bin/addon-manager.ps1',
+          }
+          evidence=Path('archive-audit-evidence');evidence.mkdir(exist_ok=True)
+          archive_terms=['Expand-Archive','ExtractToDirectory','ZipArchive','ZipFile','System.IO.Compression','OpenRead(','Entries','CompressedLength']
+          download_terms=['Invoke-WebRequest','Invoke-RestMethod','DownloadFile','HttpClient','github.com','api.github.com']
+          bound_terms=['MaxArchive','MaxEntries','EntryCount','MaxEntry','Uncompressed','CompressedLength','entry_count','entryCount','totalBytes','total_bytes','Length -gt','Length -ge']
+          path_terms=['GetFullPath','FullName','DirectorySeparatorChar','AltDirectorySeparatorChar','StartsWith','..\\','../','Rooted','IsPathRooted','Traversal']
+          rows=[]
+          for kind,path in files.items():
+            text=path.read_text(encoding='utf-8-sig')
+            matches=list(re.finditer(r'(?m)^function\s+([A-Za-z0-9_-]+)\s*\{',text))
+            blocks=[]
+            for i,m in enumerate(matches):
+              end=matches[i+1].start() if i+1<len(matches) else len(text)
+              block=text[m.start():end]
+              hit_archive=[t for t in archive_terms if t.lower() in block.lower()]
+              hit_download=[t for t in download_terms if t.lower() in block.lower()]
+              if hit_archive or hit_download:
+                row={
+                  'file':kind,'function':m.group(1),'archive_terms':hit_archive,'download_terms':hit_download,
+                  'bound_terms':[t for t in bound_terms if t.lower() in block.lower()],
+                  'path_terms':[t for t in path_terms if t.lower() in block.lower()],
+                  'expand_archive_count':block.lower().count('expand-archive'.lower()),
+                  'zip_api_count':sum(block.lower().count(t.lower()) for t in ['ZipArchive','ZipFile','ExtractToDirectory']),
+                  'invoke_webrequest_count':block.lower().count('invoke-webrequest'),
+                  'invoke_restmethod_count':block.lower().count('invoke-restmethod'),
+                  'block_sha256':hashlib.sha256(block.encode('utf-8')).hexdigest(),
+                  'block_chars':len(block),
+                }
+                rows.append(row)
+                if hit_archive:
+                  safe=re.sub(r'[^A-Za-z0-9_.-]+','_',f'{kind}-{m.group(1)}')
+                  (evidence/f'{safe}.txt').write_text(block,encoding='utf-8',newline='\n')
+          report={'schema':1,'stable_version':'0.6.23','addon_version':'0.6.5-r12','rows':rows}
+          (evidence/'archive-surface-report.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n',encoding='utf-8')
+          print('ARCHIVE_SURFACE_COUNT',len(rows))
+          for r in rows:
+            if r['archive_terms']:
+              print('ARCHIVE_FUNCTION',r['file'],r['function'],'archive='+','.join(r['archive_terms']),'bounds='+','.join(r['bound_terms']) if r['bound_terms'] else 'bounds=NONE','paths='+','.join(r['path_terms']) if r['path_terms'] else 'paths=NONE')
+            elif r['download_terms']:
+              print('DOWNLOAD_FUNCTION',r['file'],r['function'],'download='+','.join(r['download_terms']))
+
+      - name: AST-confirm direct archive command invocations
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path archive-audit-evidence | Out-Null
+          $all=New-Object System.Collections.Generic.List[object]
+          foreach($pair in @(@('main','validation/v0.6.23/out/bin/spotify-control.ps1'),@('addon','validation/v0.6.23/out/bin/addon-manager.ps1'))){
+            $kind=$pair[0];$path=$pair[1]
+            $tokens=$null;$errors=$null;$ast=[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw "PowerShell parse errors in $path"}
+            $funcs=@($ast.FindAll({param($n)$n -is [System.Management.Automation.Language.FunctionDefinitionAst]},$true))
+            $commands=@($ast.FindAll({param($n)$n -is [System.Management.Automation.Language.CommandAst]},$true))
+            foreach($cmd in $commands){
+              $name=$cmd.GetCommandName()
+              if($name -in @('Expand-Archive','Invoke-WebRequest','Invoke-RestMethod')){
+                $owner=@($funcs|Where-Object{$_.Extent.StartOffset -le $cmd.Extent.StartOffset -and $_.Extent.EndOffset -ge $cmd.Extent.EndOffset}|Sort-Object{$_.Extent.EndOffset-$_.Extent.StartOffset}|Select-Object -First 1)
+                $fn=if($owner.Count){$owner[0].Name}else{'<script>'}
+                $all.Add([pscustomobject]@{file=$kind;function=$fn;command=$name;line=$cmd.Extent.StartLineNumber;text=$cmd.Extent.Text})
+                Write-Host "AST_COMMAND file=$kind function=$fn command=$name line=$($cmd.Extent.StartLineNumber)"
+              }
+            }
+          }
+          $all|ConvertTo-Json -Depth 6|Set-Content -LiteralPath archive-audit-evidence/ast-command-report.json -Encoding UTF8
+          Write-Host "ARCHIVE_AST_COMMAND_AUDIT_PASS count=$($all.Count)"
+
+      - name: Classify resource-bound coverage conservatively
+        shell: powershell
+        run: |
+          $r=Get-Content archive-audit-evidence/archive-surface-report.json -Raw|ConvertFrom-Json
+          $archive=@($r.rows|Where-Object{@($_.archive_terms).Count -gt 0})
+          if(-not $archive.Count){throw 'No archive surface found; audit assumptions invalid.'}
+          $unbounded=@($archive|Where-Object{@($_.bound_terms).Count -eq 0})
+          $noPath=@($archive|Where-Object{@($_.path_terms).Count -eq 0})
+          Write-Host "ARCHIVE_FUNCTIONS=$($archive.Count) NO_RESOURCE_BOUND_MARKERS=$($unbounded.Count) NO_PATH_GUARD_MARKERS=$($noPath.Count)"
+          foreach($x in $unbounded){Write-Host "UNBOUNDED_CANDIDATE file=$($x.file) function=$($x.function)"}
+          foreach($x in $noPath){Write-Host "NO_PATH_GUARD_CANDIDATE file=$($x.file) function=$($x.function)"}
+          # This discovery job does not fail merely because hardening is absent; it records the exact current gap.
+          Write-Host 'ARCHIVE_RESOURCE_HARDENING_AUDIT_COMPLETE'
+
+      - name: Prove audit did not alter production
+        shell: powershell
+        run: |
+          $base='23e91427fd745227825d94eb48d804654ca54ee4'
+          $changed=@(git diff --name-only "$base...HEAD")
+          if(($changed -join '|') -cne '.github/workflows/validate-archive-resource-hardening-audit-v010.yml'){throw 'Audit branch gained non-validation changes.'}
+          git diff --exit-code -- manifest.json packages performance README.md validation
+          if($LASTEXITCODE -ne 0){throw 'Audit changed a production/tracked validation surface.'}
+          Write-Host 'ARCHIVE_AUDIT_NO_PRODUCTION_CHANGE_PASS'
+
+      - name: Upload archive audit evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: archive-resource-hardening-audit-v010
+          path: archive-audit-evidence/
+          if-no-files-found: error
