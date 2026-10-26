@@ -9,14 +9,6 @@ on:
       - 'validation/v0.6.25/**'
       - 'packages/v0.6.25/**'
       - 'manifest.json'
-  pull_request:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/validate-v0.6.25-release.yml'
-      - 'validation/v0.6.25/**'
-      - 'packages/v0.6.25/**'
-      - 'manifest.json'
   workflow_dispatch:
 
 permissions:
