@@ -44,15 +44,13 @@ def build():
     wrapper=WRAPPER.read_text(encoding='utf-8').replace('\r\n','\n').rstrip('\n').replace('\n',newline)
     text=replace_once(text,'function Get-AddonInventory {',wrapper+newline+newline+'function Get-AddonInventory {','registry wrapper insertion')
 
+    inventory=function_block(text,'Get-AddonInventory')
     old='foreach ($name in @("better-local-files","eternal-jukebox","playlist-maker")) {'
     new='$pithayaPolicyEntries = @(Get-AddonPolicyRegistry | Where-Object { [string]$_.handler -ceq "pithaya" -and [string]$_.mutation_mode -ceq "auto" } | Sort-Object -Property name)'+newline+'    foreach ($policyEntry in $pithayaPolicyEntries) {'+newline+'        $name = [string]$policyEntry.name'
-    text=replace_once(text,old,new,'Pithaya inventory registry derivation')
-
-    inventory=function_block(text,'Get-AddonInventory')
+    inventory=replace_once(inventory,old,new,'Pithaya inventory registry derivation')
     old='    foreach ($item in $items) {'+newline+'        $stateKey = if ([string]$item.kind -eq \'extension\') { \'extension:\' + [string]$item.name } else { [string]$item.name }'
     new='    $registrySummary = Add-AddonPolicyRegistryMetadata -Items $items.ToArray()'+newline+'    [void](Write-AddonPolicyRegistryReport)'+newline+newline+'    foreach ($item in $items) {'+newline+'        $stateKey = if ([string]$item.kind -eq \'extension\') { \'extension:\' + [string]$item.name } else { [string]$item.name }'
-    if inventory.count(old)!=1:raise RuntimeError('inventory registry metadata insertion marker drift')
-    inventory=inventory.replace(old,new,1)
+    inventory=replace_once(inventory,old,new,'inventory registry metadata insertion')
     old='        asset_resolution = $assetResolution'+newline+'        items = $items.ToArray()'
     new='        asset_resolution = $assetResolution'+newline+'        policy_registry = $registrySummary'+newline+'        items = $items.ToArray()'
     inventory=replace_once(inventory,old,new,'inventory report registry summary')
