@@ -24,6 +24,23 @@ def load_builder():
     spec=importlib.util.spec_from_file_location('v0621_acceptance_builder',BUILDER)
     if spec is None or spec.loader is None: raise RuntimeError('Unable to load acceptance builder module.')
     mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
+
+    original_readme=mod.readme_bytes
+    def repaired_readme_bytes(patched_sha,manifest_sha):
+        data=original_readme(patched_sha,manifest_sha)
+        slash=b'\\'
+        bad_success=b'%LOCALAPPDATA%'+slash+b'SpotifyControl'+b'\r'+b'eports'+b'\x0b'+b'0621-runtime-acceptance-latest.json'
+        bad_failure=b'%LOCALAPPDATA%'+slash+b'SpotifyControl'+b'\r'+b'eports'+b'\x0b'+b'0621-runtime-acceptance-failure-latest.txt'
+        good_success=r'%LOCALAPPDATA%\SpotifyControl\reports\v0621-runtime-acceptance-latest.json'.encode('ascii')
+        good_failure=r'%LOCALAPPDATA%\SpotifyControl\reports\v0621-runtime-acceptance-failure-latest.txt'.encode('ascii')
+        if data.count(bad_success)!=1 or data.count(bad_failure)!=1:
+            raise RuntimeError('README report-path escape repair target is missing or ambiguous.')
+        data=data.replace(bad_success,good_success,1).replace(bad_failure,good_failure,1)
+        if b'\x0b' in data or b'\r' in data.replace(b'\r\n',b''):
+            raise RuntimeError('README still contains an embedded control-character path escape.')
+        return data
+    mod.readme_bytes=repaired_readme_bytes
+
     original=mod.validator_text
     def repaired_validator_text():
         text=original()
@@ -34,6 +51,13 @@ def load_builder():
             text=text.replace(broken,correct,1)
         elif correct not in text:
             raise RuntimeError('Generated-validator newline contract changed unexpectedly.')
+        marker="ck('stage14 provenance','fb1666d8a1add725b476d31ed4650bfc162bad08' in s)\n"
+        if text.count(marker)!=1: raise RuntimeError('Generated-validator README insertion marker changed unexpectedly.')
+        extra=(
+            "readme=(r/'README.txt').read_text(encoding='utf-8')\n"
+            "ck('readme report paths',r'%LOCALAPPDATA%\\SpotifyControl\\reports\\v0621-runtime-acceptance-latest.json' in readme and r'%LOCALAPPDATA%\\SpotifyControl\\reports\\v0621-runtime-acceptance-failure-latest.txt' in readme)\n"
+        )
+        text=text.replace(marker,marker+extra,1)
         compile(text,'<generated-acceptance-validator>','exec')
         return text
     mod.validator_text=repaired_validator_text
