@@ -9,14 +9,6 @@ on:
       - 'packages/v0.6.20/**'
       - 'validation/v0.6.20-bootstrap-e2e/**'
       - '.github/workflows/validate-v0.6.20-bootstrap-e2e.yml'
-  pull_request:
-    branches:
-      - main
-    paths:
-      - 'manifest.json'
-      - 'packages/v0.6.20/**'
-      - 'validation/v0.6.20-bootstrap-e2e/**'
-      - '.github/workflows/validate-v0.6.20-bootstrap-e2e.yml'
   workflow_dispatch:
 
 permissions:
