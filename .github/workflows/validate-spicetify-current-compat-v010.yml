@@ -1,0 +1,106 @@
+name: Validate Spicetify Current Compatibility v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/spicetify-current-compat-v0.1.0
+    paths:
+      - 'validation/spicetify-current-compat-v0.1.0/**'
+      - '.github/workflows/validate-spicetify-current-compat-v010.yml'
+  pull_request:
+    paths:
+      - 'validation/spicetify-current-compat-v0.1.0/**'
+      - '.github/workflows/validate-spicetify-current-compat-v010.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove validation-only scope
+        shell: powershell
+        run: |
+          $base='29d6c52c6a79559e513b367ec57edcccebae5fd0'
+          git cat-file -e "$base^{commit}"
+          $merge=(git merge-base $base HEAD).Trim()
+          if($merge -ne $base){throw "Validation branch is not based on exact production main: $merge"}
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allowed=@(
+            'validation/spicetify-current-compat-v0.1.0/audit.py',
+            '.github/workflows/validate-spicetify-current-compat-v010.yml'
+          )
+          $bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Out-of-scope file(s): $($bad -join ', ')"}
+          if($changed.Count -ne 2){throw "Expected exactly 2 validation-only files, found $($changed.Count): $($changed -join ', ')"}
+          Write-Host 'SPICETIFY_COMPAT_SCOPE_PASS'
+
+      - name: Compile audit script
+        shell: powershell
+        run: |
+          python -m py_compile validation/spicetify-current-compat-v0.1.0/audit.py
+          if($LASTEXITCODE -ne 0){throw 'Compatibility audit failed Python compile.'}
+          Write-Host 'SPICETIFY_COMPAT_PYTHON_COMPILE_PASS'
+
+      - name: Reconstruct exact production and audit Spicetify compatibility
+        shell: powershell
+        run: |
+          python validation/spicetify-current-compat-v0.1.0/audit.py
+          if($LASTEXITCODE -ne 0){throw "Compatibility audit failed: $LASTEXITCODE"}
+
+      - name: PowerShell 5.1 parse exact generated production
+        shell: powershell
+        run: |
+          $main='validation/v0.6.20/out/bin/spotify-control.ps1'
+          $addon='validation/v0.6.20/out/bin/addon-manager.ps1'
+          foreach($p in @($main,$addon)){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("line {0}: {1}" -f $_.Extent.StartLineNumber,$_.Message)};throw "PowerShell 5.1 parse failed: $p"}
+          }
+          $mh=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant();$ms=(Get-Item $main).Length
+          $ah=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant();$as=(Get-Item $addon).Length
+          if($ms -ne 281585 -or $mh -ne 'e9f0181756cfb84c505c30f54b6067e321f6d178d3a1936489714b8f4441ba18'){throw "Production main identity mismatch: $ms/$mh"}
+          if($as -ne 225044 -or $ah -ne '3a20fcd552b363ebc05e26854a8fe010ffe50e5c756ebd3d7fca54011e8a8b86'){throw "Production addon identity mismatch: $as/$ah"}
+          Write-Host "SPICETIFY_COMPAT_EXACT_PRODUCTION_PASS main=$ms/$mh addon=$as/$ah"
+
+      - name: Run overlay regression suite against current Spicetify tag shape
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/overlay/tests/test-overlay.ps1
+          if($LASTEXITCODE -ne 0){throw "Overlay regression failed: $LASTEXITCODE"}
+          node performance/overlay/tests/test-loader.js
+          if($LASTEXITCODE -ne 0){throw "Overlay loader regression failed: $LASTEXITCODE"}
+          Write-Host 'SPICETIFY_COMPAT_OVERLAY_REGRESSION_PASS'
+
+      - name: Run Star Ratings fail-open regression suite
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/star-ratings/tests/test-star-ratings-patch.ps1
+          if($LASTEXITCODE -ne 0){throw "Star Ratings regression failed: $LASTEXITCODE"}
+          Write-Host 'SPICETIFY_COMPAT_STAR_RATINGS_REGRESSION_PASS'
+
+      - name: Validate compatibility evidence report
+        shell: powershell
+        run: |
+          $r=Get-Content spicetify-current-compat-audit.json -Raw | ConvertFrom-Json
+          if($r.result -ne 'PASS'){throw "Audit report result is not PASS: $($r.result)"}
+          if(@($r.spicetify_literal_pins).Count -ne 0){throw 'Spicetify 2.46.x literal pin unexpectedly present.'}
+          if(@($r.spicetify_semver_gate_candidates).Count -ne 0){throw 'Spicetify semantic-version gate candidate unexpectedly present.'}
+          foreach($v in @('2.46.2','2.46.3','2.46.4')){
+            $p=$r.upstream_apply_contracts.PSObject.Properties[$v]
+            if(-not $p -or -not [bool]$p.Value.required_templates_present){throw "Missing upstream apply contract evidence for $v"}
+          }
+          Write-Host ("SPICETIFY_COMPAT_REPORT_PASS spicetify_logic_lines={0}" -f [int]$r.spicetify_logic_line_count)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-Spicetify-Current-Compatibility-v0.1.0
+          path: spicetify-current-compat-audit.json
+          if-no-files-found: error
+          retention-days: 14
