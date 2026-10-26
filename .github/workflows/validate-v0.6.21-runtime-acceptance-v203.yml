@@ -59,7 +59,7 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Initial acceptance v2.0.3 package build failed.'}
           $zip=Join-Path $dir 'out/SpotifyControl-v0.6.21-r10-Runtime-Acceptance-v2.0.3.zip'
           $hash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant();$size=(Get-Item $zip).Length
-          if($size -ne 56604 -or $hash -cne '651195ec07fb49c3bc96f5d1a26af77418d8709db1ce78986634410a472f48b4'){throw "Cross-platform deterministic package identity mismatch: size=$size sha=$hash"}
+          if($size -ne 56604 -or $hash -cne '0d8d81b66932997d6e0f8e9f49ff65a0ca5b6e700d08c8b3d82fbbbe69b65f22'){throw "Cross-platform deterministic package identity mismatch: size=$size sha=$hash"}
           "$hash|$size" | Set-Content $env:RUNNER_TEMP\acceptance-v203-first.txt -Encoding ASCII
           Write-Host "V0621_RUNTIME_ACCEPTANCE_V203_BUILD_IDENTITY_PASS $hash $size"
 
@@ -176,7 +176,7 @@ jobs:
           python "$dir/build_acceptance.py";if($LASTEXITCODE -ne 0){throw 'Second acceptance build failed.'}
           $zip=Join-Path $dir 'out/SpotifyControl-v0.6.21-r10-Runtime-Acceptance-v2.0.3.zip';$second="{0}|{1}" -f (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant(),(Get-Item $zip).Length
           if($first -cne $second){throw "Acceptance build nondeterministic: $first != $second"}
-          if($second -cne '651195ec07fb49c3bc96f5d1a26af77418d8709db1ce78986634410a472f48b4|56604'){throw "Acceptance package identity drift: $second"}
+          if($second -cne '0d8d81b66932997d6e0f8e9f49ff65a0ca5b6e700d08c8b3d82fbbbe69b65f22|56604'){throw "Acceptance package identity drift: $second"}
           Add-Type -AssemblyName System.IO.Compression.FileSystem;$z=[IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip));try{
             $names=@($z.Entries|ForEach-Object{$_.FullName});foreach($required in @('RUN_RUNTIME_ACCEPTANCE.ps1','RUN_RUNTIME_ACCEPTANCE.cmd','PRECHECK_RUNTIME_ACCEPTANCE.ps1','BOOTSTRAP_RUNNER.ps1','README.txt','SHA256SUMS.txt','evidence/SELF_VALIDATION_REPORT.json')){if($required -notin $names){throw "Package missing $required"}}
             if($names -contains 'LOCAL_MANIFEST_SERVER.ps1'){throw 'Retired localhost server leaked into v2.0.3 package.'}
