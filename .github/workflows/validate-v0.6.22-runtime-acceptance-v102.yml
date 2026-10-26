@@ -1,0 +1,276 @@
+name: Validate v0.6.22 r11 Runtime Acceptance v1.0.2
+
+on:
+  push:
+    branches:
+      - validate/v0.6.22-runtime-acceptance-v1.0.2
+    paths:
+      - 'validation/v0.6.22-runtime-acceptance-v1.0.2/**'
+      - '.github/workflows/validate-v0.6.22-runtime-acceptance-v102.yml'
+  pull_request:
+    branches:
+      - release/v0.6.22-addon-source-registry-r11
+    paths:
+      - 'validation/v0.6.22-runtime-acceptance-v1.0.2/**'
+      - '.github/workflows/validate-v0.6.22-runtime-acceptance-v102.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact release-derived validation scope
+        shell: powershell
+        run: |
+          $base='9c1cabcaaed6c7a1465f5baea12d046a5d51c8dc'
+          $actual=(git rev-parse HEAD).Trim()
+          $eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -ne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Runtime acceptance v1.0.2 is not based on exact v0.6.22 release head.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allowed=@(
+            'validation/v0.6.22-runtime-acceptance-v1.0.2/build_acceptance.py',
+            '.github/workflows/validate-v0.6.22-runtime-acceptance-v102.yml'
+          )
+          $bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Out-of-scope files: $($bad -join ', ')"}
+          if($changed.Count -ne 2){throw "Expected exactly 2 validation-only files; got $($changed.Count): $($changed -join ' , ')"}
+          git cat-file -e '14862b19faa486cc9582fac51d8ce0394e7cd02d^{commit}'
+          if($LASTEXITCODE -ne 0){throw 'Validated v1.0.1 source commit is unavailable in checkout.'}
+          Write-Host "V0622_RUNTIME_ACCEPTANCE_V102_SCOPE_PASS head=$actual"
+
+      - name: Compile and build adaptive acceptance package
+        shell: powershell
+        run: |
+          $dir='validation/v0.6.22-runtime-acceptance-v1.0.2'
+          python -m py_compile "$dir/build_acceptance.py"
+          if($LASTEXITCODE -ne 0){throw 'Acceptance v1.0.2 builder Python compile failed.'}
+          python "$dir/build_acceptance.py"
+          if($LASTEXITCODE -ne 0){throw 'Initial acceptance v1.0.2 package build failed.'}
+          $zip=Join-Path $dir 'out/SpotifyControl-v0.6.22-r11-Runtime-Acceptance-v1.0.2.zip'
+          $hash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $size=(Get-Item $zip).Length
+          $report=Get-Content (Join-Path $dir 'out/SpotifyControl-v0.6.22-r11-Runtime-Acceptance-v1.0.2/evidence/SELF_VALIDATION_REPORT.json') -Raw|ConvertFrom-Json
+          if([int]$report.passed -ne [int]$report.total -or [int]$report.total -lt 45){throw "Adaptive source contract incomplete: $($report.passed)/$($report.total)"}
+          if(@($report.supported_baselines).Count -ne 2){throw 'Adaptive baseline contract count mismatch.'}
+          "$hash|$size" | Set-Content $env:RUNNER_TEMP\acceptance-v102-first.txt -Encoding ASCII
+          Write-Host "V0622_RUNTIME_ACCEPTANCE_V102_BUILD_PASS sha=$hash size=$size checks=$($report.passed)/$($report.total)"
+
+      - name: Independently audit adaptive outer baseline and restore assertions
+        shell: powershell
+        run: |
+          $run=Get-Content 'validation/v0.6.22-runtime-acceptance-v1.0.2/generated/RUN_RUNTIME_ACCEPTANCE.ps1' -Raw
+          $required=@(
+            "function Select-ExactBaseline{",
+            "281585 -and `$mh -ceq `$V0620MainSha",
+            "225044 -and `$ah -ceq `$V0620AddonSha",
+            "281579 -and `$mh -ceq `$V0621MainSha",
+            "250616 -and `$ah -ceq `$V0621AddonSha",
+            "`$script:BaselineProfile='v0.6.20/r9';`$script:ExpectedEdgeCount=2",
+            "`$script:BaselineProfile='v0.6.21/r10';`$script:ExpectedEdgeCount=1",
+            "Unsupported or mixed installed baseline.",
+            "Select-ExactBaseline;Assert-BaselineComponents;Assert-TransactionsTerminal",
+            "edge_count -ne `$ExpectedEdgeCount",
+            "Pinned main SHA chain linkage mismatch.",
+            "Pinned addon SHA chain linkage mismatch.",
+            "if(`$BaselineSelected){",
+            "profile=`$BaselineProfile;expected_edge_count=`$ExpectedEdgeCount",
+            "RESTORED TO '+`$BaselineProfile"
+          )
+          foreach($token in $required){if(-not$run.Contains($token)){throw "Adaptive runtime assertion missing: $token"}}
+          if($run.Contains("Assert-Identity `$Main `$BaselineMainSha 281579 'Spotify Control v0.6.21 main'")){throw 'Static v0.6.21-only baseline assertion remains.'}
+          if($run.Contains("Pinned Check did not resolve exact one-edge")){throw 'Static one-edge Check assertion remains.'}
+          $readme=Get-Content 'validation/v0.6.22-runtime-acceptance-v1.0.2/generated/README.txt' -Raw
+          if(-not$readme.Contains('v1.0.0 and v1.0.1 must not be run')){throw 'README does not retire prior acceptance builds.'}
+          if(-not$readme.Contains('not a v0.6.22/r11 candidate failure')){throw 'README does not preserve candidate-failure distinction.'}
+          Write-Host 'V0622_RUNTIME_ACCEPTANCE_V102_ADAPTIVE_OUTER_AUDIT_PASS'
+
+      - name: Reconstruct exact v0.6.22 r11 candidate and re-run safety suite
+        shell: powershell
+        run: |
+          python validation/v0.6.22/build_v0622.py --build
+          if($LASTEXITCODE -ne 0){throw 'v0.6.22 candidate rebuild failed.'}
+          $main='validation/v0.6.22/out/bin/spotify-control.ps1'
+          $addon='validation/v0.6.22/out/bin/addon-manager.ps1'
+          if((Get-Item $main).Length -ne 281586 -or (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'b5ba4dc98b10ea922ce30401b5cddf5a1ab01171366e09b3546ce3cc6fcd80fe'){throw 'v0.6.22 main identity mismatch.'}
+          if((Get-Item $addon).Length -ne 268670 -or (Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -ne '0ee8d30bf7c2fda9d0d8d112b7191b0d0439a1071d284d0cc04a87fe8937c7bc'){throw 'r11 addon identity mismatch.'}
+          python validation/v0.6.22/audit_r11.py
+          if($LASTEXITCODE -ne 0){throw 'r11 structural audit failed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/v0.6.22/test_r11_source_adapter.ps1
+          if($LASTEXITCODE -ne 0){throw 'r11 source-adapter fixtures failed.'}
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'r11 Addon Manager SelfTest failed.'}
+          Write-Host 'V0622_RUNTIME_ACCEPTANCE_V102_R11_SAFETY_PASS'
+
+      - name: Parse generated sources with Windows PowerShell 5.1 and run helper SelfTests
+        shell: powershell
+        run: |
+          $gen='validation/v0.6.22-runtime-acceptance-v1.0.2/generated'
+          foreach($name in @('RUN_RUNTIME_ACCEPTANCE.ps1','PRECHECK_RUNTIME_ACCEPTANCE.ps1','BOOTSTRAP_RUNNER.ps1')){
+            $p=Join-Path $gen $name
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0}:{1}: {2}" -f $name,$_.Extent.StartLineNumber,$_.Message)};throw "PowerShell 5.1 parse failed: $name"}
+          }
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $gen 'BOOTSTRAP_RUNNER.ps1') -SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Bootstrap manifest-shim runner SelfTest failed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $gen 'RUN_RUNTIME_ACCEPTANCE.ps1') -SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Runtime acceptance helper SelfTest failed.'}
+          Write-Host 'V0622_RUNTIME_ACCEPTANCE_V102_PS51_AND_HELPERS_PASS'
+
+      - name: Fetch exact immutable release-head manifest over GitHub HTTPS
+        shell: powershell
+        run: |
+          $release='9c1cabcaaed6c7a1465f5baea12d046a5d51c8dc'
+          $runner=(Resolve-Path 'validation/v0.6.22-runtime-acceptance-v1.0.2/generated/BOOTSTRAP_RUNNER.ps1').Path
+          $url="https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/$release/manifest.json"
+          $out=Join-Path $env:RUNNER_TEMP 'v102-release-head-manifest.json'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -FetchUrl $url -OutputPath $out -TimeoutSec 20
+          if($LASTEXITCODE -ne 0){throw 'Exact release-head manifest HTTPS fetch failed.'}
+          $remote=(Get-FileHash $out -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($remote -cne '9eea792cf0f81c09d3527f879b98c44dbbcbce1209c7dbc651d4298453f28e32' -or (Get-Item $out).Length -ne 38782){throw "Immutable release manifest identity drift: $remote/$((Get-Item $out).Length)"}
+          $m=Get-Content $out -Raw|ConvertFrom-Json
+          if($m.latest_version -ne '0.6.22' -or $m.source_commit -ne 'db4dd0e4357cbf03ea95dd8773c0be173b2c91fc' -or $m.payload_set_sha256 -ne 'cb396442ac874504a04d4acb0034d3cb9fa11acce290da18e639c2dbe8e5a091'){throw 'Fetched release-head manifest identity mismatch.'}
+          Write-Host "V0622_RUNTIME_ACCEPTANCE_V102_HTTPS_MANIFEST_PASS sha=$remote size=$((Get-Item $out).Length)"
+
+      - name: Download exact previously validated Bootstrap 1.0.6 carrier
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' > validated-v0614-repair-artifact.zip
+          python - <<'PY'
+          from pathlib import Path
+          from io import BytesIO
+          import hashlib,zipfile
+          outer=Path('validated-v0614-repair-artifact.zip').read_bytes()
+          with zipfile.ZipFile(BytesIO(outer)) as z:
+              assert z.testzip() is None
+              inner=z.read('SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip')
+          assert len(inner)==30856 and hashlib.sha256(inner).hexdigest()=='6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdfd267bd95f6c6ddcf06'
+          with zipfile.ZipFile(BytesIO(inner)) as z:
+              boot=z.read('bootstrap/spotify-control-self-updater.ps1')
+          assert len(boot)==42963 and hashlib.sha256(boot).hexdigest()=='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
+          print('V102_VALIDATED_BOOTSTRAP_V106_CARRIER_PASS')
+          PY
+
+      - name: Exact Bootstrap cycles from both supported starting baselines
+        shell: powershell
+        run: |
+          python validation/v0.6.22/bootstrap_prepare_fixture.py
+          if($LASTEXITCODE -ne 0){throw 'Exact v0.6.21 fixture preparation failed.'}
+          python validation/v0.6.20/build_v0620.py --build
+          if($LASTEXITCODE -ne 0){throw 'Exact v0.6.20 baseline rebuild failed.'}
+
+          $sourceFixture=(Resolve-Path 'ci-bootstrap-fixture-v0621-to-v0622').Path
+          $fixture21=Join-Path (Get-Location) 'ci-bootstrap-fixture-v102-from-v0621'
+          $fixture20=Join-Path (Get-Location) 'ci-bootstrap-fixture-v102-from-v0620'
+          Remove-Item -LiteralPath $fixture21,$fixture20 -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -LiteralPath $sourceFixture -Destination $fixture21 -Recurse -Force
+          Copy-Item -LiteralPath $sourceFixture -Destination $fixture20 -Recurse -Force
+
+          $v20out=(Resolve-Path 'validation/v0.6.20/out/bin').Path
+          Copy-Item -LiteralPath (Join-Path $v20out 'spotify-control.ps1') -Destination (Join-Path $fixture20 'LocalAppData\SpotifyControl\bin\spotify-control.ps1') -Force
+          Copy-Item -LiteralPath (Join-Path $v20out 'addon-manager.ps1') -Destination (Join-Path $fixture20 'LocalAppData\SpotifyControl\bin\addon-manager.ps1') -Force
+
+          $manifest=Join-Path $env:RUNNER_TEMP 'v102-release-head-manifest.json'
+          $runner=(Resolve-Path 'validation/v0.6.22-runtime-acceptance-v1.0.2/generated/BOOTSTRAP_RUNNER.ps1').Path
+          $mainUrl='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/main/manifest.json'
+          $bootstrapSha='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
+          $targetMainSha='b5ba4dc98b10ea922ce30401b5cddf5a1ab01171366e09b3546ce3cc6fcd80fe'
+          $targetAddonSha='0ee8d30bf7c2fda9d0d8d112b7191b0d0439a1071d284d0cc04a87fe8937c7bc'
+
+          function AssertId([string]$path,[int64]$size,[string]$sha,[string]$label){
+            if(-not(Test-Path -LiteralPath $path -PathType Leaf)){throw "$label missing: $path"}
+            if((Get-Item -LiteralPath $path).Length -ne $size -or (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $sha){throw "$label identity mismatch"}
+          }
+
+          function RunCycle([string]$fixture,[string]$baseVer,[int64]$baseMainSize,[string]$baseMainSha,[int64]$baseAddonSize,[string]$baseAddonSha,[int]$expectedEdges,[string]$label){
+            $env:LOCALAPPDATA=Join-Path $fixture 'LocalAppData'
+            $env:APPDATA=Join-Path $fixture 'Roaming'
+            New-Item -ItemType Directory -Force -Path $env:APPDATA|Out-Null
+            $root=Join-Path $env:LOCALAPPDATA 'SpotifyControl'
+            $bin=Join-Path $root 'bin'
+            $reports=Join-Path $root 'reports'
+            $bootExact=Join-Path $root 'bootstrap\spotify-control-self-updater.ps1'
+            AssertId $bootExact 42963 $bootstrapSha "$label exact Bootstrap"
+            AssertId (Join-Path $bin 'spotify-control.ps1') $baseMainSize $baseMainSha "$label baseline main"
+            AssertId (Join-Path $bin 'addon-manager.ps1') $baseAddonSize $baseAddonSha "$label baseline addon"
+            $manifestSha=(Get-FileHash $manifest -Algorithm SHA256).Hash.ToLowerInvariant()
+
+            function RunBoot([string]$a){
+              $rp=Join-Path $reports 'self-update-latest.json'
+              $shim=Join-Path $env:RUNNER_TEMP ("v102-$label-shim-$a.json")
+              Remove-Item -LiteralPath $rp,$shim -Force -ErrorAction SilentlyContinue
+              $out=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -BootstrapPath $bootExact -Action $a -ManifestPath $manifest -ExpectedManifestUrl $mainUrl -ShimEvidencePath $shim 2>&1
+              $ec=$LASTEXITCODE
+              $out|ForEach-Object{Write-Host $_}
+              if($ec -ne 0){throw "$label Bootstrap $a via manifest shim failed exit=$ec"}
+              if(-not(Test-Path $rp) -or -not(Test-Path $shim)){throw "$label Bootstrap $a report/shim evidence missing"}
+              $rep=Get-Content $rp -Raw|ConvertFrom-Json
+              $se=Get-Content $shim -Raw|ConvertFrom-Json
+              if(-not$rep.success -or $rep.action -ne $a -or $rep.bootstrap_version -ne '1.0.6' -or $rep.manifest_url -ne $mainUrl){throw "$label Bootstrap $a report invalid"}
+              if([int]$se.hits -ne 1 -or $se.action -ne $a -or $se.uri -ne $mainUrl -or $se.manifest_sha256 -ne $manifestSha -or $se.bootstrap_sha256 -ne $bootstrapSha){throw "$label Bootstrap $a shim evidence invalid"}
+              return $rep
+            }
+
+            $c=RunBoot 'Check'
+            if($c.installed_version -ne $baseVer -or [int]$c.result.edge_count -ne $expectedEdges -or $c.result.already_current){throw "$label initial Check evidence invalid"}
+            $rb=RunBoot 'RollbackTest'
+            if($rb.transaction_status -ne 'rolled-back'){throw "$label RollbackTest evidence invalid"}
+            AssertId (Join-Path $bin 'spotify-control.ps1') $baseMainSize $baseMainSha "$label rollback main"
+            AssertId (Join-Path $bin 'addon-manager.ps1') $baseAddonSize $baseAddonSha "$label rollback addon"
+            $u=RunBoot 'Update'
+            if($u.transaction_status -ne 'committed'){throw "$label Update evidence invalid"}
+            AssertId (Join-Path $bin 'spotify-control.ps1') 281586 $targetMainSha "$label updated main"
+            AssertId (Join-Path $bin 'addon-manager.ps1') 268670 $targetAddonSha "$label updated addon"
+            $pc=RunBoot 'Check'
+            if($pc.installed_version -ne '0.6.22' -or $pc.result.already_current -ne $true -or [int]$pc.result.edge_count -ne 0){throw "$label post-Check evidence invalid"}
+            AssertId $bootExact 42963 $bootstrapSha "$label final exact Bootstrap"
+            Write-Host "V0622_RUNTIME_ACCEPTANCE_V102_BOOTSTRAP_CYCLE_PASS label=$label edges=$expectedEdges"
+          }
+
+          RunCycle $fixture20 '0.6.20' 281585 'e9f0181756cfb84c505c30f54b6067e321f6d178d3a1936489714b8f4441ba18' 225044 '3a20fcd552b363ebc05e26854a8fe010ffe50e5c756ebd3d7fca54011e8a8b86' 2 'v0620-r9'
+          RunCycle $fixture21 '0.6.21' 281579 'f97c78c905b83e90e58a24035febcaccc27cb12113ae9cbc64acdc79f5853828' 250616 '7991b8eaa5a943957aebb9d3dd84d455ed6266430da442a672c05c145fe497a2' 1 'v0621-r10'
+          Write-Host 'V0622_RUNTIME_ACCEPTANCE_V102_DUAL_BASELINE_BOOTSTRAP_PASS'
+
+      - name: Prove repeated Windows package determinism and internal checksums
+        shell: powershell
+        run: |
+          $dir='validation/v0.6.22-runtime-acceptance-v1.0.2'
+          $first=(Get-Content $env:RUNNER_TEMP\acceptance-v102-first.txt -Raw).Trim().Split('|')
+          $firstHash=$first[0];$firstSize=[int64]$first[1]
+          Remove-Item -LiteralPath (Join-Path $dir 'generated'),(Join-Path $dir 'out') -Recurse -Force -ErrorAction SilentlyContinue
+          python "$dir/build_acceptance.py"
+          if($LASTEXITCODE -ne 0){throw 'Second acceptance build failed.'}
+          $zip=Join-Path $dir 'out/SpotifyControl-v0.6.22-r11-Runtime-Acceptance-v1.0.2.zip'
+          $secondHash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $secondSize=(Get-Item $zip).Length
+          if($secondHash -cne $firstHash -or $secondSize -ne $firstSize){throw "Package is not deterministic: first=$firstHash/$firstSize second=$secondHash/$secondSize"}
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z=[IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip))
+          try{
+            $bad=$null
+            foreach($entry in $z.Entries){if($entry.FullName -match '(^|/)\.\.(/|$)' -or $entry.FullName.StartsWith('/')){$bad=$entry.FullName;break}}
+            if($bad){throw "Unsafe ZIP path: $bad"}
+          }finally{$z.Dispose()}
+          Write-Host "V0622_RUNTIME_ACCEPTANCE_V102_DETERMINISM_PASS sha=$secondHash size=$secondSize"
+
+      - name: Upload adaptive runtime acceptance package
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-v0.6.22-r11-Runtime-Acceptance-v1.0.2
+          path: validation/v0.6.22-runtime-acceptance-v1.0.2/out/SpotifyControl-v0.6.22-r11-Runtime-Acceptance-v1.0.2.zip
+          if-no-files-found: error
+          compression-level: 0
