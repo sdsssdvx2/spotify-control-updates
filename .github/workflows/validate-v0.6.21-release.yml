@@ -91,7 +91,7 @@ jobs:
           $main=@($m.latest_files|Where-Object path -eq 'bin/spotify-control.ps1');$addon=@($m.latest_files|Where-Object path -eq 'bin/addon-manager.ps1');$agent=@($m.latest_files|Where-Object path -eq 'bin/spotify-control-agent.vbs')
           if($main.Count -ne 1 -or [int64]$main[0].size -ne 281579 -or $main[0].sha256 -ne 'f97c78c905b83e90e58a24035febcaccc27cb12113ae9cbc64acdc79f5853828'){throw 'v0.6.21 main identity mismatch.'}
           if($addon.Count -ne 1 -or [int64]$addon[0].size -ne 250616 -or $addon[0].sha256 -ne '7991b8eaa5a943957aebb9d3dd84d455ed6266430da442a672c05c145fe497a2'){throw 'Addon Manager r10 identity mismatch.'}
-          if($agent.Count -ne 1 -or [int64]$agent[0].size -ne 4855 -or $agent[0].sha256 -ne '2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278'){throw 'Resident agent changed.'}
+          if($agent.Count -ne 1 -or [int64]$agent[0].size -ne 4855 -or $agent[0].sha256 -ne '2a4f6f02103f9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278'){throw 'Resident agent changed.'}
           $edge=@($m.updates|Where-Object{$_.from_version -eq '0.6.20' -and $_.to_version -eq '0.6.21'})
           if($edge.Count -ne 1 -or @($edge[0].patches).Count -ne 2){throw 'Exact v0.6.20 -> v0.6.21 edge missing or ambiguous.'}
           $wrong=@($m.updates|Where-Object{$_.from_version -eq '0.6.20' -and $_.to_version -ne '0.6.21'})
@@ -136,30 +136,30 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Addon Manager r10 SelfTest failed.'}
           Write-Host 'V0621_ADDON_SELFTEST_PASS'
 
-      - name: Prove existing performance overlays unchanged
+      - name: Prove performance overlay tree unchanged and regressions green
         shell: powershell
         run: |
-          $apply='performance/overlay/apply-overlay.ps1';$loader='performance/overlay/lazy-custom-app-loader.js';$targets='performance/overlay/targets.json'
-          if((Get-Item $apply).Length -ne 16748 -or (Get-FileHash $apply -Algorithm SHA256).Hash.ToLowerInvariant() -ne '053a597e834aab959a588350160ce81046ceda66e2a2ac233eeff8af78fea544'){throw 'Overlay apply source changed.'}
-          if((Get-Item $loader).Length -ne 10600 -or (Get-FileHash $loader -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'c38af0f6266747f50d2a0c05e9a49d5ffb34135738715fab6321ff4ae79623d9'){throw 'Overlay loader source changed.'}
-          if((Get-Item $targets).Length -ne 1756 -or (Get-FileHash $targets -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'c255e53066abbd730467e0c1d92e81dd907e1ea2f245daf6f0d080d2239fea35'){throw 'Overlay target source changed.'}
-          node --check $loader
+          $base='29d6c52c6a79559e513b367ec57edcccebae5fd0'
+          git diff --quiet $base HEAD -- performance/overlay
+          if($LASTEXITCODE -ne 0){throw 'performance/overlay changed in v0.6.21 release.'}
+          node --check performance/overlay/lazy-custom-app-loader.js
           node performance/overlay/tests/test-loader.js
           if($LASTEXITCODE -ne 0){throw 'Overlay loader regression failed.'}
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/overlay/tests/test-overlay.ps1
           if($LASTEXITCODE -ne 0){throw 'Overlay PowerShell regression failed.'}
-          Write-Host 'V0621_OVERLAY_IDENTITY_AND_REGRESSION_PASS'
+          Write-Host 'V0621_OVERLAY_TREE_AND_REGRESSION_PASS'
 
-      - name: Prove Star Ratings production optimization unchanged
+      - name: Prove Star Ratings tree unchanged and regression green
         shell: powershell
         run: |
-          $engine='performance/star-ratings/apply-star-ratings-patch.ps1';$target='performance/star-ratings/target.json'
-          if((Get-Item $engine).Length -ne 12199 -or (Get-FileHash $engine -Algorithm SHA256).Hash.ToLowerInvariant() -ne '5c6945e0ec78845dad80062dd88521e841ebbaab57844f5c8abe1eca8c71932c'){throw 'Star Ratings engine identity changed.'}
-          $t=Get-Content $target -Raw|ConvertFrom-Json
+          $base='29d6c52c6a79559e513b367ec57edcccebae5fd0'
+          git diff --quiet $base HEAD -- performance/star-ratings
+          if($LASTEXITCODE -ne 0){throw 'performance/star-ratings changed in v0.6.21 release.'}
+          $t=Get-Content performance/star-ratings/target.json -Raw|ConvertFrom-Json
           if($t.target.expected_size -ne 43396 -or $t.target.expected_sha256 -ne '198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1' -or $t.target.transformed_sha256 -ne '6e0d1c84408294a619d91191eec83a6d10794ef31093d31ccf1f1bd39ea8c8a3' -or $t.target.source_revision -ne '33aa3d293f9fbb58d7a749a8cea10c318351e6c6'){throw 'Star Ratings target contract changed.'}
           $fixture=Join-Path $env:RUNNER_TEMP 'star-ratings-33aa3d293f9fbb58d7a749a8cea10c318351e6c6.js'
           Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/brimell/spicetify-star-ratings/33aa3d293f9fbb58d7a749a8cea10c318351e6c6/dist/star-ratings.js' -OutFile $fixture
           if((Get-Item $fixture).Length -ne 43396 -or (Get-FileHash $fixture -Algorithm SHA256).Hash.ToLowerInvariant() -ne '198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1'){throw 'Immutable Star Ratings fixture mismatch.'}
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/star-ratings/tests/test-star-ratings-patch.ps1 -FixturePath $fixture
           if($LASTEXITCODE -ne 0){throw 'Star Ratings transactional regression failed.'}
-          Write-Host 'V0621_STAR_IDENTITY_AND_REGRESSION_PASS'
+          Write-Host 'V0621_STAR_TREE_AND_REGRESSION_PASS'
