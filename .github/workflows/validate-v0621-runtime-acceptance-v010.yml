@@ -49,20 +49,24 @@ jobs:
           if((git merge-base $env:PROD_BASE $env:RELEASE_HEAD).Trim() -ne $env:PROD_BASE){throw 'Pinned release head is not based on exact production main.'}
           $changed=@(git diff --name-only "$env:PROD_BASE...HEAD")
           $allowed=@(
-            'validation/v0.6.21-runtime-acceptance-v0.1.0/runtime-template.gz.b64',
             'validation/v0.6.21-runtime-acceptance-v0.1.0/build_acceptance.py',
+            'validation/v0.6.21-runtime-acceptance-v0.1.0/assemble_and_build.py',
+            'validation/v0.6.21-runtime-acceptance-v0.1.0/runtime-template.part-000.b64',
+            'validation/v0.6.21-runtime-acceptance-v0.1.0/runtime-template.part-001.b64',
+            'validation/v0.6.21-runtime-acceptance-v0.1.0/runtime-template.part-002.b64',
+            'validation/v0.6.21-runtime-acceptance-v0.1.0/runtime-template.part-003.b64',
             '.github/workflows/validate-v0621-runtime-acceptance-v010.yml'
           )
           $bad=@($changed|Where-Object{$_ -notin $allowed})
           if($bad.Count){throw "Out-of-scope files: $($bad -join ', ')"}
-          if($changed.Count -ne 3){throw "Expected exactly three validation-only files; got $($changed.Count): $($changed -join ', ')"}
+          if($changed.Count -ne 7){throw "Expected exactly seven validation-only files; got $($changed.Count): $($changed -join ', ')"}
           Write-Host "V0621_ACCEPTANCE_SCOPE_PASS head=$actual release=$env:RELEASE_HEAD"
 
-      - name: Parse builder and prove pinned release contract
+      - name: Parse builders and prove pinned release contract
         shell: powershell
         run: |
-          python -m py_compile validation/v0.6.21-runtime-acceptance-v0.1.0/build_acceptance.py
-          if($LASTEXITCODE -ne 0){throw 'Acceptance builder failed Python compile.'}
+          python -m py_compile validation/v0.6.21-runtime-acceptance-v0.1.0/build_acceptance.py validation/v0.6.21-runtime-acceptance-v0.1.0/assemble_and_build.py
+          if($LASTEXITCODE -ne 0){throw 'Acceptance builders failed Python compile.'}
           $py=@'
           import hashlib,json,subprocess
           h='5eac4f39920b84f22e2a5ee07422f6080bfc7ef7'
@@ -102,14 +106,13 @@ jobs:
           }
           Write-Host 'V0621_ACCEPTANCE_PROVENANCE_ARTIFACTS_PASS'
 
-      - name: Build package twice deterministically
+      - name: Build package twice deterministically from exact chunks
         shell: powershell
         run: |
-          $builder='validation/v0.6.21-runtime-acceptance-v0.1.0/build_acceptance.py'
-          $template='validation/v0.6.21-runtime-acceptance-v0.1.0/runtime-template.gz.b64'
-          python $builder --stage14-artifact stage14-artifact.zip --bootstrap-artifact bootstrap-carrier.zip --release-manifest release-manifest.json --runtime-template $template --out-dir build-one
+          $builder='validation/v0.6.21-runtime-acceptance-v0.1.0/assemble_and_build.py'
+          python $builder --stage14-artifact stage14-artifact.zip --bootstrap-artifact bootstrap-carrier.zip --release-manifest release-manifest.json --out-dir build-one
           if($LASTEXITCODE -ne 0){throw 'First acceptance build failed.'}
-          python $builder --stage14-artifact stage14-artifact.zip --bootstrap-artifact bootstrap-carrier.zip --release-manifest release-manifest.json --runtime-template $template --out-dir build-two
+          python $builder --stage14-artifact stage14-artifact.zip --bootstrap-artifact bootstrap-carrier.zip --release-manifest release-manifest.json --out-dir build-two
           if($LASTEXITCODE -ne 0){throw 'Second acceptance build failed.'}
           $a='build-one/SpotifyControl-v0.6.21-Runtime-Acceptance-v0.1.0.zip'
           $b='build-two/SpotifyControl-v0.6.21-Runtime-Acceptance-v0.1.0.zip'
