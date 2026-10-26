@@ -1,0 +1,164 @@
+name: Validate Addon Registry r10 v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/addon-registry-r10-v0.1.0
+    paths:
+      - 'validation/addon-registry-r10-v0.1.0/**'
+      - '.github/workflows/validate-addon-registry-r10-v010.yml'
+  pull_request:
+    paths:
+      - 'validation/addon-registry-r10-v0.1.0/**'
+      - '.github/workflows/validate-addon-registry-r10-v010.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove validation-only exact-head scope
+        shell: powershell
+        run: |
+          $base='29d6c52c6a79559e513b367ec57edcccebae5fd0'
+          $actual=(git rev-parse HEAD).Trim()
+          $eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -ne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Wrong production merge base.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allowed=@(
+            'validation/addon-registry-r10-v0.1.0/addon_policy_registry.ps1.inc',
+            'validation/addon-registry-r10-v0.1.0/addon_transaction_registry_guard.ps1.inc',
+            'validation/addon-registry-r10-v0.1.0/build_r10.py',
+            'validation/addon-registry-r10-v0.1.0/build_r10_final.py',
+            '.github/workflows/validate-addon-registry-r10-v010.yml'
+          )
+          $bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Out-of-scope files: $($bad -join ', ')"}
+          if($changed.Count -ne 5){throw "Expected exactly 5 validation-only files; got $($changed.Count): $($changed -join ', ')"}
+          Write-Host "ADDON_REGISTRY_R10_SCOPE_PASS head=$actual"
+
+      - name: Parse builders and registry sources
+        shell: powershell
+        run: |
+          python -m py_compile validation/addon-registry-r10-v0.1.0/build_r10.py validation/addon-registry-r10-v0.1.0/build_r10_final.py
+          if($LASTEXITCODE -ne 0){throw 'r10 Python builders failed compile.'}
+          foreach($file in @('validation/addon-registry-r10-v0.1.0/addon_policy_registry.ps1.inc','validation/addon-registry-r10-v0.1.0/addon_transaction_registry_guard.ps1.inc')){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0}:{1}: {2}" -f $file,$_.Extent.StartLineNumber,$_.Message)};throw "PowerShell 5.1 parse failed: $file"}
+          }
+          Write-Host 'ADDON_REGISTRY_R10_SOURCE_PARSE_PASS'
+
+      - name: Build exact r10 candidate deterministically
+        shell: powershell
+        run: |
+          python validation/addon-registry-r10-v0.1.0/build_r10_final.py
+          if($LASTEXITCODE -ne 0){throw 'First r10 build failed.'}
+          $first=(Get-FileHash validation/addon-registry-r10-v0.1.0/out/addon-manager.ps1 -Algorithm SHA256).Hash.ToLowerInvariant()
+          $firstSize=(Get-Item validation/addon-registry-r10-v0.1.0/out/addon-manager.ps1).Length
+          Copy-Item validation/addon-registry-r10-v0.1.0/candidate-metadata.json $env:RUNNER_TEMP\r10-meta-first.json
+          python validation/addon-registry-r10-v0.1.0/build_r10_final.py
+          if($LASTEXITCODE -ne 0){throw 'Second r10 build failed.'}
+          $second=(Get-FileHash validation/addon-registry-r10-v0.1.0/out/addon-manager.ps1 -Algorithm SHA256).Hash.ToLowerInvariant()
+          $secondSize=(Get-Item validation/addon-registry-r10-v0.1.0/out/addon-manager.ps1).Length
+          if($first -cne $second -or $firstSize -ne $secondSize){throw "r10 build is nondeterministic: $first/$firstSize != $second/$secondSize"}
+          if((Get-FileHash $env:RUNNER_TEMP\r10-meta-first.json -Algorithm SHA256).Hash -ne (Get-FileHash validation/addon-registry-r10-v0.1.0/candidate-metadata.json -Algorithm SHA256).Hash){throw 'r10 metadata is nondeterministic.'}
+          Write-Host "ADDON_REGISTRY_R10_DETERMINISTIC_PASS size=$secondSize sha=$second"
+
+      - name: Verify exact base and registry authority contract
+        shell: powershell
+        run: |
+          $m=Get-Content validation/addon-registry-r10-v0.1.0/candidate-metadata.json -Raw|ConvertFrom-Json
+          if($m.production_base -ne '29d6c52c6a79559e513b367ec57edcccebae5fd0'){throw 'r10 production base drift.'}
+          if([int64]$m.base_main.size -ne 281585 -or $m.base_main.sha256 -ne 'e9f0181756cfb84c505c30f54b6067e321f6d178d3a1936489714b8f4441ba18'){throw 'r10 base main identity mismatch.'}
+          if([int64]$m.base_addon.size -ne 225044 -or $m.base_addon.sha256 -ne '3a20fcd552b363ebc05e26854a8fe010ffe50e5c756ebd3d7fca54011e8a8b86'){throw 'r10 base addon identity mismatch.'}
+          $candidate='validation/addon-registry-r10-v0.1.0/out/addon-manager.ps1'
+          $text=Get-Content $candidate -Raw
+          if(([regex]::Matches($text,'\$Version = "0\.6\.5-r10"')).Count -ne 1){throw 'r10 version marker missing/ambiguous.'}
+          foreach($required in @(
+            '# BEGIN SPOTIFY CONTROL ADDON POLICY REGISTRY v1 / r10',
+            '# BEGIN SPOTIFY CONTROL ADDON TRANSACTION REGISTRY GUARD v1 / r10',
+            "data_policy='protect-ratings-tags-notes'",
+            "data_policy='never-disable-or-optimize'",
+            "name='splitify'; kind='custom-app'; source=`$null; inventory_policy='unknown-source'; mutation_mode='deny'",
+            "name='star-ratings'; kind='marketplace-extension'; source='brimell/spicetify-star-ratings'; inventory_policy='source-watch-only'; mutation_mode='deny'",
+            'Get-AddonMutationAuthorization -Item $item',
+            'registry_schema=1; registry_sha256=$registrySha',
+            'Assert-AddonTransactionRegistryAuthorization -Tx $tx',
+            'legacy-schema2-no-registry',
+            'registry-v1-authorized'
+          )){if($text.IndexOf($required,[StringComparison]::Ordinal) -lt 0){throw "r10 required registry contract missing: $required"}}
+          $updateStart=$text.IndexOf('function Update-AutoApps {',[StringComparison]::Ordinal);$next=$text.IndexOf("`nfunction ",$updateStart+1,[StringComparison]::Ordinal);$update=$text.Substring($updateStart,$next-$updateStart)
+          foreach($forbidden in @('$item.source -eq "Pithaya/spicetify-apps-dist"','$item.source -eq "ivLis-Studio/ivLyrics"')){if($update.IndexOf($forbidden,[StringComparison]::Ordinal) -ge 0){throw "Hard-coded source mutation branch remains: $forbidden"}}
+          $rollbackStart=$text.IndexOf('function Rollback-LastTransaction {',[StringComparison]::Ordinal);$rollbackEnd=$text.IndexOf("`nfunction ",$rollbackStart+1,[StringComparison]::Ordinal);$rollback=$text.Substring($rollbackStart,$rollbackEnd-$rollbackStart)
+          foreach($forbidden in @('Assert-AddonTransactionRegistryAuthorization','Get-AddonPolicyRegistryFingerprint','registry_sha256')){if($rollback.IndexOf($forbidden,[StringComparison]::Ordinal) -ge 0){throw "Rollback became registry-dependent: $forbidden"}}
+          $auto=@([regex]::Matches($text,"mutation_mode='auto'")|ForEach-Object{$_.Value})
+          if($auto.Count -ne 4){throw "Registry auto-authority count changed: $($auto.Count)"}
+          Write-Host ("ADDON_REGISTRY_R10_POLICY_PASS candidate={0}/{1}" -f $m.candidate_addon.size,$m.candidate_addon.sha256)
+
+      - name: PowerShell 5.1 parse final candidate
+        shell: powershell
+        run: |
+          $file='validation/addon-registry-r10-v0.1.0/out/addon-manager.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error ("line {0}: {1}" -f $_.Extent.StartLineNumber,$_.Message)};throw 'r10 candidate failed PowerShell 5.1 parse.'}
+          Write-Host 'ADDON_REGISTRY_R10_POWERSHELL51_PASS'
+
+      - name: Candidate Addon Manager read-only SelfTest
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/addon-registry-r10-v0.1.0/out/addon-manager.ps1 -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Addon Manager r10 SelfTest failed.'}
+          Write-Host 'ADDON_REGISTRY_R10_SELFTEST_PASS'
+
+      - name: Existing performance overlay regressions remain green
+        shell: powershell
+        run: |
+          node --check performance/overlay/lazy-custom-app-loader.js
+          node performance/overlay/tests/test-loader.js
+          if($LASTEXITCODE -ne 0){throw 'Overlay loader regression failed under r10 candidate.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/overlay/tests/test-overlay.ps1
+          if($LASTEXITCODE -ne 0){throw 'Overlay PowerShell regression failed under r10 candidate.'}
+          Write-Host 'ADDON_REGISTRY_R10_OVERLAY_REGRESSION_PASS'
+
+      - name: Existing Star Ratings transactional regression remains green
+        shell: powershell
+        run: |
+          $fixture=Join-Path $env:RUNNER_TEMP 'star-ratings-33aa3d293f9fbb58d7a749a8cea10c318351e6c6.js'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/brimell/spicetify-star-ratings/33aa3d293f9fbb58d7a749a8cea10c318351e6c6/dist/star-ratings.js' -OutFile $fixture
+          if((Get-Item $fixture).Length -ne 43396 -or (Get-FileHash $fixture -Algorithm SHA256).Hash.ToLowerInvariant() -ne '198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1'){throw 'Immutable Star Ratings fixture mismatch.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/star-ratings/tests/test-star-ratings-patch.ps1 -FixturePath $fixture
+          if($LASTEXITCODE -ne 0){throw 'Star Ratings regression failed under r10 candidate.'}
+          Write-Host 'ADDON_REGISTRY_R10_STAR_REGRESSION_PASS'
+
+      - name: Final candidate artifact contract
+        shell: powershell
+        run: |
+          $m=Get-Content validation/addon-registry-r10-v0.1.0/candidate-metadata.json -Raw|ConvertFrom-Json
+          $p='validation/addon-registry-r10-v0.1.0/out/addon-manager.ps1'
+          if((Get-Item $p).Length -ne [int64]$m.candidate_addon.size){throw 'r10 final candidate size metadata mismatch.'}
+          if((Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$m.candidate_addon.sha256){throw 'r10 final candidate SHA metadata mismatch.'}
+          if([string]$m.wrapper.sha256 -notmatch '^[0-9a-f]{64}$' -or [string]$m.transaction_guard.sha256 -notmatch '^[0-9a-f]{64}$'){throw 'r10 embedded source identities invalid.'}
+          Write-Host 'ADDON_REGISTRY_R10_FINAL_ARTIFACT_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-Addon-Registry-r10-v0.1.0
+          path: |
+            validation/addon-registry-r10-v0.1.0/out/addon-manager.ps1
+            validation/addon-registry-r10-v0.1.0/candidate-metadata.json
+            validation/addon-registry-r10-v0.1.0/addon_policy_registry.ps1.inc
+            validation/addon-registry-r10-v0.1.0/addon_transaction_registry_guard.ps1.inc
+          if-no-files-found: error
+          retention-days: 14
