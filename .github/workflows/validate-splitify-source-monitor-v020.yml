@@ -62,7 +62,7 @@ jobs:
         run: |
           $main='validation/splitify-source-monitor-v0.2.0/out/bin/spotify-control.ps1'
           $addon='validation/splitify-source-monitor-v0.2.0/out/bin/addon-manager.ps1'
-          foreach($file in @($main,$addon)){
+          foreach($file in @($main,$addon,'validation/splitify-source-monitor-v0.2.0/test_prior_r11_transaction.ps1')){
             $tokens=$null;$errors=$null
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
             if($errors.Count){$errors|ForEach-Object{Write-Error ("{0}:{1}: {2}" -f $file,$_.Extent.StartLineNumber,$_.Message)};throw "PowerShell 5.1 parse failed: $file"}
@@ -71,6 +71,12 @@ jobs:
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
           if($LASTEXITCODE -ne 0){throw 'r12 candidate Addon Manager SelfTest failed.'}
           Write-Host 'SPLITIFY_R12_PS51_AND_SELFTEST_PASS'
+
+      - name: Execute exact r11 source-adapter transaction compatibility fixture
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/splitify-source-monitor-v0.2.0/test_prior_r11_transaction.ps1
+          if($LASTEXITCODE -ne 0){throw 'Exact r11 source-adapter transaction compatibility fixture failed.'}
 
       - name: Prove Splitify source monitor is non-mutating and fail-closed
         shell: powershell
@@ -105,7 +111,7 @@ jobs:
           foreach($must in @('registry-v1-compatible-prior','05c40a5339fe59b001ca0f4c4929643fd59e33a3002bae7067425845c85e2f6e','current-source-adapter-compatible-prior-registry')){if($addon.IndexOf($must,[StringComparison]::Ordinal) -lt 0){throw "Registry transition compatibility missing: $must"}}
           $report=Get-Content validation/splitify-source-monitor-v0.2.0/candidate-report.json -Raw|ConvertFrom-Json
           if([string]$report.prior_registry_compatibility -cne '05c40a5339fe59b001ca0f4c4929643fd59e33a3002bae7067425845c85e2f6e'){throw 'Prior registry compatibility pin drift.'}
-          # SelfTest above proves automatic authority remains exactly the four existing names.
+          # SelfTest plus the explicit r11 transaction fixture above prove automatic authority remains unchanged and exact historical compatibility is bounded.
           Write-Host 'SPLITIFY_R12_REGISTRY_TRANSITION_PASS'
 
       - name: Deterministic second build and no tracked production mutation
