@@ -48,4 +48,5 @@ $cover=Get-AddonPolicyRegistryEntry -Name 'sc-cover-ambience.js' -Kind 'extensio
 Assert-True (-not [bool]$coverPlan.mutation_authorized) 'SC Cover Ambience mutation authority'
 Assert-Eq $cover.data_policy 'never-disable-or-optimize' 'SC Cover Ambience policy'
 
+# Final marker doubles as the exact-head push trigger after the workflow exists on this branch.
 Write-Host "R11_SOURCE_ADAPTER_FIXTURES_PASS adapter_sha256=$fingerprint registry_sha256=$(Get-AddonPolicyRegistryFingerprint)"
