@@ -1,0 +1,157 @@
+name: Prepare Spotify Control v0.6.23 Release Candidate
+
+on:
+  push:
+    branches:
+      - release/v0.6.23-splitify-source-monitor-r12
+    paths:
+      - 'validation/v0.6.23/**'
+      - '.github/workflows/prepare-v0.6.23-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prepare-windows:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: release/v0.6.23-splitify-source-monitor-r12
+
+      - name: Assert exact stable base and pre-transport release scope
+        shell: powershell
+        run: |
+          $base='0fd4a8aa5b8f8e97cf1dc9a1e8d3b7bb9b4d1f2f'
+          $actual=(git rev-parse HEAD).Trim()
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'v0.6.23 release branch is not based on exact stable v0.6.22 main.'}
+          $m=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($m.latest_version -ne '0.6.22'){throw "Expected v0.6.22 stable base, got $($m.latest_version)"}
+          $main=@($m.latest_files|Where-Object path -eq 'bin/spotify-control.ps1');$addon=@($m.latest_files|Where-Object path -eq 'bin/addon-manager.ps1');$agent=@($m.latest_files|Where-Object path -eq 'bin/spotify-control-agent.vbs')
+          if($main.Count -ne 1 -or [int64]$main[0].size -ne 281586 -or $main[0].sha256 -ne 'b5ba4dc98b10ea922ce30401b5cddf5a1ab01171366e09b3546ce3cc6fcd80fe'){throw 'v0.6.22 main base mismatch.'}
+          if($addon.Count -ne 1 -or [int64]$addon[0].size -ne 268670 -or $addon[0].sha256 -ne '0ee8d30bf7c2fda9d0d8d112b7191b0d0439a1071d284d0cc04a87fe8937c7bc'){throw 'r11 base mismatch.'}
+          if($agent.Count -ne 1 -or [int64]$agent[0].size -ne 4855 -or $agent[0].sha256 -ne '2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278'){throw 'Resident agent base mismatch.'}
+          if($m.bootstrap.version -ne '1.0.6' -or $m.bootstrap.sha256 -ne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' -or [int64]$m.bootstrap.size -ne 42963){throw 'Bootstrap 1.0.6 trust pin changed.'}
+          if($m.payload_set_sha256 -ne 'cb396442ac874504a04d4acb0034d3cb9fa11acce290da18e639c2dbe8e5a091'){throw 'Stable v0.6.22 payload set mismatch.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          $bad=@($changed|Where-Object{
+            $_ -notlike 'validation/v0.6.23/*' -and
+            $_ -ne '.github/workflows/prepare-v0.6.23-release.yml'
+          })
+          if($bad.Count){throw "Unexpected pre-transport release files: $($bad -join ', ')"}
+          if($changed -contains 'manifest.json' -or @($changed|Where-Object{$_ -like 'packages/v0.6.23/*'}).Count){throw 'Published transport exists before prepare stage.'}
+          Write-Host "V0623_BASE_AND_SCOPE_PASS head=$actual files=$($changed.Count)"
+
+      - name: Verify validation provenance is closed unmerged
+        shell: powershell
+        run: |
+          $headers=@{'User-Agent'='spotify-control-v0623-release-validation'}
+          $pr=Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri 'https://api.github.com/repos/sdsssdvx2/spotify-control-updates/pulls/71'
+          if([string]$pr.state -cne 'closed' -or [bool]$pr.merged){throw 'Validation PR #71 must be closed unmerged.'}
+          if([string]$pr.head.sha -cne '0f4f374bf491c0460ff3d51d06676a808117cc2d'){throw "Validation PR #71 head drift: $($pr.head.sha)"}
+          if([string]$pr.base.sha -cne '0fd4a8aa5b8f8e97cf1dc9a1e8d3b7bb9b4d1f2f'){throw "Validation PR #71 base drift: $($pr.base.sha)"}
+          Write-Host 'V0623_VALIDATION_PROVENANCE_PASS'
+
+      - name: Parse release sources
+        shell: powershell
+        run: |
+          python -m py_compile validation/v0.6.23/build_v0623.py validation/v0.6.23/release_transport.py
+          if($LASTEXITCODE -ne 0){throw 'v0.6.23 Python source failed compile.'}
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'validation/v0.6.23/test_prior_r11_transaction.ps1'),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'r11 transaction compatibility fixture failed PowerShell parse.'}
+          Write-Host 'V0623_RELEASE_SOURCE_PARSE_PASS'
+
+      - name: Rebuild exact independently validated r12 candidate
+        shell: powershell
+        run: |
+          python validation/v0.6.23/build_v0623.py --build
+          if($LASTEXITCODE -ne 0){throw 'v0.6.23 candidate build failed.'}
+          $main='validation/v0.6.23/out/bin/spotify-control.ps1';$addon='validation/v0.6.23/out/bin/addon-manager.ps1'
+          if((Get-Item $main).Length -ne 281588 -or (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'bc9861bdd64ff8af94f68f0f065739f82b235271dcd18ad6325b819205528a08'){throw 'Validated v0.6.23 main identity mismatch.'}
+          if((Get-Item $addon).Length -ne 272494 -or (Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -ne '23ad2210aea4352f535d1cf0b3ebb827a82200dcba2b70bf1ebae96499d82687'){throw 'Validated r12 identity mismatch.'}
+          foreach($file in @($main,$addon)){$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw "Generated candidate parse failed: $file"}}
+          $r=Get-Content validation/v0.6.23/candidate-validation.json -Raw|ConvertFrom-Json
+          if($r.registry_fingerprint -ne '0f05406d7152de1d975f888cb8270be8249115211ba9f41e0157342cd42efbd8'){throw 'r12 registry fingerprint mismatch.'}
+          if($r.adapter_fingerprint -ne 'c0611a7b96f6ff09d1e235119efce2f2def6eb6d0a4e8e93e276cfa622c3c42d'){throw 'r12 adapter fingerprint mismatch.'}
+          if(($r.auto_authority -join '|') -ne 'better-local-files|eternal-jukebox|ivLyrics|playlist-maker'){throw 'Automatic mutation authority drift.'}
+          if($r.authority_expanded -ne $false -or $r.new_auto_install_authority -ne $false){throw 'r12 expanded mutation/install authority.'}
+          Write-Host 'V0623_EXACT_VALIDATED_CANDIDATE_PASS'
+
+      - name: Run full candidate safety and r11 transaction compatibility
+        shell: powershell
+        run: |
+          $addon='validation/v0.6.23/out/bin/addon-manager.ps1'
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'r12 candidate Addon Manager SelfTest failed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/v0.6.23/test_prior_r11_transaction.ps1
+          if($LASTEXITCODE -ne 0){throw 'Exact r11 source-adapter transaction compatibility failed.'}
+          $raw=Get-Content $addon -Raw
+          $i=$raw.IndexOf('function Get-AddonInventory {',[StringComparison]::Ordinal);$n=$raw.IndexOf("`nfunction ",$i+1,[StringComparison]::Ordinal);if($n -lt 0){$n=$raw.Length};$inv=$raw.Substring($i,$n-$i)
+          foreach($must in @('source="alexander-rebello/splitify"','policy="monitor-only"','monitor-local-release-unproven','automatic update/install remains denied')){if($inv.IndexOf($must,[StringComparison]::Ordinal) -lt 0){throw "Splitify monitor contract missing: $must"}}
+          foreach($bad in @('Expand-Archive','Remove-Item','Move-Item','Copy-Item','Start-Process','spicetify apply','spicetify backup','spicetify restore')){if($inv.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Splitify monitor gained side effect: $bad"}}
+          $u=$raw.IndexOf('function Update-AutoApps {',[StringComparison]::Ordinal);$un=$raw.IndexOf("`nfunction ",$u+1,[StringComparison]::Ordinal);$update=$raw.Substring($u,$un-$u);if($update.IndexOf('splitify',[StringComparison]::OrdinalIgnoreCase) -ge 0){throw 'Splitify gained a direct mutation path.'}
+          $rb=$raw.IndexOf('function Rollback-LastTransaction {',[StringComparison]::Ordinal);$rbn=$raw.IndexOf("`nfunction ",$rb+1,[StringComparison]::Ordinal);if($rbn -lt 0){$rbn=$raw.Length};$rollback=$raw.Substring($rb,$rbn-$rb);if($rollback.IndexOf('Assert-AddonSourceAdapterTransactionAuthorization',[StringComparison]::Ordinal) -ge 0){throw 'RollbackLast became source-adapter dependent.'}
+          Write-Host 'V0623_R12_SAFETY_PASS'
+
+      - name: Verify pinned Splitify upstream release evidence
+        shell: powershell
+        run: |
+          $headers=@{'User-Agent'='spotify-control-v0623-release-validation'}
+          $repo=Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri 'https://api.github.com/repos/alexander-rebello/splitify'
+          $release=Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri 'https://api.github.com/repos/alexander-rebello/splitify/releases/tags/v1.1.0'
+          if([string]$repo.full_name -cne 'alexander-rebello/splitify' -or [bool]$repo.archived -or [bool]$repo.disabled){throw 'Splitify repository identity/state mismatch.'}
+          if([bool]$release.draft -or [bool]$release.prerelease -or [string]$release.tag_name -cne 'v1.1.0'){throw 'Pinned Splitify release contract mismatch.'}
+          $asset=@($release.assets|Where-Object{[string]$_.name -ceq 'splitify.zip'})
+          if($asset.Count -ne 1 -or [int64]$asset[0].size -ne 7822 -or [string]$asset[0].digest -cne 'sha256:5de51a885815f78067b8d6f7f3ebe40c93b5a7c7e3c8c841fcd26147a13010ca'){throw 'Pinned Splitify release asset identity mismatch.'}
+          Write-Host 'V0623_SPLITIFY_UPSTREAM_PIN_PASS'
+
+      - name: Build deterministic v0.6.23 transports
+        shell: powershell
+        run: |
+          python validation/v0.6.23/release_transport.py --build-packages
+          if($LASTEXITCODE -ne 0){throw 'v0.6.23 transport build failed.'}
+          if(-not(Test-Path packages/v0.6.23/main-v0622-to-v0623/chunk-000.txt)){throw 'Main transport missing.'}
+          if(-not(Test-Path packages/v0.6.23/addon-v065r11-to-v065r12/chunk-000.txt)){throw 'Addon transport missing.'}
+          Write-Host 'V0623_TRANSPORT_BUILD_PASS'
+
+      - name: Commit immutable v0.6.23 transport source
+        id: source
+        shell: powershell
+        run: |
+          if(git ls-files 'validation/v0.6.23/out/**'){throw 'Raw generated v0.6.23 candidates must not be tracked.'}
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add packages/v0.6.23 validation/v0.6.23/candidate-validation.json validation/v0.6.23/release-metadata.json
+          if(git diff --cached --quiet){throw 'Expected new immutable v0.6.23 transport/evidence files.'}
+          git commit -m 'Build v0.6.23 Splitify monitor r12 transports'
+          $source=(git rev-parse HEAD).Trim()
+          if($source -notmatch '^[0-9a-f]{40}$'){throw "Invalid transport source commit: $source"}
+          "source_commit=$source"|Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "V0623_TRANSPORT_SOURCE=$source"
+
+      - name: Publish and validate v0.6.23 manifest
+        shell: powershell
+        run: |
+          $source='${{ steps.source.outputs.source_commit }}'
+          python validation/v0.6.23/release_transport.py --write-manifest --source-commit $source
+          if($LASTEXITCODE -ne 0){throw 'v0.6.23 manifest write failed.'}
+          python validation/v0.6.23/release_transport.py --validate-published
+          if($LASTEXITCODE -ne 0){throw 'v0.6.23 published transport validation failed.'}
+          $m=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($m.latest_version -ne '0.6.23'){throw 'Manifest latest version mismatch.'}
+          if($m.source_commit -ne $source){throw 'Manifest source commit mismatch.'}
+          Write-Host "V0623_PUBLISHED_MANIFEST_PASS payload=$($m.payload_set_sha256)"
+
+      - name: Commit and push prepared release branch
+        shell: powershell
+        run: |
+          git add manifest.json
+          if(git diff --cached --quiet){throw 'Expected v0.6.23 manifest publication change.'}
+          git commit -m 'Publish Spotify Control v0.6.23 Splitify monitor r12'
+          git push origin HEAD:release/v0.6.23-splitify-source-monitor-r12
+          Write-Host "V0623_PREPARE_AND_PUSH_PASS head=$((git rev-parse HEAD).Trim())"
