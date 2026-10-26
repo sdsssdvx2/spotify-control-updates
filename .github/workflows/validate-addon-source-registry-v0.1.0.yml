@@ -1,0 +1,131 @@
+name: Validate Addon Source Registry v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/addon-source-registry-v0.1.0
+    paths:
+      - 'validation/addon-source-registry-v0.1.0/**'
+      - '.github/workflows/validate-addon-source-registry-v0.1.0.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/addon-source-registry-v0.1.0/**'
+      - '.github/workflows/validate-addon-source-registry-v0.1.0.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove validation-only exact scope
+        shell: powershell
+        run: |
+          $base='dacd4faf6a632b6b33571acf16ed4b6e73a865d7'
+          $actual=(git rev-parse HEAD).Trim()
+          $eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -ne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Validation branch is not based on exact current production main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allowed=@(
+            '.github/workflows/validate-addon-source-registry-v0.1.0.yml',
+            'validation/addon-source-registry-v0.1.0/README.md',
+            'validation/addon-source-registry-v0.1.0/audit_r10.py',
+            'validation/addon-source-registry-v0.1.0/source_adapter_engine.ps1',
+            'validation/addon-source-registry-v0.1.0/test_source_adapter_engine.ps1'
+          )
+          $bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Unexpected production/scope changes: $($bad -join ', ')"}
+          if($changed.Count -ne $allowed.Count){throw "Expected exactly $($allowed.Count) validation files, got $($changed.Count): $($changed -join ', ')"}
+          foreach($path in $allowed){if($path -notin $changed){throw "Missing required validation file: $path"}}
+          Write-Host "ADDON_SOURCE_REGISTRY_SCOPE_PASS head=$actual files=$($changed.Count)"
+
+      - name: Parse validation sources on Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          python -m py_compile validation/addon-source-registry-v0.1.0/audit_r10.py
+          if($LASTEXITCODE -ne 0){throw 'Python audit source failed compile.'}
+          foreach($file in @(
+            'validation/addon-source-registry-v0.1.0/source_adapter_engine.ps1',
+            'validation/addon-source-registry-v0.1.0/test_source_adapter_engine.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0}:{1}: {2}" -f $file,$_.Extent.StartLineNumber,$_.Message)};throw "PowerShell 5.1 parser failed: $file"}
+          }
+          Write-Host 'ADDON_SOURCE_REGISTRY_PS51_PARSE_PASS'
+
+      - name: Rebuild exact production v0.6.21 r10 candidate
+        shell: powershell
+        run: |
+          python validation/v0.6.21/build_v0621.py --build
+          if($LASTEXITCODE -ne 0){throw 'Exact v0.6.21/r10 reconstruction failed.'}
+          git diff --exit-code -- packages/v0.6.21 validation/v0.6.21/candidate-metadata.json
+          if($LASTEXITCODE -ne 0){throw 'Current committed v0.6.21 transport differs from deterministic rebuild.'}
+          $addon='validation/v0.6.21/out/bin/addon-manager.ps1'
+          if((Get-Item $addon).Length -ne 250616){throw 'Rebuilt r10 size mismatch.'}
+          if((Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -ne '7991b8eaa5a943957aebb9d3dd84d455ed6266430da442a672c05c145fe497a2'){throw 'Rebuilt r10 SHA mismatch.'}
+          Write-Host 'ADDON_SOURCE_REGISTRY_EXACT_R10_REBUILD_PASS'
+
+      - name: Audit exact r10 authority boundary and side-effect-free generic layer
+        shell: powershell
+        run: |
+          python validation/addon-source-registry-v0.1.0/audit_r10.py --report validation/addon-source-registry-v0.1.0/audit-report.json
+          if($LASTEXITCODE -ne 0){throw 'r10 source-adapter boundary audit failed.'}
+
+      - name: Run generic source adapter fixtures
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/addon-source-registry-v0.1.0/test_source_adapter_engine.ps1 -ReportPath validation/addon-source-registry-v0.1.0/engine-report.json
+          if($LASTEXITCODE -ne 0){throw 'Generic source adapter fixtures failed.'}
+
+      - name: Re-run fixtures and require deterministic report
+        shell: powershell
+        run: |
+          $first=(Get-FileHash validation/addon-source-registry-v0.1.0/engine-report.json -Algorithm SHA256).Hash.ToLowerInvariant()
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/addon-source-registry-v0.1.0/test_source_adapter_engine.ps1 -ReportPath validation/addon-source-registry-v0.1.0/engine-report-2.json
+          if($LASTEXITCODE -ne 0){throw 'Second adapter fixture run failed.'}
+          $second=(Get-FileHash validation/addon-source-registry-v0.1.0/engine-report-2.json -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($first -ne $second){throw "Nondeterministic adapter evidence: $first != $second"}
+          $r=Get-Content validation/addon-source-registry-v0.1.0/engine-report.json -Raw|ConvertFrom-Json
+          if($r.result -ne 'PASS' -or $r.registry_entries -ne 9 -or $r.adapter_count -ne 6){throw 'Unexpected adapter report summary.'}
+          if(($r.mutation_authorized_names -join ',') -cne 'better-local-files,eternal-jukebox,ivLyrics,playlist-maker'){throw "Automatic authority changed: $($r.mutation_authorized_names -join ',')"}
+          if($r.new_auto_install_authority -ne $false -or $r.generic_archive_extraction -ne $false){throw 'Generic engine widened mutation/install/archive authority.'}
+          Write-Host "ADDON_SOURCE_REGISTRY_DETERMINISM_PASS sha256=$first"
+
+      - name: Current Addon Manager comprehensive SelfTest remains green
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/v0.6.21/out/bin/addon-manager.ps1 -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Current r10 Addon Manager SelfTest regressed.'}
+          Write-Host 'ADDON_SOURCE_REGISTRY_R10_SELFTEST_PASS'
+
+      - name: Final validation-only mutation surface audit
+        shell: powershell
+        run: |
+          $engine=Get-Content validation/addon-source-registry-v0.1.0/source_adapter_engine.ps1 -Raw
+          foreach($bad in @('Invoke-WebRequest','Invoke-RestMethod','Expand-Archive','Remove-Item','Move-Item','Copy-Item','Start-Process','spicetify apply','spicetify backup','spicetify restore')){
+            if($engine.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Generic adapter engine contains forbidden side-effect surface: $bad"}
+          }
+          $changed=@(git diff --name-only dacd4faf6a632b6b33571acf16ed4b6e73a865d7...HEAD)
+          if(@($changed|Where-Object{$_ -like 'bin/*' -or $_ -eq 'manifest.json' -or $_ -like 'packages/*' -or $_ -like 'performance/*'}).Count){throw 'Production surface changed in validation branch.'}
+          Write-Host 'ADDON_SOURCE_REGISTRY_FINAL_SAFETY_PASS'
+
+      - name: Upload validation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: addon-source-registry-v0.1.0-evidence
+          path: |
+            validation/addon-source-registry-v0.1.0/audit-report.json
+            validation/addon-source-registry-v0.1.0/engine-report.json
+          if-no-files-found: error
