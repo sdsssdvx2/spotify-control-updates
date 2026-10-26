@@ -1,0 +1,90 @@
+name: Validate v0.6.21 r10 Runtime Acceptance v1.0.0
+
+on:
+  push:
+    branches:
+      - validate/v0.6.21-runtime-acceptance-v1.0.0
+  pull_request:
+    branches:
+      - release/v0.6.21-addon-registry-r10
+    paths:
+      - '.github/workflows/validate-v0.6.21-runtime-acceptance-v100.yml'
+      - 'validation/v0.6.21-runtime-acceptance-v1.0.0/**'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove validation-only scope against exact release head
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $expected='5eac4f39920b84f22e2a5ee07422f6080bfc7ef7'
+          git cat-file -e "$expected^{commit}"
+          $files=@(git diff --name-only $expected..HEAD)
+          if(-not $files.Count){throw 'No validation changes found.'}
+          foreach($f in $files){
+            if($f -ne '.github/workflows/validate-v0.6.21-runtime-acceptance-v100.yml' -and $f -notlike 'validation/v0.6.21-runtime-acceptance-v1.0.0/*'){
+              throw "Unexpected non-validation file changed: $f"
+            }
+          }
+          Write-Host "VALIDATION_SCOPE_PASS count=$($files.Count)"
+
+      - name: Build deterministic runtime acceptance package
+        shell: powershell
+        run: |
+          python validation/v0.6.21-runtime-acceptance-v1.0.0/build_runtime_acceptance_v100.py
+
+      - name: PowerShell 5.1 parse runtime and packaged candidate
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $pkg='validation/v0.6.21-runtime-acceptance-v1.0.0/out/SpotifyControl-v0.6.21-r10-Runtime-Acceptance-v1.0.0'
+          foreach($f in @((Join-Path $pkg 'RUN_RUNTIME_ACCEPTANCE.ps1'),(Join-Path $pkg 'PRECHECK_RUNTIME_ACCEPTANCE.ps1'),(Join-Path $pkg 'candidate/addon-manager.ps1'))){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw "PowerShell 5.1 parse failed: $f"}
+          }
+          Write-Host 'POWERSHELL_51_PARSE_PASS'
+
+      - name: Run packaged r10 comprehensive SelfTest
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $candidate='validation/v0.6.21-runtime-acceptance-v1.0.0/out/SpotifyControl-v0.6.21-r10-Runtime-Acceptance-v1.0.0/candidate/addon-manager.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $candidate -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw "Packaged r10 SelfTest failed: $LASTEXITCODE"}
+
+      - name: Package static safety validation
+        shell: powershell
+        run: |
+          $pkg='validation/v0.6.21-runtime-acceptance-v1.0.0/out/SpotifyControl-v0.6.21-r10-Runtime-Acceptance-v1.0.0'
+          python "$pkg/evidence/validate_package.py"
+
+      - name: Prove deterministic second rebuild
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $zip='validation/v0.6.21-runtime-acceptance-v1.0.0/out/SpotifyControl-v0.6.21-r10-Runtime-Acceptance-v1.0.0.zip'
+          $first=(Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $firstSize=(Get-Item -LiteralPath $zip).Length
+          python validation/v0.6.21-runtime-acceptance-v1.0.0/build_runtime_acceptance_v100.py
+          $second=(Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $secondSize=(Get-Item -LiteralPath $zip).Length
+          if($first -cne $second -or $firstSize -ne $secondSize){throw "Nondeterministic runtime package: first=$first/$firstSize second=$second/$secondSize"}
+          Write-Host "DETERMINISTIC_REBUILD_PASS sha256=$second size=$secondSize"
+
+      - name: Upload runtime acceptance artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-v0.6.21-r10-Runtime-Acceptance-v1.0.0
+          path: validation/v0.6.21-runtime-acceptance-v1.0.0/out/SpotifyControl-v0.6.21-r10-Runtime-Acceptance-v1.0.0.zip
+          if-no-files-found: error
