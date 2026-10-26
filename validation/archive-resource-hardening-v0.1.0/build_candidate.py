@@ -229,8 +229,8 @@ def build_addon(base: bytes) -> bytes:
     for required in ('ivLyrics', 'better-local-files', 'eternal-jukebox', 'playlist-maker'):
         if required not in auto_pat.findall(candidate_registry):
             raise RuntimeError(f'missing existing auto authority: {required}')
-    if "name='sc-cover-ambience'" not in candidate_registry.lower() or "mutation_mode='deny'" not in candidate_registry.lower():
-        raise RuntimeError('SC Cover Ambience deny policy missing')
+    if "name='sc-cover-ambience.js'" not in candidate_registry.lower() or "data_policy='never-disable-or-optimize'" not in candidate_registry.lower():
+        raise RuntimeError('SC Cover Ambience protection drift')
 
     return bom + text.encode('utf-8')
 
