@@ -5,7 +5,7 @@ GEN=ROOT/'generated';OUT=ROOT/'out'
 PKG=OUT/'SpotifyControl-v0.6.21-r10-Runtime-Acceptance-v2.0.3'
 ZIP=OUT/'SpotifyControl-v0.6.21-r10-Runtime-Acceptance-v2.0.3.zip'
 SOURCE_FILES=['RUN_RUNTIME_ACCEPTANCE.ps1','RUN_RUNTIME_ACCEPTANCE.cmd','PRECHECK_RUNTIME_ACCEPTANCE.ps1','BOOTSTRAP_RUNNER.ps1','README.txt']
-BUNDLE_SHA256='c619ecf278f59f55e38e62c9fa3336b7a29b107a4a2bf29d19dee77a202cc415'
+BUNDLE_SHA256='f1b61478f076a91ae69279e6f804adb8457ab0a8545e9393487ba85bc6375fa7'
 CHUNK_DIR=ROOT/'source-b64'
 
 def sha_bytes(b): return hashlib.sha256(b).hexdigest()
@@ -64,11 +64,12 @@ def validate_sources():
       "$ExpectedBootstrapSha='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'",'$ExpectedBootstrapSize=42963',
       "if($FetchUrl -notmatch '^https://raw\\.githubusercontent\\.com/sdsssdvx2/spotify-control-updates/[0-9a-f]{40}/manifest\\.json$')",
       'Microsoft.PowerShell.Utility\\Invoke-WebRequest','BOOTSTRAP_MANIFEST_FETCH_PASS','function Invoke-RestMethod','Manifest shim refused unexpected Invoke-RestMethod URI',
-      '$script:ShimHits++','$script:ShimHits -ne 1','manifest_sha256=(Get-Sha $script:ShimManifestPath)','bootstrap_sha256=(Get-Sha $BootstrapPath)',
+      '$global:SpotifyControlManifestShimState',"$st['Hits']=[int]$st['Hits']+1","manifest_sha256=(Get-Sha ([string]$st['ManifestPath']))","bootstrap_sha256=(Get-Sha ([string]$st['BootstrapPath']))",
       '& $BootstrapPath -Action $Action -Json','BOOTSTRAP_MANIFEST_SHIM_SELFTEST_PASS']
     for x in required_runner: ck('runner-contains:'+x,x in r,checks)
     forbidden_runner=['Invoke-WebRequest{','function Invoke-WebRequest','WebRequest]::DefaultWebProxy','IWebProxy','127.0.0.1','LOCAL_MANIFEST_SERVER']
     for x in forbidden_runner: ck('runner-forbidden-absent:'+x,x not in r,checks)
+    ck('runner-no-script-scope-shim-state','$script:Shim' not in r,checks)
     ck('runner-irm-two-mode-definitions',r.count('function Invoke-RestMethod')==2,checks) # one self-test definition + one run-mode definition
     ck('bootstrap-runner-no-bootstrap-copy',"Replace($MainManifestUrl" not in r and 'ExecutionCopy' not in r,checks)
     ck('precheck-runner-only','BOOTSTRAP_RUNNER.ps1' in pre and 'LOCAL_MANIFEST_SERVER' not in pre,checks)
