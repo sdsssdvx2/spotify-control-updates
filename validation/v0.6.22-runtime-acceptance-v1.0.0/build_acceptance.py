@@ -93,6 +93,21 @@ def transform(name: str, data: bytes) -> bytes:
     data = shift_pair(data, b'v0621', b'v0620', b'v0621', b'v0622', 'LOWERNUM')
     data = shift_pair(data, b'V0621', b'V0620', b'V0621', b'V0622', 'UPPERNUM')
 
+    # Presentation labels use short r9/r10 names rather than the full Addon Manager version.
+    # Shift only labels already bound to the post-version-shift baseline/target so the real
+    # baseline r10 is never globally promoted to r11.
+    for old, new in (
+        (b'v0.6.22/r10', b'v0.6.22/r11'),
+        (b'V0.6.22/R10', b'V0.6.22/R11'),
+        (b'v0.6.22 / r10', b'v0.6.22 / r11'),
+        (b'V0.6.22 / R10', b'V0.6.22 / R11'),
+        (b'v0.6.21/r9', b'v0.6.21/r10'),
+        (b'V0.6.21/R9', b'V0.6.21/R10'),
+        (b'v0.6.21 / r9', b'v0.6.21 / r10'),
+        (b'V0.6.21 / R9', b'V0.6.21 / R10'),
+    ):
+        data = data.replace(old, new)
+
     data = data.replace(b'2.0.3', b'1.0.0')
     data = data.replace(b'v203', b'v100')
     data = data.replace(b'V203', b'V100')
