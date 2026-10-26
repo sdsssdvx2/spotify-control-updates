@@ -27,7 +27,7 @@ jobs:
           if($changed.Count -ne 1 -or $changed[0] -cne '.github/workflows/validate-splitify-release-catalog-v010.yml'){throw "Unexpected catalog scope: $($changed -join ', ')"}
           Write-Host "SPLITIFY_CATALOG_SCOPE_PASS head=$((git rev-parse HEAD).Trim())"
 
-      - name: Build authenticated catalog for every stable official Splitify release
+      - name: Build authenticated catalog for every provable stable official Splitify release
         shell: python
         run: |
           import hashlib,json,re,stat,urllib.request,zipfile
@@ -45,68 +45,82 @@ jobs:
                       b=r.read(1024*1024)
                       if not b:break
                       f.write(b)
-          releases=fetch_json(API)
-          stable=[]
-          for rel in releases:
-              tag=str(rel.get('tag_name') or '')
-              if rel.get('draft') or rel.get('prerelease') or not re.fullmatch(r'v\d+\.\d+\.\d+',tag):continue
-              assets=[a for a in rel.get('assets',[]) if a.get('name')=='splitify.zip']
-              if len(assets)!=1:raise SystemExit(f'{tag}: expected exactly one splitify.zip, got {len(assets)}')
-              a=assets[0];digest=str(a.get('digest') or '').lower()
-              if not re.fullmatch(r'sha256:[0-9a-f]{64}',digest):raise SystemExit(f'{tag}: missing GitHub sha256 digest')
-              stable.append((rel,a))
-          if not stable:raise SystemExit('No stable Splitify releases found')
           def semver(tag):return tuple(map(int,tag[1:].split('.')))
-          stable.sort(key=lambda x:semver(x[0]['tag_name']))
-          catalog=[]
-          for rel,a in stable:
-              tag=rel['tag_name'];version=tag[1:];zip_path=root/f'{tag}.zip'
-              download(a['browser_download_url'],zip_path)
-              raw=zip_path.read_bytes();actual=hashlib.sha256(raw).hexdigest()
-              if len(raw)!=int(a['size']) or actual!=a['digest'][7:].lower():raise SystemExit(f'{tag}: asset authentication mismatch')
-              seen=set();files=[];expanded=0;entries=0
-              with zipfile.ZipFile(zip_path) as z:
-                  for info in z.infolist():
-                      entries+=1
-                      if entries>100:raise SystemExit(f'{tag}: too many entries')
-                      name=info.filename.replace('\\','/')
-                      if not name or name.startswith('/') or re.match(r'^[A-Za-z]:',name) or ':' in name:raise SystemExit(f'{tag}: unsafe path {name}')
-                      trimmed=name.rstrip('/')
-                      parts=trimmed.split('/') if trimmed else []
-                      if not parts or any(p in ('','.','..') for p in parts):raise SystemExit(f'{tag}: unsafe component {name}')
-                      key=trimmed.lower()
-                      if key in seen:raise SystemExit(f'{tag}: duplicate/case collision {trimmed}')
-                      seen.add(key)
-                      mode=(info.external_attr>>16)&0o170000
-                      if mode==stat.S_IFLNK:raise SystemExit(f'{tag}: symlink {name}')
-                      if parts[0] != 'splitify-dist':raise SystemExit(f'{tag}: unexpected top level {parts[0]}')
-                      if info.is_dir():continue
-                      if info.file_size<0 or info.file_size>16*1024*1024:raise SystemExit(f'{tag}: oversized entry {name}')
-                      expanded+=info.file_size
-                      if expanded>32*1024*1024:raise SystemExit(f'{tag}: expanded cap exceeded')
-                      relpath='/'.join(parts[1:])
-                      if not relpath:raise SystemExit(f'{tag}: file at root directory marker')
-                      data=z.read(info)
-                      if len(data)!=info.file_size:raise SystemExit(f'{tag}: size mismatch {name}')
-                      files.append({'path':relpath,'size':len(data),'sha256':hashlib.sha256(data).hexdigest()})
-              if not files:raise SystemExit(f'{tag}: no files')
-              files.sort(key=lambda x:(x['path'].lower(),x['path']))
-              payload=''.join(f"{x['path']}|{x['size']}|{x['sha256']}\n" for x in files).encode()
-              tree=hashlib.sha256(payload).hexdigest()
-              manifest=[x for x in files if x['path']=='manifest.json']
-              if len(manifest)!=1:raise SystemExit(f'{tag}: manifest count {len(manifest)}')
-              with zipfile.ZipFile(zip_path) as z:m=json.loads(z.read('splitify-dist/manifest.json'))
-              row={'version':version,'tag':tag,'published_at':rel.get('published_at'),'asset_size':len(raw),'asset_sha256':actual,'asset_digest':a['digest'].lower(),'tree_sha256':tree,'file_count':len(files),'expanded_bytes':sum(x['size'] for x in files),'manifest_name':m.get('name'),'manifest_version':m.get('version'),'files':files}
-              catalog.append(row)
-              print('SPLITIFY_RELEASE',tag,'asset',len(raw),actual,'tree',tree,'files',len(files),'manifest_version',repr(m.get('version')))
+          releases=fetch_json(API)
+          stable=[r for r in releases if not r.get('draft') and not r.get('prerelease') and re.fullmatch(r'v\d+\.\d+\.\d+',str(r.get('tag_name') or ''))]
+          if not stable:raise SystemExit('No stable Splitify releases found')
+          stable.sort(key=lambda r:semver(r['tag_name']))
+          catalog=[];unsupported=[]
+          for rel in stable:
+              tag=rel['tag_name'];version=tag[1:]
+              assets=[a for a in rel.get('assets',[]) if a.get('name')=='splitify.zip']
+              if len(assets)!=1:
+                  reason='no-splitify-zip' if len(assets)==0 else f'ambiguous-splitify-zip-assets:{len(assets)}'
+                  unsupported.append({'version':version,'tag':tag,'reason':reason})
+                  print('SPLITIFY_UNPROVABLE',tag,reason)
+                  continue
+              a=assets[0];digest=str(a.get('digest') or '').lower()
+              if not re.fullmatch(r'sha256:[0-9a-f]{64}',digest):
+                  unsupported.append({'version':version,'tag':tag,'reason':'no-github-sha256-digest'})
+                  print('SPLITIFY_UNPROVABLE',tag,'no-github-sha256-digest')
+                  continue
+              try:
+                  zip_path=root/f'{tag}.zip';download(a['browser_download_url'],zip_path)
+                  raw=zip_path.read_bytes();actual=hashlib.sha256(raw).hexdigest()
+                  if len(raw)!=int(a['size']) or actual!=digest[7:]:raise ValueError('asset-authentication-mismatch')
+                  seen=set();files=[];expanded=0;entries=0;top=set();manifest_bytes=None
+                  with zipfile.ZipFile(zip_path) as z:
+                      infos=z.infolist()
+                      for info in infos:
+                          entries+=1
+                          if entries>100:raise ValueError('too-many-entries')
+                          name=info.filename.replace('\\','/')
+                          if not name or name.startswith('/') or re.match(r'^[A-Za-z]:',name) or ':' in name:raise ValueError(f'unsafe-path:{name}')
+                          trimmed=name.rstrip('/');parts=trimmed.split('/') if trimmed else []
+                          if not parts or any(p in ('','.','..') for p in parts):raise ValueError(f'unsafe-component:{name}')
+                          key=trimmed.lower()
+                          if key in seen:raise ValueError(f'duplicate-case-collision:{trimmed}')
+                          seen.add(key);top.add(parts[0])
+                          mode=(info.external_attr>>16)&0o170000
+                          if mode==stat.S_IFLNK:raise ValueError(f'symlink:{name}')
+                          if info.is_dir():continue
+                          if info.file_size<0 or info.file_size>16*1024*1024:raise ValueError(f'oversized-entry:{name}')
+                          expanded+=info.file_size
+                          if expanded>32*1024*1024:raise ValueError('expanded-cap-exceeded')
+                      if len(top)!=1:raise ValueError('ambiguous-top-level:'+','.join(sorted(top)))
+                      root_name=next(iter(top))
+                      for info in infos:
+                          if info.is_dir():continue
+                          parts=info.filename.replace('\\','/').rstrip('/').split('/')
+                          if not parts or parts[0]!=root_name:raise ValueError('root-drift')
+                          relpath='/'.join(parts[1:])
+                          if not relpath:raise ValueError('file-at-top-level-root')
+                          data=z.read(info)
+                          if len(data)!=info.file_size:raise ValueError(f'size-mismatch:{info.filename}')
+                          files.append({'path':relpath,'size':len(data),'sha256':hashlib.sha256(data).hexdigest()})
+                          if relpath=='manifest.json':manifest_bytes=data
+                  if not files:raise ValueError('no-files')
+                  if manifest_bytes is None:raise ValueError('manifest-missing')
+                  m=json.loads(manifest_bytes)
+                  if str(m.get('name') or '').lower()!='splitify':raise ValueError('manifest-identity-mismatch')
+                  files.sort(key=lambda x:(x['path'].lower(),x['path']))
+                  payload=''.join(f"{x['path']}|{x['size']}|{x['sha256']}\n" for x in files).encode()
+                  tree=hashlib.sha256(payload).hexdigest()
+                  row={'version':version,'tag':tag,'published_at':rel.get('published_at'),'asset_size':len(raw),'asset_sha256':actual,'asset_digest':digest,'root_name':root_name,'tree_sha256':tree,'file_count':len(files),'expanded_bytes':sum(x['size'] for x in files),'manifest_name':m.get('name'),'manifest_version':m.get('version'),'files':files}
+                  catalog.append(row)
+                  print('SPLITIFY_RELEASE',tag,'asset',len(raw),actual,'root',root_name,'tree',tree,'files',len(files),'manifest_version',repr(m.get('version')))
+              except Exception as e:
+                  unsupported.append({'version':version,'tag':tag,'reason':'asset-unprovable:'+str(e)})
+                  print('SPLITIFY_UNPROVABLE',tag,'asset-unprovable:'+str(e))
+          if not catalog:raise SystemExit('No cryptographically provable Splitify release assets found')
           by_tree={}
           for row in catalog:by_tree.setdefault(row['tree_sha256'],[]).append(row['version'])
           duplicates={k:v for k,v in by_tree.items() if len(v)>1}
-          result={'schema':1,'repository':'alexander-rebello/splitify','release_count':len(catalog),'latest_version':catalog[-1]['version'],'catalog':catalog,'duplicate_tree_versions':duplicates}
+          result={'schema':2,'repository':'alexander-rebello/splitify','stable_release_count':len(stable),'provable_release_count':len(catalog),'latest_stable_version':stable[-1]['tag_name'][1:],'latest_provable_version':catalog[-1]['version'],'catalog':catalog,'unsupported_stable_releases':unsupported,'duplicate_tree_versions':duplicates}
           (root/'catalog.json').write_text(json.dumps(result,indent=2,sort_keys=True)+'\n',encoding='utf-8')
-          print('SPLITIFY_RELEASE_CATALOG_PASS releases=',len(catalog),'latest=',catalog[-1]['version'],'duplicate_trees=',json.dumps(duplicates,sort_keys=True))
+          print('SPLITIFY_RELEASE_CATALOG_PASS stable=',len(stable),'provable=',len(catalog),'latest=',stable[-1]['tag_name'],'unsupported=',json.dumps(unsupported,sort_keys=True),'duplicate_trees=',json.dumps(duplicates,sort_keys=True))
 
-      - name: Prove latest pinned identity remains present
+      - name: Prove latest pinned identity remains present and unique
         shell: python
         run: |
           import json
@@ -117,6 +131,8 @@ jobs:
           x=rows[0]
           if x['asset_size']!=7822 or x['asset_sha256']!='5de51a885815f78067b8d6f7f3ebe40c93b5a7c7e3c8c841fcd26147a13010ca':raise SystemExit('v1.1.0 asset drift')
           if x['tree_sha256']!='a138d868d219028d7498a6a4138aef4900da9583c04e572e5505e2ce971a4440' or x['file_count']!=6:raise SystemExit('v1.1.0 tree drift')
+          if r['latest_stable_version']!='1.1.0' or r['latest_provable_version']!='1.1.0':raise SystemExit('latest release classification drift')
+          if x['tree_sha256'] in r['duplicate_tree_versions']:raise SystemExit('v1.1.0 tree is ambiguous across release tags')
           print('SPLITIFY_CATALOG_LATEST_PIN_PASS')
 
       - uses: actions/upload-artifact@v4
