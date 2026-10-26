@@ -1,0 +1,126 @@
+name: Validate Splitify Release Asset Layout v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/splitify-release-asset-layout-v0.1.0
+    paths:
+      - '.github/workflows/validate-splitify-release-asset-layout-v010.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove exact validation-only scope
+        shell: powershell
+        run: |
+          $base='c3dca564f70d4c85a84d5f895309d30d5a2d80c1'
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Wrong stable base.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          if($changed.Count -ne 1 -or $changed[0] -cne '.github/workflows/validate-splitify-release-asset-layout-v010.yml'){throw "Unexpected validation scope: $($changed -join ', ')"}
+          Write-Host "SPLITIFY_LAYOUT_SCOPE_PASS head=$((git rev-parse HEAD).Trim())"
+
+      - name: Fetch and authenticate official latest release asset
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $headers=@{'User-Agent'='SpotifyControl-Splitify-Layout-Audit/0.1.0'}
+          $release=Invoke-RestMethod -Uri 'https://api.github.com/repos/alexander-rebello/splitify/releases/latest' -Headers $headers
+          if([string]$release.tag_name -cne 'v1.1.0' -or [bool]$release.draft -or [bool]$release.prerelease){throw "Unexpected Splitify latest release: $($release.tag_name)"}
+          $assets=@($release.assets|Where-Object{[string]$_.name -ceq 'splitify.zip'})
+          if($assets.Count -ne 1){throw "Expected exactly one splitify.zip asset, got $($assets.Count)"}
+          $asset=$assets[0]
+          if([int64]$asset.size -ne 7822 -or [string]$asset.digest -cne 'sha256:5de51a885815f78067b8d6f7f3ebe40c93b5a7c7e3c8c841fcd26147a13010ca'){throw 'Official Splitify asset identity drifted.'}
+          New-Item -ItemType Directory -Force -Path splitify-layout-evidence | Out-Null
+          $zip='splitify-layout-evidence/splitify.zip'
+          Invoke-WebRequest -Uri ([string]$asset.browser_download_url) -Headers $headers -OutFile $zip -UseBasicParsing
+          $actual=(Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if((Get-Item -LiteralPath $zip).Length -ne 7822 -or $actual -cne '5de51a885815f78067b8d6f7f3ebe40c93b5a7c7e3c8c841fcd26147a13010ca'){throw "Downloaded Splitify asset mismatch size=$((Get-Item $zip).Length) sha=$actual"}
+          $release|ConvertTo-Json -Depth 12|Set-Content -LiteralPath splitify-layout-evidence/release.json -Encoding UTF8
+          Write-Host 'SPLITIFY_OFFICIAL_ASSET_IDENTITY_PASS'
+
+      - name: Inspect ZIP structure safely before extraction
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip=(Resolve-Path 'splitify-layout-evidence/splitify.zip').Path
+          $archive=[System.IO.Compression.ZipFile]::OpenRead($zip)
+          try{
+            $rows=New-Object System.Collections.Generic.List[object]
+            $seen=New-Object -TypeName 'System.Collections.Generic.HashSet[string]' -ArgumentList ([System.StringComparer]::OrdinalIgnoreCase)
+            [int64]$expanded=0
+            foreach($entry in @($archive.Entries)){
+              $raw=([string]$entry.FullName).Replace('\','/')
+              if([string]::IsNullOrWhiteSpace($raw) -or $raw.StartsWith('/') -or $raw.Contains(':')){throw "Unsafe Splitify path: $raw"}
+              $name=$raw.TrimEnd('/')
+              if([string]::IsNullOrWhiteSpace($name)){throw "Unsafe empty Splitify path: $raw"}
+              $parts=$name.Split('/')
+              if(@($parts|Where-Object{$_ -eq '' -or $_ -eq '.' -or $_ -eq '..'}).Count){throw "Unsafe Splitify path component: $raw"}
+              if(-not $seen.Add($name)){throw "Duplicate/case-colliding Splitify path: $name"}
+              $unixMode=(($entry.ExternalAttributes -shr 16) -band 0xF000)
+              if($unixMode -eq 0xA000){throw "Splitify release contains symlink: $raw"}
+              if(-not $raw.EndsWith('/')){$expanded += [int64]$entry.Length;if([int64]$entry.Length -gt 16MB){throw "Unexpectedly large Splitify entry: $raw"};if($expanded -gt 32MB){throw 'Splitify expanded total exceeds audit cap.'}}
+              $rows.Add([pscustomobject]@{path=$raw;length=[int64]$entry.Length;compressed_length=[int64]$entry.CompressedLength;external_attributes=[int64]$entry.ExternalAttributes})
+            }
+            if($rows.Count -lt 3 -or $rows.Count -gt 100){throw "Unexpected Splitify entry count: $($rows.Count)"}
+            $top=@($rows|ForEach-Object{($_.path.TrimEnd('/') -split '/')[0]}|Sort-Object -Unique)
+            if($top.Count -ne 1 -or $top[0] -cne 'splitify-dist'){throw "Unexpected Splitify top-level layout: $($top -join ',')"}
+            $report=[pscustomobject]@{schema=1;tag='v1.1.0';asset_sha256='5de51a885815f78067b8d6f7f3ebe40c93b5a7c7e3c8c841fcd26147a13010ca';asset_size=7822;entry_count=$rows.Count;expanded_bytes=$expanded;top_level=$top[0];entries=$rows.ToArray()}
+            $report|ConvertTo-Json -Depth 8|Set-Content -LiteralPath splitify-layout-evidence/zip-layout.json -Encoding UTF8
+            $rows|ForEach-Object{Write-Host ("SPLITIFY_ZIP_ENTRY path={0} len={1} compressed={2}" -f $_.path,$_.length,$_.compressed_length)}
+            Write-Host "SPLITIFY_ZIP_LAYOUT_PASS entries=$($rows.Count) expanded=$expanded root=$($top[0])"
+          }finally{$archive.Dispose()}
+
+      - name: Extract authenticated asset and fingerprint exact release tree
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $extract=(Join-Path (Resolve-Path 'splitify-layout-evidence').Path 'extract')
+          New-Item -ItemType Directory -Force -Path $extract|Out-Null
+          Expand-Archive -LiteralPath splitify-layout-evidence/splitify.zip -DestinationPath $extract -Force
+          $root=Join-Path $extract 'splitify-dist'
+          if(-not(Test-Path -LiteralPath $root -PathType Container)){throw 'Authenticated Splitify root missing after extraction.'}
+          $files=@(Get-ChildItem -LiteralPath $root -File -Recurse|Sort-Object{$_.FullName.Substring($root.Length).Replace('\','/').ToLowerInvariant()})
+          if(-not $files.Count){throw 'Splitify release tree contains no files.'}
+          $rows=New-Object System.Collections.Generic.List[object]
+          $lines=New-Object System.Collections.Generic.List[string]
+          foreach($file in $files){
+            $rel=$file.FullName.Substring($root.Length).TrimStart('\','/').Replace('\','/')
+            $hash=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            $rows.Add([pscustomobject]@{path=$rel;size=[int64]$file.Length;sha256=$hash})
+            $lines.Add("$rel|$([int64]$file.Length)|$hash")
+            Write-Host "SPLITIFY_TREE_FILE $rel size=$($file.Length) sha=$hash"
+          }
+          $payload=($lines.ToArray() -join "`n")+"`n"
+          $bytes=[Text.Encoding]::UTF8.GetBytes($payload);$sha=[Security.Cryptography.SHA256]::Create();try{$treeHash=([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+          $manifests=@($files|Where-Object{$_.Name -ceq 'manifest.json'})
+          if($manifests.Count -ne 1){throw "Expected exactly one manifest.json in release tree, got $($manifests.Count)"}
+          $manifest=Get-Content -LiteralPath $manifests[0].FullName -Raw|ConvertFrom-Json
+          $summary=[pscustomobject]@{schema=1;file_count=$files.Count;tree_sha256=$treeHash;manifest_relative_path=$manifests[0].FullName.Substring($root.Length).TrimStart('\','/').Replace('\','/');manifest_name=[string]$manifest.name;manifest_version=[string]$manifest.version;files=$rows.ToArray()}
+          $summary|ConvertTo-Json -Depth 8|Set-Content -LiteralPath splitify-layout-evidence/tree-fingerprint.json -Encoding UTF8
+          Write-Host "SPLITIFY_RELEASE_TREE_PASS files=$($files.Count) tree=$treeHash manifest_name=$($manifest.name) manifest_version=$($manifest.version)"
+
+      - name: Prove manifest version cannot identify v1.1.0
+        shell: powershell
+        run: |
+          $r=Get-Content splitify-layout-evidence/tree-fingerprint.json -Raw|ConvertFrom-Json
+          if([string]$r.manifest_version -cne '1.0.0'){throw "Upstream manifest version changed; provenance strategy must be reassessed: $($r.manifest_version)"}
+          if([string]$r.manifest_name -notmatch 'Splitify'){throw "Unexpected Splitify manifest name: $($r.manifest_name)"}
+          Write-Host "SPLITIFY_MANIFEST_VERSION_UNRELIABLE_CONFIRMED release=v1.1.0 manifest=$($r.manifest_version) tree=$($r.tree_sha256)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: splitify-release-asset-layout-v010
+          path: |
+            splitify-layout-evidence/zip-layout.json
+            splitify-layout-evidence/tree-fingerprint.json
+            splitify-layout-evidence/release.json
+          if-no-files-found: error
