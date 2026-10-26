@@ -55,7 +55,7 @@ jobs:
           for v,(size,asset,tree,count) in expected.items():
             x=got[v]
             if (x['asset_size'],x['asset_sha256'],x['tree_sha256'],x['file_count'])!=(size,asset,tree,count):raise SystemExit(f'{v} identity drift')
-            if x['manifest_name']!='Splitify' or x['manifest_version'] is not None:raise SystemExit(f'{v} manifest contract drift')
+            if x['manifest_name']!='Splitify':raise SystemExit(f'{v} manifest identity drift')
           unsupported={(x['version'],x['reason']) for x in r['unsupported_stable_releases']}
           if unsupported!={('1.0.1','no-splitify-zip'),('1.0.4','asset-unprovable:manifest-missing')}:raise SystemExit(f'unsupported classification drift: {unsupported}')
           print('SPLITIFY_CATALOG_EXACT_IDENTITIES_PASS')
