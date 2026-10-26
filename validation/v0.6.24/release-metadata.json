@@ -1,0 +1,297 @@
+{
+  "adapter_fingerprint": "c0611a7b96f6ff09d1e235119efce2f2def6eb6d0a4e8e93e276cfa622c3c42d",
+  "addon_version": "0.6.5-r13",
+  "archive_hardening": {
+    "ivlyrics": {
+      "historical_zipball_precheck": true,
+      "max_entries": 4096,
+      "max_entry_bytes": 134217728,
+      "max_expanded_bytes": 536870912,
+      "path_duplicate_symlink_checks": true,
+      "pre_extract": true
+    },
+    "marketplace": {
+      "max_entries": 16384,
+      "max_entry_bytes": 134217728,
+      "max_expanded_bytes": 536870912,
+      "path_duplicate_symlink_checks": true,
+      "pre_extract": true
+    },
+    "pithaya": {
+      "max_entries": 8192,
+      "max_entry_bytes": 134217728,
+      "max_expanded_bytes": 536870912,
+      "path_duplicate_symlink_checks": true,
+      "pre_extract": true
+    },
+    "spicetify_existing_extractor_unchanged": true
+  },
+  "authority_expanded": false,
+  "auto_authority": [
+    "better-local-files",
+    "eternal-jukebox",
+    "ivLyrics",
+    "playlist-maker"
+  ],
+  "base_commit": "23e91427fd745227825d94eb48d804654ca54ee4",
+  "base_version": "0.6.23",
+  "bootstrap": {
+    "sha256": "d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6",
+    "size": 42963,
+    "version": "1.0.6"
+  },
+  "candidate_addon": {
+    "sha256": "81343687c475f7f48f1311b09c98205a021776f26e8d55082e0ec47f8ebfb470",
+    "size": 275414
+  },
+  "candidate_main": {
+    "sha256": "dc5d7ec17f18f7546786c81f3172c08f6fb1692842c2e6c0a69a86171e6b1151",
+    "size": 284312
+  },
+  "new_auto_install_authority": false,
+  "registry_fingerprint": "0f05406d7152de1d975f888cb8270be8249115211ba9f41e0157342cd42efbd8",
+  "resident_agent": {
+    "sha256": "2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278",
+    "size": 4855
+  },
+  "schema": 1,
+  "transport": {
+    "addon": {
+      "chunks": [
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-000.txt",
+          "sha256": "08c6f1f091777f06ceb5a7178a8d44139e4f412bf4ba03052361321887458a71",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-001.txt",
+          "sha256": "9c8f518acd605a218400eb33423eb1791f7f3f1060e8c93daa2d86ece118dd9c",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-002.txt",
+          "sha256": "5dad3b118366953b6b8bd07cacb18ad4b85eb4b98fcc8c566359ee7ff8b16728",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-003.txt",
+          "sha256": "647c051dd6795f088a44bd185631cdfe273d396736af26a21f4f6341d35ed950",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-004.txt",
+          "sha256": "1ec2ce0918b046c2336b097899c2350183250fcdd6a01fa218830e7b2d7b854c",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-005.txt",
+          "sha256": "7460adf8c7810e6967f1a2e9cf6e71e17e0bcdc2f8f82ee19291a4de05d9bd53",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-006.txt",
+          "sha256": "e38aea8907b0d3db40cb0ceab10944c5e92802e573fb65e94a61af3a3fdd207c",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-007.txt",
+          "sha256": "70a1fcbeb90e064316edff34cbefb183ac34c1791de083713834f79fc7392ada",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-008.txt",
+          "sha256": "27ea7903116b327a0d4a436adb1cb9c299acac106999c4eb0730962d1103e547",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-009.txt",
+          "sha256": "553399b4f824e5d1c9b2b14a18147672542f88c24986184112aa9a69877fb38d",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-010.txt",
+          "sha256": "1a2a8806d15671acd4e3359b4744ed0a32de10ae80818c37aec18a52b9ab3a19",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-011.txt",
+          "sha256": "dd05926f4b67236a52dfaefa288525ddf347f529e4d7108500269ed7602fff8b",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-012.txt",
+          "sha256": "a67adb45051601bb08ad3ae596e3f5ec221c36422c5cbb08aeb4e93fdcab5a47",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-013.txt",
+          "sha256": "f7643af189f1285ac49b4a3edd51c9ac1783047e01ab55c538e00a8e12ed9759",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-014.txt",
+          "sha256": "25343df18f2ed39cccdaf099f2f1a3a6ad80a6edcf9231b025fee3c5059e706b",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-015.txt",
+          "sha256": "f74e67f19346b152d51aaaac8ead49462aafe4c840aa0f49a10d1b12c1fb621c",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-016.txt",
+          "sha256": "643b001733563ac3a48175f4ac894a9a2920d7ae617385f36f6399cce9d38ba4",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-017.txt",
+          "sha256": "c60ff6ef7ce782898dde835619beaf1a7e597096ced13568c0c8a18086a8765b",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-018.txt",
+          "sha256": "1d8f23e99c9595f82f804bcb4d4a4eddae46bfc8af8c42e9db6ef3a576ceb1c0",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-019.txt",
+          "sha256": "410bbcb4c8e86d18c3b316e317f2c9508f92a2245693ada502b35f6a7ebfd690",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/addon-v065r12-to-v065r13/chunk-020.txt",
+          "sha256": "019bb7a57fd75c44e182420b6885b6bd2d18bcca28f6fca6805ac3965e41b7ec",
+          "size": 1672
+        }
+      ],
+      "compressed_sha256": "ad6c7775a3bbf9b1506ac7ed99a13c8cd4ba21414d01cc30a8fb0b4c615aa637",
+      "compressed_size": 62693,
+      "encoded_sha256": "05974155c42ffc96ed64807539aa41c437f6b2e9bd7d83e14a445cca85e4420a",
+      "encoded_size": 83592,
+      "encoding": "gzip-base64-full-file",
+      "from_sha256": "23ad2210aea4352f535d1cf0b3ebb827a82200dcba2b70bf1ebae96499d82687",
+      "path": "bin/addon-manager.ps1",
+      "target_size": 275414,
+      "to_sha256": "81343687c475f7f48f1311b09c98205a021776f26e8d55082e0ec47f8ebfb470"
+    },
+    "main": {
+      "chunks": [
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-000.txt",
+          "sha256": "03d2b7f279f3b7434a5ab852b643007a7da729d27809d6019b7db26057bf9282",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-001.txt",
+          "sha256": "19eaf96021575d3825783ac0d63e6dc0af14aae528966cedb66d503a14601fa2",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-002.txt",
+          "sha256": "b93d848a1786acdcff5bb0d5634c2a93208684a8ae49ed9be975d9720e0b8916",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-003.txt",
+          "sha256": "7de173c0648314bcbd3719eb578e5ca8d0a895c8078f38e6073f8b9792cb42a8",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-004.txt",
+          "sha256": "5783027130aea81963023dc749d81560b7c42529ac31462b206539f6bebbfa8e",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-005.txt",
+          "sha256": "6e37c6593be3af0d9f3d08ec8057f573b833a90bf48ea1015adb775a2d9b3464",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-006.txt",
+          "sha256": "f138fcc75c750cbfead06ecec67c6f7e4554d70769d3abdd185d5c2ea7fe19cd",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-007.txt",
+          "sha256": "ab92318b58170bb059e41938c81189464b487e932e869e3de0118d2744d50854",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-008.txt",
+          "sha256": "4c78700d4676a55c7d966918413e84ec88176fd07c1a4b5366e329e4b6ae2843",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-009.txt",
+          "sha256": "fde8f2845bb9766f70a6fdbe89958d03778333a31cacba93a01f8f5b116df25a",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-010.txt",
+          "sha256": "e3f64fc5ac1e316aecd3f3952e034dad9b0f9b1216faf345ee44eaaf63da9767",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-011.txt",
+          "sha256": "fda14cac6ae0415e37e14e6eb2546b4210279a9ceafaa20c3c9eff9eedf7dc23",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-012.txt",
+          "sha256": "f705cda2fee10de6515b14b0fb38532abff24545ca2f6982cea1ba6c12d0bfcd",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-013.txt",
+          "sha256": "1015469023e0f5a0cd23ebdf90609f773370e011bc0e9cc6cfbf3b4f8c245f69",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-014.txt",
+          "sha256": "8f0484978d39e2cda4c1005e9293400d6d203453bb2af70093dbbff567d22f3a",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-015.txt",
+          "sha256": "8db7089b9249755f24a27a6d1a0a17cfa16cbd8312613b1980545e393097fdbc",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-016.txt",
+          "sha256": "64f5c4e863ba5d4bfa14389f79d405d8c12ffc679a8c0e0d5e81851ea80fe92f",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-017.txt",
+          "sha256": "17dc7166500f3d543832e33e49d4ed4875803b1c6a631efacc4cfdd0932e11fb",
+          "size": 4096
+        },
+        {
+          "path": "packages/v0.6.24/main-v0623-to-v0624/chunk-018.txt",
+          "sha256": "fdf88cb925c8f1599676d65eef87190241f5c150a012c64a7c134fd1dfd092a9",
+          "size": 564
+        }
+      ],
+      "compressed_sha256": "e2bf9e6c9b80e7ab3b88a0f6015fce391c007f74d1c020f582de536318ca8cc1",
+      "compressed_size": 55718,
+      "encoded_sha256": "69c10e363f0d5897023eabd5b12d6e7163c6053fb760c3e5827b3b5f533317da",
+      "encoded_size": 74292,
+      "encoding": "gzip-base64-full-file",
+      "from_sha256": "bc9861bdd64ff8af94f68f0f065739f82b235271dcd18ad6325b819205528a08",
+      "path": "bin/spotify-control.ps1",
+      "target_size": 284312,
+      "to_sha256": "dc5d7ec17f18f7546786c81f3172c08f6fb1692842c2e6c0a69a86171e6b1151"
+    }
+  },
+  "validation": {
+    "artifact_digest": "sha256:77b4cfb1657126a4e9f32d78ce88576bc74855e50e9327b643979cc6f6a171c7",
+    "artifact_id": "12676150104",
+    "deterministic_report_sha256": "65c8daf8c6f8e197e91e7d7b722e62fa2655c9ea28efcc290234b445c973887d",
+    "head": "a3e0519b5d7c9e15c4804061f8ce128a302d8d6a",
+    "pr": 74,
+    "pr_closed_unmerged": true,
+    "pr_run": "40377414741",
+    "push_run": "40377301372"
+  },
+  "version": "0.6.24"
+}

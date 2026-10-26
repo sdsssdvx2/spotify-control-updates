@@ -1,0 +1,60 @@
+{
+  "addon_version": "0.6.5-r13",
+  "archive_hardening": {
+    "ivlyrics": {
+      "historical_zipball_precheck": true,
+      "max_entries": 4096,
+      "max_entry_bytes": 134217728,
+      "max_expanded_bytes": 536870912
+    },
+    "marketplace": {
+      "max_entries": 16384,
+      "max_entry_bytes": 134217728,
+      "max_expanded_bytes": 536870912
+    },
+    "pithaya": {
+      "max_entries": 8192,
+      "max_entry_bytes": 134217728,
+      "max_expanded_bytes": 536870912
+    },
+    "spicetify_existing_hardening_unchanged": true
+  },
+  "authority_expanded": false,
+  "auto_authority": [
+    "better-local-files",
+    "eternal-jukebox",
+    "ivLyrics",
+    "playlist-maker"
+  ],
+  "base_addon": {
+    "sha256": "23ad2210aea4352f535d1cf0b3ebb827a82200dcba2b70bf1ebae96499d82687",
+    "size": 272494
+  },
+  "base_main": {
+    "sha256": "bc9861bdd64ff8af94f68f0f065739f82b235271dcd18ad6325b819205528a08",
+    "size": 281588
+  },
+  "base_version": "0.6.23",
+  "candidate_addon": {
+    "sha256": "81343687c475f7f48f1311b09c98205a021776f26e8d55082e0ec47f8ebfb470",
+    "size": 275414
+  },
+  "candidate_main": {
+    "sha256": "dc5d7ec17f18f7546786c81f3172c08f6fb1692842c2e6c0a69a86171e6b1151",
+    "size": 284312
+  },
+  "candidate_version": "0.6.24",
+  "protected_registry_unchanged": true,
+  "schema": 1,
+  "source_adapter_catalog_unchanged": true,
+  "spicetify_extractor_unchanged": true,
+  "validation": {
+    "artifact_digest": "sha256:77b4cfb1657126a4e9f32d78ce88576bc74855e50e9327b643979cc6f6a171c7",
+    "artifact_id": "12676150104",
+    "head": "a3e0519b5d7c9e15c4804061f8ce128a302d8d6a",
+    "pr": 74,
+    "pr_closed_unmerged": true,
+    "pr_run": "40377414741",
+    "push_run": "40377301372"
+  }
+}
