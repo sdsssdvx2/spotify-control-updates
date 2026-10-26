@@ -1,0 +1,123 @@
+name: Validate Spotify Control v0.6.21 Release
+
+on:
+  push:
+    branches:
+      - release/v0.6.21-addon-registry-r10
+    paths:
+      - 'manifest.json'
+      - 'packages/v0.6.21/**'
+      - 'validation/v0.6.21/**'
+      - 'validation/v0.6.21-bootstrap-e2e/**'
+      - '.github/workflows/prepare-v0.6.21-release.yml'
+      - '.github/workflows/validate-v0.6.21-release.yml'
+      - '.github/workflows/validate-v0.6.21-bootstrap-e2e.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'manifest.json'
+      - 'packages/v0.6.21/**'
+      - 'validation/v0.6.21/**'
+      - 'validation/v0.6.21-bootstrap-e2e/**'
+      - '.github/workflows/prepare-v0.6.21-release.yml'
+      - '.github/workflows/validate-v0.6.21-release.yml'
+      - '.github/workflows/validate-v0.6.21-bootstrap-e2e.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact release scope
+        shell: powershell
+        run: |
+          $base='29d6c52c6a79559e513b367ec57edcccebae5fd0'
+          $actual=(git rev-parse HEAD).Trim()
+          $eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -ne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Wrong v0.6.20 production merge base.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          $bad=@($changed|Where-Object{
+            $_ -ne 'manifest.json' -and
+            $_ -notlike 'packages/v0.6.21/*' -and
+            $_ -notlike 'validation/v0.6.21/*' -and
+            $_ -notlike 'validation/v0.6.21-bootstrap-e2e/*' -and
+            $_ -ne '.github/workflows/prepare-v0.6.21-release.yml' -and
+            $_ -ne '.github/workflows/validate-v0.6.21-release.yml' -and
+            $_ -ne '.github/workflows/validate-v0.6.21-bootstrap-e2e.yml'
+          })
+          if($bad.Count){throw "Unexpected v0.6.21 release files: $($bad -join ', ')"}
+          $raw=@(git ls-files 'validation/v0.6.21/out/**')
+          if($raw.Count){throw "Raw generated candidates must not be committed: $($raw -join ', ')"}
+          Write-Host "V0621_RELEASE_SCOPE_PASS head=$actual changed=$($changed.Count)"
+
+      - name: Parse release validators
+        shell: powershell
+        run: |
+          python -m py_compile validation/v0.6.21/build_v0621.py validation/v0.6.21-bootstrap-e2e/prepare_fixture.py
+          if($LASTEXITCODE -ne 0){throw 'v0.6.21 Python validation source failed compile.'}
+          foreach($file in @('validation/v0.6.21/validate_release.ps1','validation/v0.6.21-bootstrap-e2e/run_bootstrap_cycle.ps1')){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0}:{1}: {2}" -f $file,$_.Extent.StartLineNumber,$_.Message)};throw "PowerShell 5.1 parser failed: $file"}
+          }
+          Write-Host 'V0621_VALIDATOR_SOURCE_PARSE_PASS'
+
+      - name: Validate published manifest and committed transports
+        shell: powershell
+        run: |
+          python validation/v0.6.21/build_v0621.py --validate-published
+          if($LASTEXITCODE -ne 0){throw 'Published v0.6.21 validation failed.'}
+          Write-Host 'V0621_PUBLISHED_TRANSPORT_PASS'
+
+      - name: Rebuild exact candidates deterministically
+        shell: powershell
+        run: |
+          python validation/v0.6.21/build_v0621.py --build
+          if($LASTEXITCODE -ne 0){throw 'Deterministic v0.6.21 build failed.'}
+          git diff --exit-code -- packages/v0.6.21 validation/v0.6.21/candidate-metadata.json
+          if($LASTEXITCODE -ne 0){throw 'Committed v0.6.21 transports differ from deterministic rebuild.'}
+          Write-Host 'V0621_DETERMINISTIC_COMMITTED_TRANSPORT_PASS'
+
+      - name: Exact release identity, provenance and policy contract
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/v0.6.21/validate_release.ps1
+          if($LASTEXITCODE -ne 0){throw 'Exact v0.6.21 release contract validation failed.'}
+
+      - name: Candidate Addon Manager comprehensive SelfTest
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/v0.6.21/out/bin/addon-manager.ps1 -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Addon Manager r10 SelfTest failed.'}
+          Write-Host 'V0621_ADDON_SELFTEST_PASS'
+
+      - name: Existing performance overlay regression
+        shell: powershell
+        run: |
+          node --check performance/overlay/lazy-custom-app-loader.js
+          node performance/overlay/tests/test-loader.js
+          if($LASTEXITCODE -ne 0){throw 'Overlay loader regression failed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/overlay/tests/test-overlay.ps1
+          if($LASTEXITCODE -ne 0){throw 'Overlay PowerShell regression failed.'}
+          Write-Host 'V0621_OVERLAY_REGRESSION_PASS'
+
+      - name: Existing Star Ratings transactional regression
+        shell: powershell
+        run: |
+          $fixture=Join-Path $env:RUNNER_TEMP 'star-ratings-33aa3d293f9fbb58d7a749a8cea10c318351e6c6.js'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/brimell/spicetify-star-ratings/33aa3d293f9fbb58d7a749a8cea10c318351e6c6/dist/star-ratings.js' -OutFile $fixture
+          if((Get-Item $fixture).Length -ne 43396 -or (Get-FileHash $fixture -Algorithm SHA256).Hash.ToLowerInvariant() -ne '198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1'){throw 'Immutable Star Ratings fixture mismatch.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/star-ratings/tests/test-star-ratings-patch.ps1 -FixturePath $fixture
+          if($LASTEXITCODE -ne 0){throw 'Star Ratings transactional regression failed.'}
+          Write-Host 'V0621_STAR_REGRESSION_PASS'

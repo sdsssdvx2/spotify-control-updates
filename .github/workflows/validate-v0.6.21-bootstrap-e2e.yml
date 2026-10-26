@@ -1,0 +1,109 @@
+name: Validate v0.6.21 Bootstrap 1.0.6 E2E
+
+on:
+  push:
+    branches:
+      - release/v0.6.21-addon-registry-r10
+    paths:
+      - 'manifest.json'
+      - 'packages/v0.6.21/**'
+      - 'validation/v0.6.21/**'
+      - 'validation/v0.6.21-bootstrap-e2e/**'
+      - '.github/workflows/validate-v0.6.21-bootstrap-e2e.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'manifest.json'
+      - 'packages/v0.6.21/**'
+      - 'validation/v0.6.21/**'
+      - 'validation/v0.6.21-bootstrap-e2e/**'
+      - '.github/workflows/validate-v0.6.21-bootstrap-e2e.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  bootstrap-e2e-windows:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact release head and manifest edge
+        shell: powershell
+        run: |
+          $base='29d6c52c6a79559e513b367ec57edcccebae5fd0'
+          $actual=(git rev-parse HEAD).Trim()
+          $eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -ne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Wrong v0.6.20 production merge base.'}
+          $m=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($m.latest_version -ne '0.6.21'){throw "Expected v0.6.21 manifest, got $($m.latest_version)"}
+          if($m.source_commit -ne '9a90d5f13eb63023d8f965a004be14d309d99429'){throw 'v0.6.21 transport source commit mismatch.'}
+          if($m.payload_set_sha256 -ne '7bd1bd7559eee615f4e0aa049b3ec1574f6b215dbdf7417a0a57ea99b20b6c55'){throw 'v0.6.21 payload set mismatch.'}
+          if($m.bootstrap.version -ne '1.0.6' -or $m.bootstrap.sha256 -ne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' -or [int64]$m.bootstrap.size -ne 42963){throw 'Bootstrap 1.0.6 identity changed.'}
+          $edge=@($m.updates|Where-Object{$_.from_version -eq '0.6.20' -and $_.to_version -eq '0.6.21'})
+          if($edge.Count -ne 1 -or @($edge[0].patches).Count -ne 2){throw 'Exact v0.6.20 -> v0.6.21 edge missing or ambiguous.'}
+          $paths=@($edge[0].patches|ForEach-Object{[string]$_.path}|Sort-Object)
+          if(($paths -join ',') -cne 'bin/addon-manager.ps1,bin/spotify-control.ps1'){throw "Unexpected v0.6.21 patch paths: $($paths -join ',')"}
+          Write-Host "V0621_BOOTSTRAP_E2E_MANIFEST_PASS head=$actual"
+
+      - name: Parse E2E sources
+        shell: powershell
+        run: |
+          python -m py_compile validation/v0.6.21-bootstrap-e2e/prepare_fixture.py
+          if($LASTEXITCODE -ne 0){throw 'v0.6.21 Bootstrap fixture preparer failed Python compile.'}
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'validation/v0.6.21-bootstrap-e2e/run_bootstrap_cycle.ps1'),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error ("line {0}: {1}" -f $_.Extent.StartLineNumber,$_.Message)};throw 'v0.6.21 Bootstrap E2E runner failed PowerShell 5.1 parse.'}
+          Write-Host 'V0621_BOOTSTRAP_E2E_SOURCE_PARSE_PASS'
+
+      - name: Download exact previously validated Bootstrap 1.0.6 carrier
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' > validated-v0614-repair-artifact.zip
+          python - <<'PY'
+          from pathlib import Path
+          from io import BytesIO
+          import hashlib,zipfile
+          outer=Path('validated-v0614-repair-artifact.zip').read_bytes()
+          with zipfile.ZipFile(BytesIO(outer)) as z:
+              assert z.testzip() is None
+              inner=z.read('SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip')
+          assert len(inner)==30856
+          assert hashlib.sha256(inner).hexdigest()=='6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdfd267bd95f6c6ddcf06'
+          with zipfile.ZipFile(BytesIO(inner)) as z:
+              boot=z.read('bootstrap/spotify-control-self-updater.ps1')
+          assert len(boot)==42963
+          assert hashlib.sha256(boot).hexdigest()=='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
+          print('VALIDATED_BOOTSTRAP_V106_CARRIER_PASS',len(outer),len(inner),len(boot))
+          PY
+
+      - name: Prepare exact v0.6.20 installed fixture and CI-only manifest pin
+        shell: powershell
+        run: |
+          python validation/v0.6.21-bootstrap-e2e/prepare_fixture.py
+          if($LASTEXITCODE -ne 0){throw 'v0.6.21 Bootstrap fixture preparation failed.'}
+
+      - name: Exact Bootstrap 1.0.6 v0.6.20 to v0.6.21 one-edge cycle
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/v0.6.21-bootstrap-e2e/run_bootstrap_cycle.ps1 `
+            -Fixture ci-bootstrap-fixture-v0620-to-v0621
+          if($LASTEXITCODE -ne 0){throw "Bootstrap v0.6.20 -> v0.6.21 one-edge E2E failed: $LASTEXITCODE"}
+
+      - name: Cleanup fixture trees
+        if: always()
+        shell: powershell
+        run: |
+          Remove-Item -LiteralPath ci-bootstrap-fixture-v0620-to-v0621 -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath ci-bootstrap-fixture -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath validated-v0614-repair-artifact.zip -Force -ErrorAction SilentlyContinue
