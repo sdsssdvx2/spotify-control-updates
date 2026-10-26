@@ -1,13 +1,6 @@
 name: Validate Spotify Control v0.6.14 r4
 
 on:
-  pull_request:
-    branches:
-      - 'main'
-    paths:
-      - 'packages/v0.6.14/**'
-      - 'manifest.json'
-      - '.github/workflows/validate-v0.6.14-r4.yml'
   workflow_dispatch:
 
 permissions:
