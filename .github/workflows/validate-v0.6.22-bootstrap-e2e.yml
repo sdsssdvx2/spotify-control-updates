@@ -7,7 +7,7 @@ on:
     paths:
       - 'manifest.json'
       - 'packages/v0.6.22/**'
-      - 'validation/v0.6.22-bootstrap-e2e/**'
+      - 'validation/v0.6.22/bootstrap_*'
       - '.github/workflows/validate-v0.6.22-bootstrap-e2e.yml'
   pull_request:
     branches:
@@ -15,7 +15,7 @@ on:
     paths:
       - 'manifest.json'
       - 'packages/v0.6.22/**'
-      - 'validation/v0.6.22-bootstrap-e2e/**'
+      - 'validation/v0.6.22/bootstrap_*'
       - '.github/workflows/validate-v0.6.22-bootstrap-e2e.yml'
   workflow_dispatch:
 
@@ -48,23 +48,47 @@ jobs:
       - name: Parse Bootstrap E2E sources
         shell: powershell
         run: |
-          python -m py_compile validation/v0.6.22-bootstrap-e2e/prepare_fixture.py
+          python -m py_compile validation/v0.6.22/bootstrap_prepare_fixture.py
           if($LASTEXITCODE -ne 0){throw 'v0.6.22 Bootstrap fixture builder failed compile.'}
           $tokens=$null;$errors=$null
-          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'validation/v0.6.22-bootstrap-e2e/run_bootstrap_cycle.ps1'),[ref]$tokens,[ref]$errors)|Out-Null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'validation/v0.6.22/bootstrap_run_cycle.ps1'),[ref]$tokens,[ref]$errors)|Out-Null
           if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'v0.6.22 Bootstrap E2E PowerShell parse failed.'}
           Write-Host 'V0622_BOOTSTRAP_E2E_SOURCE_PARSE_PASS'
+
+      - name: Download exact previously validated Bootstrap 1.0.6 carrier
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' > validated-v0614-repair-artifact.zip
+          python - <<'PY'
+          from pathlib import Path
+          from io import BytesIO
+          import hashlib,zipfile
+          outer=Path('validated-v0614-repair-artifact.zip').read_bytes()
+          with zipfile.ZipFile(BytesIO(outer)) as z:
+              assert z.testzip() is None
+              inner=z.read('SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip')
+          assert len(inner)==30856
+          assert hashlib.sha256(inner).hexdigest()=='6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdfd267bd95f6c6ddcf06'
+          with zipfile.ZipFile(BytesIO(inner)) as z:
+              boot=z.read('bootstrap/spotify-control-self-updater.ps1')
+          assert len(boot)==42963
+          assert hashlib.sha256(boot).hexdigest()=='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
+          print('VALIDATED_BOOTSTRAP_V106_CARRIER_PASS',len(outer),len(inner),len(boot))
+          PY
 
       - name: Prepare exact v0.6.21 installed fixture
         shell: powershell
         run: |
-          python validation/v0.6.22-bootstrap-e2e/prepare_fixture.py
+          python validation/v0.6.22/bootstrap_prepare_fixture.py
           if($LASTEXITCODE -ne 0){throw 'v0.6.22 Bootstrap fixture preparation failed.'}
 
       - name: Exact Bootstrap 1.0.6 v0.6.21 to v0.6.22 cycle
         shell: powershell
         run: |
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/v0.6.22-bootstrap-e2e/run_bootstrap_cycle.ps1 -Fixture ci-bootstrap-fixture-v0621-to-v0622
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/v0.6.22/bootstrap_run_cycle.ps1 -Fixture ci-bootstrap-fixture-v0621-to-v0622
           if($LASTEXITCODE -ne 0){throw "Bootstrap v0.6.21 -> v0.6.22 E2E failed: $LASTEXITCODE"}
 
       - name: Cleanup fixture tree
@@ -73,3 +97,4 @@ jobs:
         run: |
           Remove-Item -LiteralPath ci-bootstrap-fixture-v0621-to-v0622 -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -LiteralPath ci-bootstrap-fixture -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath validated-v0614-repair-artifact.zip -Force -ErrorAction SilentlyContinue
