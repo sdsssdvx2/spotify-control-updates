@@ -14,19 +14,6 @@ on:
       - '.github/workflows/validate-v0.6.20-release.yml'
       - '.github/workflows/validate-v0.6.20-bootstrap-e2e.yml'
       - '.github/workflows/validate-v0.6.20-bootstrap-main-e2e.yml'
-  pull_request:
-    branches:
-      - main
-    paths:
-      - 'performance/star-ratings/**'
-      - 'validation/v0.6.20/**'
-      - 'validation/v0.6.20-bootstrap-e2e/**'
-      - 'packages/v0.6.20/**'
-      - 'manifest.json'
-      - '.github/workflows/prepare-v0.6.20-release.yml'
-      - '.github/workflows/validate-v0.6.20-release.yml'
-      - '.github/workflows/validate-v0.6.20-bootstrap-e2e.yml'
-      - '.github/workflows/validate-v0.6.20-bootstrap-main-e2e.yml'
   workflow_dispatch:
 
 permissions:
