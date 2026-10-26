@@ -1,5 +1,5 @@
 from pathlib import Path
-import argparse,base64,gzip,hashlib,subprocess,sys
+import argparse,base64,gzip,hashlib,importlib.util,sys
 
 HERE=Path(__file__).resolve().parent
 BUILDER=HERE/'build_acceptance.py'
@@ -15,6 +15,25 @@ RAW_SIZE=36709
 RAW_SHA='2cf31fb02c337b3c52197d744432bc77a7b5393419c095046a64213cdf593004'
 
 def sha(b):return hashlib.sha256(b).hexdigest()
+
+def load_builder():
+    spec=importlib.util.spec_from_file_location('v0621_acceptance_builder',BUILDER)
+    if spec is None or spec.loader is None: raise RuntimeError('Unable to load acceptance builder module.')
+    mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
+    original=mod.validator_text
+    def repaired_validator_text():
+        text=original()
+        broken="write_text(json.dumps(o,indent=2)+'\n');"
+        correct="write_text(json.dumps(o,indent=2)+'\\n');"
+        if broken in text:
+            if text.count(broken)!=1: raise RuntimeError('Generated-validator newline repair target is ambiguous.')
+            text=text.replace(broken,correct,1)
+        elif correct not in text:
+            raise RuntimeError('Generated-validator newline contract changed unexpectedly.')
+        compile(text,'<generated-acceptance-validator>','exec')
+        return text
+    mod.validator_text=repaired_validator_text
+    return mod
 
 def main():
     p=argparse.ArgumentParser()
@@ -37,8 +56,8 @@ def main():
     assert sha(raw)==RAW_SHA,(sha(raw),RAW_SHA)
     template=a.out_dir/'_assembled-runtime-template.gz.b64'
     template.write_bytes(encoded)
-    cmd=[sys.executable,str(BUILDER),'--stage14-artifact',str(a.stage14_artifact),'--bootstrap-artifact',str(a.bootstrap_artifact),'--release-manifest',str(a.release_manifest),'--runtime-template',str(template),'--out-dir',str(a.out_dir)]
-    subprocess.check_call(cmd)
+    builder=load_builder()
+    builder.build(a.stage14_artifact,a.bootstrap_artifact,a.release_manifest,template,a.out_dir)
     print('V0621_RUNTIME_TEMPLATE_ASSEMBLY_PASS',len(encoded),sha(encoded),len(raw),sha(raw))
 
 if __name__=='__main__':main()
