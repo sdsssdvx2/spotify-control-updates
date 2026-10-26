@@ -38,7 +38,7 @@ def main():
     spice_lines=[]
     for i,line in enumerate(lines,1):
         low=line.lower()
-        if any(k in low for k in ('spicetify','github.com/spicetify','api.github.com/repos/spicetify','release','asset')) and ('spicetify' in low or 'spice' in low):
+        if 'spicetify' in low or ('spice' in low and any(k in low for k in ('release','asset','update','transaction'))):
             spice_lines.append({'line':i,'text':line[:800]})
 
     funcs=[]
@@ -46,7 +46,7 @@ def main():
         low=(name+'\n'+block).lower()
         if 'spicetify' in low and any(k in low for k in ('update','release','preflight','transaction','download','backup','apply','rollback','restore','official')):
             start_line=text.count('\n',0,start)+1
-            urls=sorted(set(re.findall(r'https?://[^\s\"\'\)]+',block)))
+            urls=sorted(set(re.findall(r"https?://[^\s\"'\)]+",block)))
             funcs.append({
                 'name':name,'start_line':start_line,'length':len(block),
                 'urls':urls,
@@ -58,35 +58,46 @@ def main():
                 'excerpt':'\n'.join(block.splitlines()[:120])[:14000]
             })
 
-    urls=sorted(set(re.findall(r'https?://[^\s\"\'\)]+',text)))
+    urls=sorted(set(re.findall(r"https?://[^\s\"'\)]+",text)))
     spice_urls=[u for u in urls if 'spicetify' in u.lower()]
     literals=sorted(set(re.findall(r'(?<![0-9])2\.\d+\.\d+(?![0-9])',text)))
 
     latest=read_json('https://api.github.com/repos/spicetify/cli/releases/latest')
+    tag=str(latest.get('tag_name') or '').strip()
+    m=re.fullmatch(r'v(\d+\.\d+\.\d+)',tag)
+    if not m: raise RuntimeError(f'invalid current latest Spicetify tag {tag!r}')
+    if latest.get('draft') or latest.get('prerelease'): raise RuntimeError('current latest release is draft/prerelease')
+    body=str(latest.get('body') or '')
+    win_lines=[line for line in re.split(r'\r?\n',body) if re.search(r'Spotify\s+for\s+\*\*[^*]*Windows[^*]*\*\*',line)]
+    if not win_lines: raise RuntimeError('current latest release has no Windows compatibility line')
+    compat_versions=re.findall(r'(?<!\d)(\d+\.\d+\.\d+)(?!\d)',win_lines[0])
+    if len(compat_versions)!=2: raise RuntimeError(f'current latest Windows compatibility line must contain exactly two versions: {win_lines[0]}')
+
     assets=[]
     for a in latest.get('assets',[]):
         if 'windows' in a.get('name','').lower():
-            assets.append({k:a.get(k) for k in ('name','size','digest','browser_download_url','content_type')})
+            assets.append({k:a.get(k) for k in ('name','size','digest','browser_download_url','content_type','state')})
 
     report={
         'schema':1,
-        'audit':'spicetify-updater-current-v0.1.0-discovery',
+        'audit':'spicetify-updater-current-v0.1.0',
         'production_base':BASE,
         'validation_head':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
         'production_main':{'size':MAIN[0],'sha256':MAIN[1]},
         'production_addon':{'size':ADDON[0],'sha256':ADDON[1]},
         'current_latest_release':{
-            'tag_name':latest.get('tag_name'),'name':latest.get('name'),'published_at':latest.get('published_at'),
-            'html_url':latest.get('html_url'),'assets':assets
+            'tag_name':tag,'version':m.group(1),'name':latest.get('name'),'published_at':latest.get('published_at'),
+            'html_url':latest.get('html_url'),'draft':bool(latest.get('draft')),'prerelease':bool(latest.get('prerelease')),
+            'windows_compatibility_line':win_lines[0],'windows_compatibility_versions':compat_versions,'assets':assets
         },
         'production_spicetify_urls':spice_urls,
         'production_semver_literals':literals,
         'spicetify_related_lines':spice_lines,
         'candidate_updater_functions':funcs,
-        'result':'DISCOVERY_PASS'
+        'result':'AUDIT_PASS'
     }
     (ROOT/'spicetify-updater-current-audit.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8',newline='\n')
-    print('SPICETIFY_UPDATER_DISCOVERY_PASS')
-    print('latest',latest.get('tag_name'),'windows_assets',len(assets),'functions',len(funcs),'lines',len(spice_lines),'urls',len(spice_urls))
+    print('SPICETIFY_UPDATER_CURRENT_AUDIT_PASS')
+    print('latest',tag,'compat',compat_versions,'windows_assets',len(assets),'functions',len(funcs),'lines',len(spice_lines),'urls',len(spice_urls))
 
 if __name__=='__main__': main()
