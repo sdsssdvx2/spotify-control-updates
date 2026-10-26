@@ -6,10 +6,11 @@ BASE='29d6c52c6a79559e513b367ec57edcccebae5fd0'
 MAIN=(281585,'e9f0181756cfb84c505c30f54b6067e321f6d178d3a1936489714b8f4441ba18')
 ADDON=(225044,'3a20fcd552b363ebc05e26854a8fe010ffe50e5c756ebd3d7fca54011e8a8b86')
 TARGETS=[
-    'Get-SpotifyVersion','Get-SpotifyPublisherSignature','Get-LatestSpotifyWindowsCandidate',
-    'Get-VerifiedSpotifyInstaller','Get-SmartUpdateGuardPlan','Set-SpotifyUpdateGuardState',
-    'Invoke-SmartUpdateGuard','Invoke-SpotifyPreflight','Invoke-SpotifyTransactionalMaintenance',
-    'Restore-SpotifyTransactionSnapshot','Rollback-SpotifyTransaction','Repair-PendingSpotifyTransaction'
+    'Normalize-Etag','Get-SpotifyVersion','Get-SpotifyPublisherSignature','Test-SpotifyInstallerIdentity',
+    'Get-LatestSpotifyWindowsCandidate','Get-VerifiedSpotifyInstaller','Get-SmartUpdateGuardPlan',
+    'Set-SpotifyUpdateGuardState','Invoke-SmartUpdateGuard','Invoke-SpotifyPreflight',
+    'Invoke-SpotifyTransactionalMaintenance','Restore-SpotifyTransactionSnapshot',
+    'Rollback-SpotifyTransaction','Repair-PendingSpotifyTransaction'
 ]
 
 def sha(b): return hashlib.sha256(b).hexdigest()
@@ -48,9 +49,9 @@ def main():
             'markers':sorted(k for k in [
                 'etag','sha256','signature','authenticode','productversion','download','installer','cache',
                 'silent','skip-app-launch','rollback','protected','registry','shortcuts','apply --no-restart',
-                'spotify-updates','acl','blocked','unblocked','spicetify','compatibility','transaction'
+                'spotify-updates','acl','blocked','unblocked','spicetify','compatibility','transaction','if-match'
             ] if k in block.lower()),
-            'excerpt':block[:30000]
+            'excerpt':block[:32000]
         }
     all_urls=sorted(set(re.findall(r"https?://[^\s\"'\)]+",text)))
     spotify_urls=[u for u in all_urls if any(k in u.lower() for k in ('spotify','scdn','spotcdn'))]
@@ -60,13 +61,13 @@ def main():
         if any(k in low for k in ('spotifysetup','etag','candidate','installer')) and any(k in low for k in ('http','spotify','etag','installer')):
             candidate_literals.append({'line':i,'text':line[:1000]})
     report={
-        'schema':1,'audit':'spotify-updater-current-v0.1.0-discovery','result':'DISCOVERY_PASS',
+        'schema':1,'audit':'spotify-updater-current-v0.1.0','result':'AUDIT_PASS',
         'production_base':BASE,'validation_head':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
         'production_main':{'size':MAIN[0],'sha256':MAIN[1]},
         'production_addon':{'size':ADDON[0],'sha256':ADDON[1]},
         'target_functions':selected,'production_spotify_urls':spotify_urls,'candidate_related_lines':candidate_literals
     }
     (ROOT/'spotify-updater-current-audit.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n',encoding='utf-8',newline='\n')
-    print('SPOTIFY_UPDATER_DISCOVERY_PASS functions=%d urls=%d candidate_lines=%d' % (len(selected),len(spotify_urls),len(candidate_literals)))
+    print('SPOTIFY_UPDATER_CURRENT_AUDIT_PASS functions=%d urls=%d candidate_lines=%d' % (len(selected),len(spotify_urls),len(candidate_literals)))
 
 if __name__=='__main__': main()
