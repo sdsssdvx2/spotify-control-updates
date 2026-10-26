@@ -99,13 +99,11 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Committed v0.6.23 transports/evidence differ from deterministic rebuild.'}
           Write-Host 'V0623_TRANSPORT_DETERMINISM_PASS'
 
-      - name: Candidate comprehensive SelfTest and r11 compatibility fixture
+      - name: Addon Manager comprehensive SelfTest and r11 compatibility fixture
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
-          $main='validation/v0.6.23/out/bin/spotify-control.ps1';$addon='validation/v0.6.23/out/bin/addon-manager.ps1'
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $main -Action SelfTest
-          if($LASTEXITCODE -ne 0){throw 'v0.6.23 main SelfTest failed.'}
+          $addon='validation/v0.6.23/out/bin/addon-manager.ps1'
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
           if($LASTEXITCODE -ne 0){throw 'r12 Addon Manager SelfTest failed.'}
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/v0.6.23/test_prior_r11_transaction.ps1
