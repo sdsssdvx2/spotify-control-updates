@@ -1,0 +1,196 @@
+name: Validate v0.6.21 Runtime Acceptance v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/v0621-runtime-acceptance-v0.1.0
+    paths:
+      - 'validation/v0.6.21-runtime-acceptance-v0.1.0/**'
+      - '.github/workflows/validate-v0621-runtime-acceptance-v010.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/v0.6.21-runtime-acceptance-v0.1.0/**'
+      - '.github/workflows/validate-v0621-runtime-acceptance-v010.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    env:
+      RELEASE_HEAD: 5eac4f39920b84f22e2a5ee07422f6080bfc7ef7
+      PROD_BASE: 29d6c52c6a79559e513b367ec57edcccebae5fd0
+      STAGE14_ARTIFACT_ID: '12564710055'
+      STAGE14_OUTER_SIZE: '23600'
+      STAGE14_OUTER_SHA: 190a792e6f6cb09daebcc1dbd4d99213daf80110e7f06b133df460aa282b2019
+      BOOTSTRAP_ARTIFACT_ID: '12555778387'
+      BOOTSTRAP_OUTER_SIZE: '31098'
+      BOOTSTRAP_OUTER_SHA: 5e4f30a2aeab4936840a8ac0d935120cf704b8fc586f57d19d67ed82b8b867ec
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove validation-only exact-head scope
+        shell: powershell
+        run: |
+          $actual=(git rev-parse HEAD).Trim()
+          $eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -ne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $env:PROD_BASE HEAD).Trim() -ne $env:PROD_BASE){throw 'Wrong production merge base.'}
+          git cat-file -e "$env:RELEASE_HEAD^{commit}"
+          if($LASTEXITCODE -ne 0){throw 'Pinned release head is unavailable.'}
+          if((git merge-base $env:PROD_BASE $env:RELEASE_HEAD).Trim() -ne $env:PROD_BASE){throw 'Pinned release head is not based on exact production main.'}
+          $changed=@(git diff --name-only "$env:PROD_BASE...HEAD")
+          $allowed=@(
+            'validation/v0.6.21-runtime-acceptance-v0.1.0/runtime-template.gz.b64',
+            'validation/v0.6.21-runtime-acceptance-v0.1.0/build_acceptance.py',
+            '.github/workflows/validate-v0621-runtime-acceptance-v010.yml'
+          )
+          $bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Out-of-scope files: $($bad -join ', ')"}
+          if($changed.Count -ne 3){throw "Expected exactly three validation-only files; got $($changed.Count): $($changed -join ', ')"}
+          Write-Host "V0621_ACCEPTANCE_SCOPE_PASS head=$actual release=$env:RELEASE_HEAD"
+
+      - name: Parse builder and prove pinned release contract
+        shell: powershell
+        run: |
+          python -m py_compile validation/v0.6.21-runtime-acceptance-v0.1.0/build_acceptance.py
+          if($LASTEXITCODE -ne 0){throw 'Acceptance builder failed Python compile.'}
+          python - <<'PY'
+          import hashlib,json,subprocess
+          h='5eac4f39920b84f22e2a5ee07422f6080bfc7ef7'
+          raw=subprocess.check_output(['git','show',f'{h}:manifest.json'])
+          m=json.loads(raw.decode('utf-8-sig'))
+          assert m['latest_version']=='0.6.21'
+          assert m['source_commit']=='9a90d5f13eb63023d8f965a004be14d309d99429'
+          assert m['payload_set_sha256']=='7bd1bd7559eee615f4e0aa049b3ec1574f6b215dbdf7417a0a57ea99b20b6c55'
+          e=[x for x in m['updates'] if x['from_version']=='0.6.20' and x['to_version']=='0.6.21']
+          assert len(e)==1 and len(e[0]['patches'])==2
+          latest={x['path']:x for x in m['latest_files']}
+          assert latest['bin/spotify-control.ps1']=={'path':'bin/spotify-control.ps1','sha256':'f97c78c905b83e90e58a24035febcaccc27cb12113ae9cbc64acdc79f5853828','size':281579}
+          assert latest['bin/addon-manager.ps1']=={'path':'bin/addon-manager.ps1','sha256':'7991b8eaa5a943957aebb9d3dd84d455ed6266430da442a672c05c145fe497a2','size':250616}
+          assert latest['bin/spotify-control-agent.vbs']=={'path':'bin/spotify-control-agent.vbs','sha256':'2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278','size':4855}
+          open('release-manifest.json','wb').write(raw)
+          print('V0621_ACCEPTANCE_RELEASE_MANIFEST_PASS',len(raw),hashlib.sha256(raw).hexdigest())
+          PY
+          if($LASTEXITCODE -ne 0){throw 'Pinned release manifest contract failed.'}
+
+      - name: Download exact validated Stage14 and Bootstrap carriers
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $headers=@{Authorization="Bearer $env:GITHUB_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+          $base='https://api.github.com/repos/${{ github.repository }}/actions/artifacts'
+          Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri "$base/$env:STAGE14_ARTIFACT_ID/zip" -OutFile stage14-artifact.zip
+          Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri "$base/$env:BOOTSTRAP_ARTIFACT_ID/zip" -OutFile bootstrap-carrier.zip
+          foreach($row in @(
+            @{p='stage14-artifact.zip';size=[int64]$env:STAGE14_OUTER_SIZE;sha=$env:STAGE14_OUTER_SHA},
+            @{p='bootstrap-carrier.zip';size=[int64]$env:BOOTSTRAP_OUTER_SIZE;sha=$env:BOOTSTRAP_OUTER_SHA}
+          )){
+            $item=Get-Item -LiteralPath $row.p
+            $hash=(Get-FileHash -LiteralPath $row.p -Algorithm SHA256).Hash.ToLowerInvariant()
+            if([int64]$item.Length -ne $row.size -or $hash -cne $row.sha){throw "Artifact identity mismatch: $($row.p) $($item.Length)/$hash"}
+          }
+          Write-Host 'V0621_ACCEPTANCE_PROVENANCE_ARTIFACTS_PASS'
+
+      - name: Build package twice deterministically
+        shell: powershell
+        run: |
+          $builder='validation/v0.6.21-runtime-acceptance-v0.1.0/build_acceptance.py'
+          $template='validation/v0.6.21-runtime-acceptance-v0.1.0/runtime-template.gz.b64'
+          python $builder --stage14-artifact stage14-artifact.zip --bootstrap-artifact bootstrap-carrier.zip --release-manifest release-manifest.json --runtime-template $template --out-dir build-one
+          if($LASTEXITCODE -ne 0){throw 'First acceptance build failed.'}
+          python $builder --stage14-artifact stage14-artifact.zip --bootstrap-artifact bootstrap-carrier.zip --release-manifest release-manifest.json --runtime-template $template --out-dir build-two
+          if($LASTEXITCODE -ne 0){throw 'Second acceptance build failed.'}
+          $a='build-one/SpotifyControl-v0.6.21-Runtime-Acceptance-v0.1.0.zip'
+          $b='build-two/SpotifyControl-v0.6.21-Runtime-Acceptance-v0.1.0.zip'
+          $ha=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$hb=(Get-FileHash $b -Algorithm SHA256).Hash.ToLowerInvariant()
+          $sa=(Get-Item $a).Length;$sb=(Get-Item $b).Length
+          if($ha -cne $hb -or $sa -ne $sb){throw "Acceptance package nondeterministic: $sa/$ha != $sb/$hb"}
+          Write-Host "V0621_ACCEPTANCE_DETERMINISTIC_PASS size=$sa sha=$ha"
+
+      - name: Extract and validate final package internals
+        shell: powershell
+        run: |
+          $zip='build-one/SpotifyControl-v0.6.21-Runtime-Acceptance-v0.1.0.zip'
+          $dest='final-unpacked'
+          if(Test-Path $dest){Remove-Item $dest -Recurse -Force}
+          Expand-Archive -LiteralPath $zip -DestinationPath $dest
+          python "$dest/evidence/validate_acceptance.py"
+          if($LASTEXITCODE -ne 0){throw 'Generated acceptance self-validation failed.'}
+          $report=Get-Content "$dest/evidence/SELF_VALIDATION_REPORT.json" -Raw|ConvertFrom-Json
+          if([int]$report.passed -ne [int]$report.total -or [int]$report.total -lt 12){throw "Generated package self-validation incomplete: $($report.passed)/$($report.total)"}
+          foreach($file in @("$dest/RUN_RUNTIME_ACCEPTANCE.ps1","$dest/PRECHECK_RUNTIME_ACCEPTANCE.ps1","$dest/bootstrap/spotify-control-self-updater-v0621-acceptance.ps1")){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0}:{1}: {2}" -f $file,$_.Extent.StartLineNumber,$_.Message)};throw "PowerShell 5.1 parse failed: $file"}
+          }
+          foreach($line in @(Get-Content "$dest/SHA256SUMS.txt")){
+            if([string]::IsNullOrWhiteSpace($line)){continue}
+            $parts=$line -split '  ',2;if($parts.Count -ne 2){throw "Invalid SHA256SUMS line: $line"}
+            $p=Join-Path $dest $parts[1]
+            if(-not(Test-Path -LiteralPath $p -PathType Leaf)){throw "Missing hashed package file: $($parts[1])"}
+            if((Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant() -cne $parts[0]){throw "Package internal SHA mismatch: $($parts[1])"}
+          }
+          Write-Host "V0621_ACCEPTANCE_INTERNAL_PASS checks=$($report.passed)/$($report.total) runtime=$($report.runtime_sha256)"
+
+      - name: Prove Bootstrap URL-only patch and bundled manifest bytes
+        shell: powershell
+        run: |
+          python - <<'PY'
+          import hashlib,io,subprocess,zipfile
+          root='final-unpacked'
+          carrier=open('bootstrap-carrier.zip','rb').read()
+          with zipfile.ZipFile(io.BytesIO(carrier)) as z:
+              inner=z.read(z.namelist()[0])
+          with zipfile.ZipFile(io.BytesIO(inner)) as z:
+              exact=z.read('bootstrap/spotify-control-self-updater.ps1')
+          patched=open(root+'/bootstrap/spotify-control-self-updater-v0621-acceptance.ps1','rb').read()
+          old=b'https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/main/manifest.json'
+          new=b'https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/5eac4f39920b84f22e2a5ee07422f6080bfc7ef7/manifest.json'
+          assert len(exact)==42963 and hashlib.sha256(exact).hexdigest()=='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
+          assert exact.count(old)==1 and patched.count(new)==1 and old not in patched
+          assert patched.replace(new,old,1)==exact
+          manifest=subprocess.check_output(['git','show','5eac4f39920b84f22e2a5ee07422f6080bfc7ef7:manifest.json'])
+          bundled=open(root+'/release/manifest.json','rb').read()
+          assert bundled==manifest
+          print('V0621_ACCEPTANCE_BOOTSTRAP_URL_ONLY_AND_MANIFEST_BYTES_PASS',len(patched),hashlib.sha256(patched).hexdigest(),len(bundled),hashlib.sha256(bundled).hexdigest())
+          PY
+          if($LASTEXITCODE -ne 0){throw 'Bootstrap URL-only or bundled-manifest byte proof failed.'}
+
+      - name: Final safety surface audit
+        shell: powershell
+        run: |
+          $s=Get-Content final-unpacked/RUN_RUNTIME_ACCEPTANCE.ps1 -Raw
+          foreach($required in @(
+            'WINDOWS V0.6.21 RUNTIME ACCEPTANCE VERIFIED / BASELINE RESTORED',
+            "Invoke-AcceptanceBootstrap 'Rollback' -Force",
+            'Restore-BinFromAcceptanceBackup',
+            'Assert-ProtectedUnchanged',
+            "Invoke-PowerShellScript `$Addon @('-Action','Check')",
+            'e9f0181756cfb84c505c30f54b6067e321f6d178d3a1936489714b8f4441ba18',
+            '3a20fcd552b363ebc05e26854a8fe010ffe50e5c756ebd3d7fca54011e8a8b86',
+            'f97c78c905b83e90e58a24035febcaccc27cb12113ae9cbc64acdc79f5853828',
+            '7991b8eaa5a943957aebb9d3dd84d455ed6266430da442a672c05c145fe497a2',
+            'fb1666d8a1add725b476d31ed4650bfc162bad08'
+          )){if($s.IndexOf($required,[StringComparison]::Ordinal) -lt 0){throw "Acceptance safety marker missing: $required"}}
+          foreach($bad in @('keybd_event','SpotifyControlMediaKeys','Send-MediaKey','0xB0','0xB3','Start-Spotify')){if($s.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Forbidden acceptance surface present: $bad"}}
+          if($s.IndexOf('Update-AutoApps',[StringComparison]::Ordinal) -ge 0){throw 'Acceptance must not directly mutate addons.'}
+          if($s.IndexOf("Invoke-PowerShellScript `$Addon @('-Action','Update')",[StringComparison]::Ordinal) -ge 0){throw 'Acceptance must keep Addon Manager runtime validation read-only.'}
+          Write-Host 'V0621_ACCEPTANCE_FINAL_SAFETY_AUDIT_PASS'
+
+      - name: Upload final package
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpotifyControl-v0.6.21-Runtime-Acceptance-v0.1.0
+          path: build-one/SpotifyControl-v0.6.21-Runtime-Acceptance-v0.1.0.zip
+          if-no-files-found: error
+          retention-days: 30
