@@ -1,0 +1,117 @@
+name: Validate Splitify Source Monitor v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/splitify-source-monitor-v0.1.0
+    paths:
+      - '.github/workflows/validate-splitify-source-monitor-v010.yml'
+      - 'validation/v0.6.22/**'
+      - 'validation/v0.6.21/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-windows:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove validation-only head and rebuild exact stable r11
+        shell: powershell
+        run: |
+          $base='0fd4a8aa5b8f8e97cf1dc9a1e8d3b7bb9b4d1f2f'
+          $actual=(git rev-parse HEAD).Trim()
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Validation branch is not based on exact stable post-release main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          $bad=@($changed|Where-Object{$_ -ne '.github/workflows/validate-splitify-source-monitor-v010.yml'})
+          if($bad.Count){throw "Discovery phase changed non-validation files: $($bad -join ', ')"}
+          python validation/v0.6.22/build_v0622.py --build
+          if($LASTEXITCODE -ne 0){throw 'Exact stable r11 rebuild failed.'}
+          $main='validation/v0.6.22/out/bin/spotify-control.ps1'
+          $addon='validation/v0.6.22/out/bin/addon-manager.ps1'
+          if((Get-Item $main).Length -ne 281586 -or (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'b5ba4dc98b10ea922ce30401b5cddf5a1ab01171366e09b3546ce3cc6fcd80fe'){throw 'Stable v0.6.22 main identity mismatch.'}
+          if((Get-Item $addon).Length -ne 268670 -or (Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -ne '0ee8d30bf7c2fda9d0d8d112b7191b0d0439a1071d284d0cc04a87fe8937c7bc'){throw 'Stable r11 Addon Manager identity mismatch.'}
+          Write-Host "SPLITIFY_DISCOVERY_BASE_PASS head=$actual"
+
+      - name: Extract exact current Splitify inventory and adapter surface
+        shell: powershell
+        run: |
+          $addonPath='validation/v0.6.22/out/bin/addon-manager.ps1'
+          $addon=Get-Content -LiteralPath $addonPath -Raw
+          $invStart=$addon.IndexOf('function Get-AddonInventory {',[StringComparison]::Ordinal)
+          if($invStart -lt 0){throw 'Get-AddonInventory missing.'}
+          $invNext=$addon.IndexOf("`nfunction ",$invStart+1,[StringComparison]::Ordinal)
+          if($invNext -lt 0){$invNext=$addon.Length}
+          $inventory=$addon.Substring($invStart,$invNext-$invStart)
+          if($inventory.IndexOf('splitify',[StringComparison]::OrdinalIgnoreCase) -lt 0){throw 'Splitify inventory row missing.'}
+          $policyStart=$addon.IndexOf('function Get-AddonPolicyRegistry {',[StringComparison]::Ordinal)
+          $policyNext=$addon.IndexOf("`nfunction ",$policyStart+1,[StringComparison]::Ordinal)
+          $policy=$addon.Substring($policyStart,$policyNext-$policyStart)
+          if($policy.IndexOf("name='splitify'",[StringComparison]::Ordinal) -lt 0){throw 'Splitify policy row missing.'}
+          $adapterStart=$addon.IndexOf('function Assert-AddonSourceAdapterEntryContract {',[StringComparison]::Ordinal)
+          $adapterNext=$addon.IndexOf("`nfunction ",$adapterStart+1,[StringComparison]::Ordinal)
+          $adapter=$addon.Substring($adapterStart,$adapterNext-$adapterStart)
+          New-Item -ItemType Directory -Force -Path evidence | Out-Null
+          Set-Content -LiteralPath evidence/current-inventory.txt -Value $inventory -Encoding UTF8
+          Set-Content -LiteralPath evidence/current-policy.txt -Value $policy -Encoding UTF8
+          Set-Content -LiteralPath evidence/current-adapter-contract.txt -Value $adapter -Encoding UTF8
+          Write-Host '--- CURRENT SPLITIFY LINES ---'
+          ($inventory -split "`r?`n") | Where-Object { $_ -match '(?i)splitify|manual-source|unknown-source' } | ForEach-Object { Write-Host $_ }
+          ($policy -split "`r?`n") | Where-Object { $_ -match '(?i)splitify' } | ForEach-Object { Write-Host $_ }
+          Write-Host 'SPLITIFY_CURRENT_SURFACE_EXTRACT_PASS'
+
+      - name: Verify public upstream identity and release transport
+        shell: powershell
+        run: |
+          $headers=@{'User-Agent'='spotify-control-splitify-validation'}
+          $repo=Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri 'https://api.github.com/repos/alexander-rebello/splitify'
+          if([string]$repo.full_name -cne 'alexander-rebello/splitify'){throw "Unexpected repo identity: $($repo.full_name)"}
+          if([bool]$repo.archived -or [bool]$repo.disabled){throw 'Splitify upstream is archived/disabled.'}
+          $releases=@(Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri 'https://api.github.com/repos/alexander-rebello/splitify/releases?per_page=20')
+          $stable=@($releases|Where-Object{-not $_.draft -and -not $_.prerelease}|Sort-Object {[datetime]$_.published_at} -Descending|Select-Object -First 1)
+          if($stable.Count -ne 1){throw 'No unique stable Splitify release discovered.'}
+          $release=$stable[0]
+          if([string]$release.tag_name -notmatch '^v?\d+\.\d+\.\d+$'){throw "Unexpected Splitify release tag: $($release.tag_name)"}
+          $assets=@($release.assets|Where-Object{[string]$_.name -ceq 'splitify.zip'})
+          if($assets.Count -ne 1){throw "Expected exactly one splitify.zip asset, got $($assets.Count)"}
+          $asset=$assets[0]
+          if([string]$asset.digest -notmatch '^sha256:[0-9a-f]{64}$'){throw "Splitify release asset lacks GitHub SHA-256 digest: $($asset.digest)"}
+          $evidence=[ordered]@{
+            schema=1
+            repository=[string]$repo.full_name
+            default_branch=[string]$repo.default_branch
+            archived=[bool]$repo.archived
+            release_tag=[string]$release.tag_name
+            release_published_at=[string]$release.published_at
+            asset_name=[string]$asset.name
+            asset_size=[int64]$asset.size
+            asset_digest=[string]$asset.digest
+            asset_url=[string]$asset.browser_download_url
+            mutation_authority='none'
+            intended_policy='monitor-only'
+          }
+          $evidence|ConvertTo-Json -Depth 5|Set-Content -LiteralPath evidence/upstream.json -Encoding UTF8
+          Write-Host "SPLITIFY_UPSTREAM_PASS repo=$($repo.full_name) release=$($release.tag_name) asset=$($asset.size) digest=$($asset.digest)"
+
+      - name: Assert no production or authority mutation in discovery phase
+        shell: powershell
+        run: |
+          $base='0fd4a8aa5b8f8e97cf1dc9a1e8d3b7bb9b4d1f2f'
+          $changed=@(git diff --name-only "$base...HEAD")
+          if(($changed -join '|') -cne '.github/workflows/validate-splitify-source-monitor-v010.yml'){throw "Unexpected tracked scope: $($changed -join ', ')"}
+          git diff --exit-code -- manifest.json packages performance README.md validation
+          if($LASTEXITCODE -ne 0){throw 'Discovery phase modified production/tracked validation surfaces.'}
+          Write-Host 'SPLITIFY_DISCOVERY_NO_PRODUCTION_CHANGE_PASS'
+
+      - name: Upload source discovery evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: splitify-source-discovery-v010
+          path: evidence/
+          if-no-files-found: error
