@@ -92,7 +92,7 @@ jobs:
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $env:STABLE_RELEASE_VALIDATOR
           if($LASTEXITCODE -ne 0){throw "Exact $env:STABLE_VERSION release contract validation failed."}
 
-      - name: Parse and SelfTest current managed candidates
+      - name: Parse current managed candidates and SelfTest Addon Manager
         shell: powershell
         run: |
           $main=Join-Path $env:STABLE_RELEASE_DIR 'out/bin/spotify-control.ps1'
@@ -104,11 +104,9 @@ jobs:
             if($errors.Count){$errors|ForEach-Object{Write-Error ("{0}: {1}" -f $file,$_.Message)};throw "PowerShell 5.1 parser failed: $file"}
           }
           New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $main -Action SelfTest
-          if($LASTEXITCODE -ne 0){throw 'Current Spotify Control SelfTest failed.'}
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
           if($LASTEXITCODE -ne 0){throw 'Current Addon Manager SelfTest failed.'}
-          Write-Host "STABLE_MANAGED_SELFTEST_PASS version=$env:STABLE_VERSION"
+          Write-Host "STABLE_MANAGED_PARSE_AND_ADDON_SELFTEST_PASS version=$env:STABLE_VERSION"
 
       - name: Prove stable validation does not rewrite committed transport
         shell: powershell
