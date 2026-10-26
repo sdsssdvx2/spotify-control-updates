@@ -1,0 +1,88 @@
+name: Validate Spotify Control v0.6.25 Release
+
+on:
+  push:
+    branches:
+      - release/v0.6.25-splitify-release-provenance-r14
+    paths:
+      - '.github/workflows/validate-v0.6.25-release.yml'
+      - 'validation/v0.6.25/**'
+      - 'packages/v0.6.25/**'
+      - 'manifest.json'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/validate-v0.6.25-release.yml'
+      - 'validation/v0.6.25/**'
+      - 'packages/v0.6.25/**'
+      - 'manifest.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove release scope and published manifest identity
+        shell: powershell
+        run: |
+          $base='c3dca564f70d4c85a84d5f895309d30d5a2d80c1'
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'v0.6.25 release no longer descends from exact stable v0.6.24 main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          foreach($p in $changed){
+            $ok=($p -eq 'manifest.json' -or $p -like 'packages/v0.6.25/*' -or $p -like 'validation/v0.6.25/*' -or $p -eq '.github/workflows/prepare-v0.6.25-release.yml' -or $p -eq '.github/workflows/validate-v0.6.25-release.yml' -or $p -eq '.github/workflows/validate-v0.6.25-bootstrap-e2e.yml')
+            if(-not$ok){throw "Unexpected v0.6.25 release path: $p"}
+          }
+          $m=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($m.latest_version -ne '0.6.25' -or $m.source_commit -ne '7c23a470ecf9c83dff5c42caeed03ff20f669072' -or $m.payload_set_sha256 -ne 'bb6c5f63d3b65fb61f3f03ca64d43060de4508a2b0bb72e77df868c64337079a'){throw 'Published v0.6.25 manifest identity drifted.'}
+          if($m.bootstrap.version -ne '1.0.6' -or $m.bootstrap.sha256 -ne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' -or [int64]$m.bootstrap.size -ne 42963){throw 'Bootstrap contract drifted.'}
+          $edge=@($m.updates|Where-Object{$_.from_version -eq '0.6.24' -and $_.to_version -eq '0.6.25'});if($edge.Count -ne 1 -or @($edge[0].patches).Count -ne 2){throw 'Published v0.6.24 -> v0.6.25 edge missing/ambiguous.'}
+          Write-Host "V0625_RELEASE_SCOPE_PASS head=$((git rev-parse HEAD).Trim())"
+
+      - name: Reconstruct immutable transport from source_commit and compare deterministic rebuild
+        shell: powershell
+        run: |
+          python -m py_compile validation/v0.6.25/build_v0625.py validation/v0.6.25/release_transport.py validation/v0.6.25/bootstrap_prepare_fixture.py
+          if($LASTEXITCODE -ne 0){throw 'v0.6.25 validation source compile failed.'}
+          python validation/v0.6.25/release_transport.py --validate-published
+          if($LASTEXITCODE -ne 0){throw 'Published v0.6.25 immutable transport validation failed.'}
+          git diff --exit-code -- packages/v0.6.25 validation/v0.6.25/candidate-validation.json validation/v0.6.25/release-metadata.json
+          if($LASTEXITCODE -ne 0){throw 'Deterministic rebuild changed published v0.6.25 transport metadata.'}
+          Write-Host 'V0625_IMMUTABLE_TRANSPORT_REBUILD_PASS'
+
+      - name: Parse exact candidate and assert r14 policy invariants
+        shell: powershell
+        run: |
+          python validation/v0.6.25/build_v0625.py --build
+          if($LASTEXITCODE -ne 0){throw 'v0.6.25 exact candidate rebuild failed.'}
+          $main='validation/v0.6.25/out/bin/spotify-control.ps1';$addon='validation/v0.6.25/out/bin/addon-manager.ps1'
+          if((Get-Item $main).Length -ne 284313 -or (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -ne '896bb74e71385b5b6ada118af41cbe9d398dc662ce3719234104028e6eed197f'){throw 'v0.6.25 main identity mismatch.'}
+          if((Get-Item $addon).Length -ne 282718 -or (Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -ne '25ebd0a5d5158f7d3cb4b4ce2ecf89f05f4dad3ef6bc799599e7204ce103c29c'){throw 'r14 Addon Manager identity mismatch.'}
+          foreach($file in @($main,$addon)){$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Host $_.Message};throw "PowerShell 5.1 parse failed: $file"}}
+          $text=Get-Content $addon -Raw
+          foreach($required in @('function Get-SplitifyReleaseCatalog','function Get-SplitifyTreeFingerprint','function Resolve-SplitifyInstalledReleaseProvenance','authenticated-release-catalog-tree-v1','60311e81ae11727528fd5e34879533e1cfacdaaf7b2b21dd1808fb20e3b32454','8c4525b41511fb5a32ad4921fbdbda5c59e0fb613ff0b2f223d0ee295030936a','571722765760ccb98697a50742cfc8e66fae5411f91716794359e483b4383c76','48bace1b6cef325dd1757bf4428e01fd42759a74da20a93fc16ab1ce49132777','.Sort([System.StringComparer]::OrdinalIgnoreCase)','protect-ratings-tags-notes','playlist-backed-ratings-preserve','never-disable-or-optimize')){if($text.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "r14 contract missing: $required"}}
+          if($text.IndexOf('Get-SplitifyOfficialReleaseProof',[StringComparison]::OrdinalIgnoreCase) -ge 0){throw 'Superseded latest-only Splitify proof helper remains.'}
+          $report=Get-Content validation/v0.6.25/candidate-validation.json -Raw|ConvertFrom-Json
+          if($report.authority_expanded -ne $false -or $report.new_auto_install_authority -ne $false){throw 'r14 authority unexpectedly expanded.'}
+          if(($report.auto_authority -join '|') -ne 'better-local-files|eternal-jukebox|ivLyrics|playlist-maker'){throw 'Automatic authority set drifted.'}
+          if($report.registry_fingerprint -ne '0f05406d7152de1d975f888cb8270be8249115211ba9f41e0157342cd42efbd8' -or $report.source_adapter_fingerprint -ne 'c0611a7b96f6ff09d1e235119efce2f2def6eb6d0a4e8e93e276cfa622c3c42d'){throw 'Registry/source-adapter fingerprint drifted.'}
+          Write-Host 'V0625_R14_POLICY_PARSE_PASS'
+
+      - name: Validate historical manifest preservation from exact stable base
+        shell: python
+        run: |
+          import json,subprocess
+          base=json.loads(subprocess.check_output(['git','show','c3dca564f70d4c85a84d5f895309d30d5a2d80c1:manifest.json']).decode('utf-8-sig'))
+          cur=json.load(open('manifest.json',encoding='utf-8-sig'))
+          if cur['updates'][:-1]!=base['updates']:raise SystemExit('Historical update graph changed')
+          if cur['updates'][-1]['from_version']!='0.6.24' or cur['updates'][-1]['to_version']!='0.6.25':raise SystemExit('v0.6.25 edge not append-only')
+          if base['latest_version']!='0.6.24' or cur['latest_version']!='0.6.25':raise SystemExit('version chain mismatch')
+          print('V0625_APPEND_ONLY_MANIFEST_PASS')
