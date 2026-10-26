@@ -13,6 +13,10 @@ ENCODED_SIZE=13544
 ENCODED_SHA='51bba07c6e67bdc93c884391ed4b993e4af0cac85ebea3b2886a9c79c967076c'
 RAW_SIZE=36709
 RAW_SHA='2cf31fb02c337b3c52197d744432bc77a7b5393419c095046a64213cdf593004'
+PATCHED_RAW_SIZE=36710
+PATCHED_RAW_SHA='807ae0d78777304d0242f8c436d3bc14ec26f48d2e215510a5be3714e43b9a6b'
+BROKEN_RECOVERY="if($BackupReady -and ((Get-TreeFingerprint $Bin)-cne $BaselineBinFingerprint){"
+FIXED_RECOVERY="if($BackupReady -and ((Get-TreeFingerprint $Bin)-cne $BaselineBinFingerprint)){"
 
 def sha(b):return hashlib.sha256(b).hexdigest()
 
@@ -54,10 +58,17 @@ def main():
     raw=gzip.decompress(base64.b64decode(encoded,validate=True))
     assert len(raw)==RAW_SIZE,(len(raw),RAW_SIZE)
     assert sha(raw)==RAW_SHA,(sha(raw),RAW_SHA)
+    text=raw.decode('utf-8-sig')
+    if text.count(BROKEN_RECOVERY)!=1: raise RuntimeError('Runtime recovery syntax repair target is missing or ambiguous.')
+    text=text.replace(BROKEN_RECOVERY,FIXED_RECOVERY,1)
+    patched=text.encode('utf-8-sig')
+    assert len(patched)==PATCHED_RAW_SIZE,(len(patched),PATCHED_RAW_SIZE)
+    assert sha(patched)==PATCHED_RAW_SHA,(sha(patched),PATCHED_RAW_SHA)
+    patched_encoded=base64.b64encode(gzip.compress(patched,compresslevel=9,mtime=0))
     template=a.out_dir/'_assembled-runtime-template.gz.b64'
-    template.write_bytes(encoded)
+    template.write_bytes(patched_encoded)
     builder=load_builder()
     builder.build(a.stage14_artifact,a.bootstrap_artifact,a.release_manifest,template,a.out_dir)
-    print('V0621_RUNTIME_TEMPLATE_ASSEMBLY_PASS',len(encoded),sha(encoded),len(raw),sha(raw))
+    print('V0621_RUNTIME_TEMPLATE_ASSEMBLY_PASS',len(encoded),sha(encoded),len(raw),sha(raw),len(patched),sha(patched))
 
 if __name__=='__main__':main()
