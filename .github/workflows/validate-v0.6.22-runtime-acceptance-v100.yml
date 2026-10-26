@@ -56,8 +56,9 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Initial acceptance v1.0.0 package build failed.'}
           $zip=Join-Path $dir 'out/SpotifyControl-v0.6.22-r11-Runtime-Acceptance-v1.0.0.zip'
           $hash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant();$size=(Get-Item $zip).Length
+          if($size -ne 56228 -or $hash -cne '04b555a3e68a7baf72b9fabdf2f15419cf7c1bf70fb5915d936165cd74e3bd14'){throw "Windows deterministic package identity mismatch: size=$size sha=$hash"}
           "$hash|$size" | Set-Content $env:RUNNER_TEMP\acceptance-v100-first.txt -Encoding ASCII
-          Write-Host "V0622_RUNTIME_ACCEPTANCE_V100_BUILD_IDENTITY $hash $size"
+          Write-Host "V0622_RUNTIME_ACCEPTANCE_V100_BUILD_IDENTITY_PASS $hash $size"
 
       - name: Reconstruct exact v0.6.22 r11 candidate and re-run safety suite
         shell: powershell
@@ -95,14 +96,27 @@ jobs:
       - name: Fetch exact immutable release-head manifest over GitHub HTTPS
         shell: powershell
         run: |
+          $release='9c1cabcaaed6c7a1465f5baea12d046a5d51c8dc'
           $gen='validation/v0.6.22-runtime-acceptance-v1.0.0/generated'
           $runner=(Resolve-Path (Join-Path $gen 'BOOTSTRAP_RUNNER.ps1')).Path
-          $url='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/9c1cabcaaed6c7a1465f5baea12d046a5d51c8dc/manifest.json'
+          $url="https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/$release/manifest.json"
           $out=Join-Path $env:RUNNER_TEMP 'v100-release-head-manifest.json'
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runner -FetchUrl $url -OutputPath $out -TimeoutSec 20
           if($LASTEXITCODE -ne 0){throw 'Exact release-head manifest HTTPS fetch failed.'}
-          $remote=(Get-FileHash $out -Algorithm SHA256).Hash.ToLowerInvariant();$checkout=(Get-FileHash manifest.json -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($remote -cne $checkout){throw "Release-head raw manifest differs from checkout: remote=$remote checkout=$checkout"}
+          $py=@'
+          import hashlib,pathlib,subprocess,sys
+          remote=pathlib.Path(sys.argv[1]).read_bytes()
+          committed=subprocess.check_output(['git','show',sys.argv[2]+':manifest.json'])
+          rh=hashlib.sha256(remote).hexdigest(); ch=hashlib.sha256(committed).hexdigest()
+          print('REMOTE_MANIFEST_SHA='+rh)
+          print('COMMITTED_MANIFEST_SHA='+ch)
+          if remote != committed:
+              raise SystemExit('raw release manifest bytes differ from immutable Git blob bytes')
+          '@
+          python -c $py $out $release
+          if($LASTEXITCODE -ne 0){throw 'Fetched release-head manifest does not match immutable Git blob bytes.'}
+          $remote=(Get-FileHash $out -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($remote -cne '9eea792cf0f81c09d3527f879b98c44dbbcbce1209c7dbc651d4298453f28e32'){throw "Immutable release manifest SHA drift: $remote"}
           $m=Get-Content $out -Raw|ConvertFrom-Json
           if($m.latest_version -ne '0.6.22' -or $m.source_commit -ne 'db4dd0e4357cbf03ea95dd8773c0be173b2c91fc' -or $m.payload_set_sha256 -ne 'cb396442ac874504a04d4acb0034d3cb9fa11acce290da18e639c2dbe8e5a091'){throw 'Fetched release-head manifest identity mismatch.'}
           "$remote|$((Get-Item $out).Length)" | Set-Content $env:RUNNER_TEMP\v100-manifest-identity.txt -Encoding ASCII
@@ -177,6 +191,7 @@ jobs:
           $zip=Join-Path $dir 'out/SpotifyControl-v0.6.22-r11-Runtime-Acceptance-v1.0.0.zip'
           $secondHash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant();$secondSize=(Get-Item $zip).Length
           if($secondHash -cne $firstHash -or $secondSize -ne $firstSize){throw "Package is not deterministic: first=$firstHash/$firstSize second=$secondHash/$secondSize"}
+          if($secondSize -ne 56228 -or $secondHash -cne '04b555a3e68a7baf72b9fabdf2f15419cf7c1bf70fb5915d936165cd74e3bd14'){throw "Final package identity drift: size=$secondSize sha=$secondHash"}
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $z=[IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip));try{
             $bad=$null
