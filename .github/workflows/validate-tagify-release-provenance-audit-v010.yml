@@ -1,0 +1,157 @@
+name: Audit Tagify Official Release Provenance v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/tagify-release-provenance-audit-v0.1.0
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove exact validation-only scope
+        shell: powershell
+        run: |
+          $base='9b97ffba51060e92e687fadeb361da7ba95a1dd0'
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Tagify audit is not based on exact current stable main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          if($changed.Count -ne 1 -or $changed[0] -cne '.github/workflows/validate-tagify-release-provenance-audit-v010.yml'){throw "Unexpected audit scope: $($changed -join ', ')"}
+          Write-Host "TAGIFY_PROVENANCE_AUDIT_SCOPE_PASS head=$((git rev-parse HEAD).Trim())"
+
+      - name: Catalog authenticated stable Tagify release ZIP trees
+        shell: python
+        run: |
+          import hashlib,json,re,stat,urllib.request,zipfile
+          from pathlib import Path
+          API='https://api.github.com/repos/alexk218/tagify/releases?per_page=100'
+          UA='SpotifyControl-Tagify-Provenance-Audit/0.1.0'
+          out=Path('tagify-provenance-audit-evidence');out.mkdir(exist_ok=True)
+          def get_json(url):
+              req=urllib.request.Request(url,headers={'User-Agent':UA,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'})
+              with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
+          def download(url):
+              req=urllib.request.Request(url,headers={'User-Agent':UA})
+              with urllib.request.urlopen(req,timeout=90) as r:return r.read()
+          def semver(tag):return tuple(map(int,tag[1:].split('.')))
+          releases=get_json(API)
+          stable=[r for r in releases if not r.get('draft') and not r.get('prerelease') and re.fullmatch(r'v\d+\.\d+\.\d+',str(r.get('tag_name') or ''))]
+          stable.sort(key=lambda r:semver(r['tag_name']))
+          if not stable:raise SystemExit('No stable Tagify releases found')
+          catalog=[];unsupported=[]
+          for release in stable:
+              tag=release['tag_name'];version=tag[1:];expected_name=f'tagify-{tag}.zip'
+              assets=[a for a in release.get('assets',[]) if str(a.get('name') or '').lower().endswith('.zip')]
+              exact=[a for a in assets if a.get('name')==expected_name]
+              if len(exact)!=1:
+                  unsupported.append({'version':version,'tag':tag,'reason':'exact-release-zip-count:'+str(len(exact)),'zip_assets':[a.get('name') for a in assets]})
+                  print('TAGIFY_UNPROVABLE',tag,'exact-release-zip-count',len(exact),'assets',[a.get('name') for a in assets]);continue
+              asset=exact[0];digest=str(asset.get('digest') or '').lower()
+              if not re.fullmatch(r'sha256:[0-9a-f]{64}',digest):
+                  unsupported.append({'version':version,'tag':tag,'reason':'no-github-sha256-digest','asset':expected_name})
+                  print('TAGIFY_UNPROVABLE',tag,'no-github-sha256-digest');continue
+              try:
+                  raw=download(asset['browser_download_url']);actual=hashlib.sha256(raw).hexdigest()
+                  if len(raw)!=int(asset['size']) or actual!=digest[7:]:raise ValueError('asset-authentication-mismatch')
+                  zp=out/f'{tag}.zip';zp.write_bytes(raw)
+                  entries=[];seen=set();expanded=0
+                  with zipfile.ZipFile(zp) as z:
+                      infos=z.infolist()
+                      if len(infos)>20000:raise ValueError('too-many-entries')
+                      for info in infos:
+                          name=info.filename.replace('\\','/')
+                          if not name or name.startswith('/') or re.match(r'^[A-Za-z]:',name) or ':' in name:raise ValueError(f'unsafe-path:{name}')
+                          trimmed=name.rstrip('/');parts=trimmed.split('/') if trimmed else []
+                          if not parts or any(p in ('','.','..') for p in parts):raise ValueError(f'unsafe-component:{name}')
+                          key=trimmed.lower()
+                          if key in seen:raise ValueError(f'duplicate-case-collision:{trimmed}')
+                          seen.add(key)
+                          mode=(info.external_attr>>16)&0o170000
+                          if mode==stat.S_IFLNK:raise ValueError(f'symlink:{name}')
+                          if info.is_dir():continue
+                          if info.file_size<0 or info.file_size>128*1024*1024:raise ValueError(f'oversized-entry:{name}')
+                          expanded+=info.file_size
+                          if expanded>1024*1024*1024:raise ValueError('expanded-cap-exceeded')
+                          data=z.read(info)
+                          if len(data)!=info.file_size:raise ValueError(f'size-mismatch:{name}')
+                          entries.append({'archive_path':trimmed,'size':len(data),'sha256':hashlib.sha256(data).hexdigest(),'data':data})
+                  if not entries:raise ValueError('no-files')
+                  top={x['archive_path'].split('/')[0] for x in entries}
+                  common_root=next(iter(top)) if len(top)==1 and all('/' in x['archive_path'] for x in entries) else None
+                  files=[];package=None;manifest=None
+                  for x in entries:
+                      rel=x['archive_path'][len(common_root)+1:] if common_root else x['archive_path']
+                      if not rel:raise ValueError('empty-relative-path')
+                      files.append({'path':rel,'size':x['size'],'sha256':x['sha256']})
+                      if rel=='package.json':
+                          try:package=json.loads(x['data'])
+                          except Exception as exc:raise ValueError('invalid-package-json:'+str(exc))
+                      if rel=='manifest.json':
+                          try:manifest=json.loads(x['data'])
+                          except Exception as exc:raise ValueError('invalid-manifest-json:'+str(exc))
+                  files.sort(key=lambda x:(x['path'].lower(),x['path']))
+                  payload=''.join(f"{x['path']}|{x['size']}|{x['sha256']}\n" for x in files).encode('utf-8')
+                  tree=hashlib.sha256(payload).hexdigest()
+                  package_name=package.get('name') if isinstance(package,dict) else None
+                  package_version=package.get('version') if isinstance(package,dict) else None
+                  manifest_name=manifest.get('name') if isinstance(manifest,dict) else None
+                  manifest_version=manifest.get('version') if isinstance(manifest,dict) else None
+                  identity_ok=(str(package_name or '').lower()=='tagify' or str(manifest_name or '').lower()=='tagify')
+                  row={'version':version,'tag':tag,'published_at':release.get('published_at'),'asset_name':expected_name,'asset_size':len(raw),'asset_sha256':actual,'asset_digest':digest,'common_root':common_root,'tree_sha256':tree,'file_count':len(files),'expanded_bytes':sum(x['size'] for x in files),'package_name':package_name,'package_version':package_version,'manifest_name':manifest_name,'manifest_version':manifest_version,'identity_marker_ok':identity_ok,'top_level_paths':sorted({x['path'].split('/')[0] for x in files},key=lambda s:(s.lower(),s)),'files':files}
+                  catalog.append(row)
+                  print('TAGIFY_RELEASE',tag,'asset',len(raw),actual,'root',repr(common_root),'tree',tree,'files',len(files),'package',repr(package_name),repr(package_version),'manifest',repr(manifest_name),repr(manifest_version),'identity_ok',identity_ok)
+              except Exception as exc:
+                  unsupported.append({'version':version,'tag':tag,'reason':'asset-unprovable:'+str(exc),'asset':expected_name})
+                  print('TAGIFY_UNPROVABLE',tag,'asset-unprovable:'+str(exc))
+          by_tree={}
+          for row in catalog:by_tree.setdefault(row['tree_sha256'],[]).append(row['version'])
+          duplicates={k:v for k,v in by_tree.items() if len(v)>1}
+          result={'schema':1,'repository':'alexk218/tagify','stable_release_count':len(stable),'provable_release_count':len(catalog),'latest_stable_version':stable[-1]['tag_name'][1:],'latest_provable_version':catalog[-1]['version'] if catalog else None,'catalog':catalog,'unsupported_stable_releases':unsupported,'duplicate_tree_versions':duplicates}
+          (out/'catalog.json').write_text(json.dumps(result,indent=2,sort_keys=True)+'\n',encoding='utf-8')
+          if not catalog:raise SystemExit('No authenticated Tagify release tree was provable')
+          latest=[x for x in catalog if x['version']=='3.3.2']
+          if len(latest)!=1:raise SystemExit('Current v3.3.2 release was not uniquely provable')
+          x=latest[0]
+          if x['asset_size']!=1554948 or x['asset_sha256']!='5261538c8f596cf179b1f6efd20e0a0a60c73b4cd765115fc6bc25c6a6b3b76b':raise SystemExit('Current v3.3.2 published asset identity drifted')
+          print('TAGIFY_PROVENANCE_AUDIT_PASS stable=',len(stable),'provable=',len(catalog),'unsupported=',len(unsupported),'duplicates=',json.dumps(duplicates,sort_keys=True))
+
+      - name: Summarize provenance suitability without changing product
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          r=json.loads(Path('tagify-provenance-audit-evidence/catalog.json').read_text())
+          identity=[x for x in r['catalog'] if x['identity_marker_ok']]
+          noid=[x['version'] for x in r['catalog'] if not x['identity_marker_ok']]
+          roots={str(x['common_root']) for x in r['catalog']}
+          print('TAGIFY_CATALOG_SUMMARY stable',r['stable_release_count'],'provable',r['provable_release_count'],'identity_marked',len(identity),'duplicate_trees',r['duplicate_tree_versions'])
+          print('TAGIFY_COMMON_ROOT_VARIANTS',sorted(roots))
+          print('TAGIFY_PROVABLE_WITHOUT_IDENTITY_MARKER',noid)
+          print('TAGIFY_UNSUPPORTED',[(x['version'],x['reason']) for x in r['unsupported_stable_releases']])
+          if r['duplicate_tree_versions']:
+              print('TAGIFY_PROVENANCE_WARNING duplicate release trees require ambiguity fail-closed handling')
+          print('TAGIFY_AUDIT_READ_ONLY_COMPLETE')
+
+      - name: Prove audit changed no production surface
+        shell: powershell
+        run: |
+          $base='9b97ffba51060e92e687fadeb361da7ba95a1dd0'
+          $changed=@(git diff --name-only "$base...HEAD")
+          if($changed.Count -ne 1 -or $changed[0] -cne '.github/workflows/validate-tagify-release-provenance-audit-v010.yml'){throw 'Audit branch gained non-validation changes.'}
+          git diff --exit-code -- manifest.json packages performance README.md validation
+          if($LASTEXITCODE -ne 0){throw 'Audit changed a production/tracked validation surface.'}
+          Write-Host 'TAGIFY_AUDIT_NO_PRODUCTION_CHANGE_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tagify-release-provenance-audit-v010
+          path: tagify-provenance-audit-evidence/catalog.json
+          if-no-files-found: error
