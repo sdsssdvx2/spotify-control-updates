@@ -1,0 +1,152 @@
+name: Validate Addon Source Registry r11 v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/addon-source-registry-r11-v0.1.0
+    paths:
+      - 'validation/v0.6.22/**'
+      - '.github/workflows/validate-addon-source-registry-r11-v0.1.0.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/v0.6.22/**'
+      - '.github/workflows/validate-addon-source-registry-r11-v0.1.0.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact validation-only scope
+        shell: powershell
+        run: |
+          $base='dacd4faf6a632b6b33571acf16ed4b6e73a865d7'
+          $actual=(git rev-parse HEAD).Trim()
+          $eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -ne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'r11 validation is not based on exact stable main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allowed=@(
+            '.github/workflows/validate-addon-source-registry-r11-v0.1.0.yml',
+            'validation/v0.6.22/addon_source_adapter_engine.ps1.inc',
+            'validation/v0.6.22/audit_r11.py',
+            'validation/v0.6.22/build_v0622.py',
+            'validation/v0.6.22/test_r11_source_adapter.ps1'
+          )
+          $bad=@($changed|Where-Object{$_ -notin $allowed});if($bad.Count){throw "Unexpected production/scope changes: $($bad -join ', ')"}
+          if($changed.Count -ne $allowed.Count){throw "Expected exactly $($allowed.Count) files, got $($changed.Count): $($changed -join ', ')"}
+          foreach($f in $allowed){if($f -notin $changed){throw "Missing validation file: $f"}}
+          Write-Host "R11_SCOPE_PASS head=$actual files=$($changed.Count)"
+
+      - name: Parse validation sources
+        shell: powershell
+        run: |
+          python -m py_compile validation/v0.6.22/build_v0622.py validation/v0.6.22/audit_r11.py
+          if($LASTEXITCODE -ne 0){throw 'r11 Python validation source failed compile.'}
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'validation/v0.6.22/test_r11_source_adapter.ps1'),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'r11 fixture PowerShell parse failed.'}
+          $engine=Get-Content validation/v0.6.22/addon_source_adapter_engine.ps1.inc -Raw
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseInput($engine,[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'r11 engine PowerShell parse failed.'}
+          Write-Host 'R11_SOURCE_PARSE_PASS'
+
+      - name: Build deterministic v0.6.22 r11 candidate
+        shell: powershell
+        run: |
+          python validation/v0.6.22/build_v0622.py --build
+          if($LASTEXITCODE -ne 0){throw 'r11 candidate build failed.'}
+          $r=Get-Content validation/v0.6.22/candidate-validation.json -Raw|ConvertFrom-Json
+          Write-Host "R11_MAIN_IDENTITY size=$($r.candidate_main.size) sha=$($r.candidate_main.sha256)"
+          Write-Host "R11_ADDON_IDENTITY size=$($r.candidate_addon.size) sha=$($r.candidate_addon.sha256)"
+          Write-Host "R11_ENGINE_IDENTITY size=$($r.adapter_engine.size) sha=$($r.adapter_engine.sha256)"
+          if($r.authority_expanded -ne $false -or $r.new_auto_install_authority -ne $false -or $r.generic_network_fetch -ne $false -or $r.generic_archive_extraction -ne $false){throw 'r11 candidate widened authority or introduced generic side effects.'}
+
+      - name: Parse generated candidate on Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          foreach($file in @('validation/v0.6.22/out/bin/spotify-control.ps1','validation/v0.6.22/out/bin/addon-manager.ps1')){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0}:{1}: {2}" -f $file,$_.Extent.StartLineNumber,$_.Message)};throw "Generated PowerShell parse failed: $file"}
+          }
+          Write-Host 'R11_GENERATED_PS51_PARSE_PASS'
+
+      - name: Structural regression audit
+        shell: powershell
+        run: |
+          python validation/v0.6.22/audit_r11.py
+          if($LASTEXITCODE -ne 0){throw 'r11 structural audit failed.'}
+
+      - name: Source adapter and transaction guard fixtures
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/v0.6.22/test_r11_source_adapter.ps1
+          if($LASTEXITCODE -ne 0){throw 'r11 source adapter fixtures failed.'}
+
+      - name: Candidate Addon Manager comprehensive SelfTest
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/v0.6.22/out/bin/addon-manager.ps1 -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'r11 Addon Manager SelfTest failed.'}
+          Write-Host 'R11_ADDON_SELFTEST_PASS'
+
+      - name: Require deterministic second build
+        shell: powershell
+        run: |
+          $main1=(Get-FileHash validation/v0.6.22/out/bin/spotify-control.ps1 -Algorithm SHA256).Hash.ToLowerInvariant();$mainSize1=(Get-Item validation/v0.6.22/out/bin/spotify-control.ps1).Length
+          $addon1=(Get-FileHash validation/v0.6.22/out/bin/addon-manager.ps1 -Algorithm SHA256).Hash.ToLowerInvariant();$addonSize1=(Get-Item validation/v0.6.22/out/bin/addon-manager.ps1).Length
+          $report1=(Get-FileHash validation/v0.6.22/candidate-validation.json -Algorithm SHA256).Hash.ToLowerInvariant()
+          python validation/v0.6.22/build_v0622.py --build
+          if($LASTEXITCODE -ne 0){throw 'Second r11 build failed.'}
+          $main2=(Get-FileHash validation/v0.6.22/out/bin/spotify-control.ps1 -Algorithm SHA256).Hash.ToLowerInvariant();$mainSize2=(Get-Item validation/v0.6.22/out/bin/spotify-control.ps1).Length
+          $addon2=(Get-FileHash validation/v0.6.22/out/bin/addon-manager.ps1 -Algorithm SHA256).Hash.ToLowerInvariant();$addonSize2=(Get-Item validation/v0.6.22/out/bin/addon-manager.ps1).Length
+          $report2=(Get-FileHash validation/v0.6.22/candidate-validation.json -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($main1 -ne $main2 -or $mainSize1 -ne $mainSize2 -or $addon1 -ne $addon2 -or $addonSize1 -ne $addonSize2 -or $report1 -ne $report2){throw 'r11 build is nondeterministic.'}
+          Write-Host "R11_DETERMINISM_PASS main=$main1 addon=$addon1 report=$report1"
+
+      - name: Existing overlay and Star Ratings regressions remain green
+        shell: powershell
+        run: |
+          node --check performance/overlay/lazy-custom-app-loader.js
+          node performance/overlay/tests/test-loader.js
+          if($LASTEXITCODE -ne 0){throw 'Existing overlay loader regression failed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/overlay/tests/test-overlay.ps1
+          if($LASTEXITCODE -ne 0){throw 'Existing overlay PowerShell regression failed.'}
+          $fixture=Join-Path $env:RUNNER_TEMP 'star-ratings.js'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/brimell/spicetify-star-ratings/33aa3d293f9fbb58d7a749a8cea10c318351e6c6/dist/star-ratings.js' -OutFile $fixture
+          if((Get-Item $fixture).Length -ne 43396 -or (Get-FileHash $fixture -Algorithm SHA256).Hash.ToLowerInvariant() -ne '198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1'){throw 'Star Ratings fixture drift.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/star-ratings/tests/test-star-ratings-patch.ps1 -FixturePath $fixture
+          if($LASTEXITCODE -ne 0){throw 'Star Ratings regression failed.'}
+          Write-Host 'R11_EXISTING_PERFORMANCE_REGRESSIONS_PASS'
+
+      - name: Final no-production-change audit
+        shell: powershell
+        run: |
+          $changed=@(git diff --name-only dacd4faf6a632b6b33571acf16ed4b6e73a865d7...HEAD)
+          if(@($changed|Where-Object{$_ -like 'bin/*' -or $_ -eq 'manifest.json' -or $_ -like 'packages/*' -or $_ -like 'performance/*'}).Count){throw 'Validation branch changed production surface.'}
+          $engine=Get-Content validation/v0.6.22/addon_source_adapter_engine.ps1.inc -Raw
+          foreach($bad in @('Invoke-WebRequest','Invoke-RestMethod','Expand-Archive','Remove-Item','Move-Item','Copy-Item','Start-Process','spicetify apply','spicetify backup','spicetify restore')){if($engine.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Generic source adapter gained forbidden side effect: $bad"}}
+          Write-Host 'R11_FINAL_VALIDATION_ONLY_SAFETY_PASS'
+
+      - name: Upload r11 validation candidate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: addon-source-registry-r11-v0.1.0-candidate
+          path: |
+            validation/v0.6.22/candidate-validation.json
+            validation/v0.6.22/out/bin/spotify-control.ps1
+            validation/v0.6.22/out/bin/addon-manager.ps1
+          if-no-files-found: error
