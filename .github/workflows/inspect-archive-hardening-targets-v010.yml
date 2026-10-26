@@ -1,0 +1,50 @@
+name: Inspect Archive Hardening Targets v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/archive-resource-hardening-audit-v0.1.0
+    paths:
+      - '.github/workflows/inspect-archive-hardening-targets-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-windows:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rebuild exact stable candidate
+        shell: powershell
+        run: |
+          python validation/v0.6.23/build_v0623.py --build
+          if($LASTEXITCODE -ne 0){throw 'Current v0.6.23/r12 rebuild failed.'}
+          $main='validation/v0.6.23/out/bin/spotify-control.ps1';$addon='validation/v0.6.23/out/bin/addon-manager.ps1'
+          if((Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'bc9861bdd64ff8af94f68f0f065739f82b235271dcd18ad6325b819205528a08'){throw 'main drift'}
+          if((Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -ne '23ad2210aea4352f535d1cf0b3ebb827a82200dcba2b70bf1ebae96499d82687'){throw 'addon drift'}
+      - name: Print exact target function blocks
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          targets={
+            'main':['Expand-AndValidateMarketplaceAsset','Expand-AndValidateSpicetifyAsset'],
+            'addon':['Test-IvLyricsZipArchiveSafety','Download-IvLyricsReleaseStage','Download-PithayaPinnedStage','Invoke-IvLyricsOfficialTagProofOnlineSelfTest'],
+          }
+          paths={'main':Path('validation/v0.6.23/out/bin/spotify-control.ps1'),'addon':Path('validation/v0.6.23/out/bin/addon-manager.ps1')}
+          for kind,names in targets.items():
+            text=paths[kind].read_text(encoding='utf-8-sig')
+            matches=list(re.finditer(r'(?m)^function\s+([A-Za-z0-9_-]+)\s*\{',text))
+            idx={m.group(1):(m.start(),matches[i+1].start() if i+1<len(matches) else len(text)) for i,m in enumerate(matches)}
+            for name in names:
+              if name not in idx: raise SystemExit(f'missing {kind} {name}')
+              a,b=idx[name]
+              print(f'===== BEGIN {kind}:{name} =====')
+              print(text[a:b].rstrip())
+              print(f'===== END {kind}:{name} =====')
+          print('ARCHIVE_TARGET_FUNCTION_DUMP_PASS')
