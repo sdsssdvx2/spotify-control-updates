@@ -37,6 +37,15 @@ def ordinal_ignore_case_ascii_key(path):
     return (path.lower(), path)
 
 
+def decode_manifest(raw):
+    value = json.loads(raw)
+    if isinstance(value, str):
+        value = json.loads(value)
+    if not isinstance(value, dict):
+        raise ValueError(f'manifest-json-type:{type(value).__name__}')
+    return value
+
+
 def inspect_release(rel):
     tag = rel['tag_name']
     version = tag[1:]
@@ -101,15 +110,15 @@ def inspect_release(rel):
                 data = z.read(info)
                 if len(data) != info.file_size:
                     raise ValueError(f'size-mismatch:{info.filename}')
-                row = {'path': rel, 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
-                files.append(row)
+                file_row = {'path': rel, 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+                files.append(file_row)
                 if rel == 'manifest.json':
                     manifest_bytes = data
         if not files:
             raise ValueError('no-files')
         if manifest_bytes is None:
             raise ValueError('manifest-missing')
-        manifest = json.loads(manifest_bytes)
+        manifest = decode_manifest(manifest_bytes)
         if str(manifest.get('name') or '').lower() != 'splitify':
             raise ValueError('manifest-identity-mismatch')
         files.sort(key=lambda x: ordinal_ignore_case_ascii_key(x['path']))
@@ -143,10 +152,10 @@ if not stable:
 catalog = []
 unsupported = []
 for rel in stable:
-    row, bad = inspect_release(rel)
-    if row:
-        catalog.append(row)
-        print('SPLITIFY_RELEASE', row['tag'], row['asset_size'], row['asset_sha256'], row['tree_sha256'], row['file_count'])
+    release_row, bad = inspect_release(rel)
+    if release_row:
+        catalog.append(release_row)
+        print('SPLITIFY_RELEASE', release_row['tag'], release_row['asset_size'], release_row['asset_sha256'], release_row['tree_sha256'], release_row['file_count'])
     else:
         unsupported.append(bad)
         print('SPLITIFY_UNPROVABLE', bad['tag'], bad['reason'])
@@ -154,8 +163,8 @@ if not catalog:
     raise SystemExit('No cryptographically provable release assets')
 
 by_tree = {}
-for row in catalog:
-    by_tree.setdefault(row['tree_sha256'], []).append(row['version'])
+for release_row in catalog:
+    by_tree.setdefault(release_row['tree_sha256'], []).append(release_row['version'])
 duplicates = {k: v for k, v in by_tree.items() if len(v) > 1}
 result = {
     'schema': 2,
