@@ -14,9 +14,11 @@ EXPECTED_ENGINE=(17020,'8d51607ec3b7371c6777475ae9e301fe19a7b9fada8325626889e528
 def need(v,m):
     if not v: raise AssertionError(m)
 def funcs(text):
-    hits=list(re.finditer(r'(?m)^function\s+([^\s{]+)\s*\{',text));out={}
-    for i,h in enumerate(hits):
-        end=hits[i+1].start() if i+1<len(hits) else len(text)
+    out={}
+    for h in re.finditer(r'(?m)^function\s+([^\s{]+)\s*\{',text):
+        close=re.search(r'(?m)^}\s*$',text[h.end():])
+        if close is None:raise AssertionError(f'cannot find top-level close for {h.group(1)}')
+        end=h.end()+close.end()
         out[h.group(1)]=text[h.start():end].rstrip()
     return out
 def sha(b):return hashlib.sha256(b).hexdigest()
