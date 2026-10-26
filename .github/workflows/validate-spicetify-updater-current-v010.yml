@@ -65,21 +65,21 @@ jobs:
           }
           $main=Get-Content validation/v0.6.20/out/bin/spotify-control.ps1 -Raw
           foreach($x in @(
-            "https://api.github.com/repos/spicetify/cli/releases/latest",
-            "https://api.github.com/repos/spicetify/cli/releases/tags/",
-            "Spicetify release asset is missing a valid GitHub-published SHA-256 digest.",
-            "Spicetify published digest mismatch.",
-            "Spicetify asset size mismatch.",
-            "Unexpected top-level path in Spicetify archive",
-            "Symlink entry refused in Spicetify archive",
-            "Installed Spicetify executable does not match the exact official",
-            "Spicetify persistent rollback backup tree mismatch",
-            "preserving $($baseline.ExtraFileCount) extra file(s)",
-            "Current Spotify compatibility became unverified after Spicetify apply.",
-            "post_apply_guard_succeeded = $true",
-            "extras_preserved=$true",
-            "refusing downgrade",
-            "Spotify is running; Spicetify CLI transaction requires Spotify to be fully closed."
+            'https://api.github.com/repos/spicetify/cli/releases/latest',
+            'https://api.github.com/repos/spicetify/cli/releases/tags/',
+            'Spicetify release asset is missing a valid GitHub-published SHA-256 digest.',
+            'Spicetify published digest mismatch.',
+            'Spicetify asset size mismatch.',
+            'Unexpected top-level path in Spicetify archive',
+            'Symlink entry refused in Spicetify archive',
+            'Installed Spicetify executable does not match the exact official',
+            'Spicetify persistent rollback backup tree mismatch',
+            'preserving $($baseline.ExtraFileCount) extra file(s)',
+            'Current Spotify compatibility became unverified after Spicetify apply.',
+            'post_apply_guard_succeeded = $true',
+            'extras_preserved=$true',
+            'refusing downgrade',
+            'Spotify is running; Spicetify CLI transaction requires Spotify to be fully closed.'
           )){if($main.IndexOf($x,[StringComparison]::Ordinal) -lt 0){throw "Production updater safety contract missing: $x"}}
           Write-Host ("SPICETIFY_UPDATER_STATIC_CONTRACT_PASS latest={0} functions={1}" -f $r.current_latest_release.tag_name,$names.Count)
 
