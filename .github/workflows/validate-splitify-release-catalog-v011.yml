@@ -1,0 +1,78 @@
+name: Validate Splitify Official Release Catalog v0.1.1
+
+on:
+  push:
+    branches:
+      - validate/splitify-release-catalog-v0.1.1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  catalog-windows:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove exact validation-only scope
+        shell: powershell
+        run: |
+          $base='c3dca564f70d4c85a84d5f895309d30d5a2d80c1'
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Catalog branch is not based on exact v0.6.24 stable main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allowed=@('.github/workflows/validate-splitify-release-catalog-v011.yml','validation/splitify-release-catalog-v0.1.1/catalog.py')
+          foreach($p in $changed){if($allowed -cnotcontains $p){throw "Unexpected catalog path: $p"}}
+          if($changed.Count -ne 2){throw "Expected exactly two validation files, got $($changed.Count)."}
+          Write-Host "SPLITIFY_CATALOG_SCOPE_PASS head=$((git rev-parse HEAD).Trim())"
+
+      - name: Build authenticated official release catalog
+        shell: powershell
+        run: |
+          python validation/splitify-release-catalog-v0.1.1/catalog.py
+          if($LASTEXITCODE -ne 0){throw 'Splitify catalog builder failed.'}
+
+      - name: Assert exact discovered release classes and canonical identities
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          r=json.loads(Path('splitify-release-catalog-evidence/catalog.json').read_text())
+          if r['canonical_order']!='OrdinalIgnoreCase-ASCII-path, Ordinal tie-break':raise SystemExit('canonical order drift')
+          if r['stable_release_count']!=5 or r['provable_release_count']!=3:raise SystemExit(f"release count drift: {r['stable_release_count']} / {r['provable_release_count']}")
+          if r['latest_stable_version']!='1.1.0' or r['latest_provable_version']!='1.1.0':raise SystemExit('latest classification drift')
+          if r['duplicate_tree_versions']!={}:raise SystemExit(f"ambiguous release trees: {r['duplicate_tree_versions']}")
+          expected={
+            '1.0.5':(7301,'c2ecc5e9330035b5c1855f537ea42f85a49705519ccc57e10d121e8b4595fab2','8c4525b41511fb5a32ad4921fbdbda5c59e0fb613ff0b2f223d0ee295030936a',5),
+            '1.0.8':(8801,'03158572d234c1aba14d7b9c53578886c885ffc568f5004dc03346eaa5dc4508','571722765760ccb98697a50742cfc8e66fae5411f91716794359e483b4383c76',6),
+            '1.1.0':(7822,'5de51a885815f78067b8d6f7f3ebe40c93b5a7c7e3c8c841fcd26147a13010ca','48bace1b6cef325dd1757bf4428e01fd42759a74da20a93fc16ab1ce49132777',6),
+          }
+          got={x['version']:x for x in r['catalog']}
+          if set(got)!=set(expected):raise SystemExit(f"provable release set drift: {sorted(got)}")
+          for v,(size,asset,tree,count) in expected.items():
+            x=got[v]
+            if (x['asset_size'],x['asset_sha256'],x['tree_sha256'],x['file_count'])!=(size,asset,tree,count):raise SystemExit(f'{v} identity drift')
+            if x['manifest_name']!='Splitify' or x['manifest_version'] is not None:raise SystemExit(f'{v} manifest contract drift')
+          unsupported={(x['version'],x['reason']) for x in r['unsupported_stable_releases']}
+          if unsupported!={('1.0.1','no-splitify-zip'),('1.0.4','asset-unprovable:manifest-missing')}:raise SystemExit(f'unsupported classification drift: {unsupported}')
+          print('SPLITIFY_CATALOG_EXACT_IDENTITIES_PASS')
+
+      - name: Re-run catalog and prove deterministic JSON
+        shell: powershell
+        run: |
+          $p='splitify-release-catalog-evidence/catalog.json'
+          $h1=(Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant()
+          python validation/splitify-release-catalog-v0.1.1/catalog.py
+          if($LASTEXITCODE -ne 0){throw 'Second catalog build failed.'}
+          $h2=(Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($h1 -cne $h2){throw "Catalog is not deterministic: $h1 != $h2"}
+          Write-Host "SPLITIFY_CATALOG_DETERMINISTIC_PASS sha=$h2"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: splitify-release-catalog-v011
+          path: splitify-release-catalog-evidence/catalog.json
+          if-no-files-found: error
