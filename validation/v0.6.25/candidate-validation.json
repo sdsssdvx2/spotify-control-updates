@@ -1,0 +1,97 @@
+{
+  "addon_version": "0.6.5-r14",
+  "authority_expanded": false,
+  "auto_authority": [
+    "better-local-files",
+    "eternal-jukebox",
+    "ivLyrics",
+    "playlist-maker"
+  ],
+  "base_addon": {
+    "sha256": "81343687c475f7f48f1311b09c98205a021776f26e8d55082e0ec47f8ebfb470",
+    "size": 275414
+  },
+  "base_main": {
+    "sha256": "dc5d7ec17f18f7546786c81f3172c08f6fb1692842c2e6c0a69a86171e6b1151",
+    "size": 284312
+  },
+  "base_version": "0.6.24",
+  "candidate_addon": {
+    "sha256": "25ebd0a5d5158f7d3cb4b4ce2ecf89f05f4dad3ef6bc799599e7204ce103c29c",
+    "size": 282718
+  },
+  "candidate_main": {
+    "sha256": "896bb74e71385b5b6ada118af41cbe9d398dc662ce3719234104028e6eed197f",
+    "size": 284313
+  },
+  "canonical_order": "StringComparer.OrdinalIgnoreCase",
+  "catalog_evidence": {
+    "artifact_digest": "sha256:a275c0e4274b98394d057efd49a2ba45d44ace71d47ed71b9383b44e18993918",
+    "artifact_id": 12681395038,
+    "catalog_json_sha256": "60311e81ae11727528fd5e34879533e1cfacdaaf7b2b21dd1808fb20e3b32454",
+    "head": "4af252f0d60b371db1cf7456d8f22ea0c200221a",
+    "run": "40384980123"
+  },
+  "manifest_version_trusted": false,
+  "new_auto_install_authority": false,
+  "registry_fingerprint": "0f05406d7152de1d975f888cb8270be8249115211ba9f41e0157342cd42efbd8",
+  "release_catalog": [
+    {
+      "asset_sha256": "c2ecc5e9330035b5c1855f537ea42f85a49705519ccc57e10d121e8b4595fab2",
+      "asset_size": 7301,
+      "file_count": 5,
+      "tag": "v1.0.5",
+      "tree_sha256": "8c4525b41511fb5a32ad4921fbdbda5c59e0fb613ff0b2f223d0ee295030936a",
+      "version": "1.0.5"
+    },
+    {
+      "asset_sha256": "03158572d234c1aba14d7b9c53578886c885ffc568f5004dc03346eaa5dc4508",
+      "asset_size": 8801,
+      "file_count": 6,
+      "tag": "v1.0.8",
+      "tree_sha256": "571722765760ccb98697a50742cfc8e66fae5411f91716794359e483b4383c76",
+      "version": "1.0.8"
+    },
+    {
+      "asset_sha256": "5de51a885815f78067b8d6f7f3ebe40c93b5a7c7e3c8c841fcd26147a13010ca",
+      "asset_size": 7822,
+      "file_count": 6,
+      "tag": "v1.1.0",
+      "tree_sha256": "48bace1b6cef325dd1757bf4428e01fd42759a74da20a93fc16ab1ce49132777",
+      "version": "1.1.0"
+    }
+  ],
+  "schema": 2,
+  "source_adapter_fingerprint": "c0611a7b96f6ff09d1e235119efce2f2def6eb6d0a4e8e93e276cfa622c3c42d",
+  "splitify_policy": {
+    "data_policy": "preserve-installed-content",
+    "install_mode": "never-auto-install",
+    "inventory_policy": "monitor-only",
+    "mutation_mode": "deny"
+  },
+  "unsupported_stable_releases": [
+    {
+      "reason": "no-splitify-zip",
+      "version": "1.0.1"
+    },
+    {
+      "reason": "authenticated-asset-missing-manifest",
+      "version": "1.0.4"
+    }
+  ],
+  "validated_source": {
+    "blob": "5cab5a8141a13bf7985570aeced3166d7b163c8e",
+    "head": "c08ce018a8424ce39c4e5692443b78a71e010b26",
+    "path": "validation/splitify-release-provenance-v0.1.2/build_candidate.py",
+    "pr": 79,
+    "pr_artifact_digest": "sha256:2397dc0039073f8177f6c3e12fcc08db90086db39dcda73d4aad1f98927c263d",
+    "pr_artifact_id": 12680796618,
+    "pr_closed_unmerged": true,
+    "pr_run": "40386074191",
+    "push_artifact_digest": "sha256:afe8d76ba6bee31ff12bab10958beb2959d12a3985d637c2bb9639a6b0d1f6fd",
+    "push_artifact_id": 12679968671,
+    "push_run": "40385692901",
+    "stable_pr_run": "40386074179"
+  },
+  "version": "0.6.25"
+}
