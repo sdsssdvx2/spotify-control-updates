@@ -6,6 +6,7 @@ function Assert-False([bool]$Value,[string]$Message){if($Value){throw $Message}}
 function Assert-Eq($Actual,$Expected,[string]$Message){if([string]$Actual -cne [string]$Expected){throw "$Message actual='$Actual' expected='$Expected'"}}
 function Assert-Throws([scriptblock]$Action,[string]$Contains,[string]$Message){$threw=$false;try{& $Action}catch{$threw=$true;if(-not [string]::IsNullOrWhiteSpace($Contains) -and $_.Exception.Message.IndexOf($Contains,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "$Message wrong error: $($_.Exception.Message)"}};if(-not $threw){throw "$Message did not throw"}}
 
+Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
 Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
 $root=Join-Path ([IO.Path]::GetTempPath()) ('custom-app-remote-observer-test-'+[Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($root)
