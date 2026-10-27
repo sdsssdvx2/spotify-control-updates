@@ -34,6 +34,11 @@ def main():
     if text.count(old)!=1:
         raise RuntimeError(f'Tagify package identity correction anchor count drifted: {text.count(old)}')
     text=text.replace(old,new,1)
+    fixture_old='{"name":"tagify","version":"9.9.9"}'
+    fixture_new='{"name":"tagify-secret","version":"9.9.9"}'
+    if text.count(fixture_old)!=1:
+        raise RuntimeError(f'Tagify synthetic package identity fixture count drifted: {text.count(fixture_old)}')
+    text=text.replace(fixture_old,fixture_new,1)
     corrected=bom+text.encode('utf-8')
     addon_path.write_bytes(corrected)
     report=json.loads(REPORT.read_text(encoding='utf-8'))
@@ -44,6 +49,7 @@ def main():
         'reason':'official authenticated Tagify v2.5.0-v3.3.2 release assets use package.json name tagify-secret under common root tagify',
         'package_name_contract':'tagify-secret',
         'manifest_name_contract':'Tagify',
+        'synthetic_selftest_package_name_contract':'tagify-secret',
         'production_surface_changed':False
     }
     report['candidate_addon']={'size':len(corrected),'sha256':sha(corrected)}
