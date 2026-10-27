@@ -10,15 +10,6 @@ on:
       - 'validation/v0.6.28/bootstrap_run_cycle.ps1'
       - 'manifest.json'
       - 'packages/v0.6.28/**'
-  pull_request:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/validate-v0.6.28-bootstrap-e2e.yml'
-      - 'validation/v0.6.28/bootstrap_prepare_fixture.py'
-      - 'validation/v0.6.28/bootstrap_run_cycle.ps1'
-      - 'manifest.json'
-      - 'packages/v0.6.28/**'
   workflow_dispatch:
 
 permissions:
@@ -33,12 +24,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
 
       - name: Assert exact event head and published release inputs
         shell: powershell
         run: |
-          $actual=(git rev-parse HEAD).Trim();$eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          $actual=(git rev-parse HEAD).Trim();$eventHead='${{ github.sha }}'
           if($actual -cne $eventHead){throw "Not exact event head: $actual != $eventHead"}
           $m=Get-Content manifest.json -Raw|ConvertFrom-Json
           if($m.latest_version -cne '0.6.28' -or $m.source_commit -cne 'bb6d90146f20b73d36fbf8cb813f1b190f403c48' -or $m.payload_set_sha256 -cne '4be96c5d41c2160ed9ac96001b469998595629232929b82c8b0f34b11fda3b43'){throw 'v0.6.28 manifest identity drifted before Bootstrap E2E.'}
