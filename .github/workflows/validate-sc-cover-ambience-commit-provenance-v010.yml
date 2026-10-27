@@ -1,0 +1,227 @@
+name: Validate SC Cover Ambience Commit Provenance v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/sc-cover-ambience-commit-provenance-v0.1.0
+    paths:
+      - 'validation/sc-cover-ambience-commit-provenance-v0.1.0/**'
+      - '.github/workflows/validate-sc-cover-ambience-commit-provenance-v010.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/sc-cover-ambience-commit-provenance-v0.1.0/**'
+      - '.github/workflows/validate-sc-cover-ambience-commit-provenance-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact validation-only scope and evidence lineage
+        shell: powershell
+        run: |
+          $base='25daf4a295e7737bd12e96b584467da53245e37a'
+          $actual=(git rev-parse HEAD).Trim()
+          $eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'Candidate is not based on exact stable v0.6.27 main.'}
+          $changed=@(git diff --name-only "$base...HEAD"|Sort-Object)
+          $expected=@(
+            '.github/workflows/validate-sc-cover-ambience-commit-provenance-v010.yml',
+            'validation/sc-cover-ambience-commit-provenance-v0.1.0/build_candidate.py'
+          )|Sort-Object
+          if(($changed -join '|') -cne ($expected -join '|')){throw "Unexpected validation scope: $($changed -join ', ')"}
+          $catalog=(git rev-parse '008daeb5c57992b79fabc2ad9ca54192f1d78463:validation/sc-cover-ambience-runtime-topology-collector-v0.1.0/official-snapshots.json').Trim()
+          if($catalog -cne '244f3e7616b0b6d0eecc2017ec7d5febcf10bece'){throw "Pinned snapshot catalog blob drifted: $catalog"}
+          Write-Host "SC_COVER_AMBIENCE_PROVENANCE_SCOPE_PASS head=$actual catalog_blob=$catalog"
+
+      - name: Build candidate twice and parse with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $builder='validation/sc-cover-ambience-commit-provenance-v0.1.0/build_candidate.py'
+          python -m py_compile $builder
+          if($LASTEXITCODE -ne 0){throw 'Candidate builder Python compile failed.'}
+          python $builder --build
+          if($LASTEXITCODE -ne 0){throw 'Candidate build failed.'}
+          $main='validation/sc-cover-ambience-commit-provenance-v0.1.0/out/bin/spotify-control.ps1'
+          $addon='validation/sc-cover-ambience-commit-provenance-v0.1.0/out/bin/addon-manager.ps1'
+          foreach($file in @($main,$addon)){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0}: {1}" -f $file,$_.Message)};throw "PowerShell 5.1 parse failed: $file"}
+          }
+          $mainSha=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant();$mainSize=(Get-Item $main).Length
+          $addonSha=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant();$addonSize=(Get-Item $addon).Length
+          Copy-Item $main "$main.first";Copy-Item $addon "$addon.first"
+          python $builder --build
+          if($LASTEXITCODE -ne 0){throw 'Second deterministic build failed.'}
+          if((Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne $mainSha){throw 'Main candidate is nondeterministic.'}
+          if((Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -cne $addonSha){throw 'Addon candidate is nondeterministic.'}
+          if((Get-Item $main).Length -ne $mainSize -or (Get-Item $addon).Length -ne $addonSize){throw 'Candidate size changed on deterministic rebuild.'}
+          Remove-Item "$main.first","$addon.first" -Force
+          Write-Host "SC_COVER_AMBIENCE_PROVENANCE_BUILD_PARSE_DETERMINISM_PASS main=${mainSize}:$mainSha addon=${addonSize}:$addonSha"
+
+      - name: Prove policy and mutation authority are unchanged
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $addon=(Resolve-Path 'validation/sc-cover-ambience-commit-provenance-v0.1.0/out/bin/addon-manager.ps1').Path
+          $text=Get-Content $addon -Raw
+          $tokens=$null;$errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile($addon,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw 'Candidate AST parse failed.'}
+          function Get-Fn([string]$name){
+            $rows=@($ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq $name},$true))
+            if($rows.Count -ne 1){throw "Function cardinality mismatch: $name / $($rows.Count)"}
+            return $rows[0].Extent.Text
+          }
+          $registry=Get-Fn 'Get-AddonPolicyRegistry'
+          foreach($required in @("name='sc-cover-ambience.js'","inventory_policy='rescue-copy-cleanup-only'","mutation_mode='deny'","install_mode='recovery-owned'","version_strategy='owner-cleanup-only'","rollback_strategy='external-owner'","data_policy='never-disable-or-optimize'")){
+            if($registry.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "SC Cover Ambience policy drift: $required"}
+          }
+          $auto=[regex]::Matches($registry,"name='([^']+)'.*?mutation_mode='auto'",[Text.RegularExpressions.RegexOptions]::IgnoreCase)|ForEach-Object{$_.Groups[1].Value}|Sort-Object
+          $expected=@('better-local-files','eternal-jukebox','ivLyrics','playlist-maker')|Sort-Object
+          if(($auto -join '|').ToLowerInvariant() -cne ($expected -join '|').ToLowerInvariant()){throw "Automatic authority drift: $($auto -join ',')"}
+          $update=Get-Fn 'Update-AutoApps'
+          if($update.IndexOf('sc-cover-ambience',[StringComparison]::OrdinalIgnoreCase) -ge 0){throw 'SC Cover Ambience gained an automatic mutation route.'}
+          $rollback=Get-Fn 'Rollback-LastTransaction'
+          if($rollback.IndexOf('Assert-AddonSourceAdapterTransactionAuthorization',[StringComparison]::OrdinalIgnoreCase) -ge 0){throw 'RollbackLast became source-adapter-dependent.'}
+          foreach($name in @('Get-SCCoverAmbienceSnapshotCatalog','Get-SCCoverAmbienceFileSnapshotProvenance','Resolve-SCCoverAmbienceInstalledSnapshotProvenance')){
+            $fn=Get-Fn $name
+            foreach($forbidden in @('Invoke-WebRequest','Invoke-RestMethod','Remove-Item','Copy-Item','Move-Item','Set-Content','Add-Content','Start-Process','Stop-Process','spicetify apply','spicetify backup','spicetify restore','IndexedDB','localStorage','Local Storage','\Browser\','\Default\')){
+              if($fn.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "$name gained forbidden surface: $forbidden"}
+            }
+          }
+          $inventory=Get-Fn 'Get-AddonInventory'
+          foreach($required in @('ownership_migration_authorized','disable_or_optimize_authorized','cleanup/update/disable/optimization remain unauthorized','c12391e57a393d37d70ffd7a984bdbb6af9f4a83cf3c2b0a8c9bf040247c731f')){
+            if($inventory.IndexOf($required,[StringComparison]::Ordinal) -lt 0){throw "Inventory provenance contract missing: $required"}
+          }
+          Write-Host 'SC_COVER_AMBIENCE_PROVENANCE_POLICY_AUTHORITY_UNCHANGED_PASS'
+
+      - name: Re-authenticate current upstream head and frozen catalog
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $api='https://api.github.com/repos/Theblockbuster1/spicetify-extensions/commits?path=CoverAmbience%2FCoverAmbience.js&per_page=1'
+          $head=@(Invoke-RestMethod -UseBasicParsing -Headers @{'User-Agent'='spotify-control-validation'} -Uri $api)
+          if($head.Count -lt 1){throw 'Upstream path history returned no commits.'}
+          $sha=[string]$head[0].sha
+          if($sha -cne '9454b55e454fb354ecedcf3f72c5a4f0a9671651'){throw "Upstream Cover Ambience head moved outside frozen catalog: $sha"}
+          $tmp=Join-Path $env:RUNNER_TEMP 'CoverAmbience-current.js'
+          Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Theblockbuster1/spicetify-extensions/$sha/CoverAmbience/CoverAmbience.js" -OutFile $tmp
+          if((Get-Item $tmp).Length -ne 10267){throw 'Current upstream size drifted.'}
+          if((Get-FileHash $tmp -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0aea69246e14156b22a10261af07b84f3abc58bed4368e03f740ed76db329738'){throw 'Current upstream SHA drifted.'}
+          Write-Host 'SC_COVER_AMBIENCE_CURRENT_UPSTREAM_REAUTHENTICATED_PASS commit=9454b55e size=10267'
+
+      - name: Exercise exact current historical divergence unknown and remote-head contracts
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $addon=(Resolve-Path 'validation/sc-cover-ambience-commit-provenance-v0.1.0/out/bin/addon-manager.ps1').Path
+          $tokens=$null;$errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile($addon,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw 'Candidate AST parse failed before helper extraction.'}
+          $wanted=@('Test-PathSafe','Set-ObjectNoteProperty','Get-SCCoverAmbienceSnapshotCatalog','Get-SCCoverAmbienceFileSnapshotProvenance','Resolve-SCCoverAmbienceInstalledSnapshotProvenance','Get-SCCoverAmbienceRemoteHead')
+          $defs=@($ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $n.Name},$true))
+          if($defs.Count -ne $wanted.Count){throw "Helper extraction mismatch: $($defs.Name -join ',')"}
+          $harness=Join-Path $env:RUNNER_TEMP 'cover-provenance-harness.ps1'
+          ($defs|Sort-Object{$wanted.IndexOf($_.Name)}|ForEach-Object{$_.Extent.Text}) -join "`r`n`r`n" | Set-Content -LiteralPath $harness -Encoding UTF8
+          . $harness
+          $catalog=@(Get-SCCoverAmbienceSnapshotCatalog)
+          if($catalog.Count -ne 35){throw "Expected 35 snapshots, got $($catalog.Count)"}
+          if(@($catalog|Where-Object{$_.Current}).Count -ne 1){throw 'Catalog current cardinality mismatch.'}
+
+          $root=Join-Path $env:RUNNER_TEMP 'cover-provenance-fixtures'
+          Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $root|Out-Null
+          $current=Join-Path $root 'current.js'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/Theblockbuster1/spicetify-extensions/9454b55e454fb354ecedcf3f72c5a4f0a9671651/CoverAmbience/CoverAmbience.js' -OutFile $current
+          $historical=Join-Path $root 'historical.js'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/Theblockbuster1/spicetify-extensions/dbf0b1842766a0fd9888de1e41c66fe2a3fd724f/CoverAmbience/CoverAmbience.js' -OutFile $historical
+          $unknown=Join-Path $root 'unknown.js';[IO.File]::WriteAllText($unknown,'unknown-cover-ambience-bytes',[Text.UTF8Encoding]::new($false))
+
+          $app=Join-Path $root 'app-current';$local=Join-Path $root 'local-current'
+          $source=Join-Path $app 'spicetify\Extensions\sc-cover-ambience.js';$active=Join-Path $app 'Spotify\Apps\xpui\extensions\sc-cover-ambience.js'
+          New-Item -ItemType Directory -Force -Path (Split-Path $source -Parent),(Split-Path $active -Parent)|Out-Null
+          Copy-Item $current $source;Copy-Item $current $active
+          $p=Resolve-SCCoverAmbienceInstalledSnapshotProvenance -AppDataRoot $app -LocalAppDataRoot $local
+          if(-not[bool]$p.Proven -or [bool]$p.Ambiguous -or [string]$p.Commit -cne '9454b55e454fb354ecedcf3f72c5a4f0a9671651' -or -not[bool]$p.Current -or [string]$p.ProofKind -cne 'source-active-exact-official-snapshot-v1' -or [int]$p.SourceCount -ne 1 -or [int]$p.ActiveCount -ne 1){throw 'Exact current source+active provenance failed.'}
+          Write-Host 'SC_COVER_AMBIENCE_CURRENT_SOURCE_ACTIVE_PROVEN_PASS'
+
+          $app2=Join-Path $root 'app-historical';$local2=Join-Path $root 'local-historical';$source2=Join-Path $app2 'spicetify\Extensions\sc-cover-ambience.js'
+          New-Item -ItemType Directory -Force -Path (Split-Path $source2 -Parent)|Out-Null;Copy-Item $historical $source2
+          $p2=Resolve-SCCoverAmbienceInstalledSnapshotProvenance -AppDataRoot $app2 -LocalAppDataRoot $local2
+          if(-not[bool]$p2.Proven -or [bool]$p2.Current -or [string]$p2.Commit -cne 'dbf0b1842766a0fd9888de1e41c66fe2a3fd724f' -or [string]$p2.ProofKind -cne 'source-exact-official-snapshot-v1'){throw 'Historical exact snapshot provenance failed.'}
+          Write-Host 'SC_COVER_AMBIENCE_HISTORICAL_SOURCE_PROVEN_PASS'
+
+          Copy-Item $historical $active -Force
+          $div=Resolve-SCCoverAmbienceInstalledSnapshotProvenance -AppDataRoot $app -LocalAppDataRoot $local
+          if([bool]$div.Proven -or -not[bool]$div.Ambiguous -or [string]$div.Reason -cne 'multiple-official-snapshot-commits-present'){throw 'Official snapshot divergence did not fail closed.'}
+          Write-Host 'SC_COVER_AMBIENCE_DIVERGENCE_FAIL_CLOSED_PASS'
+
+          Copy-Item $unknown $active -Force
+          $bad=Resolve-SCCoverAmbienceInstalledSnapshotProvenance -AppDataRoot $app -LocalAppDataRoot $local
+          if([bool]$bad.Proven -or [string]$bad.Reason -cne 'one-or-more-local-files-unproven'){throw 'Unknown active bytes were trusted.'}
+          $absent=Resolve-SCCoverAmbienceInstalledSnapshotProvenance -AppDataRoot (Join-Path $root 'absent-app') -LocalAppDataRoot (Join-Path $root 'absent-local')
+          if([bool]$absent.Proven -or [string]$absent.Reason -cne 'no-local-cover-ambience-files'){throw 'Absent fixture was incorrectly proven.'}
+          $dup=@($catalog)+[pscustomobject]@{Commit='0000000000000000000000000000000000000000';Date='2099-01-01T00:00:00Z';Size=[int64]10267;Sha256='0aea69246e14156b22a10261af07b84f3abc58bed4368e03f740ed76db329738';Current=$false}
+          $amb=Get-SCCoverAmbienceFileSnapshotProvenance -Path $current -Role source -Catalog $dup
+          if([bool]$amb.Proven -or -not[bool]$amb.Ambiguous -or [int]$amb.MatchCount -ne 2){throw 'Ambiguous catalog did not fail closed.'}
+          Write-Host 'SC_COVER_AMBIENCE_UNKNOWN_ABSENT_AMBIGUOUS_FAIL_CLOSED_PASS'
+
+          $script:MockRemoteCommit='9454b55e454fb354ecedcf3f72c5a4f0a9671651'
+          function Invoke-GitHubJson { param([string]$Uri) return @([pscustomobject]@{sha=$script:MockRemoteCommit}) }
+          $remote=Get-SCCoverAmbienceRemoteHead -Catalog $catalog
+          if(-not[bool]$remote.CatalogKnown -or -not[bool]$remote.CatalogCurrent -or [string]$remote.Commit -cne $script:MockRemoteCommit){throw 'Known current remote-head classification failed.'}
+          $script:MockRemoteCommit='1111111111111111111111111111111111111111'
+          $newRemote=Get-SCCoverAmbienceRemoteHead -Catalog $catalog
+          if([bool]$newRemote.CatalogKnown -or [bool]$newRemote.CatalogCurrent){throw 'Unknown future remote head was incorrectly trusted.'}
+          Write-Host 'SC_COVER_AMBIENCE_REMOTE_HEAD_FAIL_SAFE_PASS'
+
+      - name: Run full candidate Addon Manager read-only SelfTest
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $addon='validation/sc-cover-ambience-commit-provenance-v0.1.0/out/bin/addon-manager.ps1'
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Candidate Addon Manager SelfTest failed.'}
+          Write-Host 'SC_COVER_AMBIENCE_PROVENANCE_ADDON_SELFTEST_PASS'
+
+      - name: Validate candidate report and stable production immutability
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $report=Get-Content 'validation/sc-cover-ambience-commit-provenance-v0.1.0/candidate-report.json' -Raw|ConvertFrom-Json
+          if([string]$report.base_version -cne '0.6.27'){throw 'Candidate base version drifted.'}
+          if([string]$report.snapshot_catalog.audit_catalog_payload_sha256 -cne 'c12391e57a393d37d70ffd7a984bdbb6af9f4a83cf3c2b0a8c9bf040247c731f'){throw 'Catalog fingerprint drifted.'}
+          if([int]$report.snapshot_catalog.snapshot_count -ne 35){throw 'Snapshot count drifted.'}
+          if([string]$report.real_pc_evidence.report_sha256 -cne '7349326c6567806f6c45bacb741d32649a6afc424b797d7249358cd9b8f5b38b' -or [int64]$report.real_pc_evidence.report_size -ne 16730){throw 'Sanitized real-PC evidence identity drifted.'}
+          foreach($field in @('safe_to_expand_mutation_authority','safe_to_auto_remove_direct_copy','disable_or_optimize')){if([bool]$report.real_pc_evidence.$field){throw "Real-PC safety gate unexpectedly true: $field"}}
+          if([bool]$report.authority_expanded -or [bool]$report.new_auto_install_authority -or [bool]$report.ownership_migration_authorized -or [bool]$report.disable_or_optimize_authorized){throw 'Candidate expanded forbidden authority.'}
+          $base='25daf4a295e7737bd12e96b584467da53245e37a'
+          foreach($path in @('manifest.json','README.md','performance/star-ratings/apply-star-ratings-patch.ps1','performance/star-ratings/target.json','validation/v0.6.27/build_v0627.py')){
+            if((git rev-parse "$base`:$path").Trim() -cne (git rev-parse "HEAD`:$path").Trim()){throw "Stable production surface changed: $path"}
+          }
+          Write-Host 'SC_COVER_AMBIENCE_PROVENANCE_REPORT_AND_PRODUCTION_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sc-cover-ambience-commit-provenance-v010
+          path: |
+            validation/sc-cover-ambience-commit-provenance-v0.1.0/out/bin/spotify-control.ps1
+            validation/sc-cover-ambience-commit-provenance-v0.1.0/out/bin/addon-manager.ps1
+            validation/sc-cover-ambience-commit-provenance-v0.1.0/candidate-report.json
+          if-no-files-found: error
