@@ -1,0 +1,83 @@
+name: Validate Auto-Authority Provenance Gap Audit v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/auto-authority-provenance-gap-audit-v0.1.0
+    paths:
+      - 'validation/auto-authority-provenance-gap-audit-v0.1.0/**'
+      - '.github/workflows/validate-auto-authority-provenance-gap-audit-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-windows:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Prove exact validation-only scope
+        shell: powershell
+        run: |
+          $base='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          $actual=(git rev-parse HEAD).Trim(); $eventHead='${{ github.sha }}'
+          if($actual -cne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'Audit branch no longer descends from exact v0.6.28/r17 production main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          foreach($p in $changed){
+            $ok=($p -like 'validation/auto-authority-provenance-gap-audit-v0.1.0/*' -or $p -ceq '.github/workflows/validate-auto-authority-provenance-gap-audit-v010.yml')
+            if(-not$ok){throw "Unexpected validation audit path: $p"}
+          }
+          if($changed.Count -ne 2){throw "Expected exactly two validation-only files, got $($changed.Count)."}
+          Write-Host "AUTO_AUTHORITY_AUDIT_SCOPE_PASS head=$actual"
+
+      - name: Reconstruct exact production r17 and audit source/provenance surfaces
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -m py_compile validation/auto-authority-provenance-gap-audit-v0.1.0/audit.py
+          if($LASTEXITCODE -ne 0){throw 'Audit source failed Python compile.'}
+          python validation/auto-authority-provenance-gap-audit-v0.1.0/audit.py --online
+          if($LASTEXITCODE -ne 0){throw 'Auto-authority provenance gap audit failed.'}
+
+      - name: Parse exact regenerated Addon Manager with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $addon='validation/v0.6.28/out/bin/addon-manager.ps1'
+          if((Get-Item $addon).Length -ne 323385 -or (Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -cne '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285'){throw 'Exact r17 identity drifted.'}
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $addon),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Exact r17 failed PowerShell 5.1 parse.'}
+          Write-Host 'AUTO_AUTHORITY_AUDIT_R17_PS51_PARSE_PASS'
+
+      - name: Assert report is read-only and authority-neutral
+        shell: powershell
+        run: |
+          $r=Get-Content validation/auto-authority-provenance-gap-audit-v0.1.0/audit-result.json -Raw|ConvertFrom-Json
+          if($r.read_only -ne $true -or $r.mutation_performed -ne $false -or $r.authority_expanded -ne $false){throw 'Audit safety contract failed.'}
+          if(($r.static.automatic_authority -join '|') -cne 'better-local-files|eternal-jukebox|ivLyrics|playlist-maker'){throw 'Automatic mutation authority drifted.'}
+          if($r.recommendation.authority_change_recommended -ne $false -or $r.recommendation.production_mutation_change_recommended -ne $false){throw 'Audit recommended a forbidden authority/mutation expansion.'}
+          Write-Host "AUTO_AUTHORITY_AUDIT_RECOMMENDATION=$($r.recommendation.target)"
+          Write-Host "AUTO_AUTHORITY_AUDIT_REASON=$($r.recommendation.reason)"
+          Write-Host 'AUTO_AUTHORITY_AUDIT_SAFETY_PASS'
+
+      - name: Prove all production release surfaces unchanged
+        shell: powershell
+        run: |
+          $base='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          git diff --exit-code $base -- manifest.json manifest.schema.json packages performance validation/v0.6.28 README.md
+          if($LASTEXITCODE -ne 0){throw 'Validation audit changed a production/release surface.'}
+          Write-Host 'AUTO_AUTHORITY_AUDIT_NO_PRODUCTION_CHANGE_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: auto-authority-provenance-gap-audit-v010
+          path: validation/auto-authority-provenance-gap-audit-v0.1.0/audit-result.json
+          if-no-files-found: error
