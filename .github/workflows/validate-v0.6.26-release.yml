@@ -77,6 +77,7 @@ jobs:
           if($report.authority_expanded -ne $false -or $report.new_auto_install_authority -ne $false){throw 'r15 authority unexpectedly expanded.'}
           if(($report.auto_authority -join '|') -ne 'better-local-files|eternal-jukebox|ivLyrics|playlist-maker'){throw 'Automatic authority set drifted.'}
           if($report.registry_fingerprint -ne '0f05406d7152de1d975f888cb8270be8249115211ba9f41e0157342cd42efbd8' -or $report.source_adapter_fingerprint -ne 'c0611a7b96f6ff09d1e235119efce2f2def6eb6d0a4e8e93e276cfa622c3c42d'){throw 'Registry/source-adapter fingerprint drifted.'}
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
           if($LASTEXITCODE -ne 0){throw 'r15 Addon Manager SelfTest failed.'}
           Write-Host 'V0626_R15_POLICY_PARSE_SELFTEST_PASS'
