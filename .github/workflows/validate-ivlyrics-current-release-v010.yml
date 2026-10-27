@@ -1,0 +1,57 @@
+name: Validate ivLyrics Current Release v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/ivlyrics-current-release-v0.1.0
+    paths:
+      - 'validation/ivlyrics-current-release-v0.1.0/**'
+      - '.github/workflows/validate-ivlyrics-current-release-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-windows:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Prove exact validation-only scope
+        shell: powershell
+        run: |
+          $base='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          $actual=(git rev-parse HEAD).Trim();$eventHead='${{ github.sha }}'
+          if($actual -cne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'ivLyrics validation no longer descends from exact production main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          foreach($p in $changed){$ok=($p -like 'validation/ivlyrics-current-release-v0.1.0/*' -or $p -ceq '.github/workflows/validate-ivlyrics-current-release-v010.yml');if(-not$ok){throw "Unexpected validation path: $p"}}
+          if($changed.Count -ne 2){throw "Expected exactly two validation-only files, got $($changed.Count)."}
+          Write-Host "IVLYRICS_CURRENT_RELEASE_SCOPE_PASS head=$actual"
+
+      - name: Extract exact r17 ivLyrics handler functions and dependency calls
+        shell: powershell
+        run: |
+          python -m py_compile validation/ivlyrics-current-release-v0.1.0/inspect.py
+          if($LASTEXITCODE -ne 0){throw 'inspection source compile failed'}
+          python validation/ivlyrics-current-release-v0.1.0/inspect.py
+          if($LASTEXITCODE -ne 0){throw 'exact r17 handler inspection failed'}
+
+      - name: Prove production surfaces unchanged
+        shell: powershell
+        run: |
+          $base='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          git diff --exit-code $base -- manifest.json manifest.schema.json packages performance validation/v0.6.28 README.md
+          if($LASTEXITCODE -ne 0){throw 'ivLyrics validation changed production/release surface'}
+          Write-Host 'IVLYRICS_CURRENT_RELEASE_NO_PRODUCTION_CHANGE_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ivlyrics-current-release-inspection-v010
+          path: validation/ivlyrics-current-release-v0.1.0/inspection.json
+          if-no-files-found: error
