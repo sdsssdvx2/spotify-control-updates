@@ -106,6 +106,7 @@ jobs:
           $base='36471b7193324d117c3c9b40c1cc27cc25dc2c86';$changed=@(git diff --name-only "$base...HEAD")
           $expected=@('.github/workflows/validate-marketplace-native-refresh-contract-v010.yml','validation/marketplace-native-refresh-contract-v0.1.0/marketplace-native-refresh-contract.ps1')
           $bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "Unexpected changed surface: $($bad -join ', ')"}
-          if((git show "$base`:validation/marketplace-source-topology-v0.1.0/build_candidate.py"|git hash-object --stdin).Trim() -cne '1e32dd57c95f718f2aeaae6149da36762ca7f6fd'){throw 'Validated source-topology builder identity drift.'}
+          $builderBlob=(git rev-parse "$base`:validation/marketplace-source-topology-v0.1.0/build_candidate.py").Trim()
+          if($builderBlob -cne '1e32dd57c95f718f2aeaae6149da36762ca7f6fd'){throw "Validated source-topology builder identity drift: $builderBlob"}
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved during native-refresh validation.'}
           Write-Host 'MARKETPLACE_NATIVE_REFRESH_IMMUTABILITY_PASS'
