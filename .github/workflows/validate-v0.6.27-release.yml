@@ -1,0 +1,120 @@
+name: Validate Spotify Control v0.6.27 Release
+
+on:
+  push:
+    branches:
+      - release/v0.6.27-star-ratings-release-provenance-r16
+    paths:
+      - '.github/workflows/validate-v0.6.27-release.yml'
+      - 'validation/v0.6.27/**'
+      - 'packages/v0.6.27/**'
+      - 'manifest.json'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/validate-v0.6.27-release.yml'
+      - 'validation/v0.6.27/**'
+      - 'packages/v0.6.27/**'
+      - 'manifest.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove release scope and published manifest identity
+        shell: powershell
+        run: |
+          $base='5cf131e7bc168f686c7b6fc933a713f4d96b9dd3'
+          $actual=(git rev-parse HEAD).Trim();$eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -ne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'v0.6.27 release no longer descends from exact stable v0.6.26 main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          foreach($p in $changed){
+            $ok=($p -eq 'manifest.json' -or $p -like 'packages/v0.6.27/*' -or $p -like 'validation/v0.6.27/*' -or $p -eq '.github/workflows/prepare-v0.6.27-release.yml' -or $p -eq '.github/workflows/validate-v0.6.27-release.yml' -or $p -eq '.github/workflows/validate-v0.6.27-bootstrap-e2e.yml')
+            if(-not$ok){throw "Unexpected v0.6.27 release path: $p"}
+          }
+          $m=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($m.latest_version -ne '0.6.27' -or $m.source_commit -ne '1bead7959e27c7fff58116c43b8ca8e09a88203e' -or $m.payload_set_sha256 -ne 'd74d39b2f705a6e225e639038390d24027ff32d27cd390a1b82700739bb0f178'){throw 'Published v0.6.27 manifest identity drifted.'}
+          if($m.bootstrap.version -ne '1.0.6' -or $m.bootstrap.sha256 -ne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' -or [int64]$m.bootstrap.size -ne 42963){throw 'Bootstrap contract drifted.'}
+          $edge=@($m.updates|Where-Object{$_.from_version -eq '0.6.26' -and $_.to_version -eq '0.6.27'});if($edge.Count -ne 1 -or @($edge[0].patches).Count -ne 2){throw 'Published v0.6.26 -> v0.6.27 edge missing/ambiguous.'}
+          Write-Host "V0627_RELEASE_SCOPE_PASS head=$actual"
+
+      - name: Reconstruct immutable transport from source_commit and compare deterministic rebuild
+        shell: powershell
+        run: |
+          python -m py_compile validation/v0.6.27/build_v0627.py validation/v0.6.27/release_transport.py validation/v0.6.27/bootstrap_prepare_fixture.py
+          if($LASTEXITCODE -ne 0){throw 'v0.6.27 validation source compile failed.'}
+          python validation/v0.6.27/release_transport.py --validate-published
+          if($LASTEXITCODE -ne 0){throw 'Published v0.6.27 immutable transport validation failed.'}
+          git diff --exit-code -- packages/v0.6.27 validation/v0.6.27/candidate-validation.json validation/v0.6.27/release-metadata.json
+          if($LASTEXITCODE -ne 0){throw 'Deterministic rebuild changed published v0.6.27 transport metadata.'}
+          Write-Host 'V0627_IMMUTABLE_TRANSPORT_REBUILD_PASS'
+
+      - name: Parse exact candidate and assert r16 policy invariants
+        shell: powershell
+        run: |
+          python validation/v0.6.27/build_v0627.py --build
+          if($LASTEXITCODE -ne 0){throw 'v0.6.27 exact candidate rebuild failed.'}
+          $main='validation/v0.6.27/out/bin/spotify-control.ps1';$addon='validation/v0.6.27/out/bin/addon-manager.ps1'
+          if((Get-Item $main).Length -ne 284317 -or (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -ne '9eb51ff9e001ebd84fd43532a2b3869f6d61f9b230a8008742119e8892202787'){throw 'v0.6.27 main identity mismatch.'}
+          if((Get-Item $addon).Length -ne 303745 -or (Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'c8d52542faaf033c0ede8216f71fe2e40d73636bd343d3faf88eb926e5017152'){throw 'r16 Addon Manager identity mismatch.'}
+          foreach($file in @($main,$addon)){$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Host $_.Message};throw "PowerShell 5.1 parse failed: $file"}}
+          $text=Get-Content $addon -Raw
+          foreach($required in @(
+            'function Get-StarRatingsReleaseCatalog','function Get-StarRatingsReleaseFileProvenance','function Resolve-StarRatingsInstalledReleaseProvenance',
+            '2592f43a26c3c49b9d58b8244654d27448d801995465c7c8e4ba8d3159b9aa27','performance-original-backup-v1','active-exact-upstream-dist-v1',
+            '198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1','6e0d1c84408294a619d91191eec83a6d10794ef31093d31ccf1f1bd39ea8c8a3',
+            'function Resolve-TagifyInstalledReleaseProvenance','75d66f6e06ec76c8f96fbc7941617e7330844979a87d3297e8e4ff824c3b6a1a',
+            'function Resolve-SplitifyInstalledReleaseProvenance','60311e81ae11727528fd5e34879533e1cfacdaaf7b2b21dd1808fb20e3b32454',
+            'protect-ratings-tags-notes','playlist-backed-ratings-preserve','never-disable-or-optimize')){if($text.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "r16 contract missing: $required"}}
+          $report=Get-Content validation/v0.6.27/candidate-validation.json -Raw|ConvertFrom-Json
+          if($report.validated_source.head -ne 'ac6a89298af835b65d4948ed0587341bb3cc7ff9' -or $report.validated_source.blob -ne '99efd34930aca9f463983f801fe91593539017f1'){throw 'Validated Star Ratings builder provenance pin drifted.'}
+          if($report.audit_evidence.catalog_json_sha256 -ne '2592f43a26c3c49b9d58b8244654d27448d801995465c7c8e4ba8d3159b9aa27'){throw 'Star Ratings audit catalog pin drifted.'}
+          if($report.authority_expanded -ne $false -or $report.new_auto_install_authority -ne $false){throw 'r16 authority unexpectedly expanded.'}
+          if(($report.auto_authority -join '|') -ne 'better-local-files|eternal-jukebox|ivLyrics|playlist-maker'){throw 'Automatic authority set drifted.'}
+          if($report.registry_fingerprint -ne '0f05406d7152de1d975f888cb8270be8249115211ba9f41e0157342cd42efbd8' -or $report.source_adapter_fingerprint -ne 'c0611a7b96f6ff09d1e235119efce2f2def6eb6d0a4e8e93e276cfa622c3c42d'){throw 'Registry/source-adapter fingerprint drifted.'}
+          if($report.star_ratings_policy.inventory_policy -ne 'source-watch-only' -or $report.star_ratings_policy.mutation_mode -ne 'deny' -or $report.star_ratings_policy.data_policy -ne 'playlist-backed-ratings-preserve'){throw 'Star Ratings protected policy drifted.'}
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'r16 Addon Manager SelfTest failed.'}
+          Write-Host 'V0627_R16_POLICY_PARSE_SELFTEST_PASS'
+
+      - name: Re-authenticate production Star Ratings upstream anchor and run immutable performance regression
+        shell: powershell
+        run: |
+          $fixture=Join-Path $env:RUNNER_TEMP 'star-ratings-2.1.3.js'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/brimell/spicetify-star-ratings/0698684b95a984b6726618e1b4541e0f830b93f2/dist/star-ratings.js' -OutFile $fixture
+          if((Get-Item $fixture).Length -ne 43396 -or (Get-FileHash $fixture -Algorithm SHA256).Hash.ToLowerInvariant() -ne '198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1'){throw 'Star Ratings v2.1.3 upstream anchor drifted.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/star-ratings/tests/test-star-ratings-patch.ps1 -FixturePath $fixture
+          if($LASTEXITCODE -ne 0){throw 'Existing immutable Star Ratings performance regression failed.'}
+          Remove-Item $fixture -Force -ErrorAction SilentlyContinue
+          Write-Host 'V0627_STAR_RATINGS_UPSTREAM_AND_PERFORMANCE_REGRESSION_PASS'
+
+      - name: Validate historical manifest preservation from exact stable base
+        shell: python
+        run: |
+          import json,subprocess
+          base=json.loads(subprocess.check_output(['git','show','5cf131e7bc168f686c7b6fc933a713f4d96b9dd3:manifest.json']).decode('utf-8-sig'))
+          cur=json.load(open('manifest.json',encoding='utf-8-sig'))
+          if cur['updates'][:-1]!=base['updates']:raise SystemExit('Historical update graph changed')
+          if cur['updates'][-1]['from_version']!='0.6.26' or cur['updates'][-1]['to_version']!='0.6.27':raise SystemExit('v0.6.27 edge not append-only')
+          if base['latest_version']!='0.6.26' or cur['latest_version']!='0.6.27':raise SystemExit('version chain mismatch')
+          print('V0627_APPEND_ONLY_MANIFEST_PASS')
+
+      - name: Prove validation left published release bytes unchanged
+        shell: powershell
+        run: |
+          git diff --exit-code -- manifest.json packages/v0.6.27 validation/v0.6.27/candidate-validation.json validation/v0.6.27/release-metadata.json performance
+          if($LASTEXITCODE -ne 0){throw 'v0.6.27 release validation mutated committed release/performance bytes.'}
+          Write-Host 'V0627_RELEASE_VALIDATION_NO_MUTATION_PASS'
