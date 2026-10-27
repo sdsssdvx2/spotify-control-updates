@@ -57,7 +57,7 @@ jobs:
           $m1=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant();$a1=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant()
           $ms1=(Get-Item $main).Length;$as1=(Get-Item $addon).Length
           if($ms1 -ne 284327 -or $m1 -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw "Candidate main identity drift: $ms1/$m1"}
-          if($as1 -ne 343674 -or $a1 -cne 'c4c6d8716e9da01eab19e540696a51e360f925ce9afee941607d9ac58d7d6281'){throw "Candidate addon identity drift: $as1/$a1"}
+          if($as1 -ne 341958 -or $a1 -cne '5931e7e425d7fa715b4fd18bc0d74301309c08cd5d3b756415d853f24aa716b8'){throw "Candidate addon identity drift: $as1/$a1"}
           Remove-Item -LiteralPath (Join-Path $dir 'out') -Recurse -Force
           python "$dir/build_candidate.py"
           if($LASTEXITCODE -ne 0){throw 'Second candidate build failed.'}
