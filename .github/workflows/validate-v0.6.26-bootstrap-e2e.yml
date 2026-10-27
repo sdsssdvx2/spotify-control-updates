@@ -10,15 +10,6 @@ on:
       - 'validation/v0.6.26/bootstrap_run_cycle.ps1'
       - 'manifest.json'
       - 'packages/v0.6.26/**'
-  pull_request:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/validate-v0.6.26-bootstrap-e2e.yml'
-      - 'validation/v0.6.26/bootstrap_prepare_fixture.py'
-      - 'validation/v0.6.26/bootstrap_run_cycle.ps1'
-      - 'manifest.json'
-      - 'packages/v0.6.26/**'
   workflow_dispatch:
 
 permissions:
