@@ -1,0 +1,226 @@
+name: Validate SC Cover Ambience Runtime Topology Collector v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/sc-cover-ambience-runtime-topology-collector-v0.1.0
+    paths:
+      - 'validation/sc-cover-ambience-runtime-topology-collector-v0.1.0/**'
+      - '.github/workflows/validate-sc-cover-ambience-runtime-topology-collector-v010.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/sc-cover-ambience-runtime-topology-collector-v0.1.0/**'
+      - '.github/workflows/validate-sc-cover-ambience-runtime-topology-collector-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact validation-only scope and pinned source ancestry
+        shell: powershell
+        run: |
+          $base='25daf4a295e7737bd12e96b584467da53245e37a'
+          $old='14a2f9bfacc54e617aec024b44b7f367dec28bbe'
+          $actual=(git rev-parse HEAD).Trim()
+          $eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'Collector validation is not based on exact stable v0.6.27 main.'}
+          git cat-file -e "$old`^{commit}"
+          if($LASTEXITCODE -ne 0){throw 'Pinned validated Star Ratings collector commit is unavailable.'}
+          $changed=@(git diff --name-only "$base...HEAD"|Sort-Object)
+          $expected=@(
+            '.github/workflows/validate-sc-cover-ambience-runtime-topology-collector-v010.yml',
+            'validation/sc-cover-ambience-runtime-topology-collector-v0.1.0/build_collector.py',
+            'validation/sc-cover-ambience-runtime-topology-collector-v0.1.0/official-snapshots.json'
+          )|Sort-Object
+          if(($changed -join '|') -cne ($expected -join '|')){throw "Unexpected validation scope: $($changed -join ', ')"}
+          Write-Host "SC_COVER_AMBIENCE_TOPOLOGY_SCOPE_PASS head=$actual pinned_reader_source=$old"
+
+      - name: Validate frozen official snapshot catalog
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $catalog='validation/sc-cover-ambience-runtime-topology-collector-v0.1.0/official-snapshots.json'
+          $doc=Get-Content $catalog -Raw|ConvertFrom-Json
+          if($doc.schema -ne 1){throw 'Catalog schema mismatch.'}
+          if([string]$doc.source_repository -cne 'Theblockbuster1/spicetify-extensions'){throw 'Catalog repository mismatch.'}
+          if([string]$doc.source_path -cne 'CoverAmbience/CoverAmbience.js'){throw 'Catalog path mismatch.'}
+          if([string]$doc.audit_catalog_payload_sha256 -cne 'c12391e57a393d37d70ffd7a984bdbb6af9f4a83cf3c2b0a8c9bf040247c731f'){throw 'Audit catalog fingerprint mismatch.'}
+          $snapshots=@($doc.snapshots)
+          if($snapshots.Count -ne 35){throw "Snapshot count mismatch: $($snapshots.Count)"}
+          $keys=@{}
+          foreach($s in $snapshots){
+            $key="$( [int64]$s.size )|$([string]$s.sha256)"
+            if($keys.ContainsKey($key)){throw "Duplicate snapshot identity: $key"}
+            $keys[$key]=$true
+          }
+          if(@($snapshots|Where-Object{$_.current}).Count -ne 1){throw 'Current snapshot cardinality mismatch.'}
+          $current=@($snapshots|Where-Object{$_.current})[0]
+          if([int64]$current.size -ne 10267 -or [string]$current.sha256 -cne '0aea69246e14156b22a10261af07b84f3abc58bed4368e03f740ed76db329738' -or [string]$current.commit -cne '9454b55e454fb354ecedcf3f72c5a4f0a9671651'){throw 'Current snapshot identity mismatch.'}
+          $tmp=Join-Path $env:RUNNER_TEMP 'CoverAmbience-current.js'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/Theblockbuster1/spicetify-extensions/9454b55e454fb354ecedcf3f72c5a4f0a9671651/CoverAmbience/CoverAmbience.js' -OutFile $tmp
+          if((Get-Item $tmp).Length -ne 10267){throw 'Pinned current upstream size drifted.'}
+          if((Get-FileHash $tmp -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0aea69246e14156b22a10261af07b84f3abc58bed4368e03f740ed76db329738'){throw 'Pinned current upstream hash drifted.'}
+          Write-Host 'SC_COVER_AMBIENCE_SNAPSHOT_CATALOG_PASS snapshots=35 current=9454b55e'
+
+      - name: Deterministically derive collector twice from validated reader lineage
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $src='validation/sc-cover-ambience-runtime-topology-collector-v0.1.0'
+          python -m py_compile "$src/build_collector.py"
+          if($LASTEXITCODE -ne 0){throw 'Builder Python compile failed.'}
+          $a=Join-Path $env:RUNNER_TEMP 'cover-collector-a'
+          $b=Join-Path $env:RUNNER_TEMP 'cover-collector-b'
+          python "$src/build_collector.py" --out $a --catalog "$src/official-snapshots.json"
+          if($LASTEXITCODE -ne 0){throw 'Collector build A failed.'}
+          python "$src/build_collector.py" --out $b --catalog "$src/official-snapshots.json"
+          if($LASTEXITCODE -ne 0){throw 'Collector build B failed.'}
+          $names=@('Collect-SCCoverAmbience-Topology.ps1','LevelDbReadOnly.cs','fixture_builder.py','official-snapshots.json','Run-SCCoverAmbience-Topology.cmd')
+          foreach($name in $names){
+            $ha=(Get-FileHash (Join-Path $a $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            $hb=(Get-FileHash (Join-Path $b $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            if($ha -cne $hb){throw "Nondeterministic generated file: $name"}
+          }
+          Write-Host 'SC_COVER_AMBIENCE_TOPOLOGY_DETERMINISTIC_BUILD_PASS'
+
+      - name: Parse generated scripts and prove read-only safety surface
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP 'cover-collector-a'
+          $collector=Join-Path $root 'Collect-SCCoverAmbience-Topology.ps1'
+          $tokens=$null;$errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile($collector,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Collector PowerShell 5.1 parse failed.'}
+          $forbidden=@('Remove-Item','Set-Content','Add-Content','Copy-Item','Move-Item','Rename-Item','Clear-Content','Set-Item','Set-ItemProperty','New-ItemProperty','Remove-ItemProperty','Start-Process','Stop-Process','Restart-Service','Stop-Service','Start-Service','Invoke-Expression')
+          $commands=@($ast.FindAll({param($n) $n -is [System.Management.Automation.Language.CommandAst]},$true))
+          foreach($cmd in $commands){$name=$cmd.GetCommandName();if($name -and $forbidden -contains $name){throw "Forbidden mutation/process command in collector: $name"}}
+          $text=Get-Content $collector -Raw
+          foreach($forbiddenText in @('spicetify apply','spicetify config','taskkill','Stop-Process','Start-Process','Set-Acl','icacls','SC Cover Ambience performance','star-ratings-performance')){
+            if($text.IndexOf($forbiddenText,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Forbidden mutation/process/performance text in collector: $forbiddenText"}
+          }
+          foreach($required in @('safe_to_expand_mutation_authority = $false','safe_to_auto_remove_direct_copy = $false','disable_or_optimize = $false','No Spotify/Spicetify/Marketplace data was modified. SC Cover Ambience was not disabled, optimized, updated, installed, or removed.')){
+            if($text.IndexOf($required,[StringComparison]::Ordinal) -lt 0){throw "Missing safety marker: $required"}
+          }
+          python -m py_compile (Join-Path $root 'fixture_builder.py')
+          if($LASTEXITCODE -ne 0){throw 'Generated fixture builder compile failed.'}
+          Write-Host 'SC_COVER_AMBIENCE_TOPOLOGY_PARSE_AND_READONLY_SURFACE_PASS'
+
+      - name: Build synthetic LevelDB fixtures
+        shell: powershell
+        run: |
+          $root=Join-Path $env:RUNNER_TEMP 'cover-collector-a'
+          $fixtureRoot=Join-Path $env:RUNNER_TEMP 'cover-ambience-topology-fixtures'
+          python (Join-Path $root 'fixture_builder.py') --out $fixtureRoot
+          if($LASTEXITCODE -ne 0){throw 'Fixture generation failed.'}
+          if(-not(Test-Path (Join-Path $fixtureRoot 'expected.json'))){throw 'Expected fixture map missing.'}
+          Write-Host "SC_COVER_AMBIENCE_TOPOLOGY_FIXTURE_BUILD_PASS root=$fixtureRoot"
+
+      - name: Exercise Snappy tombstone fallback corruption and ownership contracts
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $generated=Join-Path $env:RUNNER_TEMP 'cover-collector-a'
+          $fixtureRoot=Join-Path $env:RUNNER_TEMP 'cover-ambience-topology-fixtures'
+          $reports=Join-Path $env:RUNNER_TEMP 'cover-ambience-topology-reports'
+          New-Item -ItemType Directory -Force -Path $reports|Out-Null
+          $collector=Join-Path $generated 'Collect-SCCoverAmbience-Topology.ps1'
+          $expected=Get-Content (Join-Path $fixtureRoot 'expected.json') -Raw|ConvertFrom-Json
+
+          function Get-Snapshot([string]$root){
+            $rows=@()
+            foreach($file in @(Get-ChildItem -LiteralPath $root -File -Recurse -Force|Sort-Object FullName)){
+              $rel=$file.FullName.Substring($root.Length).TrimStart('\')
+              $sha=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              $rows+=("{0}|{1}|{2}" -f $rel,[int64]$file.Length,$sha)
+            }
+            return ($rows -join "`n")
+          }
+
+          $kinds=@('dual','configured-only','marketplace-only','tombstoned','corrupt','localstorage-only')
+          foreach($kind in $kinds){
+            $root=Join-Path $fixtureRoot $kind
+            $app=Join-Path $root 'appdata';$local=Join-Path $root 'localappdata';$out=Join-Path $reports ($kind+'.json')
+            $before=Get-Snapshot $root
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $collector -AppDataRoot $app -LocalAppDataRoot $local -OutputPath $out | Out-Host
+            if($LASTEXITCODE -ne 0){throw "Collector failed for fixture $kind"}
+            if((Get-Snapshot $root) -cne $before){throw "Collector mutated source fixture: $kind"}
+            $report=Get-Content $out -Raw|ConvertFrom-Json;$want=[string]$expected.$kind
+            if([string]$report.derived.topology -cne $want){throw "Topology mismatch for ${kind}: $($report.derived.topology) != $want"}
+            if($report.read_only -ne $true -or $report.mutation_performed -ne $false -or [string]$report.spotify_process_action -cne 'none'){throw "Read-only contract failed for $kind"}
+            if($report.derived.safe_to_expand_mutation_authority -ne $false -or $report.derived.safe_to_auto_remove_direct_copy -ne $false -or $report.derived.disable_or_optimize -ne $false){throw "Safety authority contract failed for $kind"}
+            Write-Host "SC_COVER_AMBIENCE_TOPOLOGY_FIXTURE_PASS kind=$kind topology=$want marketplace=$($report.marketplace.status)"
+          }
+          $tomb=Get-Content (Join-Path $reports 'tombstoned.json') -Raw|ConvertFrom-Json;if($tomb.marketplace.installed -ne $false){throw 'Newer WAL tombstone did not override stale positive SST record.'}
+          $corrupt=Get-Content (Join-Path $reports 'corrupt.json') -Raw|ConvertFrom-Json;if($null -ne $corrupt.marketplace.installed -or [string]$corrupt.marketplace.status -cne 'inconclusive'){throw 'Corrupt LevelDB was not fail-closed.'}
+          $fallback=Get-Content (Join-Path $reports 'localstorage-only.json') -Raw|ConvertFrom-Json;if($fallback.marketplace.installed -ne $true){throw 'Legacy Local Storage fallback was not proven.'}
+          Write-Host 'SC_COVER_AMBIENCE_TOPOLOGY_ALL_LEVELDB_FIXTURES_PASS'
+
+      - name: Prove exact official snapshot resolution without touching user data
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $generated=Join-Path $env:RUNNER_TEMP 'cover-collector-a'
+          $fixtureBase=Join-Path $env:RUNNER_TEMP 'cover-ambience-topology-fixtures\configured-only'
+          $root=Join-Path $env:RUNNER_TEMP 'cover-official-provenance-fixture'
+          Copy-Item -LiteralPath $fixtureBase -Destination $root -Recurse
+          $app=Join-Path $root 'appdata';$local=Join-Path $root 'localappdata'
+          $official=Join-Path $env:RUNNER_TEMP 'CoverAmbience-pinned-current.js'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/Theblockbuster1/spicetify-extensions/9454b55e454fb354ecedcf3f72c5a4f0a9671651/CoverAmbience/CoverAmbience.js' -OutFile $official
+          $source=Join-Path $app 'spicetify\Extensions\sc-cover-ambience.js'
+          $active=Join-Path $app 'Spotify\Apps\xpui\extensions\sc-cover-ambience.js'
+          New-Item -ItemType Directory -Force -Path (Split-Path $source -Parent),(Split-Path $active -Parent)|Out-Null
+          Copy-Item $official $source -Force;Copy-Item $official $active -Force
+          $out=Join-Path $env:RUNNER_TEMP 'cover-official-provenance-report.json'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $generated 'Collect-SCCoverAmbience-Topology.ps1') -AppDataRoot $app -LocalAppDataRoot $local -OutputPath $out | Out-Host
+          if($LASTEXITCODE -ne 0){throw 'Official provenance fixture collector failed.'}
+          $r=Get-Content $out -Raw|ConvertFrom-Json
+          if([string]$r.derived.topology -cne 'configured-only-likely'){throw "Official fixture topology mismatch: $($r.derived.topology)"}
+          $sourceMatches=@($r.local_source_provenance|Where-Object{$_.official -eq $true -and $_.current -eq $true -and [string]$_.commit -ceq '9454b55e454fb354ecedcf3f72c5a4f0a9671651'})
+          $activeMatches=@($r.active_xpui_provenance|Where-Object{$_.official -eq $true -and $_.current -eq $true -and [string]$_.commit -ceq '9454b55e454fb354ecedcf3f72c5a4f0a9671651'})
+          if($sourceMatches.Count -lt 1 -or $activeMatches.Count -lt 1){throw 'Exact official current snapshot was not resolved for source and active paths.'}
+          if([string]$r.provenance_catalog.audit_catalog_payload_sha256 -cne 'c12391e57a393d37d70ffd7a984bdbb6af9f4a83cf3c2b0a8c9bf040247c731f'){throw 'Runtime provenance catalog fingerprint mismatch.'}
+          Write-Host 'SC_COVER_AMBIENCE_OFFICIAL_SNAPSHOT_RESOLUTION_PASS'
+
+      - name: Prove stable production surface unchanged
+        shell: powershell
+        run: |
+          $base='25daf4a295e7737bd12e96b584467da53245e37a'
+          foreach($path in @('manifest.json','README.md','performance/star-ratings/apply-star-ratings-patch.ps1','performance/star-ratings/target.json','validation/v0.6.27/build_v0627.py')){
+            if((git rev-parse "$base`:$path").Trim() -cne (git rev-parse "HEAD`:$path").Trim()){throw "Production surface changed: $path"}
+          }
+          Write-Host 'SC_COVER_AMBIENCE_TOPOLOGY_NO_PRODUCTION_CHANGE_PASS'
+
+      - name: Build one-shot collector package
+        shell: powershell
+        run: |
+          $generated=Join-Path $env:RUNNER_TEMP 'cover-collector-a'
+          $stage=Join-Path $env:RUNNER_TEMP 'SpotifyControl-SCCoverAmbience-Topology-Collector-v0.1.0'
+          New-Item -ItemType Directory -Force -Path $stage|Out-Null
+          foreach($name in @('Collect-SCCoverAmbience-Topology.ps1','LevelDbReadOnly.cs','official-snapshots.json','Run-SCCoverAmbience-Topology.cmd')){Copy-Item -LiteralPath (Join-Path $generated $name) -Destination (Join-Path $stage $name)}
+          $zip=Join-Path $PWD 'SpotifyControl-SCCoverAmbience-Topology-Collector-v0.1.0.zip'
+          Compress-Archive -LiteralPath $stage -DestinationPath $zip -Force
+          $sha=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant();$size=(Get-Item $zip).Length
+          "${sha}  SpotifyControl-SCCoverAmbience-Topology-Collector-v0.1.0.zip"|Set-Content -LiteralPath ($zip+'.sha256.txt') -Encoding ASCII
+          Write-Host "SC_COVER_AMBIENCE_TOPOLOGY_PACKAGE_PASS size=$size sha256=$sha"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sc-cover-ambience-runtime-topology-collector-v010
+          path: |
+            SpotifyControl-SCCoverAmbience-Topology-Collector-v0.1.0.zip
+            SpotifyControl-SCCoverAmbience-Topology-Collector-v0.1.0.zip.sha256.txt
+          if-no-files-found: error
