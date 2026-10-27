@@ -1,0 +1,63 @@
+name: Validate Addon State Preservation Audit v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/addon-state-preservation-audit-v0.1.0
+    paths:
+      - 'validation/addon-state-preservation-audit-v0.1.0/**'
+      - '.github/workflows/validate-addon-state-preservation-audit-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-windows:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prove exact validation-only scope
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          $actual=(git rev-parse HEAD).Trim()
+          if((git merge-base $base HEAD).Trim() -cne $base){ throw 'Validation branch is not based on exact stable r17 main.' }
+          $changed=@(git diff --name-only "$base...HEAD" | Sort-Object)
+          $allowed=@(
+            '.github/workflows/validate-addon-state-preservation-audit-v010.yml',
+            'validation/addon-state-preservation-audit-v0.1.0/audit.py'
+          ) | Sort-Object
+          if(($changed -join '|') -cne ($allowed -join '|')){ throw "Unexpected validation scope: $($changed -join ', ')" }
+          Write-Host "ADDON_STATE_PRESERVATION_SCOPE_PASS head=$actual"
+
+      - name: Rebuild exact r17 and inspect preservation surfaces
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m py_compile validation/addon-state-preservation-audit-v0.1.0/audit.py
+          if($LASTEXITCODE -ne 0){ throw 'Audit Python compile failed.' }
+          python validation/addon-state-preservation-audit-v0.1.0/audit.py
+          if($LASTEXITCODE -ne 0){ throw 'Audit failed.' }
+          $report=Get-Content validation/addon-state-preservation-audit-v0.1.0/audit-report.json -Raw | ConvertFrom-Json
+          if([int64]$report.stable_addon.size -ne 323385){ throw 'Stable addon size drift.' }
+          if([string]$report.stable_addon.sha256 -cne '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285'){ throw 'Stable addon SHA drift.' }
+          Write-Host "ADDON_STATE_PRESERVATION_FUNCTION_COUNT=$($report.function_count)"
+          Write-Host "ADDON_STATE_PRESERVATION_RELEVANT=$($report.relevant_function_names -join '|')"
+          foreach($name in $report.exact_requested_functions_present){
+            Write-Host "===== FUNCTION $name BEGIN ====="
+            Write-Host ([string]$report.exact_requested_functions.$name)
+            Write-Host "===== FUNCTION $name END ====="
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: addon-state-preservation-audit-v010
+          path: validation/addon-state-preservation-audit-v0.1.0/audit-report.json
+          if-no-files-found: error
+          retention-days: 14
