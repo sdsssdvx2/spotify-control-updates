@@ -1,0 +1,143 @@
+name: Validate Spotify Control v0.6.28 Release
+
+on:
+  push:
+    branches:
+      - release/v0.6.28-sc-cover-ambience-commit-provenance-r17
+    paths:
+      - '.github/workflows/validate-v0.6.28-release.yml'
+      - 'validation/v0.6.28/**'
+      - 'packages/v0.6.28/**'
+      - 'manifest.json'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/validate-v0.6.28-release.yml'
+      - 'validation/v0.6.28/**'
+      - 'packages/v0.6.28/**'
+      - 'manifest.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove release scope and published manifest identity
+        shell: powershell
+        run: |
+          $base='25daf4a295e7737bd12e96b584467da53245e37a'
+          $actual=(git rev-parse HEAD).Trim();$eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'v0.6.28 release no longer descends from exact stable v0.6.27 main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          foreach($p in $changed){
+            $ok=($p -ceq 'manifest.json' -or $p -like 'packages/v0.6.28/*' -or $p -like 'validation/v0.6.28/*' -or $p -ceq '.github/workflows/prepare-v0.6.28-release.yml' -or $p -ceq '.github/workflows/validate-v0.6.28-release.yml' -or $p -ceq '.github/workflows/validate-v0.6.28-bootstrap-e2e.yml')
+            if(-not$ok){throw "Unexpected v0.6.28 release path: $p"}
+          }
+          $m=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($m.latest_version -cne '0.6.28' -or $m.source_commit -cne 'bb6d90146f20b73d36fbf8cb813f1b190f403c48' -or $m.payload_set_sha256 -cne '4be96c5d41c2160ed9ac96001b469998595629232929b82c8b0f34b11fda3b43'){throw 'Published v0.6.28 manifest identity drifted.'}
+          if($m.bootstrap.version -cne '1.0.6' -or $m.bootstrap.sha256 -cne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' -or [int64]$m.bootstrap.size -ne 42963){throw 'Bootstrap contract drifted.'}
+          $edge=@($m.updates|Where-Object{$_.from_version -ceq '0.6.27' -and $_.to_version -ceq '0.6.28'});if($edge.Count -ne 1 -or @($edge[0].patches).Count -ne 2){throw 'Published v0.6.27 -> v0.6.28 edge missing/ambiguous.'}
+          Write-Host "V0628_RELEASE_SCOPE_PASS head=$actual"
+
+      - name: Reconstruct immutable transport from source_commit and compare deterministic rebuild
+        shell: powershell
+        run: |
+          python -m py_compile validation/v0.6.28/build_v0628.py validation/v0.6.28/release_transport.py validation/v0.6.28/bootstrap_prepare_fixture.py
+          if($LASTEXITCODE -ne 0){throw 'v0.6.28 validation source compile failed.'}
+          python validation/v0.6.28/release_transport.py --validate-published
+          if($LASTEXITCODE -ne 0){throw 'Published v0.6.28 immutable transport validation failed.'}
+          git diff --exit-code -- packages/v0.6.28 validation/v0.6.28/candidate-validation.json validation/v0.6.28/release-metadata.json
+          if($LASTEXITCODE -ne 0){throw 'Deterministic rebuild changed published v0.6.28 transport metadata.'}
+          Write-Host 'V0628_IMMUTABLE_TRANSPORT_REBUILD_PASS'
+
+      - name: Parse exact candidate and assert r17 policy invariants
+        shell: powershell
+        run: |
+          python validation/v0.6.28/build_v0628.py --build
+          if($LASTEXITCODE -ne 0){throw 'v0.6.28 exact candidate rebuild failed.'}
+          $main='validation/v0.6.28/out/bin/spotify-control.ps1';$addon='validation/v0.6.28/out/bin/addon-manager.ps1'
+          if((Get-Item $main).Length -ne 284321 -or (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0'){throw 'v0.6.28 main identity mismatch.'}
+          if((Get-Item $addon).Length -ne 323385 -or (Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -cne '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285'){throw 'r17 Addon Manager identity mismatch.'}
+          foreach($file in @($main,$addon)){$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Host $_.Message};throw "PowerShell 5.1 parse failed: $file"}}
+          $text=Get-Content $addon -Raw
+          foreach($required in @(
+            'function Get-SCCoverAmbienceSnapshotCatalog','function Get-SCCoverAmbienceFileSnapshotProvenance','function Resolve-SCCoverAmbienceInstalledSnapshotProvenance','function Get-SCCoverAmbienceRemoteHead',
+            'c12391e57a393d37d70ffd7a984bdbb6af9f4a83cf3c2b0a8c9bf040247c731f','9454b55e454fb354ecedcf3f72c5a4f0a9671651','0aea69246e14156b22a10261af07b84f3abc58bed4368e03f740ed76db329738',
+            'watched-current-proven','watched-upstream-head-unproven-new-snapshot','ownership_migration_authorized','disable_or_optimize_authorized',
+            'function Get-StarRatingsReleaseCatalog','function Resolve-StarRatingsInstalledReleaseProvenance','2592f43a26c3c49b9d58b8244654d27448d801995465c7c8e4ba8d3159b9aa27','performance-original-backup-v1','active-exact-upstream-dist-v1',
+            'function Resolve-TagifyInstalledReleaseProvenance','75d66f6e06ec76c8f96fbc7941617e7330844979a87d3297e8e4ff824c3b6a1a',
+            'function Resolve-SplitifyInstalledReleaseProvenance','60311e81ae11727528fd5e34879533e1cfacdaaf7b2b21dd1808fb20e3b32454',
+            'protect-ratings-tags-notes','playlist-backed-ratings-preserve','never-disable-or-optimize')){if($text.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "r17 contract missing: $required"}}
+          $tokens=$null;$errors=$null;$ast=[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $addon),[ref]$tokens,[ref]$errors)
+          function Fn([string]$name){$x=@($ast.FindAll({param($n)$n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq $name},$true));if($x.Count -ne 1){throw "Function cardinality mismatch: $name"};return $x[0].Extent.Text}
+          $registry=Fn 'Get-AddonPolicyRegistry'
+          foreach($required in @("name='sc-cover-ambience.js'","inventory_policy='rescue-copy-cleanup-only'","mutation_mode='deny'","install_mode='recovery-owned'","version_strategy='owner-cleanup-only'","rollback_strategy='external-owner'","data_policy='never-disable-or-optimize'")){if($registry.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "SC Cover Ambience policy drift: $required"}}
+          $auto=[regex]::Matches($registry,"name='([^']+)'.*?mutation_mode='auto'",[Text.RegularExpressions.RegexOptions]::IgnoreCase)|ForEach-Object{$_.Groups[1].Value}|Sort-Object
+          $expected=@('better-local-files','eternal-jukebox','ivLyrics','playlist-maker')|Sort-Object
+          if(($auto -join '|').ToLowerInvariant() -cne ($expected -join '|').ToLowerInvariant()){throw "Automatic authority drift: $($auto -join ',')"}
+          if((Fn 'Update-AutoApps').IndexOf('sc-cover-ambience',[StringComparison]::OrdinalIgnoreCase) -ge 0){throw 'SC Cover Ambience gained automatic mutation route.'}
+          if((Fn 'Rollback-LastTransaction').IndexOf('Assert-AddonSourceAdapterTransactionAuthorization',[StringComparison]::OrdinalIgnoreCase) -ge 0){throw 'RollbackLast became source-adapter-dependent.'}
+          $report=Get-Content validation/v0.6.28/candidate-validation.json -Raw|ConvertFrom-Json
+          if($report.validated_source.head -cne 'f8ed342f0f414abba3d2a42f93720057ae8b55e5' -or $report.validated_source.blob -cne 'a52961092730a3216ea2d4b4dceaaa814f33ce4e'){throw 'Validated SC Cover Ambience builder provenance pin drifted.'}
+          if($report.sc_cover_ambience_provenance.catalog_payload_sha256 -cne 'c12391e57a393d37d70ffd7a984bdbb6af9f4a83cf3c2b0a8c9bf040247c731f' -or $report.sc_cover_ambience_provenance.real_pc_topology -cne 'dual-owned-risk'){throw 'SC Cover Ambience evidence pin drifted.'}
+          if($report.authority_expanded -ne $false -or $report.new_auto_install_authority -ne $false -or $report.ownership_migration_authorized -ne $false -or $report.direct_copy_cleanup_authorized -ne $false -or $report.disable_or_optimize_authorized -ne $false){throw 'r17 authority unexpectedly expanded.'}
+          if(($report.auto_authority -join '|') -cne 'better-local-files|eternal-jukebox|ivLyrics|playlist-maker'){throw 'Automatic authority set drifted.'}
+          if($report.registry_fingerprint -cne '0f05406d7152de1d975f888cb8270be8249115211ba9f41e0157342cd42efbd8' -or $report.source_adapter_fingerprint -cne 'c0611a7b96f6ff09d1e235119efce2f2def6eb6d0a4e8e93e276cfa622c3c42d'){throw 'Registry/source-adapter fingerprint drifted.'}
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'r17 Addon Manager SelfTest failed.'}
+          Write-Host 'V0628_R17_POLICY_PARSE_SELFTEST_PASS'
+
+      - name: Re-authenticate current SC Cover Ambience upstream snapshot
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $rows=@(Invoke-RestMethod -UseBasicParsing -Headers @{'User-Agent'='spotify-control-v0628-validation'} -Uri 'https://api.github.com/repos/Theblockbuster1/spicetify-extensions/commits?path=CoverAmbience%2FCoverAmbience.js&per_page=1')
+          if($rows.Count -lt 1){throw 'SC Cover Ambience upstream path history returned no rows.'}
+          $commit=[string]$rows[0].sha
+          if($commit -cne '9454b55e454fb354ecedcf3f72c5a4f0a9671651'){throw "SC Cover Ambience upstream head moved: $commit"}
+          $fixture=Join-Path $env:RUNNER_TEMP 'CoverAmbience-current.js'
+          Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/Theblockbuster1/spicetify-extensions/$commit/CoverAmbience/CoverAmbience.js" -OutFile $fixture
+          if((Get-Item $fixture).Length -ne 10267 -or (Get-FileHash $fixture -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0aea69246e14156b22a10261af07b84f3abc58bed4368e03f740ed76db329738'){throw 'SC Cover Ambience current upstream snapshot drifted.'}
+          Remove-Item $fixture -Force -ErrorAction SilentlyContinue
+          Write-Host 'V0628_SC_COVER_AMBIENCE_UPSTREAM_REAUTHENTICATED_PASS'
+
+      - name: Run immutable Star Ratings performance regression unchanged
+        shell: powershell
+        run: |
+          $fixture=Join-Path $env:RUNNER_TEMP 'star-ratings-2.1.3.js'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/brimell/spicetify-star-ratings/0698684b95a984b6726618e1b4541e0f830b93f2/dist/star-ratings.js' -OutFile $fixture
+          if((Get-Item $fixture).Length -ne 43396 -or (Get-FileHash $fixture -Algorithm SHA256).Hash.ToLowerInvariant() -cne '198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1'){throw 'Star Ratings v2.1.3 upstream anchor drifted.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/star-ratings/tests/test-star-ratings-patch.ps1 -FixturePath $fixture
+          if($LASTEXITCODE -ne 0){throw 'Existing immutable Star Ratings performance regression failed.'}
+          Remove-Item $fixture -Force -ErrorAction SilentlyContinue
+          Write-Host 'V0628_STAR_RATINGS_PERFORMANCE_REGRESSION_PASS'
+
+      - name: Validate historical manifest preservation from exact stable base
+        shell: python
+        run: |
+          import json,subprocess
+          base=json.loads(subprocess.check_output(['git','show','25daf4a295e7737bd12e96b584467da53245e37a:manifest.json']).decode('utf-8-sig'))
+          cur=json.load(open('manifest.json',encoding='utf-8-sig'))
+          if cur['updates'][:-1]!=base['updates']:raise SystemExit('Historical update graph changed')
+          if cur['updates'][-1]['from_version']!='0.6.27' or cur['updates'][-1]['to_version']!='0.6.28':raise SystemExit('v0.6.28 edge not append-only')
+          if base['latest_version']!='0.6.27' or cur['latest_version']!='0.6.28':raise SystemExit('version chain mismatch')
+          print('V0628_APPEND_ONLY_MANIFEST_PASS')
+
+      - name: Prove validation left published release bytes unchanged
+        shell: powershell
+        run: |
+          git diff --exit-code -- manifest.json packages/v0.6.28 validation/v0.6.28/candidate-validation.json validation/v0.6.28/release-metadata.json performance
+          if($LASTEXITCODE -ne 0){throw 'v0.6.28 release validation mutated committed release/performance bytes.'}
+          Write-Host 'V0628_RELEASE_VALIDATION_NO_MUTATION_PASS'
