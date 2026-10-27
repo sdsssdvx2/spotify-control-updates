@@ -79,7 +79,11 @@ jobs:
           python validation/marketplace-record-discovery-v0.1.0/fixture_builder.py --out $root
           if($LASTEXITCODE -ne 0){throw 'Fixture build failed.'}
           $lines=@(Get-ChildItem -LiteralPath $root -Recurse -File|Sort-Object FullName|ForEach-Object{"$($_.FullName.Substring((Resolve-Path $root).Path.Length))|$($_.Length)|$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"})
-          $fingerprint=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes(($lines -join "`n")))).ToLowerInvariant()
+          $sha=[Security.Cryptography.SHA256]::Create()
+          try {
+            $bytes=[Text.Encoding]::UTF8.GetBytes(($lines -join "`n"))
+            $fingerprint=([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()
+          } finally { $sha.Dispose() }
           "FIXTURE_BEFORE=$fingerprint"|Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "MARKETPLACE_RECORD_FIXTURE_IDENTITY_PASS sha256=$fingerprint"
 
@@ -127,7 +131,11 @@ jobs:
         run: |
           $root='validation/marketplace-record-discovery-v0.1.0/fixtures'
           $lines=@(Get-ChildItem -LiteralPath $root -Recurse -File|Sort-Object FullName|ForEach-Object{"$($_.FullName.Substring((Resolve-Path $root).Path.Length))|$($_.Length)|$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"})
-          $after=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes(($lines -join "`n")))).ToLowerInvariant()
+          $sha=[Security.Cryptography.SHA256]::Create()
+          try {
+            $bytes=[Text.Encoding]::UTF8.GetBytes(($lines -join "`n"))
+            $after=([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()
+          } finally { $sha.Dispose() }
           if($after -cne $env:FIXTURE_BEFORE){throw "Read-only collector modified fixture inputs: $env:FIXTURE_BEFORE != $after"}
           Write-Host "MARKETPLACE_RECORD_READ_ONLY_PASS sha256=$after"
 
