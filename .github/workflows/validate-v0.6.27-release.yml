@@ -9,14 +9,6 @@ on:
       - 'validation/v0.6.27/**'
       - 'packages/v0.6.27/**'
       - 'manifest.json'
-  pull_request:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/validate-v0.6.27-release.yml'
-      - 'validation/v0.6.27/**'
-      - 'packages/v0.6.27/**'
-      - 'manifest.json'
   workflow_dispatch:
 
 permissions:
@@ -30,13 +22,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
 
       - name: Prove release scope and published manifest identity
         shell: powershell
         run: |
           $base='5cf131e7bc168f686c7b6fc933a713f4d96b9dd3'
-          $actual=(git rev-parse HEAD).Trim();$eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          $actual=(git rev-parse HEAD).Trim();$eventHead='${{ github.sha }}'
           if($actual -ne $eventHead){throw "Not exact event head: $actual != $eventHead"}
           if((git merge-base $base HEAD).Trim() -ne $base){throw 'v0.6.27 release no longer descends from exact stable v0.6.26 main.'}
           $changed=@(git diff --name-only "$base...HEAD")
