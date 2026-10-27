@@ -97,8 +97,8 @@ jobs:
             if($core.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Remote-source contract gained forbidden side effect/network primitive: $forbidden"}
           }
           foreach($required in @(
-            "managed_by='custom-app-provenance-v1'","managed_by='custom-app-remote-source-v1'","mutation_mode='deny'",'auto_update_authorized=$false','auto_install_authorized=$false',
-            "'repo-commit-root','release-asset'",'github-numeric-repository-id-changed','initial-content-match-required','source-change-blocked',
+            "'custom-app-provenance-v1'","managed_by='custom-app-remote-source-v1'","mutation_mode='deny'",'auto_update_authorized=$false','auto_install_authorized=$false',
+            "'repo-commit-root','release-asset'",'github-numeric-repository-id-changed','initial-content-match-required','provenance-reenrollment-required',
             'path-backslash-denied','path-dot-or-empty-segment','path-ads-or-colon','path-windows-reserved-name','case-insensitive-duplicate-path',
             'root-index-js-missing','root-manifest-json-missing','remote-surface-requires-build','release-asset-continuity-drift','local-tree-drift'
           )){if($core.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Remote-source safety marker missing: $required"}}
