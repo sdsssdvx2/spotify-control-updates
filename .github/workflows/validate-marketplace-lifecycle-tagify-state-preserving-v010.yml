@@ -1,0 +1,139 @@
+name: Validate Tagify State-Preserving Marketplace Lifecycle v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/marketplace-lifecycle-tagify-state-preserving-v0.1.0
+    paths:
+      - 'validation/marketplace-lifecycle-tagify-state-preserving-v0.1.0/**'
+      - '.github/workflows/validate-marketplace-lifecycle-tagify-state-preserving-v010.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/marketplace-lifecycle-tagify-state-preserving-v0.1.0/**'
+      - '.github/workflows/validate-marketplace-lifecycle-tagify-state-preserving-v010.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact validation-only scope from stable v0.6.28/r17
+        shell: powershell
+        run: |
+          $base='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Validation branch is not based on exact stable main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allowed=@(
+            'validation/marketplace-lifecycle-tagify-state-preserving-v0.1.0/build_candidate.py',
+            'validation/marketplace-lifecycle-tagify-state-preserving-v0.1.0/test_tagify_state_preserving.ps1',
+            '.github/workflows/validate-marketplace-lifecycle-tagify-state-preserving-v010.yml'
+          )
+          $bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Out-of-scope files: $($bad -join ', ')"}
+          if($changed.Count -ne 3){throw "Expected exactly 3 validation-only files, got $($changed.Count): $($changed -join ', ')"}
+          Write-Host "TAGIFY_LIFECYCLE_SCOPE_PASS head=$((git rev-parse HEAD).Trim())"
+
+      - name: Build candidate twice and prove deterministic exact identity
+        shell: powershell
+        run: |
+          $dir='validation/marketplace-lifecycle-tagify-state-preserving-v0.1.0'
+          python -m py_compile "$dir/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'Candidate builder Python compile failed.'}
+          python "$dir/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'Candidate build failed.'}
+          $main=Join-Path $dir 'out/bin/spotify-control.ps1'
+          $addon=Join-Path $dir 'out/bin/addon-manager.ps1'
+          $m1=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant();$a1=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant()
+          $ms1=(Get-Item $main).Length;$as1=(Get-Item $addon).Length
+          if($ms1 -ne 284327 -or $m1 -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw "Candidate main identity drift: $ms1/$m1"}
+          if($as1 -ne 343674 -or $a1 -cne 'c4c6d8716e9da01eab19e540696a51e360f925ce9afee941607d9ac58d7d6281'){throw "Candidate addon identity drift: $as1/$a1"}
+          Remove-Item -LiteralPath (Join-Path $dir 'out') -Recurse -Force
+          python "$dir/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'Second candidate build failed.'}
+          $m2=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant();$a2=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($m2 -cne $m1 -or $a2 -cne $a1 -or (Get-Item $main).Length -ne $ms1 -or (Get-Item $addon).Length -ne $as1){throw 'Candidate build is not deterministic.'}
+          Write-Host "TAGIFY_LIFECYCLE_DETERMINISM_PASS main=$m2 addon=$a2"
+
+      - name: Parse candidate and acceptance with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $dir='validation/marketplace-lifecycle-tagify-state-preserving-v0.1.0'
+          foreach($p in @((Join-Path $dir 'out/bin/spotify-control.ps1'),(Join-Path $dir 'out/bin/addon-manager.ps1'),(Join-Path $dir 'test_tagify_state_preserving.ps1'))){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0}:{1} {2}" -f $p,$_.Extent.StartLineNumber,$_.Message)};throw "PowerShell 5.1 parse failed: $p"}
+          }
+          Write-Host 'TAGIFY_LIFECYCLE_PS51_PARSE_PASS'
+
+      - name: Audit policy expansion is exactly Tagify and protected addons remain denied
+        shell: powershell
+        run: |
+          $dir='validation/marketplace-lifecycle-tagify-state-preserving-v0.1.0'
+          $addon=Get-Content (Join-Path $dir 'out/bin/addon-manager.ps1') -Raw
+          foreach($required in @(
+            "name='tagify'; kind='custom-app'; source='alexk218/tagify'; inventory_policy='auto'; mutation_mode='auto'; handler='tagify'; install_mode='installed-only'",
+            "version_strategy='semver-release-state-preserving-tree'",
+            "data_policy='preserve-ratings-tags-notes-and-browser-storage'",
+            "id='tagify-release-state-v1'",
+            "protected_state_kind='tagify-browser-storage-v1'",
+            'must-remain-byte-identical-through-apply',
+            'Tagify protected Browser/Default state changed through Spicetify apply',
+            "name='splitify'; kind='custom-app'; source='alexander-rebello/splitify'; inventory_policy='monitor-only'; mutation_mode='deny'",
+            "name='star-ratings'; kind='marketplace-extension'; source='brimell/spicetify-star-ratings'; inventory_policy='source-watch-only'; mutation_mode='deny'",
+            "name='sc-cover-ambience.js'; kind='extension'; source='Theblockbuster1/spicetify-extensions'; inventory_policy='rescue-copy-cleanup-only'; mutation_mode='deny'",
+            "data_policy='never-disable-or-optimize'"
+          )){if(-not $addon.Contains($required)){throw "Required policy/lifecycle marker missing: $required"}}
+          if($addon.Contains("name='tagify'; kind='custom-app'; source='alexk218/tagify'; inventory_policy='monitor-only'")){throw 'Legacy Tagify monitor-only registry entry remains.'}
+          $report=Get-Content (Join-Path $dir 'candidate-validation.json') -Raw|ConvertFrom-Json
+          if(($report.auto_authority -join ',') -cne 'better-local-files,eternal-jukebox,ivLyrics,playlist-maker,tagify'){throw 'Candidate auto authority set mismatch.'}
+          if($report.user_storage_mutation_authorized -ne $false -or $report.user_storage_auto_restore -ne $false){throw 'Candidate unexpectedly authorizes browser-storage mutation/restore.'}
+          Write-Host 'TAGIFY_LIFECYCLE_POLICY_AUDIT_PASS'
+
+      - name: Run full Addon Manager read-only SelfTest in isolated profile
+        shell: powershell
+        run: |
+          $dir='validation/marketplace-lifecycle-tagify-state-preserving-v0.1.0'
+          $root=Join-Path $env:RUNNER_TEMP 'tagify-selftest-profile'
+          $env:LOCALAPPDATA=Join-Path $root 'LocalAppData';$env:APPDATA=Join-Path $root 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $dir 'out/bin/addon-manager.ps1') -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Candidate Addon Manager SelfTest failed.'}
+          Write-Host 'TAGIFY_LIFECYCLE_ADDON_SELFTEST_PASS'
+
+      - name: Run official-release state-preserving transaction acceptance
+        shell: powershell
+        run: |
+          $dir='validation/marketplace-lifecycle-tagify-state-preserving-v0.1.0'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $dir 'test_tagify_state_preserving.ps1') -CandidatePath (Resolve-Path (Join-Path $dir 'out/bin/addon-manager.ps1'))
+          if($LASTEXITCODE -ne 0){throw 'Tagify state-preserving transaction acceptance failed.'}
+
+      - name: Prove stable production surfaces remain unchanged
+        shell: powershell
+        run: |
+          $base='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          foreach($p in @('manifest.json','README.md','packages/v0.6.28/spotify-control.ps1','packages/v0.6.28/addon-manager.ps1','bin/spotify-control-agent.vbs','bootstrap/spotify-control-self-updater.ps1')){
+            $a=(git rev-parse "$base`:$p").Trim();$b=(git rev-parse "HEAD`:$p").Trim();if($a -cne $b){throw "Production surface changed on validation branch: $p"}
+          }
+          Write-Host 'TAGIFY_LIFECYCLE_PRODUCTION_UNCHANGED_PASS'
+
+      - name: Upload validation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: tagify-state-preserving-lifecycle-v010
+          path: |
+            validation/marketplace-lifecycle-tagify-state-preserving-v0.1.0/candidate-validation.json
+            validation/marketplace-lifecycle-tagify-state-preserving-v0.1.0/out/bin/spotify-control.ps1
+            validation/marketplace-lifecycle-tagify-state-preserving-v0.1.0/out/bin/addon-manager.ps1
+          if-no-files-found: error
+          compression-level: 0
