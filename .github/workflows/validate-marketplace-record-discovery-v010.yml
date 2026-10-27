@@ -108,7 +108,7 @@ jobs:
           if($indexed.status -cne 'ok' -or [int]$indexed.record_count -ne 3){throw 'IndexedDB baseline discovery failed.'}
           $k=@($indexed.records|ForEach-Object{$_.kind}|Sort-Object)
           if(($k -join '|') -cne 'extension|snippet|theme'){throw "IndexedDB type classification failed: $($k -join '|')"}
-          foreach($row in @($indexed.records|Where-Object{$_.kind -ne 'snippet'})){if(-not $row.identity_from_marketplace_key -or [string]::IsNullOrWhiteSpace([string]$row.github_owner) -or [string]::IsNullOrWhiteSpace([string]$row.github_repo)){throw 'GitHub source identity derivation failed.'}}
+          foreach($row in @($indexed.records|Where-Object{$_.kind -ne 'snippet'})){if([string]$row.source_kind -cne 'github-repository-key' -or [string]::IsNullOrWhiteSpace([string]$row.github_owner) -or [string]::IsNullOrWhiteSpace([string]$row.github_repo)){throw 'GitHub source identity derivation failed.'}}
           $orphan=Get-Content "$r/orphan.json" -Raw|ConvertFrom-Json
           if($orphan.status -cne 'ok' -or [int]$orphan.record_count -ne 4 -or @($orphan.records|Where-Object{$_.kind -eq 'unlisted'}).Count -ne 1){throw 'Unlisted/orphan record handling failed.'}
           $wal=Get-Content "$r/wal-tombstone.json" -Raw|ConvertFrom-Json
