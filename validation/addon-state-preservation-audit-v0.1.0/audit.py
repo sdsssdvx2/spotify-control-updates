@@ -21,7 +21,7 @@ def sha256(data: bytes) -> str:
 
 
 def function_map(text: str) -> dict[str, str]:
-    matches = list(re.finditer(r"(?m)^function ([A-Za-z0-9_-]+) \\{", text))
+    matches = list(re.finditer(r"(?m)^function ([A-Za-z0-9_-]+) \{", text))
     out: dict[str, str] = {}
     for i, match in enumerate(matches):
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
