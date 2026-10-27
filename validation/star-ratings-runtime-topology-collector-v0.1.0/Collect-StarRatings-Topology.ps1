@@ -291,7 +291,7 @@ function Combine-ProfileMarketplaceEvidence([string]$ProfileLabel, [string]$Prof
 
 function Get-MarketplaceEvidence {
     $profiles = @(
-        Combine-ProfileMarketplaceEvidence 'Browser' (Join-Path $LocalAppDataRoot 'Spotify\Browser'),
+        Combine-ProfileMarketplaceEvidence 'Browser' (Join-Path $LocalAppDataRoot 'Spotify\Browser')
         Combine-ProfileMarketplaceEvidence 'Default' (Join-Path $LocalAppDataRoot 'Spotify\Default')
     )
     $present = @($profiles | Where-Object { $_.exists })
