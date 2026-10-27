@@ -1,0 +1,74 @@
+name: Validate Pithaya Provenance Audit v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/pithaya-provenance-audit-v0.1.0
+    paths:
+      - 'validation/pithaya-provenance-audit-v0.1.0/**'
+      - '.github/workflows/validate-pithaya-provenance-audit-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-windows:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Prove exact validation-only scope
+        shell: powershell
+        run: |
+          $base='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          $actual=(git rev-parse HEAD).Trim();$eventHead='${{ github.sha }}'
+          if($actual -cne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'Pithaya audit no longer descends from exact v0.6.28/r17 production main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          foreach($p in $changed){$ok=($p -like 'validation/pithaya-provenance-audit-v0.1.0/*' -or $p -ceq '.github/workflows/validate-pithaya-provenance-audit-v010.yml');if(-not$ok){throw "Unexpected validation path: $p"}}
+          if($changed.Count -ne 2){throw "Expected exactly two validation-only files, got $($changed.Count)."}
+          Write-Host "PITHAYA_PROVENANCE_AUDIT_SCOPE_PASS head=$actual"
+
+      - name: Reconstruct exact r17 and audit Pithaya commit tree binding
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -m py_compile validation/pithaya-provenance-audit-v0.1.0/audit.py
+          if($LASTEXITCODE -ne 0){throw 'Pithaya audit source failed Python compile.'}
+          python validation/pithaya-provenance-audit-v0.1.0/audit.py
+          if($LASTEXITCODE -ne 0){throw 'Pithaya provenance audit failed.'}
+
+      - name: Assert read-only no-authority-change audit result
+        shell: powershell
+        run: |
+          $r=Get-Content validation/pithaya-provenance-audit-v0.1.0/audit-result.json -Raw|ConvertFrom-Json
+          if($r.read_only -ne $true -or $r.mutation_performed -ne $false -or $r.authority_expanded -ne $false){throw 'Pithaya audit safety contract failed.'}
+          if($r.decision.authority_change_recommended -ne $false){throw 'Pithaya audit unexpectedly recommends authority expansion.'}
+          foreach($name in @('better-local-files','eternal-jukebox','playlist-maker')){if(-not($r.online.PSObject.Properties.Name -contains $name)){throw "Missing upstream audit result for $name"}}
+          Write-Host "PITHAYA_PROVENANCE_EXISTING_PATH_BOUND=$($r.decision.existing_path_is_commit_tree_bound)"
+          Write-Host "PITHAYA_PROVENANCE_PRODUCTION_CHANGE_JUSTIFIED=$($r.decision.production_change_justified_by_this_audit)"
+          Write-Host 'PITHAYA_PROVENANCE_AUDIT_SAFETY_PASS'
+
+      - name: Parse exact regenerated Addon Manager and prove production surfaces unchanged
+        shell: powershell
+        run: |
+          $addon='validation/v0.6.28/out/bin/addon-manager.ps1'
+          if((Get-Item $addon).Length -ne 323385 -or (Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -cne '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285'){throw 'Exact r17 identity drifted.'}
+          $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $addon),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Exact r17 PowerShell 5.1 parse failed.'}
+          $base='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          git diff --exit-code $base -- manifest.json manifest.schema.json packages performance validation/v0.6.28 README.md
+          if($LASTEXITCODE -ne 0){throw 'Pithaya validation audit changed production/release surfaces.'}
+          Write-Host 'PITHAYA_PROVENANCE_AUDIT_NO_PRODUCTION_CHANGE_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pithaya-provenance-audit-v010
+          path: validation/pithaya-provenance-audit-v0.1.0/audit-result.json
+          if-no-files-found: error
