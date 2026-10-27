@@ -1,0 +1,93 @@
+{
+  "addon_version": "0.6.5-r16",
+  "audit_evidence": {
+    "artifact_digest": "sha256:161a1619ffea938eec444add714f4cbb330d3fc05c2aa88c7dc3190d3d63d05a",
+    "artifact_id": 12714720971,
+    "catalog_json_sha256": "2592f43a26c3c49b9d58b8244654d27448d801995465c7c8e4ba8d3159b9aa27",
+    "head": "52a9c0f633c87a0f4ce70077aaec22e72f9b9d8f",
+    "run": "40460929873"
+  },
+  "authority_expanded": false,
+  "auto_authority": [
+    "better-local-files",
+    "eternal-jukebox",
+    "ivLyrics",
+    "playlist-maker"
+  ],
+  "base_addon": {
+    "sha256": "4aa56dd5d4ef07da21d3bdf5c76227fabb49c64767a281b1e11ee48e7211a09f",
+    "size": 291294
+  },
+  "base_main": {
+    "sha256": "d7b484a2a7b10a27db0f182d71fe36f590784171db7208189540045bcf4f54d1",
+    "size": 284311
+  },
+  "base_version": "0.6.26",
+  "candidate_addon": {
+    "sha256": "c8d52542faaf033c0ede8216f71fe2e40d73636bd343d3faf88eb926e5017152",
+    "size": 303745
+  },
+  "candidate_main": {
+    "sha256": "9eb51ff9e001ebd84fd43532a2b3869f6d61f9b230a8008742119e8892202787",
+    "size": 284317
+  },
+  "excluded_inputs": [
+    "spicetify-rescue-copy",
+    "known-transformed-active-bytes-without-valid-state",
+    "spotify-playlist-data",
+    "browser-indexeddb-localstorage"
+  ],
+  "historical_performance_anchor": {
+    "sha256": "198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1",
+    "size": 43396,
+    "transformed_sha256": "6e0d1c84408294a619d91191eec83a6d10794ef31093d31ccf1f1bd39ea8c8a3",
+    "version": "2.1.3"
+  },
+  "new_auto_install_authority": false,
+  "provenance_inputs": [
+    "active-xpui-exact-official-dist",
+    "performance-active-state-bound-original-backup"
+  ],
+  "registry_fingerprint": "0f05406d7152de1d975f888cb8270be8249115211ba9f41e0157342cd42efbd8",
+  "release_catalog_versions": [
+    "2.0.0",
+    "2.0.1",
+    "2.0.2",
+    "2.0.3",
+    "2.0.4",
+    "2.0.5",
+    "2.0.6",
+    "2.0.7",
+    "2.0.8",
+    "2.1.0",
+    "2.1.1",
+    "2.1.2",
+    "2.1.3"
+  ],
+  "rollback_last_source_adapter_independent": true,
+  "schema": 2,
+  "source_adapter_fingerprint": "c0611a7b96f6ff09d1e235119efce2f2def6eb6d0a4e8e93e276cfa622c3c42d",
+  "splitify_provenance_preserved": true,
+  "star_ratings_policy": {
+    "data_policy": "playlist-backed-ratings-preserve",
+    "install_mode": "marketplace-owned",
+    "inventory_policy": "source-watch-only",
+    "mutation_mode": "deny"
+  },
+  "tagify_provenance_preserved": true,
+  "validated_source": {
+    "blob": "99efd34930aca9f463983f801fe91593539017f1",
+    "head": "ac6a89298af835b65d4948ed0587341bb3cc7ff9",
+    "path": "validation/star-ratings-release-provenance-v0.1.2/build_candidate.py",
+    "pr": 85,
+    "pr_artifact_digest": "sha256:a3906fbf60c23ff660339b84e90f3b1087e59e6a7dca7c27dec1d288bdb7570e",
+    "pr_artifact_id": 12714813864,
+    "pr_closed_unmerged": true,
+    "pr_run": "40462367886",
+    "push_artifact_digest": "sha256:5f88fb01df3c01f21474934421b642884c28b83f090d01462cb543a973e81d04",
+    "push_artifact_id": 12714414518,
+    "push_run": "40462233405",
+    "stable_pr_run": "40462367892"
+  },
+  "version": "0.6.27"
+}

@@ -1,0 +1,109 @@
+name: Validate v0.6.27 Bootstrap 1.0.6 E2E
+
+on:
+  push:
+    branches:
+      - release/v0.6.27-star-ratings-release-provenance-r16
+    paths:
+      - '.github/workflows/validate-v0.6.27-bootstrap-e2e.yml'
+      - 'validation/v0.6.27/bootstrap_prepare_fixture.py'
+      - 'validation/v0.6.27/bootstrap_run_cycle.ps1'
+      - 'manifest.json'
+      - 'packages/v0.6.27/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/validate-v0.6.27-bootstrap-e2e.yml'
+      - 'validation/v0.6.27/bootstrap_prepare_fixture.py'
+      - 'validation/v0.6.27/bootstrap_run_cycle.ps1'
+      - 'manifest.json'
+      - 'packages/v0.6.27/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  bootstrap-e2e-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Assert exact event head and published release inputs
+        shell: powershell
+        run: |
+          $actual=(git rev-parse HEAD).Trim();$eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -ne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          $m=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($m.latest_version -ne '0.6.27' -or $m.source_commit -ne '1bead7959e27c7fff58116c43b8ca8e09a88203e' -or $m.payload_set_sha256 -ne 'd74d39b2f705a6e225e639038390d24027ff32d27cd390a1b82700739bb0f178'){throw 'v0.6.27 manifest identity drifted before Bootstrap E2E.'}
+          if($m.bootstrap.version -ne '1.0.6' -or $m.bootstrap.sha256 -ne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' -or [int64]$m.bootstrap.size -ne 42963){throw 'Bootstrap 1.0.6 identity drifted.'}
+          $edge=@($m.updates|Where-Object{$_.from_version -eq '0.6.26' -and $_.to_version -eq '0.6.27'});if($edge.Count -ne 1 -or @($edge[0].patches).Count -ne 2){throw 'Expected exact one-edge v0.6.26 -> v0.6.27 path.'}
+          Write-Host "V0627_BOOTSTRAP_INPUT_CONTRACT_PASS head=$actual"
+
+      - name: Parse Bootstrap E2E sources
+        shell: powershell
+        run: |
+          python -m py_compile validation/v0.6.27/bootstrap_prepare_fixture.py
+          if($LASTEXITCODE -ne 0){throw 'v0.6.27 Bootstrap fixture source failed compile.'}
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'validation/v0.6.27/bootstrap_run_cycle.ps1'),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'v0.6.27 Bootstrap E2E PowerShell parse failed.'}
+          Write-Host 'V0627_BOOTSTRAP_E2E_SOURCE_PARSE_PASS'
+
+      - name: Download exact previously validated Bootstrap 1.0.6 carrier
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' > validated-v0614-repair-artifact.zip
+          python - <<'PY'
+          from pathlib import Path
+          from io import BytesIO
+          import hashlib,zipfile
+          outer=Path('validated-v0614-repair-artifact.zip').read_bytes()
+          with zipfile.ZipFile(BytesIO(outer)) as z:
+              assert z.testzip() is None
+              inner=z.read('SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip')
+          assert len(inner)==30856
+          assert hashlib.sha256(inner).hexdigest()=='6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdfd267bd95f6c6ddcf06'
+          with zipfile.ZipFile(BytesIO(inner)) as z:
+              boot=z.read('bootstrap/spotify-control-self-updater.ps1')
+          assert len(boot)==42963
+          assert hashlib.sha256(boot).hexdigest()=='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
+          print('VALIDATED_BOOTSTRAP_V106_CARRIER_PASS',len(outer),len(inner),len(boot))
+          PY
+
+      - name: Build exact local-manifest Bootstrap fixture
+        shell: powershell
+        run: |
+          python validation/v0.6.27/bootstrap_prepare_fixture.py
+          if($LASTEXITCODE -ne 0){throw 'v0.6.27 Bootstrap fixture preparation failed.'}
+
+      - name: Run Check RollbackTest Update post-Check transaction cycle
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/v0.6.27/bootstrap_run_cycle.ps1 -Fixture ci-bootstrap-fixture-v0626-to-v0627
+          if($LASTEXITCODE -ne 0){throw "v0.6.27 Bootstrap transaction E2E failed: $LASTEXITCODE"}
+          Write-Host 'V0627_BOOTSTRAP_E2E_PASS'
+
+      - name: Prove fixture never changed released Bootstrap bytes
+        shell: powershell
+        run: |
+          $exact='ci-bootstrap-fixture-v0626-to-v0627/LocalAppData/SpotifyControl/bootstrap/spotify-control-self-updater.ps1'
+          if((Get-Item $exact).Length -ne 42963 -or (Get-FileHash $exact -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'){throw 'Released Bootstrap bytes changed during E2E.'}
+          Write-Host 'V0627_BOOTSTRAP_EXACT_BYTES_PRESERVED_PASS'
+
+      - name: Cleanup fixture tree
+        if: always()
+        shell: powershell
+        run: |
+          Remove-Item -LiteralPath ci-bootstrap-fixture-v0626-to-v0627 -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath ci-bootstrap-fixture -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath validated-v0614-repair-artifact.zip -Force -ErrorAction SilentlyContinue
