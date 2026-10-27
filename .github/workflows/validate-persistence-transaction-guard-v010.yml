@@ -1,0 +1,93 @@
+name: Validate persistence transaction guard v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/persistence-transaction-guard-v0.1.0
+    paths:
+      - 'validation/persistence-transaction-guard-v0.1.0/**'
+      - '.github/workflows/validate-persistence-transaction-guard-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout exact validation head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validation-only scope guard
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          if((git merge-base $base HEAD).Trim() -cne $base){ throw 'Validation branch is not based on exact stable r17 main.' }
+          $changed=@(git diff --name-only "$base...HEAD" | Sort-Object)
+          $allowed=@(
+            '.github/workflows/validate-persistence-transaction-guard-v010.yml',
+            'validation/persistence-transaction-guard-v0.1.0/build_candidate.py'
+          ) | Sort-Object
+          if(($changed -join '|') -cne ($allowed -join '|')){ throw "Unexpected validation scope: $($changed -join ', ')" }
+          Write-Host "PERSISTENCE_GUARD_SCOPE_PASS head=$((git rev-parse HEAD).Trim())"
+
+      - name: Build exact r17-derived candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m py_compile validation/persistence-transaction-guard-v0.1.0/build_candidate.py
+          if($LASTEXITCODE -ne 0){ throw 'Candidate builder Python compile failed.' }
+          python validation/persistence-transaction-guard-v0.1.0/build_candidate.py --build
+          if($LASTEXITCODE -ne 0){ throw 'Candidate build failed.' }
+
+      - name: Parse candidate with Windows PowerShell
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $path='validation/persistence-transaction-guard-v0.1.0/out/bin/addon-manager.ps1'
+          $text=[IO.File]::ReadAllText((Resolve-Path $path))
+          $tokens=$null;$errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
+          if($errors.Count -ne 0){$errors|ForEach-Object{Write-Error $_.Message};throw 'Candidate Addon Manager failed Windows PowerShell parse.'}
+          Write-Host 'PERSISTENCE_GUARD_WINDOWS_POWERSHELL_PARSE_PASS'
+
+      - name: Run persistence transaction synthetic E2E through TransactionSelfTest
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $spotifyRoot=Join-Path $env:LOCALAPPDATA 'Spotify'
+          New-Item -ItemType Directory -Force -Path $spotifyRoot|Out-Null
+          & 'validation/persistence-transaction-guard-v0.1.0/out/bin/addon-manager.ps1' -Action TransactionSelfTest
+          if($LASTEXITCODE -ne 0){throw "Candidate TransactionSelfTest failed: $LASTEXITCODE"}
+          Write-Host 'PERSISTENCE_GUARD_TRANSACTION_SELFTEST_PASS'
+
+      - name: Run candidate read-only SelfTest
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & 'validation/persistence-transaction-guard-v0.1.0/out/bin/addon-manager.ps1' -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw "Candidate SelfTest failed: $LASTEXITCODE"}
+          Write-Host 'PERSISTENCE_GUARD_CANDIDATE_SELFTEST_PASS'
+
+      - name: Prove stable production transport remains untouched
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/stable/validate_stable.py
+          if($LASTEXITCODE -ne 0){throw 'Stable validator failed.'}
+          Write-Host 'PERSISTENCE_GUARD_STABLE_UNCHANGED_PASS'
+
+      - name: Upload candidate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: persistence-transaction-guard-v010
+          path: |
+            validation/persistence-transaction-guard-v0.1.0/candidate-report.json
+            validation/persistence-transaction-guard-v0.1.0/out/bin/addon-manager.ps1
+          if-no-files-found: error
+          retention-days: 14
