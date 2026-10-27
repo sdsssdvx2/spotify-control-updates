@@ -1,0 +1,143 @@
+name: Validate Star Ratings Ownership Policy v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/star-ratings-ownership-policy-v0.1.0
+    paths:
+      - 'validation/star-ratings-ownership-policy-v0.1.0/**'
+      - '.github/workflows/validate-star-ratings-ownership-policy-v010.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/star-ratings-ownership-policy-v0.1.0/**'
+      - '.github/workflows/validate-star-ratings-ownership-policy-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ownership-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact validation-only scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='25daf4a295e7737bd12e96b584467da53245e37a'
+          actual="$(git rev-parse HEAD)"
+          event_head='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          test "$actual" = "$event_head"
+          test "$(git merge-base "$base" HEAD)" = "$base"
+          mapfile -t changed < <(git diff --name-only "$base...HEAD" | sort)
+          expected=(
+            '.github/workflows/validate-star-ratings-ownership-policy-v010.yml'
+            'validation/star-ratings-ownership-policy-v0.1.0/policy.py'
+          )
+          mapfile -t expected_sorted < <(printf '%s\n' "${expected[@]}" | sort)
+          test "$(printf '%s|' "${changed[@]}")" = "$(printf '%s|' "${expected_sorted[@]}")"
+          echo "STAR_RATINGS_OWNERSHIP_POLICY_SCOPE_PASS head=$actual"
+
+      - name: Run synthetic ownership decision matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile validation/star-ratings-ownership-policy-v0.1.0/policy.py
+          python validation/star-ratings-ownership-policy-v0.1.0/policy.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('validation/star-ratings-ownership-policy-v0.1.0/report.json')
+          r=json.loads(p.read_text(encoding='utf-8'))
+          assert r['result']=='POLICY_MATRIX_PASS'
+          assert r['real_pc_gate_result']=='dual-owned-risk'
+          assert r['production_decision']=='do-not-expand-star-ratings-mutation-authority'
+          assert r['canonical_owner_candidate']=='marketplace'
+          assert r['migration_authorized'] is False
+          assert r['mutation_authority_change'] is False
+          assert r['user_data_mutation'] is False
+          assert r['playlist_contract']=='playlist-backed-ratings-preserve'
+          assert r['performance_contract']['id']=='star-ratings-observer-debounce-v1'
+          assert r['performance_contract']['original_sha256']=='198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1'
+          assert r['performance_contract']['transformed_sha256']=='6e0d1c84408294a619d91191eec83a6d10794ef31093d31ccf1f1bd39ea8c8a3'
+          assert r['automatic_mutation_allowlist_expected_unchanged']==['better-local-files','eternal-jukebox','ivLyrics','playlist-maker']
+          assert len(r['cases'])==10
+          assert all(c['decision']['mutation_authorized'] is False for c in r['cases'])
+          assert all(c['decision']['migration_authorized'] is False for c in r['cases'])
+          print('STAR_RATINGS_OWNERSHIP_REPORT_CONTRACT_PASS')
+          PY
+
+      - name: Prove production surfaces unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='25daf4a295e7737bd12e96b584467da53245e37a'
+          for path in manifest.json README.md performance/star-ratings/apply-star-ratings-patch.ps1 performance/star-ratings/target.json; do
+            test "$(git rev-parse "$base:$path")" = "$(git rev-parse "HEAD:$path")"
+          done
+          echo 'STAR_RATINGS_OWNERSHIP_POLICY_NO_PRODUCTION_CHANGE_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: star-ratings-ownership-policy-v010
+          path: validation/star-ratings-ownership-policy-v0.1.0/report.json
+          if-no-files-found: error
+
+  performance-state-lifecycle:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove valid state survives exact-original external restore and safely reapplies
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expectedOriginal = '198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1'
+          $expectedTransformed = '6e0d1c84408294a619d91191eec83a6d10794ef31093d31ccf1f1bd39ea8c8a3'
+          $url = 'https://raw.githubusercontent.com/brimell/spicetify-star-ratings/33aa3d293f9fbb58d7a749a8cea10c318351e6c6/dist/star-ratings.js'
+          $root = Join-Path $env:RUNNER_TEMP 'star-ratings-lifecycle'
+          $xpui = Join-Path $root 'xpui'
+          $ext = Join-Path $xpui 'extensions'
+          $state = Join-Path $root 'state'
+          $original = Join-Path $root 'original.js'
+          $active = Join-Path $ext 'sc-star-ratings.js'
+          New-Item -ItemType Directory -Force -Path $ext,$state | Out-Null
+          Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $original
+          if ((Get-Item -LiteralPath $original).Length -ne 43396) { throw 'Pinned Star Ratings source size drifted.' }
+          if ((Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedOriginal) { throw 'Pinned Star Ratings source hash drifted.' }
+          Copy-Item -LiteralPath $original -Destination $active
+
+          $patch = Join-Path $PWD 'performance\star-ratings\apply-star-ratings-patch.ps1'
+          $target = Join-Path $PWD 'performance\star-ratings\target.json'
+          $first = (& $patch -Mode Apply -XpuiRoot $xpui -StateRoot $state -TargetMetadataPath $target | Out-String) | ConvertFrom-Json
+          if ($first.status -ne 'applied') { throw "Initial apply failed: $($first | ConvertTo-Json -Compress)" }
+          if ((Get-FileHash -LiteralPath $active -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedTransformed) { throw 'Initial transformed hash mismatch.' }
+          $stateFile = Join-Path $state 'active-state.json'
+          if (-not (Test-Path -LiteralPath $stateFile -PathType Leaf)) { throw 'Active performance state missing.' }
+
+          # Mirror the observed real-PC lifecycle: an external owner restores the exact pinned
+          # original bytes while Spotify Control's validated performance state remains present.
+          Copy-Item -LiteralPath $original -Destination $active -Force
+          if ((Get-FileHash -LiteralPath $active -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedOriginal) { throw 'External exact-original restore simulation failed.' }
+          if (-not (Test-Path -LiteralPath $stateFile -PathType Leaf)) { throw 'Valid performance state disappeared unexpectedly.' }
+
+          $second = (& $patch -Mode Apply -XpuiRoot $xpui -StateRoot $state -TargetMetadataPath $target | Out-String) | ConvertFrom-Json
+          if ($second.status -ne 'applied') { throw "Reapply after exact-original restore failed: $($second | ConvertTo-Json -Compress)" }
+          if ((Get-FileHash -LiteralPath $active -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedTransformed) { throw 'Reapplied transformed hash mismatch.' }
+
+          $restore = (& $patch -Mode Restore -XpuiRoot $xpui -StateRoot $state -TargetMetadataPath $target | Out-String) | ConvertFrom-Json
+          if ($restore.status -ne 'restored-exact-original') { throw "Restore failed: $($restore | ConvertTo-Json -Compress)" }
+          if ((Get-FileHash -LiteralPath $active -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedOriginal) { throw 'Exact restore hash mismatch.' }
+          if ((Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedOriginal) { throw 'Fixture source mutated.' }
+          Write-Host 'STAR_RATINGS_PERFORMANCE_STATE_LIFECYCLE_PASS'
