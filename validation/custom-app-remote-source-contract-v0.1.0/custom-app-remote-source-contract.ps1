@@ -28,8 +28,7 @@ function Test-CustomAppRemoteWindowsReservedSegment {
     param([Parameter(Mandatory=$true)][string]$Segment)
     $base=($Segment.Split('.')[0]).ToUpperInvariant()
     if($base -in @('CON','PRN','AUX','NUL')){return $true}
-    if($base -match '^(COM|LPT)[1-9]$'){return $true}
-    return $false
+    return ($base -match '^(COM|LPT)[1-9]$')
 }
 
 function Test-CustomAppRemoteRelativePath {
@@ -37,7 +36,8 @@ function Test-CustomAppRemoteRelativePath {
     if([string]::IsNullOrWhiteSpace($Path)){return [pscustomobject]@{safe=$false;canonical=$null;reason='path-empty'}}
     if($Path.IndexOf([char]0) -ge 0){return [pscustomobject]@{safe=$false;canonical=$null;reason='path-nul'}}
     if($Path -match '[\x00-\x1f]'){return [pscustomobject]@{safe=$false;canonical=$null;reason='path-control-character'}}
-    $p=$Path.Replace('\\','/')
+    if($Path.Contains('\')){return [pscustomobject]@{safe=$false;canonical=$null;reason='path-backslash-denied'}}
+    $p=$Path
     if($p.StartsWith('/') -or $p.StartsWith('//') -or $p -match '^[A-Za-z]:'){return [pscustomobject]@{safe=$false;canonical=$null;reason='path-absolute'}}
     if($p.Contains('//')){return [pscustomobject]@{safe=$false;canonical=$null;reason='path-empty-segment'}}
     $segments=@($p.Split('/'))
@@ -68,7 +68,7 @@ function Test-CustomAppRemoteRuntimeFileSet {
         $type=([string]$entry.type).Trim().ToLowerInvariant()
         if($type -notin @('file','dir')){return [pscustomobject]@{safe=$false;installable=$false;reason='non-regular-entry-type';tree_sha256=$null;file_count=$fileCount;total_bytes=$total}}
         if($type -eq 'dir'){$rows.Add(('d|'+$key));continue}
-        $size=[int64]$entry.size
+        try{$size=[int64]$entry.size}catch{return [pscustomobject]@{safe=$false;installable=$false;reason='file-size-invalid';tree_sha256=$null;file_count=$fileCount;total_bytes=$total}}
         if($size -lt 0 -or $size -gt 67108864){return [pscustomobject]@{safe=$false;installable=$false;reason='individual-file-size-limit';tree_sha256=$null;file_count=$fileCount;total_bytes=$total}}
         $hash=([string]$entry.sha256).Trim().ToLowerInvariant()
         if(-not (Test-CustomAppRemoteSha256 $hash)){return [pscustomobject]@{safe=$false;installable=$false;reason='file-sha256-invalid';tree_sha256=$null;file_count=$fileCount;total_bytes=$total}}
@@ -88,12 +88,7 @@ function Test-CustomAppRemoteRuntimeFileSet {
 }
 
 function New-CustomAppRemoteSourceDecision {
-    param(
-        [bool]$Applicable,[bool]$Conclusive,[string]$Status,[string]$Reason,
-        [bool]$SourceIdentityVerified,[bool]$RepoIdVerified,[bool]$SurfaceVerified,[bool]$LocalContinuityVerified,
-        [bool]$UpdateObserved,[bool]$EnrollmentCandidate,[bool]$RequiresReenrollment,
-        $BindingCandidate,[AllowNull()][string]$RemoteTreeSha256
-    )
+    param([bool]$Applicable,[bool]$Conclusive,[string]$Status,[string]$Reason,[bool]$SourceIdentityVerified,[bool]$RepoIdVerified,[bool]$SurfaceVerified,[bool]$LocalContinuityVerified,[bool]$UpdateObserved,[bool]$EnrollmentCandidate,[bool]$RequiresReenrollment,$BindingCandidate,[AllowNull()][string]$RemoteTreeSha256)
     return [pscustomobject]@{
         schema=$CustomAppRemoteSourceContractSchema;applicable=$Applicable;conclusive=$Conclusive;status=$Status;reason=$Reason
         source_identity_verified=$SourceIdentityVerified;repo_id_verified=$RepoIdVerified;surface_verified=$SurfaceVerified;local_continuity_verified=$LocalContinuityVerified
@@ -136,9 +131,7 @@ function Test-CustomAppRemoteSurfaceObservation {
     if($surface -eq 'release-asset'){
         try{$releaseId=[int64]$Observation.release_id;$assetId=[int64]$Observation.asset_id;$assetSize=[int64]$Observation.asset_size}catch{return [pscustomobject]@{ok=$false;reason='release-asset-identity-invalid';tree_sha256=$null}}
         $assetName=[string]$Observation.asset_name;$assetDigest=([string]$Observation.asset_digest_sha256).Trim().ToLowerInvariant()
-        if($releaseId -le 0 -or $assetId -le 0 -or $assetSize -le 0 -or [string]::IsNullOrWhiteSpace($assetName) -or -not $assetName.EndsWith('.zip',[StringComparison]::OrdinalIgnoreCase) -or -not (Test-CustomAppRemoteSha256 $assetDigest)){
-            return [pscustomobject]@{ok=$false;reason='release-asset-identity-invalid';tree_sha256=$null}
-        }
+        if($releaseId -le 0 -or $assetId -le 0 -or $assetSize -le 0 -or [string]::IsNullOrWhiteSpace($assetName) -or -not $assetName.EndsWith('.zip',[StringComparison]::OrdinalIgnoreCase) -or -not (Test-CustomAppRemoteSha256 $assetDigest)){return [pscustomobject]@{ok=$false;reason='release-asset-identity-invalid';tree_sha256=$null}}
     }
     $files=Test-CustomAppRemoteRuntimeFileSet -Observation $Observation
     if(-not [bool]$files.safe){return [pscustomobject]@{ok=$false;reason=[string]$files.reason;tree_sha256=[string]$files.tree_sha256}}
@@ -147,65 +140,30 @@ function Test-CustomAppRemoteSurfaceObservation {
 }
 
 function Resolve-CustomAppRemoteSourceContract {
-    param(
-        [Parameter(Mandatory=$true)]$ProvenanceRow,
-        [Parameter(Mandatory=$true)]$RemoteObservation,
-        [AllowNull()]$Binding,
-        [Parameter(Mandatory=$true)][string]$CurrentLocalTreeSha256,
-        [Parameter(Mandatory=$true)][string]$CurrentLocalManifestName
-    )
+    param([Parameter(Mandatory=$true)]$ProvenanceRow,[Parameter(Mandatory=$true)]$RemoteObservation,[AllowNull()]$Binding,[Parameter(Mandatory=$true)][string]$CurrentLocalTreeSha256,[Parameter(Mandatory=$true)][string]$CurrentLocalManifestName)
     $prov=Test-CustomAppRemoteProvenanceRow -Row $ProvenanceRow
     if(-not [bool]$prov.ok){return New-CustomAppRemoteSourceDecision $true $false 'provenance-denied' ([string]$prov.reason) $false $false $false $false $false $false $true $null $null}
     $source=[string]$prov.source
-    if(-not (Test-CustomAppRemoteSha256 $CurrentLocalTreeSha256) -or [string]::IsNullOrWhiteSpace($CurrentLocalManifestName)){
-        return New-CustomAppRemoteSourceDecision $true $false 'local-baseline-invalid' 'local-tree-or-manifest-invalid' $true $false $false $false $false $false $true $null $null
-    }
+    if(-not (Test-CustomAppRemoteSha256 $CurrentLocalTreeSha256) -or [string]::IsNullOrWhiteSpace($CurrentLocalManifestName)){return New-CustomAppRemoteSourceDecision $true $false 'local-baseline-invalid' 'local-tree-or-manifest-invalid' $true $false $false $false $false $false $true $null $null}
     $remote=Test-CustomAppRemoteSurfaceObservation -Observation $RemoteObservation -ExpectedSource $source
     if(-not [bool]$remote.ok){return New-CustomAppRemoteSourceDecision $true $false 'remote-denied' ([string]$remote.reason) $true $false $false $false $false $false $true $null ([string]$remote.tree_sha256)}
-    if([string]$remote.manifest_name -cne $CurrentLocalManifestName){
-        return New-CustomAppRemoteSourceDecision $true $false 'manifest-identity-drift' 'remote-manifest-name-does-not-match-local' $true $false $true $false $false $false $true $null ([string]$remote.tree_sha256)
-    }
+    if([string]$remote.manifest_name -cne $CurrentLocalManifestName){return New-CustomAppRemoteSourceDecision $true $false 'manifest-identity-drift' 'remote-manifest-name-does-not-match-local' $true $false $true $false $false $false $true $null ([string]$remote.tree_sha256)}
 
     if($null -eq $Binding){
-        if([string]$remote.tree_sha256 -cne $CurrentLocalTreeSha256){
-            return New-CustomAppRemoteSourceDecision $true $false 'initial-content-match-required' 'remote-surface-does-not-exactly-match-current-local-tree' $true $false $true $false $false $false $true $null ([string]$remote.tree_sha256)
-        }
-        $candidate=[pscustomobject]@{
-            schema=$CustomAppRemoteSourceContractSchema;managed_by='custom-app-remote-source-v1';source_identity=$source;github_repo_id=[int64]$remote.repo_id
-            surface_kind=[string]$remote.surface_kind;asset_name=$remote.asset_name;layout_root='.';manifest_name=[string]$remote.manifest_name
-            last_verified_local_tree_sha256=$CurrentLocalTreeSha256;last_verified_remote_tree_sha256=[string]$remote.tree_sha256
-            last_verified_commit_sha=[string]$remote.commit_sha;mutation_mode='deny';auto_update_authorized=$false;auto_install_authorized=$false
-        }
+        if([string]$remote.tree_sha256 -cne $CurrentLocalTreeSha256){return New-CustomAppRemoteSourceDecision $true $false 'initial-content-match-required' 'remote-surface-does-not-exactly-match-current-local-tree' $true $false $true $false $false $false $true $null ([string]$remote.tree_sha256)}
+        $candidate=[pscustomobject]@{schema=$CustomAppRemoteSourceContractSchema;managed_by='custom-app-remote-source-v1';source_identity=$source;github_repo_id=[int64]$remote.repo_id;surface_kind=[string]$remote.surface_kind;asset_name=$remote.asset_name;layout_root='.';manifest_name=[string]$remote.manifest_name;last_verified_local_tree_sha256=$CurrentLocalTreeSha256;last_verified_remote_tree_sha256=[string]$remote.tree_sha256;last_verified_commit_sha=[string]$remote.commit_sha;mutation_mode='deny';auto_update_authorized=$false;auto_install_authorized=$false}
         return New-CustomAppRemoteSourceDecision $true $true 'binding-enrollment-candidate' 'exact-local-content-match-and-repo-id-observed' $true $false $true $true $false $true $false $candidate ([string]$remote.tree_sha256)
     }
 
-    if([string]$Binding.managed_by -cne 'custom-app-remote-source-v1' -or [int]$Binding.schema -ne $CustomAppRemoteSourceContractSchema){
-        return New-CustomAppRemoteSourceDecision $true $false 'binding-denied' 'binding-owner-or-schema-mismatch' $true $false $true $false $false $false $true $null ([string]$remote.tree_sha256)
-    }
-    if([string]$Binding.mutation_mode -cne 'deny' -or [bool]$Binding.auto_update_authorized -or [bool]$Binding.auto_install_authorized){
-        return New-CustomAppRemoteSourceDecision $true $false 'binding-denied' 'binding-authority-drift' $true $false $true $false $false $false $true $null ([string]$remote.tree_sha256)
-    }
-    if(([string]$Binding.source_identity).ToLowerInvariant() -cne $source){
-        return New-CustomAppRemoteSourceDecision $true $false 'binding-denied' 'binding-source-mismatch' $true $false $true $false $false $false $true $null ([string]$remote.tree_sha256)
-    }
-    if([int64]$Binding.github_repo_id -ne [int64]$remote.repo_id){
-        return New-CustomAppRemoteSourceDecision $true $false 'repo-id-drift' 'github-numeric-repository-id-changed' $true $false $true $false $false $false $true $null ([string]$remote.tree_sha256)
-    }
-    if([string]$Binding.surface_kind -cne [string]$remote.surface_kind -or [string]$Binding.layout_root -cne '.'){
-        return New-CustomAppRemoteSourceDecision $true $false 'surface-contract-drift' 'bound-remote-surface-or-layout-changed' $true $true $false $false $false $false $true $null ([string]$remote.tree_sha256)
-    }
-    if([string]$Binding.manifest_name -cne [string]$remote.manifest_name -or [string]$Binding.manifest_name -cne $CurrentLocalManifestName){
-        return New-CustomAppRemoteSourceDecision $true $false 'manifest-identity-drift' 'bound-manifest-name-changed' $true $true $true $false $false $false $true $null ([string]$remote.tree_sha256)
-    }
-    if([string]$remote.surface_kind -ceq 'release-asset' -and [string]$Binding.asset_name -cne [string]$remote.asset_name){
-        return New-CustomAppRemoteSourceDecision $true $false 'release-asset-continuity-drift' 'bound-release-asset-name-changed' $true $true $true $false $false $false $true $null ([string]$remote.tree_sha256)
-    }
-    if(-not (Test-CustomAppRemoteSha256 ([string]$Binding.last_verified_local_tree_sha256)) -or [string]$Binding.last_verified_local_tree_sha256 -cne $CurrentLocalTreeSha256){
-        return New-CustomAppRemoteSourceDecision $true $false 'local-tree-drift' 'current-local-tree-no-longer-matches-last-verified-tree' $true $true $true $false $false $false $true $null ([string]$remote.tree_sha256)
-    }
-    $changed=([string]$remote.tree_sha256 -cne $CurrentLocalTreeSha256)
-    $status=$(if($changed){'remote-change-observed'}else{'remote-current'})
-    $reason=$(if($changed){'verified-same-repository-and-surface-new-tree-observed'}else{'verified-same-repository-and-surface-current-tree'})
+    if([string]$Binding.managed_by -cne 'custom-app-remote-source-v1' -or [int]$Binding.schema -ne $CustomAppRemoteSourceContractSchema){return New-CustomAppRemoteSourceDecision $true $false 'binding-denied' 'binding-owner-or-schema-mismatch' $true $false $true $false $false $false $true $null ([string]$remote.tree_sha256)}
+    if([string]$Binding.mutation_mode -cne 'deny' -or [bool]$Binding.auto_update_authorized -or [bool]$Binding.auto_install_authorized){return New-CustomAppRemoteSourceDecision $true $false 'binding-denied' 'binding-authority-drift' $true $false $true $false $false $false $true $null ([string]$remote.tree_sha256)}
+    if(([string]$Binding.source_identity).ToLowerInvariant() -cne $source){return New-CustomAppRemoteSourceDecision $true $false 'binding-denied' 'binding-source-mismatch' $true $false $true $false $false $false $true $null ([string]$remote.tree_sha256)}
+    if([int64]$Binding.github_repo_id -ne [int64]$remote.repo_id){return New-CustomAppRemoteSourceDecision $true $false 'repo-id-drift' 'github-numeric-repository-id-changed' $true $false $true $false $false $false $true $null ([string]$remote.tree_sha256)}
+    if([string]$Binding.surface_kind -cne [string]$remote.surface_kind -or [string]$Binding.layout_root -cne '.'){return New-CustomAppRemoteSourceDecision $true $false 'surface-contract-drift' 'bound-remote-surface-or-layout-changed' $true $true $false $false $false $false $true $null ([string]$remote.tree_sha256)}
+    if([string]$Binding.manifest_name -cne [string]$remote.manifest_name -or [string]$Binding.manifest_name -cne $CurrentLocalManifestName){return New-CustomAppRemoteSourceDecision $true $false 'manifest-identity-drift' 'bound-manifest-name-changed' $true $true $true $false $false $false $true $null ([string]$remote.tree_sha256)}
+    if([string]$remote.surface_kind -ceq 'release-asset' -and [string]$Binding.asset_name -cne [string]$remote.asset_name){return New-CustomAppRemoteSourceDecision $true $false 'release-asset-continuity-drift' 'bound-release-asset-name-changed' $true $true $true $false $false $false $true $null ([string]$remote.tree_sha256)}
+    if(-not (Test-CustomAppRemoteSha256 ([string]$Binding.last_verified_local_tree_sha256)) -or [string]$Binding.last_verified_local_tree_sha256 -cne $CurrentLocalTreeSha256){return New-CustomAppRemoteSourceDecision $true $false 'local-tree-drift' 'current-local-tree-no-longer-matches-last-verified-tree' $true $true $true $false $false $false $true $null ([string]$remote.tree_sha256)}
+    $changed=([string]$remote.tree_sha256 -cne $CurrentLocalTreeSha256);$status=$(if($changed){'remote-change-observed'}else{'remote-current'});$reason=$(if($changed){'verified-same-repository-and-surface-new-tree-observed'}else{'verified-same-repository-and-surface-current-tree'})
     return New-CustomAppRemoteSourceDecision $true $true $status $reason $true $true $true $true $changed $false $false $null ([string]$remote.tree_sha256)
 }
 
