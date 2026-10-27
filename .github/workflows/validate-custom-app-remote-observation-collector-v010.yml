@@ -2,14 +2,12 @@ name: Validate Custom App Remote Observation Collector v0.1.0
 
 on:
   push:
-    branches:
-      - validate/custom-app-remote-observation-collector-v0.1.0
+    branches: [validate/custom-app-remote-observation-collector-v0.1.0]
     paths:
       - 'validation/custom-app-remote-observation-collector-v0.1.0/**'
       - '.github/workflows/validate-custom-app-remote-observation-collector-v010.yml'
   pull_request:
-    branches:
-      - validate/custom-app-remote-source-contract-v0.1.1
+    branches: [validate/custom-app-remote-source-contract-v0.1.1]
     paths:
       - 'validation/custom-app-remote-observation-collector-v0.1.0/**'
       - '.github/workflows/validate-custom-app-remote-observation-collector-v010.yml'
@@ -34,71 +32,52 @@ jobs:
           $actual=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
           if($actual -cne $expected){throw "Not exact event head: $actual != $expected"}
           $parent='19109205bd2e61e862c3b9acd61946568397ecb5'
-          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'Remote observation collector is not descended from exact validated v0.1.1 head.'}
-          $allowed=@(
-            '.github/workflows/validate-custom-app-remote-observation-collector-v010.yml',
-            'validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1',
-            'validation/custom-app-remote-observation-collector-v0.1.0/test_custom_app_remote_observer.ps1'
-          )
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'Collector is not descended from exact validated v0.1.1 head.'}
+          $allowed=@('.github/workflows/validate-custom-app-remote-observation-collector-v010.yml','validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1','validation/custom-app-remote-observation-collector-v0.1.0/test_custom_app_remote_observer.ps1')
           $changed=@(git diff --name-only "$parent...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed})
           if($bad.Count){throw "Collector validation scope escaped: $($bad -join ', ')"}
           foreach($required in $allowed){if($required -notin $changed){throw "Missing expected collector file: $required"}}
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved during collector validation.'}
           Write-Host "CUSTOM_APP_REMOTE_OBSERVER_SCOPE_PASS head=$actual"
 
-      - name: Prove validated contract lineage and collector blob pins
+      - name: Prove exact contract and collector blob pins
         shell: powershell
         run: |
           $pins=@(
             @('b53bcf39f715f1c35c7d1f99e157cdecb0a2a572','validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1','f8c91f5a566b24c82257742942bdc6fecfe68eb2'),
             @('19109205bd2e61e862c3b9acd61946568397ecb5','validation/custom-app-remote-source-contract-v0.1.1/release-continuity-v011.ps1','dbec4f817f4f4eab92d89d1f8dc623b1da435ac3'),
             @('HEAD','validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1','3a49ceebd13fa993b086eb2643130fb02c746bd1'),
-            @('HEAD','validation/custom-app-remote-observation-collector-v0.1.0/test_custom_app_remote_observer.ps1','b0c396aed3ecb3db350c7ca1bee9a28667642223')
+            @('HEAD','validation/custom-app-remote-observation-collector-v0.1.0/test_custom_app_remote_observer.ps1','1d0518cefbd3532cacc5ba82e01546afbc8ad1f8')
           )
           foreach($pin in $pins){$blob=(git rev-parse "$($pin[0])`:$($pin[1])").Trim();if($blob -cne $pin[2]){throw "Pinned blob drift: $($pin[1]) $blob != $($pin[2])"}}
           Write-Host 'CUSTOM_APP_REMOTE_OBSERVER_BLOB_PIN_PASS'
 
-      - name: Parse collector and offline tests with Windows PowerShell 5.1
+      - name: Parse collector and offline matrix with Windows PowerShell 5.1
         shell: powershell
         run: |
-          foreach($file in @(
-            'validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1',
-            'validation/custom-app-remote-observation-collector-v0.1.0/test_custom_app_remote_observer.ps1'
-          )){
+          foreach($file in @('validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1','validation/custom-app-remote-observation-collector-v0.1.0/test_custom_app_remote_observer.ps1')){
             $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
-            if($errors.Count){$errors|ForEach-Object{Write-Error "$file :: $($_.Message)"};throw "PowerShell 5.1 parse failed: $file"}
+            if($errors.Count){$errors|ForEach-Object{Write-Error "$file :: $($_.Message)"};throw "PS5.1 parse failed: $file"}
           }
-          Write-Host 'CUSTOM_APP_REMOTE_OBSERVER_PS51_PARSE_PASS'
-
-      - name: Run 16-case offline ZIP and temp-safety acceptance matrix
-        shell: powershell
-        run: |
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-remote-observation-collector-v0.1.0/test_custom_app_remote_observer.ps1'
           if($LASTEXITCODE -ne 0){throw 'Remote observer offline acceptance matrix failed.'}
           Write-Host 'CUSTOM_APP_REMOTE_OBSERVER_OFFLINE_MATRIX_PASS'
 
-      - name: Audit collector as temp-only observer with bounded streaming and no extraction/install path
+      - name: Audit collector as bounded temp-only observer
         shell: powershell
         run: |
           $core=Get-Content 'validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1' -Raw
-          foreach($forbidden in @('Expand-Archive','ExtractToDirectory','Start-Process','Copy-Item','Move-Item','Set-Content','Out-File','Add-Content','spicetify apply','spicetify config','CustomApps','LOCALAPPDATA','APPDATA','HKCU:','HKLM:')){
-            if($core.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Collector gained forbidden install/user-state primitive: $forbidden"}
-          }
-          foreach($required in @(
-            'spotify-control-remote-observer','Refusing to clean a path outside the dedicated remote-observer temp root',
-            'HttpCompletionOption]::ResponseHeadersRead','compressed download exceeded the safety limit while streaming','Test-CustomAppObserverDownloadHost',
-            'ZipFile]::OpenRead','path-backslash-denied','case-colliding logical path','contains a symlink','expanded-byte total exceeds the safety limit',
-            'asset digest','release_zip_asset_count','wrapper_stripped','has_submodule','mutation_authorized=$false','auto_update_authorized=$false','auto_install_authorized=$false'
-          )){if($core.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Collector safety marker missing: $required"}}
+          foreach($forbidden in @('Expand-Archive','ExtractToDirectory','Start-Process','Copy-Item','Move-Item','Set-Content','Out-File','Add-Content','spicetify apply','spicetify config','CustomApps','LOCALAPPDATA','APPDATA','HKCU:','HKLM:')){if($core.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Collector gained forbidden install/user-state primitive: $forbidden"}}
+          foreach($required in @('spotify-control-remote-observer','ResponseHeadersRead','compressed download exceeded the safety limit while streaming','Test-CustomAppObserverDownloadHost','ZipFile]::OpenRead','path-backslash-denied','case-colliding logical path','contains a symlink','expanded-byte total exceeds the safety limit','release_zip_asset_count','wrapper_stripped','has_submodule','mutation_authorized=$false','auto_update_authorized=$false','auto_install_authorized=$false')){if($core.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Collector safety marker missing: $required"}}
           Write-Host 'CUSTOM_APP_REMOTE_OBSERVER_STATIC_AUDIT_PASS'
 
       - name: Re-run validated remote-source contract matrices
         shell: powershell
         run: |
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-remote-source-contract-v0.1.0/test_custom_app_remote_source_contract.ps1'
-          if($LASTEXITCODE -ne 0){throw 'Validated v0.1.0 remote-source matrix regressed.'}
+          if($LASTEXITCODE -ne 0){throw 'Validated v0.1.0 matrix regressed.'}
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-remote-source-contract-v0.1.1/test_release_continuity_v011.ps1'
-          if($LASTEXITCODE -ne 0){throw 'Validated v0.1.1 release-continuity matrix regressed.'}
+          if($LASTEXITCODE -ne 0){throw 'Validated v0.1.1 matrix regressed.'}
           Write-Host 'CUSTOM_APP_REMOTE_OBSERVER_CONTRACT_REPLAY_PASS'
 
       - name: Live pinned Tagify v3.3.1 to v3.3.2 collector-contract acceptance
@@ -109,54 +88,50 @@ jobs:
           . (Resolve-Path 'validation/custom-app-remote-source-contract-v0.1.1/release-continuity-v011.ps1')
           $old=Get-CustomAppObserverReleaseObservation -Source 'alexk218/tagify' -ReleaseId 416245914
           $new=Get-CustomAppObserverReleaseObservation -Source 'alexk218/tagify' -ReleaseId 418974188
-          if([int64]$old.github_repo_id -ne 1021838879 -or [int64]$new.github_repo_id -ne 1021838879){throw 'Tagify numeric GitHub repository identity drift.'}
-          if([string]$old.commit_sha -cne '0be36dced09c5b5b7fef14726a69b99148bee432'){throw "Tagify v3.3.1 commit dereference drift: $($old.commit_sha)"}
-          if([string]$new.commit_sha -cne 'bacd80f76c621a3acc06965bb3160ce1056fad7b'){throw "Tagify v3.3.2 commit dereference drift: $($new.commit_sha)"}
-          if([int64]$old.asset_id -ne 652536027 -or [int64]$new.asset_id -ne 660754674){throw 'Tagify pinned release asset identity drift.'}
-          if([string]$old.asset_digest_sha256 -cne 'b7510e525297c297d6007305acef947c35bf2df34e0fae492c41a31f555db957'){throw 'Tagify v3.3.1 collected digest drift.'}
-          if([string]$new.asset_digest_sha256 -cne '5261538c8f596cf179b1f6efd20e0a0a60c73b4cd765115fc6bc25c6a6b3b76b'){throw 'Tagify v3.3.2 collected digest drift.'}
+          if([int64]$old.github_repo_id -ne 1021838879 -or [int64]$new.github_repo_id -ne 1021838879){throw 'Tagify numeric repository identity drift.'}
+          if([string]$old.commit_sha -cne '0be36dced09c5b5b7fef14726a69b99148bee432'){throw "Tagify v3.3.1 commit drift: $($old.commit_sha)"}
+          if([string]$new.commit_sha -cne 'bacd80f76c621a3acc06965bb3160ce1056fad7b'){throw "Tagify v3.3.2 commit drift: $($new.commit_sha)"}
+          if([int64]$old.asset_id -ne 652536027 -or [int64]$new.asset_id -ne 660754674){throw 'Tagify pinned asset identity drift.'}
+          if([string]$old.asset_digest_sha256 -cne 'b7510e525297c297d6007305acef947c35bf2df34e0fae492c41a31f555db957'){throw 'Tagify v3.3.1 digest drift.'}
+          if([string]$new.asset_digest_sha256 -cne '5261538c8f596cf179b1f6efd20e0a0a60c73b4cd765115fc6bc25c6a6b3b76b'){throw 'Tagify v3.3.2 digest drift.'}
           foreach($o in @($old,$new)){
-            if([int]$o.release_zip_asset_count -ne 1){throw 'Tagify collector did not prove unique ZIP release selection.'}
-            if([bool]$o.archive_unsafe -or [bool]$o.has_symlink -or [bool]$o.has_device_entry){throw 'Tagify collector reported unsafe archive state.'}
-            if([bool]$o.build_required -or [int]$o.app_root_count -ne 1 -or [string]$o.layout_root -cne '.'){throw "Tagify release ZIP is not a normalized ready runtime root: build=$($o.build_required) roots=$($o.app_root_count) layout=$($o.layout_root) wrapper=$($o.wrapper_name)"}
-            if(-not [bool]$o.manifest_valid -or [string]::IsNullOrWhiteSpace([string]$o.manifest_name)){throw 'Tagify collector did not parse a valid runtime manifest.'}
-            if(-not (Test-CustomAppRemoteSha256 ([string]$o.tree_sha256)){throw 'Tagify collected runtime tree hash is invalid.'}
-            if([bool]$o.mutation_authorized -or [bool]$o.auto_update_authorized -or [bool]$o.auto_install_authorized){throw 'Tagify collector observation escaped observer-only authority.'}
+            if([int]$o.release_zip_asset_count -ne 1 -or [bool]$o.archive_unsafe -or [bool]$o.has_symlink -or [bool]$o.has_device_entry){throw 'Tagify release observation safety drift.'}
+            if([bool]$o.build_required -or [int]$o.app_root_count -ne 1 -or [string]$o.layout_root -cne '.'){throw "Tagify ZIP is not a ready runtime root: build=$($o.build_required) roots=$($o.app_root_count) layout=$($o.layout_root) wrapper=$($o.wrapper_name)"}
+            if(-not [bool]$o.manifest_valid -or [string]::IsNullOrWhiteSpace([string]$o.manifest_name)){throw 'Tagify manifest observation failed.'}
+            if(-not (Test-CustomAppRemoteSha256 ([string]$o.tree_sha256)){throw 'Tagify runtime tree hash invalid.'}
+            if([bool]$o.mutation_authorized -or [bool]$o.auto_update_authorized -or [bool]$o.auto_install_authorized){throw 'Collector escaped observer-only authority.'}
           }
           if([string]$old.manifest_name -cne [string]$new.manifest_name){throw 'Tagify manifest identity changed across pinned releases.'}
           $prov=[pscustomobject]@{schema=1;managed_by='custom-app-provenance-v1';source_identity='alexk218/tagify';last_proven_source='alexk218/tagify';source_status='proven-local-git-origin';source_changed=$false;requires_reenrollment=$false;mutation_mode='deny';auto_update_authorized=$false;auto_install_authorized=$false}
-          $enroll=Resolve-CustomAppRemoteSourceContractV011 -ProvenanceRow $prov -RemoteObservation $old -Binding $null -CurrentLocalTreeSha256 ([string]$old.tree_sha256) -CurrentLocalManifestName ([string]$old.manifest_name)
-          if([string]$enroll.status -cne 'binding-enrollment-candidate' -or [string]$enroll.binding_candidate.release_asset_selector -cne 'unique-zip-asset'){throw "Tagify v3.3.1 collector output could not enroll safely: $($enroll.status)/$($enroll.reason)"}
-          if(Test-CustomAppRemoteSourceMutationAuthorityV011 $enroll){throw 'Tagify enrollment candidate gained mutation authority.'}
-          $update=Resolve-CustomAppRemoteSourceContractV011 -ProvenanceRow $prov -RemoteObservation $new -Binding $enroll.binding_candidate -CurrentLocalTreeSha256 ([string]$old.tree_sha256) -CurrentLocalManifestName ([string]$old.manifest_name)
-          if([string]$update.status -cne 'remote-change-observed' -or -not [bool]$update.update_observed -or -not [bool]$update.release_asset_name_changed){throw "Tagify v3.3.2 was not safely observed as a versioned update: $($update.status)/$($update.reason)"}
-          if(Test-CustomAppRemoteSourceMutationAuthorityV011 $update){throw 'Tagify live update observation gained mutation authority.'}
-          Write-Host "CUSTOM_APP_REMOTE_OBSERVER_LIVE_TAGIFY_PASS old_tree=$($old.tree_sha256) new_tree=$($new.tree_sha256) manifest=$($old.manifest_name) old_wrapper=$($old.wrapper_name) new_wrapper=$($new.wrapper_name)"
+          $enroll=Resolve-CustomAppRemoteSourceContractV011 $prov $old $null ([string]$old.tree_sha256) ([string]$old.manifest_name)
+          if([string]$enroll.status -cne 'binding-enrollment-candidate' -or [string]$enroll.binding_candidate.release_asset_selector -cne 'unique-zip-asset' -or (Test-CustomAppRemoteSourceMutationAuthorityV011 $enroll)){throw "Tagify v3.3.1 safe enrollment failed: $($enroll.status)/$($enroll.reason)"}
+          $update=Resolve-CustomAppRemoteSourceContractV011 $prov $new $enroll.binding_candidate ([string]$old.tree_sha256) ([string]$old.manifest_name)
+          if([string]$update.status -cne 'remote-change-observed' -or -not [bool]$update.update_observed -or -not [bool]$update.release_asset_name_changed -or (Test-CustomAppRemoteSourceMutationAuthorityV011 $update)){throw "Tagify v3.3.2 safe update observation failed: $($update.status)/$($update.reason)"}
+          Write-Host "CUSTOM_APP_REMOTE_OBSERVER_LIVE_TAGIFY_PASS old_tree=$($old.tree_sha256) new_tree=$($new.tree_sha256) manifest=$($old.manifest_name)"
 
-      - name: Prove repo-commit observer remains source-tree conservative on pinned Tagify commit
+      - name: Prove repo-commit observer is conservative on pinned Tagify commit
         shell: powershell
         run: |
           . (Resolve-Path 'validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1')
-          $repoObs=Get-CustomAppObserverRepoCommitObservation -Source 'alexk218/tagify' -CommitSha 'bacd80f76c621a3acc06965bb3160ce1056fad7b'
-          if([int64]$repoObs.github_repo_id -ne 1021838879 -or [string]$repoObs.commit_sha -cne 'bacd80f76c621a3acc06965bb3160ce1056fad7b'){throw 'Pinned Tagify repo-commit observation identity drift.'}
-          if(-not [bool]$repoObs.wrapper_stripped){throw 'GitHub zipball wrapper was not stripped exactly once.'}
-          if([bool]$repoObs.mutation_authorized -or [bool]$repoObs.auto_update_authorized -or [bool]$repoObs.auto_install_authorized){throw 'Repo-commit observation gained mutation authority.'}
-          Write-Host "CUSTOM_APP_REMOTE_OBSERVER_REPO_COMMIT_PASS build_required=$($repoObs.build_required) roots=$($repoObs.app_root_count) layout=$($repoObs.layout_root) tree=$($repoObs.tree_sha256)"
+          $o=Get-CustomAppObserverRepoCommitObservation -Source 'alexk218/tagify' -CommitSha 'bacd80f76c621a3acc06965bb3160ce1056fad7b'
+          if([int64]$o.github_repo_id -ne 1021838879 -or [string]$o.commit_sha -cne 'bacd80f76c621a3acc06965bb3160ce1056fad7b' -or -not [bool]$o.wrapper_stripped){throw 'Pinned Tagify repo observation identity/wrapper drift.'}
+          if([bool]$o.mutation_authorized -or [bool]$o.auto_update_authorized -or [bool]$o.auto_install_authorized){throw 'Repo observation gained mutation authority.'}
+          Write-Host "CUSTOM_APP_REMOTE_OBSERVER_REPO_COMMIT_PASS build_required=$($o.build_required) roots=$($o.app_root_count) layout=$($o.layout_root) tree=$($o.tree_sha256)"
 
-      - name: Rebuild exact validated observer parent and rerun full Addon Manager SelfTest
+      - name: Rebuild exact observer parent and run full Addon Manager SelfTest
         shell: powershell
         run: |
           python 'validation/custom-app-provenance-integrated-observer-v0.3.0/build_candidate.py' --build
           if($LASTEXITCODE -ne 0){throw 'Validated observer parent rebuild failed.'}
           $addon='validation/custom-app-provenance-integrated-observer-v0.3.0/out/bin/addon-manager.ps1';$main='validation/custom-app-provenance-integrated-observer-v0.3.0/out/bin/spotify-control.ps1'
           $as=(Get-Item $addon).Length;$ah=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant();$ms=(Get-Item $main).Length;$mh=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($as -ne 428643 -or $ah -cne '8de197a78e40faad6e934c0eef4bb123f6652fc6e35cf440733c813c6df86e52'){throw "Observer parent Addon Manager drift: $as/$ah"}
-          if($ms -ne 284327 -or $mh -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw "Observer parent Spotify Control drift: $ms/$mh"}
+          if($as -ne 428643 -or $ah -cne '8de197a78e40faad6e934c0eef4bb123f6652fc6e35cf440733c813c6df86e52'){throw "Observer Addon Manager drift: $as/$ah"}
+          if($ms -ne 284327 -or $mh -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw "Spotify Control drift: $ms/$mh"}
           $root=Join-Path $env:RUNNER_TEMP 'remote-observer-parent-selftest';$env:LOCALAPPDATA=Join-Path $root 'LocalAppData';$env:APPDATA=Join-Path $root 'Roaming'
           New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
-          if($LASTEXITCODE -ne 0){throw 'Validated observer parent Addon Manager SelfTest failed.'}
-          Write-Host 'CUSTOM_APP_REMOTE_OBSERVER_PARENT_REBUILD_SELFTEST_PASS'
+          if($LASTEXITCODE -ne 0){throw 'Validated observer parent SelfTest failed.'}
+          Write-Host 'CUSTOM_APP_REMOTE_OBSERVER_PARENT_SELFTEST_PASS'
 
       - name: Prove production and v0.1.1 parent remain immutable
         shell: powershell
@@ -164,10 +139,7 @@ jobs:
           $parent='19109205bd2e61e862c3b9acd61946568397ecb5';$changed=@(git diff --name-only "$parent...HEAD")
           $expected=@('.github/workflows/validate-custom-app-remote-observation-collector-v010.yml','validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1','validation/custom-app-remote-observation-collector-v0.1.0/test_custom_app_remote_observer.ps1')
           $bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "Unexpected collector changed surface: $($bad -join ', ')"}
-          foreach($path in @('bin/spotify-control.ps1','bin/addon-manager.ps1','manifest.json','stable-version.json','validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1','validation/custom-app-remote-source-contract-v0.1.1/release-continuity-v011.ps1')){
-            git diff --quiet $parent HEAD -- $path
-            if($LASTEXITCODE -ne 0){throw "Protected parent/production surface changed: $path"}
-          }
+          foreach($path in @('bin/spotify-control.ps1','bin/addon-manager.ps1','manifest.json','stable-version.json','validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1','validation/custom-app-remote-source-contract-v0.1.1/release-continuity-v011.ps1')){git diff --quiet $parent HEAD -- $path;if($LASTEXITCODE -ne 0){throw "Protected parent/production surface changed: $path"}}
           Write-Host 'CUSTOM_APP_REMOTE_OBSERVER_IMMUTABILITY_PASS'
 
       - name: Upload remote observer validation artifact
