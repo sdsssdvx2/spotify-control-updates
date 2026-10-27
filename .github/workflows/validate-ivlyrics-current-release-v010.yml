@@ -13,9 +13,9 @@ permissions:
   contents: read
 
 jobs:
-  inspect-windows:
+  acceptance-windows:
     runs-on: windows-2025
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,24 +34,44 @@ jobs:
           if($changed.Count -ne 2){throw "Expected exactly two validation-only files, got $($changed.Count)."}
           Write-Host "IVLYRICS_CURRENT_RELEASE_SCOPE_PASS head=$actual"
 
-      - name: Extract exact r17 ivLyrics handler functions and dependency calls
+      - name: Run exact production r17 against official ivLyrics v7.0.16
         shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           python -m py_compile validation/ivlyrics-current-release-v0.1.0/inspect.py
-          if($LASTEXITCODE -ne 0){throw 'inspection source compile failed'}
+          if($LASTEXITCODE -ne 0){throw 'ivLyrics current-release audit source failed Python compile.'}
           python validation/ivlyrics-current-release-v0.1.0/inspect.py
-          if($LASTEXITCODE -ne 0){throw 'exact r17 handler inspection failed'}
+          if($LASTEXITCODE -ne 0){throw 'Exact r17 ivLyrics v7.0.16 acceptance failed.'}
 
-      - name: Prove production surfaces unchanged
+      - name: Assert acceptance safety and decision contract
         shell: powershell
         run: |
+          $r=Get-Content validation/ivlyrics-current-release-v0.1.0/audit-result.json -Raw|ConvertFrom-Json
+          if($r.read_only -ne $true -or $r.mutation_performed -ne $false -or $r.authority_expanded -ne $false){throw 'ivLyrics audit safety contract failed.'}
+          if($r.independent_release_pin.version -cne '7.0.16' -or $r.independent_release_pin.zip.sha256 -cne 'a58098f29ca69dc4e56b96b1eb635699d14fc80c19cd2c3710cc42f5312f1509'){throw 'ivLyrics v7.0.16 independent release pin drifted.'}
+          if($r.acceptance.baseline_proof_kind -cne 'release-asset' -or $r.acceptance.extra_file_stage_rejected -ne $true -or $r.acceptance.extra_file_baseline_rejected -ne $true){throw 'ivLyrics exact-r17 acceptance/drift rejection failed.'}
+          if($r.acceptance.install_mode -cne 'installed-only'){throw 'ivLyrics install policy drifted.'}
+          if($r.decision.production_change_justified -ne $false -or $r.decision.r18_release_justified -ne $false){throw 'Audit unexpectedly recommends production/r18 change.'}
+          Write-Host "IVLYRICS_V7016_STAGE_FILES=$($r.acceptance.stage_file_count)"
+          Write-Host "IVLYRICS_V7016_STAGE_BYTES=$($r.acceptance.stage_expanded_bytes)"
+          Write-Host "IVLYRICS_V7016_TAG_REVISION=$($r.acceptance.official_tag_revision)"
+          Write-Host 'IVLYRICS_CURRENT_RELEASE_DECISION_PASS'
+
+      - name: Parse exact regenerated Addon Manager and prove production surfaces unchanged
+        shell: powershell
+        run: |
+          $addon='validation/v0.6.28/out/bin/addon-manager.ps1'
+          if((Get-Item $addon).Length -ne 323385 -or (Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -cne '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285'){throw 'Exact r17 identity drifted.'}
+          $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $addon),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Exact r17 PowerShell 5.1 parse failed.'}
           $base='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
           git diff --exit-code $base -- manifest.json manifest.schema.json packages performance validation/v0.6.28 README.md
-          if($LASTEXITCODE -ne 0){throw 'ivLyrics validation changed production/release surface'}
+          if($LASTEXITCODE -ne 0){throw 'ivLyrics validation changed production/release surface.'}
           Write-Host 'IVLYRICS_CURRENT_RELEASE_NO_PRODUCTION_CHANGE_PASS'
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ivlyrics-current-release-inspection-v010
-          path: validation/ivlyrics-current-release-v0.1.0/inspection.json
+          name: ivlyrics-current-release-v010
+          path: validation/ivlyrics-current-release-v0.1.0/audit-result.json
           if-no-files-found: error
