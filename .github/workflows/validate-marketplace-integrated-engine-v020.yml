@@ -1,0 +1,204 @@
+name: Validate Marketplace Integrated Engine v0.2.0
+
+on:
+  push:
+    branches:
+      - validate/marketplace-integrated-engine-v0.2.0
+    paths:
+      - 'validation/marketplace-integrated-engine-v0.2.0/**'
+      - '.github/workflows/validate-marketplace-integrated-engine-v020.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/marketplace-integrated-engine-v0.2.0/**'
+      - '.github/workflows/validate-marketplace-integrated-engine-v020.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact validation scope and validated-input lineage
+        shell: powershell
+        run: |
+          $actual=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $expected){throw "Not exact event head: $actual != $expected"}
+          $base='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'Integrated validation branch is not based on exact v0.6.28/r17 production main.'}
+          $allowed=@(
+            '.github/workflows/validate-marketplace-integrated-engine-v020.yml',
+            'validation/marketplace-integrated-engine-v0.2.0/build_candidate.py',
+            'validation/marketplace-integrated-engine-v0.2.0/integration-glue.ps1'
+          )
+          $changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Validation scope escaped: $($bad -join ', ')"}
+          foreach($required in $allowed){if($required -notin $changed){throw "Missing expected validation-only file: $required"}}
+          $pins=@(
+            @('3178c335e82bdbf7ca5610f0fd618468b4e1c26a','validation/marketplace-lifecycle-tagify-state-preserving-v0.1.2/build_candidate.py','33261373ae8f178de305964dd1376b6babf84322'),
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/build_candidate.py','c31579cb95f3a8c7065afd462c377e19378d3cc6'),
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+            @('1e70069457ceeffb15bdc711b3b6c29cb2d3639e','validation/marketplace-lifecycle-identity-ledger-v0.1.0/marketplace-identity-ledger.ps1','7cea70935f84deb098c4db3c13fc6b901f121626'),
+            @('957286ed0a9d06e469d09811286b93321af819a0','validation/marketplace-record-discovery-v0.1.0/Collect-Marketplace-Records.ps1','5f4cc7f78a5d1a17281771f2b2caf58aab09e008'),
+            @('957286ed0a9d06e469d09811286b93321af819a0','validation/marketplace-record-discovery-v0.1.0/fixture_builder.py','0d070c9d9435d7ca08a1fdd7cff405538f0f5b4a'),
+            @('14a2f9bfacc54e617aec024b44b7f367dec28bbe','validation/star-ratings-runtime-topology-collector-v0.1.0/LevelDbReadOnly.cs','66de32a1dafcb4fbca9ebe0509cf326fd8a65a5e')
+          )
+          foreach($pin in $pins){$blob=(git rev-parse "$($pin[0])`:$($pin[1])").Trim();if($blob -cne $pin[2]){throw "Validated input drift: $($pin[1]) $blob != $($pin[2])"}}
+          Write-Host "MARKETPLACE_INTEGRATED_SCOPE_AND_LINEAGE_PASS head=$actual"
+
+      - name: Build exact integrated candidate twice and prove determinism
+        shell: powershell
+        run: |
+          $dir='validation/marketplace-integrated-engine-v0.2.0';$builder=Join-Path $dir 'build_candidate.py'
+          python -m py_compile $builder
+          if($LASTEXITCODE -ne 0){throw 'Integrated builder Python compile failed.'}
+          python $builder --build
+          if($LASTEXITCODE -ne 0){throw 'First integrated candidate build failed.'}
+          $out=Join-Path $dir 'out/bin';$main=Join-Path $out 'spotify-control.ps1';$addon=Join-Path $out 'addon-manager.ps1';$collector=Join-Path $out 'Collect-Marketplace-Records.ps1';$reader=Join-Path $out 'LevelDbReadOnly.cs'
+          $ids1=@((Get-Item $main).Length,(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant(),(Get-Item $addon).Length,(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant(),(Get-Item $collector).Length,(Get-FileHash $collector -Algorithm SHA256).Hash.ToLowerInvariant(),(Get-Item $reader).Length,(Get-FileHash $reader -Algorithm SHA256).Hash.ToLowerInvariant())
+          if($ids1[0] -ne 284327 -or $ids1[1] -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw "Validated Tagify main bytes changed: $($ids1[0])/$($ids1[1])"}
+          Remove-Item (Join-Path $dir 'out') -Recurse -Force;Remove-Item (Join-Path $dir 'candidate-validation.json') -Force
+          python $builder --build
+          if($LASTEXITCODE -ne 0){throw 'Second integrated candidate build failed.'}
+          $ids2=@((Get-Item $main).Length,(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant(),(Get-Item $addon).Length,(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant(),(Get-Item $collector).Length,(Get-FileHash $collector -Algorithm SHA256).Hash.ToLowerInvariant(),(Get-Item $reader).Length,(Get-FileHash $reader -Algorithm SHA256).Hash.ToLowerInvariant())
+          if(($ids1 -join '|') -cne ($ids2 -join '|')){throw "Integrated build is nondeterministic: $($ids1 -join '|') != $($ids2 -join '|')"}
+          "INTEGRATED_ADDON_SHA=$($ids2[3])"|Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "INTEGRATED_ADDON_SIZE=$($ids2[2])"|Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "MARKETPLACE_INTEGRATED_DETERMINISM_PASS addon=$($ids2[3])/$($ids2[2])"
+
+      - name: Parse candidate and helper PowerShell with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $dir='validation/marketplace-integrated-engine-v0.2.0';$files=@(
+            (Join-Path $dir 'integration-glue.ps1'),
+            (Join-Path $dir 'out/bin/spotify-control.ps1'),
+            (Join-Path $dir 'out/bin/addon-manager.ps1'),
+            (Join-Path $dir 'out/bin/Collect-Marketplace-Records.ps1')
+          )
+          foreach($file in $files){$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Error ("{0}:{1} {2}" -f $file,$_.Extent.StartLineNumber,$_.Message)};throw "PowerShell 5.1 parse failed: $file"}}
+          Add-Type -Path (Resolve-Path (Join-Path $dir 'out/bin/LevelDbReadOnly.cs')) -ErrorAction Stop
+          Write-Host 'MARKETPLACE_INTEGRATED_PS51_AND_READER_COMPILE_PASS'
+
+      - name: Run full integrated Addon Manager SelfTest
+        shell: powershell
+        run: |
+          $dir='validation/marketplace-integrated-engine-v0.2.0';$root=Join-Path $env:RUNNER_TEMP 'integrated-addon-selftest'
+          $env:LOCALAPPDATA=Join-Path $root 'LocalAppData';$env:APPDATA=Join-Path $root 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $dir 'out/bin/addon-manager.ps1') -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Integrated Addon Manager SelfTest failed.'}
+          Write-Host 'MARKETPLACE_INTEGRATED_ADDON_SELFTEST_PASS'
+
+      - name: Re-run pinned Tagify official-release state-preserving transaction acceptance
+        shell: powershell
+        run: |
+          $test=Join-Path $env:RUNNER_TEMP 'test_tagify_state_preserving.ps1'
+          git show '750c5dca0087d9bc8dd69b75dcc301b5e83ad0ec:validation/marketplace-lifecycle-tagify-state-preserving-v0.1.0/test_tagify_state_preserving.ps1' | Set-Content -LiteralPath $test -Encoding UTF8
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test -CandidatePath (Resolve-Path 'validation/marketplace-integrated-engine-v0.2.0/out/bin/addon-manager.ps1')
+          if($LASTEXITCODE -ne 0){throw 'Pinned Tagify transaction acceptance failed on integrated candidate.'}
+          Write-Host 'MARKETPLACE_INTEGRATED_TAGIFY_TRANSACTION_PASS'
+
+      - name: Build six exact Marketplace LevelDB fixtures and pin input identity
+        shell: powershell
+        run: |
+          $fixtureBuilder=Join-Path $env:RUNNER_TEMP 'marketplace_fixture_builder.py'
+          git show '957286ed0a9d06e469d09811286b93321af819a0:validation/marketplace-record-discovery-v0.1.0/fixture_builder.py' | Set-Content -LiteralPath $fixtureBuilder -Encoding UTF8
+          python -m py_compile $fixtureBuilder
+          if($LASTEXITCODE -ne 0){throw 'Pinned Marketplace fixture builder Python compile failed.'}
+          $fixtures='validation/marketplace-integrated-engine-v0.2.0/fixtures'
+          python $fixtureBuilder --out $fixtures
+          if($LASTEXITCODE -ne 0){throw 'Pinned Marketplace fixture build failed.'}
+          $lines=@(Get-ChildItem -LiteralPath $fixtures -Recurse -File|Sort-Object FullName|ForEach-Object{"$($_.FullName.Substring((Resolve-Path $fixtures).Path.Length))|$($_.Length)|$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"})
+          $sha=[Security.Cryptography.SHA256]::Create();try{$bytes=[Text.Encoding]::UTF8.GetBytes(($lines -join "`n"));$fingerprint=([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+          "FIXTURE_BEFORE=$fingerprint"|Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "MARKETPLACE_INTEGRATED_FIXTURE_IDENTITY_PASS sha256=$fingerprint"
+
+      - name: Run exact collector across all six fixtures
+        shell: powershell
+        run: |
+          $dir='validation/marketplace-integrated-engine-v0.2.0';$collector=Resolve-Path (Join-Path $dir 'out/bin/Collect-Marketplace-Records.ps1');$reader=Resolve-Path (Join-Path $dir 'out/bin/LevelDbReadOnly.cs');$reports=Join-Path $dir 'reports';New-Item -ItemType Directory -Force -Path $reports|Out-Null
+          foreach($kind in @('indexeddb','orphan','wal-tombstone','corrupt','localstorage','dual-profiles')){
+            $local=Join-Path (Join-Path (Join-Path $dir 'fixtures') $kind) 'localappdata';$out=Join-Path $reports ($kind+'.json')
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $collector -LocalAppDataRoot $local -ReaderPath $reader -OutputPath $out
+            if($LASTEXITCODE -ne 0){throw "Integrated collector failed fixture: $kind"}
+          }
+          $indexed=Get-Content (Join-Path $reports 'indexeddb.json') -Raw|ConvertFrom-Json;if($indexed.status -cne 'ok' -or [int]$indexed.record_count -ne 3){throw 'IndexedDB baseline discovery failed.'}
+          if((@($indexed.records|ForEach-Object{$_.kind}|Sort-Object) -join '|') -cne 'extension|snippet|theme'){throw 'IndexedDB type classification failed.'}
+          $orphan=Get-Content (Join-Path $reports 'orphan.json') -Raw|ConvertFrom-Json;if($orphan.status -cne 'ok' -or [int]$orphan.record_count -ne 4 -or @($orphan.records|Where-Object{$_.kind -eq 'unlisted'}).Count -ne 1){throw 'Orphan handling failed.'}
+          $wal=Get-Content (Join-Path $reports 'wal-tombstone.json') -Raw|ConvertFrom-Json;if($wal.status -cne 'ok' -or [int]$wal.record_count -ne 2 -or @($wal.records|Where-Object{$_.key -like '*theme-repo*'}).Count -ne 0){throw 'WAL tombstone semantics failed.'}
+          $corrupt=Get-Content (Join-Path $reports 'corrupt.json') -Raw|ConvertFrom-Json;if($corrupt.status -cne 'inconclusive'){throw 'Corrupt DB did not fail closed.'}
+          $legacy=Get-Content (Join-Path $reports 'localstorage.json') -Raw|ConvertFrom-Json;if($legacy.status -cne 'ok' -or [int]$legacy.record_count -ne 3){throw 'Local Storage fallback failed.'}
+          $dual=Get-Content (Join-Path $reports 'dual-profiles.json') -Raw|ConvertFrom-Json;if($dual.status -cne 'ok' -or [int]$dual.record_count -ne 3){throw 'Dual-profile merge failed.'};foreach($row in @($dual.records)){if(@($row.profiles).Count -ne 2){throw "Dual-profile merge evidence failed for $($row.key)"}}
+          foreach($name in @('indexeddb','orphan','wal-tombstone','localstorage','dual-profiles')){$x=Get-Content (Join-Path $reports ($name+'.json')) -Raw|ConvertFrom-Json;if($x.read_only -ne $true -or $x.mutation_performed -ne $false -or $x.derived.safe_to_expand_mutation_authority -ne $false){throw "Collector safety contract failed: $name"}}
+          Write-Host 'MARKETPLACE_INTEGRATED_SIX_FIXTURE_DISCOVERY_PASS'
+
+      - name: Exercise real collector reports through integrated lifecycle and user-intent gate
+        shell: powershell
+        run: |
+          $dir='validation/marketplace-integrated-engine-v0.2.0';$candidate=Resolve-Path (Join-Path $dir 'out/bin/addon-manager.ps1');$raw=Get-Content -LiteralPath $candidate -Raw;$raw=$raw -replace "`r`n","`n"
+          $marker='try {'+"`n"+'    Write-AddonLog "Addon Manager v$Version action=$Action force=$Force"';$idx=$raw.LastIndexOf($marker,[StringComparison]::Ordinal);if($idx -lt 0){throw 'Could not isolate integrated candidate definitions.'}
+          $defs=Join-Path $env:RUNNER_TEMP 'integrated-definitions.ps1';[IO.File]::WriteAllText($defs,$raw.Substring(0,$idx),[Text.UTF8Encoding]::new($true))
+          $root=Join-Path $env:RUNNER_TEMP 'integrated-real-report-gate';$env:LOCALAPPDATA=Join-Path $root 'LocalAppData';$env:APPDATA=Join-Path $root 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA|Out-Null;. $defs
+          $reports=Resolve-Path (Join-Path $dir 'reports')
+          $state=[pscustomobject]@{}
+          $initial=Get-Content (Join-Path $reports 'indexeddb.json') -Raw|ConvertFrom-Json
+          $s1=Update-MarketplaceIdentityLifecycleFromReport -State $state -MarketplaceReport $initial -ObservedAt '2026-10-28T00:10:00+00:00';if(-not [bool]$s1.conclusive){throw 'Real-report initial lifecycle update was not conclusive.'}
+          $theme=[pscustomobject]@{name='fixture-theme';kind='custom-app';policy='auto';installed=$true;source='bob/theme-repo';marketplace_identity_required=$true;marketplace_identity_evidence_conclusive=$true;marketplace_identity_fingerprint=[string]$initial.identity_fingerprint}
+          $g1=Test-MarketplaceSourceUserIntentAllowsMutation -State $state -Item $theme;if(-not [bool]$g1.Allowed){throw "Real-report current theme identity denied: $($g1.Reason)"}
+          $wal=Get-Content (Join-Path $reports 'wal-tombstone.json') -Raw|ConvertFrom-Json
+          $s2=Update-MarketplaceIdentityLifecycleFromReport -State $state -MarketplaceReport $wal -ObservedAt '2026-10-28T00:11:00+00:00';if([int]$s2.removed_count -ne 1){throw 'Real WAL report did not create one removal tombstone.'}
+          $theme.marketplace_identity_fingerprint=[string]$wal.identity_fingerprint;$g2=Test-MarketplaceSourceUserIntentAllowsMutation -State $state -Item $theme;if([bool]$g2.Allowed){throw 'Real WAL-deleted theme remained user-intent authorized.'}
+          $s3=Update-MarketplaceIdentityLifecycleFromReport -State $state -MarketplaceReport $initial -ObservedAt '2026-10-28T00:12:00+00:00';if([int]$s3.reinstalled_count -ne 1){throw 'Real report reinstall was not recognized.'}
+          $theme.marketplace_identity_fingerprint=[string]$initial.identity_fingerprint;$g3=Test-MarketplaceSourceUserIntentAllowsMutation -State $state -Item $theme;if(-not [bool]$g3.Allowed){throw "Real report reinstall did not restore gate: $($g3.Reason)"}
+          $before=$state|ConvertTo-Json -Depth 30 -Compress;$corrupt=Get-Content (Join-Path $reports 'corrupt.json') -Raw|ConvertFrom-Json;$s4=Update-MarketplaceIdentityLifecycleFromReport -State $state -MarketplaceReport $corrupt -ObservedAt '2026-10-28T00:13:00+00:00';$after=$state|ConvertTo-Json -Depth 30 -Compress
+          if([bool]$s4.conclusive -or $before -cne $after){throw 'Inconclusive corrupt report changed lifecycle state.'}
+          $theme.marketplace_identity_evidence_conclusive=$false;$theme.marketplace_identity_fingerprint=$null;$g4=Test-MarketplaceSourceUserIntentAllowsMutation -State $state -Item $theme;if([bool]$g4.Allowed -or [string]$g4.Reason -cne 'marketplace-evidence-inconclusive'){throw 'Stale ledger escaped current-evidence fail-closed gate.'}
+          foreach($prop in @($state.lifecycle.PSObject.Properties)){if([string]$prop.Value.managed_by -ceq 'marketplace-record-v1' -and [string]$prop.Value.mutation_mode -cne 'deny'){throw 'Real-report generic Marketplace ledger gained mutation authority.'}}
+          Write-Host 'MARKETPLACE_INTEGRATED_REAL_REPORT_LEDGER_GATE_E2E_PASS'
+
+      - name: Prove collector fixture inputs remained byte-identical
+        shell: powershell
+        run: |
+          $fixtures='validation/marketplace-integrated-engine-v0.2.0/fixtures';$lines=@(Get-ChildItem -LiteralPath $fixtures -Recurse -File|Sort-Object FullName|ForEach-Object{"$($_.FullName.Substring((Resolve-Path $fixtures).Path.Length))|$($_.Length)|$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"})
+          $sha=[Security.Cryptography.SHA256]::Create();try{$bytes=[Text.Encoding]::UTF8.GetBytes(($lines -join "`n"));$after=([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+          if($after -cne $env:FIXTURE_BEFORE){throw "Read-only collector changed fixture bytes: $env:FIXTURE_BEFORE != $after"}
+          Write-Host "MARKETPLACE_INTEGRATED_READ_ONLY_PASS sha256=$after"
+
+      - name: Audit authority and protected policies after composition
+        shell: powershell
+        run: |
+          $dir='validation/marketplace-integrated-engine-v0.2.0';$addon=Get-Content (Join-Path $dir 'out/bin/addon-manager.ps1') -Raw;$report=Get-Content (Join-Path $dir 'candidate-validation.json') -Raw|ConvertFrom-Json
+          if(($report.auto_authority -join ',') -cne 'better-local-files,eternal-jukebox,ivLyrics,playlist-maker,tagify'){throw 'Integrated auto-authority set drifted.'}
+          if($report.generic_marketplace_mutation_authority_expanded -ne $false -or $report.marketplace_gate_is_user_intent_only -ne $true -or $report.tagify_requires_current_marketplace_evidence -ne $true){throw 'Integrated authority report contract failed.'}
+          foreach($required in @("name='tagify'; kind='custom-app'; source='alexk218/tagify'; inventory_policy='auto'; mutation_mode='auto'; handler='tagify'; install_mode='installed-only'",'marketplace_identity_required=$true','Test-MarketplaceSourceUserIntentAllowsMutation','New-RequiredSpotifyPersistenceBackup','Restore-SpotifyPersistenceBackup',"name='sc-cover-ambience.js'",'never-disable-or-optimize',"name='star-ratings'",'playlist-backed-ratings-preserve',"name='splitify'")){if(-not $addon.Contains($required)){throw "Integrated protected marker missing: $required"}}
+          Write-Host "MARKETPLACE_INTEGRATED_AUTHORITY_AUDIT_PASS addon=$env:INTEGRATED_ADDON_SHA/$env:INTEGRATED_ADDON_SIZE"
+
+      - name: Prove production and stable validation surfaces remain untouched
+        shell: powershell
+        run: |
+          git diff --exit-code d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2...HEAD -- manifest.json manifest.schema.json README.md packages bin bootstrap validation/v0.6.28 .github/workflows/validate-stable-main.yml
+          if($LASTEXITCODE -ne 0){throw 'Integrated validation branch changed production/stable surfaces.'}
+          Write-Host 'MARKETPLACE_INTEGRATED_PRODUCTION_UNCHANGED_PASS'
+
+      - name: Upload exact integrated validation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketplace-integrated-engine-v020
+          path: |
+            validation/marketplace-integrated-engine-v0.2.0/candidate-validation.json
+            validation/marketplace-integrated-engine-v0.2.0/out/bin/spotify-control.ps1
+            validation/marketplace-integrated-engine-v0.2.0/out/bin/addon-manager.ps1
+            validation/marketplace-integrated-engine-v0.2.0/out/bin/Collect-Marketplace-Records.ps1
+            validation/marketplace-integrated-engine-v0.2.0/out/bin/LevelDbReadOnly.cs
+            validation/marketplace-integrated-engine-v0.2.0/reports/*.json
+          if-no-files-found: error
+          compression-level: 0
