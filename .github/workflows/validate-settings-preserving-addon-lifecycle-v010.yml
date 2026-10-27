@@ -1,0 +1,55 @@
+name: Validate settings-preserving addon lifecycle v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/settings-preserving-addon-lifecycle-v0.1.0
+    paths:
+      - 'validation/settings-preserving-addon-lifecycle-v0.1.0/**'
+      - '.github/workflows/validate-settings-preserving-addon-lifecycle-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-current-r17:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout exact validation head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct exact r17 and audit mutation surfaces
+        shell: pwsh
+        run: |
+          python validation/settings-preserving-addon-lifecycle-v0.1.0/audit_current_r17.py
+
+      - name: Parse reconstructed Addon Manager with Windows PowerShell
+        shell: powershell
+        run: |
+          $path = 'validation/settings-preserving-addon-lifecycle-v0.1.0/out/addon-manager-r17.ps1'
+          $text = [IO.File]::ReadAllText((Resolve-Path $path))
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$tokens, [ref]$errors)
+          if ($errors.Count -ne 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw 'Reconstructed r17 Addon Manager failed Windows PowerShell parse.'
+          }
+          Write-Host 'R17_WINDOWS_POWERSHELL_PARSE_PASS'
+
+      - name: Run reconstructed r17 read-only SelfTest
+        shell: powershell
+        run: |
+          & 'validation/settings-preserving-addon-lifecycle-v0.1.0/out/addon-manager-r17.ps1' -Action SelfTest
+          if ($LASTEXITCODE -ne 0) { throw "Addon Manager SelfTest failed: $LASTEXITCODE" }
+
+      - name: Upload exact audit evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: settings-preserving-addon-lifecycle-v010-r17-audit
+          path: validation/settings-preserving-addon-lifecycle-v0.1.0/out/
+          if-no-files-found: error
+          retention-days: 14
