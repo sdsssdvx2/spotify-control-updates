@@ -1,0 +1,111 @@
+name: Validate Marketplace Native Refresh Contract v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/marketplace-native-refresh-contract-v0.1.0
+    paths:
+      - 'validation/marketplace-native-refresh-contract-v0.1.0/**'
+      - '.github/workflows/validate-marketplace-native-refresh-contract-v010.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/marketplace-native-refresh-contract-v0.1.0/**'
+      - '.github/workflows/validate-marketplace-native-refresh-contract-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact validation-only scope and lineage
+        shell: powershell
+        run: |
+          $actual=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $expected){throw "Not exact event head: $actual != $expected"}
+          $base='36471b7193324d117c3c9b40c1cc27cc25dc2c86'
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'Native-refresh contract is not descended from exact source-topology validation head.'}
+          $allowed=@(
+            '.github/workflows/validate-marketplace-native-refresh-contract-v010.yml',
+            'validation/marketplace-native-refresh-contract-v0.1.0/marketplace-native-refresh-contract.ps1'
+          )
+          $changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Native-refresh validation scope escaped: $($bad -join ', ')"}
+          foreach($required in $allowed){if($required -notin $changed){throw "Missing expected native-refresh validation file: $required"}}
+          Write-Host "MARKETPLACE_NATIVE_REFRESH_SCOPE_PASS head=$actual"
+
+      - name: Fetch and pin exact Spicetify Marketplace implementation
+        shell: powershell
+        run: |
+          $repo=Join-Path $env:RUNNER_TEMP 'marketplace-upstream';git init -q $repo;git -C $repo remote add origin https://github.com/spicetify/marketplace.git
+          git -C $repo fetch -q --depth=1 origin 7f357885a3514a55d426fd43edfd705d583a5cdd;if($LASTEXITCODE -ne 0){throw 'Could not fetch pinned Marketplace implementation.'};git -C $repo checkout -q FETCH_HEAD
+          if((git -C $repo rev-parse HEAD).Trim() -cne '7f357885a3514a55d426fd43edfd705d583a5cdd'){throw 'Pinned Marketplace checkout drift.'}
+          $pins=@(
+            @('src/constants.ts','f7149872c403bde8f2699fccc1c177e8e0352881'),
+            @('src/extensions/extension.tsx','947b13126479984e521d4ad6d899c4a3c7770fed'),
+            @('src/components/Card/Card.tsx','f1b6c76a46a5bede91e9ca30692ec68e6b4894b3'),
+            @('src/logic/Utils.ts','6b3ddde6a2e1658b922a26b20b62ba77b017be83')
+          )
+          foreach($pin in $pins){$blob=(git -C $repo rev-parse "HEAD`:$($pin[0])").Trim();if($blob -cne $pin[1]){throw "Pinned Marketplace blob drift: $($pin[0]) $blob != $($pin[1])"}}
+          "MARKETPLACE_PINNED_REPO=$repo"|Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host 'MARKETPLACE_NATIVE_REFRESH_UPSTREAM_PINS_PASS'
+
+      - name: Prove extension, theme, and snippet refresh behavior from upstream code
+        shell: powershell
+        run: |
+          $repo=$env:MARKETPLACE_PINNED_REPO
+          $ext=Get-Content -LiteralPath (Join-Path $repo 'src/extensions/extension.tsx') -Raw
+          foreach($m in @('extensionManifest.extensionURL','cdn.jsdelivr.','?time=${Date.now()}','parseCSS(themeManifest, tld)','initializeSnippets(installedSnippets)')){if($ext.IndexOf($m,[StringComparison]::Ordinal) -lt 0){throw "Marketplace runtime refresh evidence missing: $m"}}
+          $card=Get-Content -LiteralPath (Join-Path $repo 'src/components/Card/Card.tsx') -Raw
+          foreach($m in @('this.props.CONFIG.activeTab === "Installed" && this.props.type !== "snippet"','await this.installExtension(recordMeta);','await this.installTheme(true, recordMeta);','const { schemes, activeScheme } = getLocalStorageDataFromKey(this.localStorageKey, {});','code: this.props.item.code')){if($card.IndexOf($m,[StringComparison]::Ordinal) -lt 0){throw "Marketplace installed-item refresh evidence missing: $m"}}
+          $utils=Get-Content -LiteralPath (Join-Path $repo 'src/logic/Utils.ts') -Raw
+          foreach($m in @('export const initializeSnippets','snippet.code','style.innerHTML = styleContent')){if($utils.IndexOf($m,[StringComparison]::Ordinal) -lt 0){throw "Marketplace snippet storage evidence missing: $m"}}
+          $constants=Get-Content -LiteralPath (Join-Path $repo 'src/constants.ts') -Raw
+          foreach($m in @('installedExtensions','installedThemes','installedSnippets')){if($constants.IndexOf($m,[StringComparison]::Ordinal) -lt 0){throw "Marketplace installed-list contract missing: $m"}}
+          if($constants.IndexOf('installedCustomApps',[StringComparison]::OrdinalIgnoreCase) -ge 0){throw 'Marketplace unexpectedly added installed CustomApps storage.'}
+          Write-Host 'MARKETPLACE_NATIVE_REFRESH_CODE_EVIDENCE_PASS'
+
+      - name: Parse and self-test native refresh decision contract
+        shell: powershell
+        run: |
+          $file=Resolve-Path 'validation/marketplace-native-refresh-contract-v0.1.0/marketplace-native-refresh-contract.ps1';$tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Native refresh contract PowerShell 5.1 parse failed.'}
+          . $file
+          Invoke-MarketplaceNativeRefreshContractSelfTest
+          Write-Host 'MARKETPLACE_NATIVE_REFRESH_CONTRACT_EXECUTION_PASS'
+
+      - name: Prove contract never grants Addon Manager direct Marketplace mutation
+        shell: powershell
+        run: |
+          . (Resolve-Path 'validation/marketplace-native-refresh-contract-v0.1.0/marketplace-native-refresh-contract.ps1')
+          $fixtures=@(
+            [pscustomobject]@{kind='extension';source_kind='github-repository-key';ambiguous=$false;mutation_authorized=$false},
+            [pscustomobject]@{kind='theme';source_kind='github-repository-key';ambiguous=$false;mutation_authorized=$false},
+            [pscustomobject]@{kind='snippet';source_kind='snippet-key';ambiguous=$false;mutation_authorized=$false},
+            [pscustomobject]@{kind='unlisted';source_kind='github-repository-key';ambiguous=$false;mutation_authorized=$false}
+          )
+          foreach($f in $fixtures){$d=Resolve-MarketplaceNativeRefreshContract $f;if([bool]$d.addon_manager_direct_mutation_allowed){throw "Direct mutation authority escaped for kind=$($f.kind)"}}
+          $ext=Resolve-MarketplaceNativeRefreshContract $fixtures[0];if(-not $ext.automatic_runtime_content_refresh -or $ext.full_installed_record_refresh_guaranteed){throw 'Extension partial native-refresh boundary drift.'}
+          $theme=Resolve-MarketplaceNativeRefreshContract $fixtures[1];if(-not $theme.automatic_runtime_content_refresh -or $theme.full_installed_record_refresh_guaranteed){throw 'Theme partial native-refresh boundary drift.'}
+          $snippet=Resolve-MarketplaceNativeRefreshContract $fixtures[2];if($snippet.automatic_runtime_content_refresh -or $snippet.full_installed_record_refresh_guaranteed){throw 'Snippet no-auto-refresh boundary drift.'}
+          Write-Host 'MARKETPLACE_NATIVE_REFRESH_NO_MUTATION_AUTHORITY_PASS'
+
+      - name: Prove prior source-topology candidate and production surfaces remain untouched
+        shell: powershell
+        run: |
+          $base='36471b7193324d117c3c9b40c1cc27cc25dc2c86';$changed=@(git diff --name-only "$base...HEAD")
+          $expected=@('.github/workflows/validate-marketplace-native-refresh-contract-v010.yml','validation/marketplace-native-refresh-contract-v0.1.0/marketplace-native-refresh-contract.ps1')
+          $bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "Unexpected changed surface: $($bad -join ', ')"}
+          if((git show "$base`:validation/marketplace-source-topology-v0.1.0/build_candidate.py"|git hash-object --stdin).Trim() -cne '1e32dd57c95f718f2aeaae6149da36762ca7f6fd'){throw 'Validated source-topology builder identity drift.'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved during native-refresh validation.'}
+          Write-Host 'MARKETPLACE_NATIVE_REFRESH_IMMUTABILITY_PASS'
