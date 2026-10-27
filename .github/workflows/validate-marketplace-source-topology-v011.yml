@@ -1,0 +1,125 @@
+name: Validate Marketplace Source Topology v0.1.1
+
+on:
+  push:
+    branches:
+      - validate/marketplace-source-topology-v0.1.0
+    paths:
+      - 'validation/marketplace-source-topology-v0.1.0/**'
+      - '.github/workflows/validate-marketplace-source-topology-v011.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/marketplace-source-topology-v0.1.0/**'
+      - '.github/workflows/validate-marketplace-source-topology-v011.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact scope, production lineage, and integrated base
+        shell: powershell
+        run: |
+          $actual=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $expected){throw "Not exact event head: $actual != $expected"}
+          $production='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2';$integrated='71ebf04ec6744383161bc16376a6a292dd3a5e33'
+          if((git merge-base $production HEAD).Trim() -cne $production){throw 'Not descended from exact production main.'}
+          if((git merge-base $integrated HEAD).Trim() -cne $integrated){throw 'Not descended from exact integrated v0.2.1 head.'}
+          $allowed=@('.github/workflows/validate-marketplace-source-topology-v011.yml','validation/marketplace-source-topology-v0.1.0/build_candidate.py','validation/marketplace-source-topology-v0.1.0/marketplace-source-topology.ps1')
+          $changed=@(git diff --name-only "$integrated...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Validation scope escaped: $($bad -join ', ')"}
+          foreach($required in $allowed){if($required -notin $changed){throw "Missing expected validation-only file: $required"}}
+          $blob=(git rev-parse '71ebf04ec6744383161bc16376a6a292dd3a5e33:validation/marketplace-integrated-engine-v0.2.0/build_candidate.py').Trim()
+          if($blob -cne 'a3c10668d5630d1e1a40dc425fffe4e859652e37'){throw "Integrated v0.2.1 builder drift: $blob"}
+          Write-Host "SOURCE_TOPOLOGY_V011_SCOPE_PASS head=$actual"
+
+      - name: Prove pinned upstream topology contract
+        shell: powershell
+        run: |
+          $root=Join-Path $env:RUNNER_TEMP 'source-topology-upstream';New-Item -ItemType Directory -Force -Path $root|Out-Null
+          $market=Join-Path $root 'marketplace';git init -q $market;git -C $market remote add origin https://github.com/spicetify/marketplace.git;git -C $market fetch -q --depth=1 origin 7f357885a3514a55d426fd43edfd705d583a5cdd;git -C $market checkout -q FETCH_HEAD
+          $constants=Get-Content -LiteralPath (Join-Path $market 'src/constants.ts') -Raw
+          foreach($m in @('installedExtensions','installedSnippets','installedThemes','installed-extensions','installed-snippets','installed-themes')){if($constants.IndexOf($m,[StringComparison]::Ordinal) -lt 0){throw "Marketplace storage contract missing: $m"}}
+          if($constants.IndexOf('installedCustomApps',[StringComparison]::OrdinalIgnoreCase) -ge 0){throw 'Marketplace unexpectedly exposes installed CustomApps.'}
+          $grid=Get-Content -LiteralPath (Join-Path $market 'src/components/Grid.tsx') -Raw
+          foreach($m in @('theme:','extension:','snippet:','installedThemes','installedExtensions','installedSnippets')){if($grid.IndexOf($m,[StringComparison]::Ordinal) -lt 0){throw "Marketplace Installed grid contract missing: $m"}}
+          $tagify=Join-Path $root 'tagify';git init -q $tagify;git -C $tagify remote add origin https://github.com/alexk218/tagify.git;git -C $tagify fetch -q --depth=1 origin 759b3c106620bddbd9a59e517af7bdbbfa629905;git -C $tagify checkout -q FETCH_HEAD
+          $readme=Get-Content -LiteralPath (Join-Path $tagify 'README.md') -Raw;$install=Get-Content -LiteralPath (Join-Path $tagify 'install.ps1') -Raw
+          if($readme.IndexOf('custom app',[StringComparison]::OrdinalIgnoreCase) -lt 0){throw 'Tagify no longer identifies as a custom app.'}
+          if($install.IndexOf('spicetify config custom_apps tagify',[StringComparison]::OrdinalIgnoreCase) -lt 0){throw 'Tagify installer no longer configures custom_apps tagify.'}
+          Write-Host 'SOURCE_TOPOLOGY_V011_UPSTREAM_PASS marketplace=extension,theme,snippet tagify=custom-app'
+
+      - name: Build twice and prove deterministic candidate identity
+        shell: powershell
+        run: |
+          $dir='validation/marketplace-source-topology-v0.1.0';$builder=Join-Path $dir 'build_candidate.py';python -m py_compile $builder;if($LASTEXITCODE -ne 0){throw 'Builder compile failed.'}
+          python $builder --build;if($LASTEXITCODE -ne 0){throw 'First build failed.'};$out=Join-Path $dir 'out/bin';$paths=@('spotify-control.ps1','addon-manager.ps1','Collect-Marketplace-Records.ps1','LevelDbReadOnly.cs')|ForEach-Object{Join-Path $out $_}
+          $ids1=@($paths|ForEach-Object{"$((Get-Item $_).Length)|$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant())"});if($ids1[0] -cne '284327|69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw "Validated main drift: $($ids1[0])"}
+          Remove-Item (Join-Path $dir 'out') -Recurse -Force;Remove-Item (Join-Path $dir 'candidate-validation.json') -Force;python $builder --build;if($LASTEXITCODE -ne 0){throw 'Second build failed.'}
+          $ids2=@($paths|ForEach-Object{"$((Get-Item $_).Length)|$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant())"});if(($ids1 -join ';') -cne ($ids2 -join ';')){throw "Nondeterministic build: $($ids1 -join ';') != $($ids2 -join ';')"}
+          Write-Host "SOURCE_TOPOLOGY_V011_DETERMINISM_PASS addon=$($ids2[1])"
+
+      - name: Parse payloads and run ownership plus Addon Manager self-tests
+        shell: powershell
+        run: |
+          $dir='validation/marketplace-source-topology-v0.1.0';foreach($file in @((Join-Path $dir 'marketplace-source-topology.ps1'),(Join-Path $dir 'out/bin/spotify-control.ps1'),(Join-Path $dir 'out/bin/addon-manager.ps1'),(Join-Path $dir 'out/bin/Collect-Marketplace-Records.ps1'))){$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){throw "PowerShell 5.1 parse failed: $file :: $($errors[0].Message)"}}
+          Add-Type -Path (Resolve-Path (Join-Path $dir 'out/bin/LevelDbReadOnly.cs')) -ErrorAction Stop
+          function Write-AddonLog { param([string]$Message,[string]$Level='INFO'); Write-Host "[$Level] $Message" };. (Resolve-Path (Join-Path $dir 'marketplace-source-topology.ps1'));Invoke-MarketplaceSourceTopologySelfTest
+          $root=Join-Path $env:RUNNER_TEMP 'source-topology-selftest';$env:LOCALAPPDATA=Join-Path $root 'LocalAppData';$env:APPDATA=Join-Path $root 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $dir 'out/bin/addon-manager.ps1') -Action SelfTest;if($LASTEXITCODE -ne 0){throw 'Addon Manager SelfTest failed.'}
+          Write-Host 'SOURCE_TOPOLOGY_V011_SELFTEST_PASS'
+
+      - name: Re-run pinned Tagify state-preserving transaction acceptance
+        shell: powershell
+        run: |
+          $test=Join-Path $env:RUNNER_TEMP 'test_tagify_state_preserving.ps1';git show '750c5dca0087d9bc8dd69b75dcc301b5e83ad0ec:validation/marketplace-lifecycle-tagify-state-preserving-v0.1.0/test_tagify_state_preserving.ps1'|Set-Content -LiteralPath $test -Encoding UTF8
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test -CandidatePath (Resolve-Path 'validation/marketplace-source-topology-v0.1.0/out/bin/addon-manager.ps1');if($LASTEXITCODE -ne 0){throw 'Tagify transaction acceptance failed.'}
+          Write-Host 'SOURCE_TOPOLOGY_V011_TAGIFY_TRANSACTION_PASS'
+
+      - name: Re-run exact Marketplace fixtures and read-only deny contract
+        shell: powershell
+        run: |
+          $dir='validation/marketplace-source-topology-v0.1.0';$fb=Join-Path $env:RUNNER_TEMP 'fixture_builder.py';git show '957286ed0a9d06e469d09811286b93321af819a0:validation/marketplace-record-discovery-v0.1.0/fixture_builder.py'|Set-Content -LiteralPath $fb -Encoding UTF8;python $fb --out (Join-Path $dir 'fixtures');if($LASTEXITCODE -ne 0){throw 'Fixture build failed.'}
+          $collector=Resolve-Path (Join-Path $dir 'out/bin/Collect-Marketplace-Records.ps1');$reader=Resolve-Path (Join-Path $dir 'out/bin/LevelDbReadOnly.cs');$reports=Join-Path $dir 'reports';New-Item -ItemType Directory -Force -Path $reports|Out-Null
+          foreach($kind in @('indexeddb','orphan','wal-tombstone','corrupt','localstorage','dual-profiles')){$local=Join-Path (Join-Path (Join-Path $dir 'fixtures') $kind) 'localappdata';$out=Join-Path $reports ($kind+'.json');& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $collector -LocalAppDataRoot $local -ReaderPath $reader -OutputPath $out;if($LASTEXITCODE -ne 0){throw "Collector failed: $kind"}}
+          $indexed=Get-Content (Join-Path $reports 'indexeddb.json') -Raw|ConvertFrom-Json;if($indexed.status -cne 'ok' -or [int]$indexed.record_count -ne 3 -or ((@($indexed.records|ForEach-Object{$_.kind}|Sort-Object)-join '|') -cne 'extension|snippet|theme')){throw 'Marketplace baseline/type fixture failed.'}
+          $corrupt=Get-Content (Join-Path $reports 'corrupt.json') -Raw|ConvertFrom-Json;if($corrupt.status -cne 'inconclusive'){throw 'Corrupt DB did not fail closed.'}
+          foreach($name in @('indexeddb','orphan','wal-tombstone','localstorage','dual-profiles')){$x=Get-Content (Join-Path $reports ($name+'.json')) -Raw|ConvertFrom-Json;if($x.read_only -ne $true -or $x.mutation_performed -ne $false -or $x.derived.safe_to_expand_mutation_authority -ne $false){throw "Read-only deny contract failed: $name"}}
+          Write-Host 'SOURCE_TOPOLOGY_V011_FIXTURES_PASS'
+
+      - name: Audit protected policies and prove production immutability
+        shell: powershell
+        run: |
+          $addon=Get-Content -LiteralPath 'validation/marketplace-source-topology-v0.1.0/out/bin/addon-manager.ps1' -Raw
+          foreach($m in @('Test-LocalSpicetifyUserIntentAllowsMutation','current-local-user-intent-confirmed','local-lifecycle-evidence-stale','local-lifecycle-ambiguous-or-unsafe','Test-MarketplaceSourceUserIntentAllowsMutation','marketplace-ledger-authority-drift','New-RequiredSpotifyPersistenceBackup','Restore-SpotifyPersistenceBackup','never-disable-or-optimize','playlist-backed-ratings-preserve','preserve-ratings-tags-notes-and-browser-storage')){if($addon.IndexOf($m,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Protection marker missing: $m"}}
+          $report=Get-Content -LiteralPath 'validation/marketplace-source-topology-v0.1.0/candidate-validation.json' -Raw|ConvertFrom-Json;if($report.generic_marketplace_mutation_authority_expanded -ne $false -or $report.production_surface_changed -ne $false){throw 'Authority/production surface expanded.'}
+          $integrated='71ebf04ec6744383161bc16376a6a292dd3a5e33';$expected=@('.github/workflows/validate-marketplace-source-topology-v011.yml','validation/marketplace-source-topology-v0.1.0/build_candidate.py','validation/marketplace-source-topology-v0.1.0/marketplace-source-topology.ps1');$changed=@(git diff --name-only "$integrated...HEAD");$bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "Unexpected changed surface: $($bad -join ', ')"}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production origin/main moved during validation.'}
+          Write-Host 'SOURCE_TOPOLOGY_V011_POLICY_AND_IMMUTABILITY_PASS'
+
+      - name: Upload validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: marketplace-source-topology-v011-${{ github.run_id }}
+          path: |
+            validation/marketplace-source-topology-v0.1.0/candidate-validation.json
+            validation/marketplace-source-topology-v0.1.0/marketplace-source-topology.ps1
+            validation/marketplace-source-topology-v0.1.0/out/bin/spotify-control.ps1
+            validation/marketplace-source-topology-v0.1.0/out/bin/addon-manager.ps1
+            validation/marketplace-source-topology-v0.1.0/out/bin/Collect-Marketplace-Records.ps1
+            validation/marketplace-source-topology-v0.1.0/out/bin/LevelDbReadOnly.cs
+            validation/marketplace-source-topology-v0.1.0/reports/*.json
+          if-no-files-found: error
+          compression-level: 0
