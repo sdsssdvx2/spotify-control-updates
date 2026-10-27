@@ -1,9 +1,9 @@
-name: Validate persistence transaction guard v0.1.0
+name: Validate persistence transaction guard v0.1.1
 
 on:
   push:
     branches:
-      - validate/persistence-transaction-guard-v0.1.0
+      - validate/persistence-transaction-guard-v0.1.1
     paths:
       - 'validation/persistence-transaction-guard-v0.1.0/**'
       - '.github/workflows/validate-persistence-transaction-guard-v010.yml'
@@ -31,16 +31,17 @@ jobs:
           $allowed=@(
             '.github/workflows/validate-persistence-transaction-guard-v010.yml',
             'validation/persistence-transaction-guard-v0.1.0/build_candidate.py',
-            'validation/persistence-transaction-guard-v0.1.0/audit_spicetify_apply.py'
+            'validation/persistence-transaction-guard-v0.1.0/audit_spicetify_apply.py',
+            'validation/persistence-transaction-guard-v0.1.0/integration_e2e.py'
           ) | Sort-Object
-          if(($changed -join '|') -cne ($allowed -join '|')){ throw "Expected exactly three validation-only files. actual=$($changed -join ', ')" }
-          Write-Host "PERSISTENCE_GUARD_SCOPE_PASS head=$((git rev-parse HEAD).Trim()) files=$($changed.Count)"
+          if(($changed -join '|') -cne ($allowed -join '|')){ throw "Expected exactly four validation-only files. actual=$($changed -join ', ')" }
+          Write-Host "PERSISTENCE_GUARD_V011_SCOPE_PASS head=$((git rev-parse HEAD).Trim()) files=$($changed.Count)"
 
       - name: Build exact r17-derived candidate
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          python -m py_compile validation/persistence-transaction-guard-v0.1.0/build_candidate.py validation/persistence-transaction-guard-v0.1.0/audit_spicetify_apply.py
+          python -m py_compile validation/persistence-transaction-guard-v0.1.0/build_candidate.py validation/persistence-transaction-guard-v0.1.0/audit_spicetify_apply.py validation/persistence-transaction-guard-v0.1.0/integration_e2e.py
           if($LASTEXITCODE -ne 0){ throw 'Validation Python compile failed.' }
           python validation/persistence-transaction-guard-v0.1.0/build_candidate.py --build
           if($LASTEXITCODE -ne 0){ throw 'Candidate build failed.' }
@@ -73,6 +74,16 @@ jobs:
           if($LASTEXITCODE -ne 0){throw "Candidate TransactionSelfTest failed: $LASTEXITCODE"}
           Write-Host 'PERSISTENCE_GUARD_TRANSACTION_SELFTEST_PASS'
 
+      - name: Run integrated CommitLast persistence drift rollback E2E
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/persistence-transaction-guard-v0.1.0/integration_e2e.py
+          if($LASTEXITCODE -ne 0){throw 'Integration harness build failed.'}
+          $h='validation/persistence-transaction-guard-v0.1.0/out/persistence-commit-integration-e2e.ps1'
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $h
+          if($LASTEXITCODE -ne 0){throw "Integrated persistence CommitLast E2E failed: $LASTEXITCODE"}
+
       - name: Run candidate read-only SelfTest
         shell: powershell
         run: |
@@ -93,10 +104,11 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: persistence-transaction-guard-v010
+          name: persistence-transaction-guard-v011
           path: |
             validation/persistence-transaction-guard-v0.1.0/candidate-report.json
             validation/persistence-transaction-guard-v0.1.0/spicetify-apply-scope-report.json
             validation/persistence-transaction-guard-v0.1.0/out/bin/addon-manager.ps1
+            validation/persistence-transaction-guard-v0.1.0/out/persistence-commit-integration-e2e.ps1
           if-no-files-found: error
           retention-days: 14
