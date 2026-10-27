@@ -67,8 +67,13 @@ jobs:
         shell: powershell
         run: |
           $core=Get-Content 'validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1' -Raw
-          foreach($forbidden in @('Expand-Archive','ExtractToDirectory','Start-Process','Copy-Item','Move-Item','Set-Content','Out-File','Add-Content','spicetify apply','spicetify config','CustomApps','LOCALAPPDATA','APPDATA','HKCU:','HKLM:')){if($core.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Collector gained forbidden install/user-state primitive: $forbidden"}}
-          foreach($required in @('spotify-control-remote-observer','ResponseHeadersRead','compressed download exceeded the safety limit while streaming','Test-CustomAppObserverDownloadHost','ZipFile]::OpenRead','path-backslash-denied','case-colliding logical path','contains a symlink','expanded-byte total exceeds the safety limit','release_zip_asset_count','wrapper_stripped','has_submodule','mutation_authorized=$false','auto_update_authorized=$false','auto_install_authorized=$false')){if($core.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Collector safety marker missing: $required"}}
+          foreach($literal in @('Expand-Archive','ExtractToDirectory','Start-Process','spicetify apply','spicetify config','CustomApps','LOCALAPPDATA','APPDATA','HKCU:','HKLM:')){if($core.IndexOf($literal,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Collector gained forbidden install/user-state primitive: $literal"}}
+          foreach($cmd in @('Copy-Item','Move-Item','Set-Content','Out-File','Add-Content')){if([regex]::IsMatch($core,"(?im)^\s*$([regex]::Escape($cmd))\b")){throw "Collector gained forbidden command token: $cmd"}}
+          $cleanup=[regex]::Match($core,'(?ms)^function Remove-CustomAppObserverTempDirectory \{.*?(?=^function |\z)').Value
+          if([string]::IsNullOrWhiteSpace($cleanup)){throw 'Dedicated temp cleanup function is missing.'}
+          $removeAll=[regex]::Matches($core,'(?i)\bRemove-Item\b').Count;$removeCleanup=[regex]::Matches($cleanup,'(?i)\bRemove-Item\b').Count
+          if($removeAll -ne 1 -or $removeCleanup -ne 1){throw "Remove-Item escaped dedicated temp cleanup: all=$removeAll cleanup=$removeCleanup"}
+          foreach($required in @('spotify-control-remote-observer','Refusing to clean a path outside the dedicated remote-observer temp root','ResponseHeadersRead','compressed download exceeded the safety limit while streaming','Test-CustomAppObserverDownloadHost','ZipFile]::OpenRead','path-backslash-denied','case-colliding logical path','contains a symlink','expanded-byte total exceeds the safety limit','release_zip_asset_count','wrapper_stripped','has_submodule','mutation_authorized=$false','auto_update_authorized=$false','auto_install_authorized=$false')){if($core.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Collector safety marker missing: $required"}}
           Write-Host 'CUSTOM_APP_REMOTE_OBSERVER_STATIC_AUDIT_PASS'
 
       - name: Re-run validated remote-source contract matrices
