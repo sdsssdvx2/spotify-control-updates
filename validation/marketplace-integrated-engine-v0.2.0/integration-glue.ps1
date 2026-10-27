@@ -166,7 +166,8 @@ function Invoke-MarketplaceIntegratedEngineSelfTest {
     }
 
     $state=[pscustomobject]@{}
-    $r1=& $newReport @((& $newRecord 'manifest.json')) $fpA
+    $records1=@(& $newRecord 'manifest.json')
+    $r1=& $newReport $records1 $fpA
     $s1=Update-MarketplaceIdentityLifecycleLedger -State $state -MarketplaceReport $r1 -ObservedAt '2026-10-28T00:00:00+00:00'
     if(-not [bool]$s1.conclusive){throw 'Integrated Marketplace self-test: initial report was not conclusive.'}
     $g1=Test-MarketplaceSourceUserIntentAllowsMutation -State $state -Item (& $newItem $true $fpA)
@@ -177,29 +178,34 @@ function Invoke-MarketplaceIntegratedEngineSelfTest {
     $g3=Test-MarketplaceSourceUserIntentAllowsMutation -State $state -Item (& $newItem $true $fpB)
     if([bool]$g3.Allowed -or [string]$g3.Reason -cne 'marketplace-evidence-stale'){throw 'Integrated Marketplace self-test: fingerprint drift was not denied.'}
 
-    $empty=& $newReport @() $fpB
+    $emptyRecords=@()
+    $empty=& $newReport $emptyRecords $fpB
     $s2=Update-MarketplaceIdentityLifecycleLedger -State $state -MarketplaceReport $empty -ObservedAt '2026-10-28T00:01:00+00:00'
     if([int]$s2.removed_count -ne 1){throw 'Integrated Marketplace self-test: user removal tombstone was not created.'}
     $g4=Test-MarketplaceSourceUserIntentAllowsMutation -State $state -Item (& $newItem $true $fpB)
     if([bool]$g4.Allowed -or [string]$g4.Reason -notin @('marketplace-not-present','marketplace-user-removed')){throw 'Integrated Marketplace self-test: deleted Tagify identity was not denied.'}
 
-    $r3=& $newReport @((& $newRecord 'manifest.json')) $fpC
+    $records3=@(& $newRecord 'manifest.json')
+    $r3=& $newReport $records3 $fpC
     $s3=Update-MarketplaceIdentityLifecycleLedger -State $state -MarketplaceReport $r3 -ObservedAt '2026-10-28T00:02:00+00:00'
     if([int]$s3.reinstalled_count -ne 1){throw 'Integrated Marketplace self-test: explicit reinstall was not recognized.'}
     $g5=Test-MarketplaceSourceUserIntentAllowsMutation -State $state -Item (& $newItem $true $fpC)
     if(-not [bool]$g5.Allowed){throw 'Integrated Marketplace self-test: explicit reinstall did not restore current user-intent gate.'}
 
     $state2=[pscustomobject]@{}
-    $r4=& $newReport @((& $newRecord 'manifest.json')) $fpD
+    $records4=@(& $newRecord 'manifest.json')
+    $r4=& $newReport $records4 $fpD
     [void](Update-MarketplaceIdentityLifecycleLedger -State $state2 -MarketplaceReport $r4 -ObservedAt '2026-10-28T00:03:00+00:00')
     $ownedKey='marketplace:installed:alexk218/tagify/manifest.json'
-    $s4=Update-MarketplaceIdentityLifecycleLedger -State $state2 -MarketplaceReport (& $newReport @() $fpE) -ObservedAt '2026-10-28T00:04:00+00:00' -TransactionOwnedAbsenceKeys @($ownedKey)
+    $empty2=& $newReport $emptyRecords $fpE
+    $s4=Update-MarketplaceIdentityLifecycleLedger -State $state2 -MarketplaceReport $empty2 -ObservedAt '2026-10-28T00:04:00+00:00' -TransactionOwnedAbsenceKeys @($ownedKey)
     if([int]$s4.transaction_absence_count -ne 1){throw 'Integrated Marketplace self-test: transaction-owned absence was not distinguished.'}
     $g6=Test-MarketplaceSourceUserIntentAllowsMutation -State $state2 -Item (& $newItem $true $fpE)
     if([bool]$g6.Allowed -or [string]$g6.Reason -cne 'marketplace-not-present'){throw 'Integrated Marketplace self-test: transaction-owned temporary absence became mutable.'}
 
     $state3=[pscustomobject]@{}
-    $multi=& $newReport @((& $newRecord 'one.js'),(& $newRecord 'two.js')) $fpF
+    $multiRecords=@((& $newRecord 'one.js'),(& $newRecord 'two.js'))
+    $multi=& $newReport $multiRecords $fpF
     [void](Update-MarketplaceIdentityLifecycleLedger -State $state3 -MarketplaceReport $multi -ObservedAt '2026-10-28T00:05:00+00:00')
     $g7=Test-MarketplaceSourceUserIntentAllowsMutation -State $state3 -Item (& $newItem $true $fpF)
     if([bool]$g7.Allowed -or [string]$g7.Reason -cne 'marketplace-source-ambiguous'){throw 'Integrated Marketplace self-test: multiple records for one source were not denied.'}
