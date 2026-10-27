@@ -1,0 +1,87 @@
+name: Validate Star Ratings Ownership Topology Audit v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/star-ratings-ownership-topology-audit-v0.1.0
+    paths:
+      - 'validation/star-ratings-ownership-topology-audit-v0.1.0/**'
+      - '.github/workflows/validate-star-ratings-ownership-topology-audit-v010.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/star-ratings-ownership-topology-audit-v0.1.0/**'
+      - '.github/workflows/validate-star-ratings-ownership-topology-audit-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact validation-only scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='25daf4a295e7737bd12e96b584467da53245e37a'
+          actual="$(git rev-parse HEAD)"
+          event_head='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          test "$actual" = "$event_head"
+          test "$(git merge-base "$base" HEAD)" = "$base"
+          mapfile -t changed < <(git diff --name-only "$base...HEAD" | sort)
+          expected=(
+            '.github/workflows/validate-star-ratings-ownership-topology-audit-v010.yml'
+            'validation/star-ratings-ownership-topology-audit-v0.1.0/audit.py'
+          )
+          mapfile -t expected_sorted < <(printf '%s\n' "${expected[@]}" | sort)
+          test "$(printf '%s|' "${changed[@]}")" = "$(printf '%s|' "${expected_sorted[@]}")"
+          echo "STAR_RATINGS_OWNERSHIP_SCOPE_PASS head=$actual"
+
+      - name: Run immutable public-source ownership audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile validation/star-ratings-ownership-topology-audit-v0.1.0/audit.py
+          python validation/star-ratings-ownership-topology-audit-v0.1.0/audit.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('validation/star-ratings-ownership-topology-audit-v0.1.0/ownership-topology-audit.json')
+          r=json.loads(p.read_text(encoding='utf-8'))
+          assert r['result']=='AUDIT_PASS'
+          assert r['marketplace']['commit']=='7f357885a3514a55d426fd43edfd705d583a5cdd'
+          assert r['marketplace']['release_tag_pin_enforced_by_marketplace'] is False
+          assert r['star_ratings']['version']=='2.1.3'
+          assert r['star_ratings']['dist_size']==43396
+          assert r['star_ratings']['dist_sha256']=='198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1'
+          assert r['production_contract']['safe_to_expand_mutation_authority_from_public_source_only'] is False
+          assert r['production_contract']['mutation_authority_change'] is False
+          assert r['production_contract']['user_data_mutation'] is False
+          assert r['production_contract']['next_gate']=='read-only real-PC ownership topology evidence'
+          print('STAR_RATINGS_OWNERSHIP_REPORT_CONTRACT_PASS')
+          PY
+
+      - name: Prove stable production surface unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='25daf4a295e7737bd12e96b584467da53245e37a'
+          for path in manifest.json README.md performance/star-ratings/apply-star-ratings-patch.ps1 performance/star-ratings/target.json; do
+            test "$(git rev-parse "$base:$path")" = "$(git rev-parse "HEAD:$path")"
+          done
+          echo 'STAR_RATINGS_OWNERSHIP_NO_PRODUCTION_CHANGE_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: star-ratings-ownership-topology-audit-v010
+          path: validation/star-ratings-ownership-topology-audit-v0.1.0/ownership-topology-audit.json
+          if-no-files-found: error
