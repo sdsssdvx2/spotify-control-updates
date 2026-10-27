@@ -38,6 +38,7 @@ def sha256(data: bytes) -> str:
 
 
 def extract_apply_function(text: str) -> str:
+    text = text.replace("\r\n", "\n")
     start = text.find("func Apply(spicetifyVersion string) {")
     require(start >= 0, "Spicetify Apply function anchor missing")
     end = text.find("\n}\n\n// RefreshTheme", start)
