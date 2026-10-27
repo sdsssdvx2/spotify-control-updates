@@ -1,0 +1,144 @@
+{
+  "addon_version": "0.6.5-r15",
+  "audit_evidence": {
+    "artifact_digest": "sha256:9ed6837dccbf5229a9546a16ef4a35fc933289a28cc4929e45138625bd499f50",
+    "artifact_id": 12682440808,
+    "catalog_json_sha256": "75d66f6e06ec76c8f96fbc7941617e7330844979a87d3297e8e4ff824c3b6a1a",
+    "head": "4263a53f145fc602fbe81e0c243f8d7a70f46fc5",
+    "run": "40388895760"
+  },
+  "authority_expanded": false,
+  "auto_authority": [
+    "better-local-files",
+    "eternal-jukebox",
+    "ivLyrics",
+    "playlist-maker"
+  ],
+  "base_addon": {
+    "sha256": "25ebd0a5d5158f7d3cb4b4ce2ecf89f05f4dad3ef6bc799599e7204ce103c29c",
+    "size": 282718
+  },
+  "base_main": {
+    "sha256": "896bb74e71385b5b6ada118af41cbe9d398dc662ce3719234104028e6eed197f",
+    "size": 284313
+  },
+  "base_version": "0.6.25",
+  "candidate_addon": {
+    "sha256": "4aa56dd5d4ef07da21d3bdf5c76227fabb49c64767a281b1e11ee48e7211a09f",
+    "size": 291294
+  },
+  "candidate_main": {
+    "sha256": "d7b484a2a7b10a27db0f182d71fe36f590784171db7208189540045bcf4f54d1",
+    "size": 284311
+  },
+  "canonical_order": "StringComparer.OrdinalIgnoreCase",
+  "excluded_releases": [
+    {
+      "reason": "no-exact-release-zip",
+      "versions": [
+        "1.0.0",
+        "1.0.1",
+        "1.0.2",
+        "2.0.0",
+        "2.1.0",
+        "2.1.1"
+      ]
+    },
+    {
+      "reason": "authenticated-zip-without-Tagify-identity-marker",
+      "versions": [
+        "2.1.2",
+        "2.2.0",
+        "2.3.0",
+        "2.4.0"
+      ]
+    }
+  ],
+  "local_provenance_source": "exact-install-tree-only",
+  "manifest_or_package_version_trusted_for_provenance": false,
+  "new_auto_install_authority": false,
+  "registry_fingerprint": "0f05406d7152de1d975f888cb8270be8249115211ba9f41e0157342cd42efbd8",
+  "release_catalog": [
+    {
+      "asset_sha256": "5a47106d50b08aa377a3402258dee94db63797360e21dccf59f81f0827fcaccc",
+      "asset_size": 494087,
+      "file_count": 13,
+      "tag": "v2.5.0",
+      "tree_sha256": "3b5ba1c33e4415fe530a029fd93af8f0fc84748eb2ac432422f31747a40c28dc",
+      "version": "2.5.0"
+    },
+    {
+      "asset_sha256": "ee04ec7eeb45054b798337ccd9e08f66a2cc881348f74b7a4d2adfbc93ef07b1",
+      "asset_size": 909371,
+      "file_count": 18,
+      "tag": "v3.0.0",
+      "tree_sha256": "ac6d7f7567d78cbfbb37df40dc3d76273df3dde80f0962efaea3a217dcba99d0",
+      "version": "3.0.0"
+    },
+    {
+      "asset_sha256": "a84b9c2aefd43035b16edf537b91652b934c09f1ef5037ed17b3738f1e4ecc91",
+      "asset_size": 1355380,
+      "file_count": 21,
+      "tag": "v3.1.0",
+      "tree_sha256": "f896dc5f83acd8272315aa171ea7893d744dc029422b15574da9c60190750c4e",
+      "version": "3.1.0"
+    },
+    {
+      "asset_sha256": "346f0e746abf3e29aca754240da2e9d2c87e75d7e35fd27109575fed66629c31",
+      "asset_size": 1436949,
+      "file_count": 22,
+      "tag": "v3.2.0",
+      "tree_sha256": "516f364e8519983ae1bd64158b552a3bb68ed54414402e4ab9523f3e6abe1559",
+      "version": "3.2.0"
+    },
+    {
+      "asset_sha256": "12f2efc0221014464eff2d5884a83bd05882138e87bcd0c208e734538c71604c",
+      "asset_size": 1470208,
+      "file_count": 22,
+      "tag": "v3.3.0",
+      "tree_sha256": "108e8afba7bcab8cfe8657431041a0118140a774ba4996e60ce91cfa8a4cf2d9",
+      "version": "3.3.0"
+    },
+    {
+      "asset_sha256": "b7510e525297c297d6007305acef947c35bf2df34e0fae492c41a31f555db957",
+      "asset_size": 1471676,
+      "file_count": 22,
+      "tag": "v3.3.1",
+      "tree_sha256": "8f8abd6f80f88321d6517c1496c985da146e313a949e80f4e4b41c34ad27178a",
+      "version": "3.3.1"
+    },
+    {
+      "asset_sha256": "5261538c8f596cf179b1f6efd20e0a0a60c73b4cd765115fc6bc25c6a6b3b76b",
+      "asset_size": 1554948,
+      "file_count": 22,
+      "tag": "v3.3.2",
+      "tree_sha256": "e751c2692d0edb5d63ac359df0b81c024ddca4f02e9de46cd5e4d8f3266bbf71",
+      "version": "3.3.2"
+    }
+  ],
+  "rollback_last_source_adapter_independent": true,
+  "schema": 2,
+  "source_adapter_fingerprint": "c0611a7b96f6ff09d1e235119efce2f2def6eb6d0a4e8e93e276cfa622c3c42d",
+  "splitify_policy_preserved": true,
+  "tagify_policy": {
+    "data_policy": "protect-ratings-tags-notes",
+    "install_mode": "never-auto-install",
+    "inventory_policy": "monitor-only",
+    "mutation_mode": "deny"
+  },
+  "validated_source": {
+    "blob": "6988eff6b99266ed4601db31c8984d83bc11c44e",
+    "head": "91980963f1bd7cca987a3fc15c0a70074ea72c08",
+    "path": "validation/tagify-release-provenance-v0.1.0/build_candidate.py",
+    "pr": 82,
+    "pr_artifact_digest": "sha256:e36662f22d6f85823e69a0df07ff42374276a4d180c4ba599e87ef744cb193c8",
+    "pr_artifact_id": 12711157197,
+    "pr_closed_unmerged": true,
+    "pr_run": "40453275598",
+    "push_artifact_digest": "sha256:22c6ac0f3aa527284fc1ce5fd50426a9bb6b3a46a5c9994d4b68178408f67d6b",
+    "push_artifact_id": 12710864506,
+    "push_run": "40453161373",
+    "stable_pr_run": "40453275661"
+  },
+  "version": "0.6.26"
+}

@@ -1,0 +1,94 @@
+name: Validate Spotify Control v0.6.26 Release
+
+on:
+  push:
+    branches:
+      - release/v0.6.26-tagify-release-provenance-r15
+    paths:
+      - '.github/workflows/validate-v0.6.26-release.yml'
+      - 'validation/v0.6.26/**'
+      - 'packages/v0.6.26/**'
+      - 'manifest.json'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/validate-v0.6.26-release.yml'
+      - 'validation/v0.6.26/**'
+      - 'packages/v0.6.26/**'
+      - 'manifest.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove release scope and published manifest identity
+        shell: powershell
+        run: |
+          $base='9b97ffba51060e92e687fadeb361da7ba95a1dd0'
+          $actual=(git rev-parse HEAD).Trim();$eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -ne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'v0.6.26 release no longer descends from exact stable v0.6.25 main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          foreach($p in $changed){
+            $ok=($p -eq 'manifest.json' -or $p -like 'packages/v0.6.26/*' -or $p -like 'validation/v0.6.26/*' -or $p -eq '.github/workflows/prepare-v0.6.26-release.yml' -or $p -eq '.github/workflows/validate-v0.6.26-release.yml' -or $p -eq '.github/workflows/validate-v0.6.26-bootstrap-e2e.yml')
+            if(-not$ok){throw "Unexpected v0.6.26 release path: $p"}
+          }
+          $m=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($m.latest_version -ne '0.6.26' -or $m.source_commit -ne '1dcaf6ea9a32d2f9b3116993f9d08374b612f1e2' -or $m.payload_set_sha256 -ne '172321533fc3147835b8ec79c8869d7c5e0f56dec6fb6bd5a8af963f412e5131'){throw 'Published v0.6.26 manifest identity drifted.'}
+          if($m.bootstrap.version -ne '1.0.6' -or $m.bootstrap.sha256 -ne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' -or [int64]$m.bootstrap.size -ne 42963){throw 'Bootstrap contract drifted.'}
+          $edge=@($m.updates|Where-Object{$_.from_version -eq '0.6.25' -and $_.to_version -eq '0.6.26'});if($edge.Count -ne 1 -or @($edge[0].patches).Count -ne 2){throw 'Published v0.6.25 -> v0.6.26 edge missing/ambiguous.'}
+          Write-Host "V0626_RELEASE_SCOPE_PASS head=$actual"
+
+      - name: Reconstruct immutable transport from source_commit and compare deterministic rebuild
+        shell: powershell
+        run: |
+          python -m py_compile validation/v0.6.26/build_v0626.py validation/v0.6.26/release_transport.py validation/v0.6.26/bootstrap_prepare_fixture.py
+          if($LASTEXITCODE -ne 0){throw 'v0.6.26 validation source compile failed.'}
+          python validation/v0.6.26/release_transport.py --validate-published
+          if($LASTEXITCODE -ne 0){throw 'Published v0.6.26 immutable transport validation failed.'}
+          git diff --exit-code -- packages/v0.6.26 validation/v0.6.26/candidate-validation.json validation/v0.6.26/release-metadata.json
+          if($LASTEXITCODE -ne 0){throw 'Deterministic rebuild changed published v0.6.26 transport metadata.'}
+          Write-Host 'V0626_IMMUTABLE_TRANSPORT_REBUILD_PASS'
+
+      - name: Parse exact candidate and assert r15 policy invariants
+        shell: powershell
+        run: |
+          python validation/v0.6.26/build_v0626.py --build
+          if($LASTEXITCODE -ne 0){throw 'v0.6.26 exact candidate rebuild failed.'}
+          $main='validation/v0.6.26/out/bin/spotify-control.ps1';$addon='validation/v0.6.26/out/bin/addon-manager.ps1'
+          if((Get-Item $main).Length -ne 284311 -or (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'd7b484a2a7b10a27db0f182d71fe36f590784171db7208189540045bcf4f54d1'){throw 'v0.6.26 main identity mismatch.'}
+          if((Get-Item $addon).Length -ne 291294 -or (Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -ne '4aa56dd5d4ef07da21d3bdf5c76227fabb49c64767a281b1e11ee48e7211a09f'){throw 'r15 Addon Manager identity mismatch.'}
+          foreach($file in @($main,$addon)){$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Host $_.Message};throw "PowerShell 5.1 parse failed: $file"}}
+          $text=Get-Content $addon -Raw
+          foreach($required in @('function Get-TagifyReleaseCatalog','function Get-TagifyTreeFingerprint','function Resolve-TagifyInstalledReleaseProvenance','authenticated-release-catalog-tree-v1','75d66f6e06ec76c8f96fbc7941617e7330844979a87d3297e8e4ff824c3b6a1a','3b5ba1c33e4415fe530a029fd93af8f0fc84748eb2ac432422f31747a40c28dc','e751c2692d0edb5d63ac359df0b81c024ddca4f02e9de46cd5e4d8f3266bbf71','.Sort([System.StringComparer]::OrdinalIgnoreCase)','function Resolve-SplitifyInstalledReleaseProvenance','60311e81ae11727528fd5e34879533e1cfacdaaf7b2b21dd1808fb20e3b32454','protect-ratings-tags-notes','playlist-backed-ratings-preserve','never-disable-or-optimize')){if($text.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "r15 contract missing: $required"}}
+          $report=Get-Content validation/v0.6.26/candidate-validation.json -Raw|ConvertFrom-Json
+          if($report.validated_source.head -ne '91980963f1bd7cca987a3fc15c0a70074ea72c08' -or $report.validated_source.blob -ne '6988eff6b99266ed4601db31c8984d83bc11c44e'){throw 'Validated Tagify builder provenance pin drifted.'}
+          if($report.authority_expanded -ne $false -or $report.new_auto_install_authority -ne $false){throw 'r15 authority unexpectedly expanded.'}
+          if(($report.auto_authority -join '|') -ne 'better-local-files|eternal-jukebox|ivLyrics|playlist-maker'){throw 'Automatic authority set drifted.'}
+          if($report.registry_fingerprint -ne '0f05406d7152de1d975f888cb8270be8249115211ba9f41e0157342cd42efbd8' -or $report.source_adapter_fingerprint -ne 'c0611a7b96f6ff09d1e235119efce2f2def6eb6d0a4e8e93e276cfa622c3c42d'){throw 'Registry/source-adapter fingerprint drifted.'}
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'r15 Addon Manager SelfTest failed.'}
+          Write-Host 'V0626_R15_POLICY_PARSE_SELFTEST_PASS'
+
+      - name: Validate historical manifest preservation from exact stable base
+        shell: python
+        run: |
+          import json,subprocess
+          base=json.loads(subprocess.check_output(['git','show','9b97ffba51060e92e687fadeb361da7ba95a1dd0:manifest.json']).decode('utf-8-sig'))
+          cur=json.load(open('manifest.json',encoding='utf-8-sig'))
+          if cur['updates'][:-1]!=base['updates']:raise SystemExit('Historical update graph changed')
+          if cur['updates'][-1]['from_version']!='0.6.25' or cur['updates'][-1]['to_version']!='0.6.26':raise SystemExit('v0.6.26 edge not append-only')
+          if base['latest_version']!='0.6.25' or cur['latest_version']!='0.6.26':raise SystemExit('version chain mismatch')
+          print('V0626_APPEND_ONLY_MANIFEST_PASS')
