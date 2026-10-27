@@ -40,13 +40,16 @@ jobs:
           }
           Write-Host 'R17_WINDOWS_POWERSHELL_PARSE_PASS'
 
-      - name: Run reconstructed r17 read-only SelfTest
+      - name: Run reconstructed r17 read-only SelfTest with synthetic Spotify root
         shell: powershell
         run: |
+          $spotifyRoot = Join-Path $env:LOCALAPPDATA 'Spotify'
+          New-Item -ItemType Directory -Force -Path $spotifyRoot | Out-Null
           & 'validation/settings-preserving-addon-lifecycle-v0.1.0/out/addon-manager-r17.ps1' -Action SelfTest
           if ($LASTEXITCODE -ne 0) { throw "Addon Manager SelfTest failed: $LASTEXITCODE" }
 
       - name: Upload exact audit evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: settings-preserving-addon-lifecycle-v010-r17-audit
