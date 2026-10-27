@@ -1,0 +1,222 @@
+name: Validate Star Ratings Exact Release Provenance v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/star-ratings-release-provenance-v0.1.0
+    paths:
+      - 'validation/star-ratings-release-provenance-v0.1.0/**'
+      - '.github/workflows/validate-star-ratings-release-provenance-v010.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/star-ratings-release-provenance-v0.1.0/**'
+      - '.github/workflows/validate-star-ratings-release-provenance-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact validation-only scope
+        shell: powershell
+        run: |
+          $base='5cf131e7bc168f686c7b6fc933a713f4d96b9dd3'
+          $actual=(git rev-parse HEAD).Trim()
+          $eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -ne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Star Ratings provenance validation is not based on exact stable v0.6.26 main.'}
+          $changed=@(git diff --name-only "$base...HEAD"|Sort-Object)
+          $expected=@('.github/workflows/validate-star-ratings-release-provenance-v010.yml','validation/star-ratings-release-provenance-v0.1.0/build_candidate.py'|Sort-Object)
+          $actualKey=($changed -join '|');$expectedKey=($expected -join '|')
+          if($actualKey -cne $expectedKey){throw "Unexpected validation scope: $($changed -join ', ')"}
+          Write-Host "STAR_RATINGS_V010_SCOPE_PASS head=$actual"
+
+      - name: Build prospective v0.6.27 r16 candidate twice
+        shell: powershell
+        run: |
+          python -m py_compile validation/star-ratings-release-provenance-v0.1.0/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'Star Ratings candidate builder failed Python compile.'}
+          python validation/star-ratings-release-provenance-v0.1.0/build_candidate.py --build
+          if($LASTEXITCODE -ne 0){throw 'Star Ratings candidate build failed.'}
+          $main='validation/star-ratings-release-provenance-v0.1.0/out/bin/spotify-control.ps1'
+          $addon='validation/star-ratings-release-provenance-v0.1.0/out/bin/addon-manager.ps1'
+          $mainId="{0}:{1}" -f (Get-Item $main).Length,(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant()
+          $addonId="{0}:{1}" -f (Get-Item $addon).Length,(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant()
+          Copy-Item $main "$main.first";Copy-Item $addon "$addon.first"
+          python validation/star-ratings-release-provenance-v0.1.0/build_candidate.py --build
+          if($LASTEXITCODE -ne 0){throw 'Second deterministic Star Ratings candidate build failed.'}
+          $mainId2="{0}:{1}" -f (Get-Item $main).Length,(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant()
+          $addonId2="{0}:{1}" -f (Get-Item $addon).Length,(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($mainId2 -cne $mainId -or $addonId2 -cne $addonId){throw "Candidate build is not deterministic: $mainId/$addonId -> $mainId2/$addonId2"}
+          Remove-Item "$main.first","$addon.first" -Force
+          Write-Host "STAR_RATINGS_CANDIDATE_IDENTITIES main=$mainId addon=$addonId"
+          Write-Host 'STAR_RATINGS_V010_DETERMINISTIC_BUILD_PASS'
+
+      - name: Parse candidate and prove protected policy surface
+        shell: powershell
+        run: |
+          $main='validation/star-ratings-release-provenance-v0.1.0/out/bin/spotify-control.ps1'
+          $addon='validation/star-ratings-release-provenance-v0.1.0/out/bin/addon-manager.ps1'
+          foreach($file in @($main,$addon)){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0}: {1}" -f $file,$_.Message)};throw "PowerShell 5.1 parser failed: $file"}
+          }
+          $text=Get-Content $addon -Raw
+          foreach($required in @(
+            'function Get-StarRatingsReleaseCatalog','function Get-StarRatingsReleaseFileProvenance','function Resolve-StarRatingsInstalledReleaseProvenance',
+            '2592f43a26c3c49b9d58b8244654d27448d801995465c7c8e4ba8d3159b9aa27','performance-original-backup-v1','active-exact-upstream-dist-v1',
+            'playlist-backed-ratings-preserve','protect-ratings-tags-notes','never-disable-or-optimize',
+            'function Resolve-TagifyInstalledReleaseProvenance','75d66f6e06ec76c8f96fbc7941617e7330844979a87d3297e8e4ff824c3b6a1a',
+            'function Resolve-SplitifyInstalledReleaseProvenance','60311e81ae11727528fd5e34879533e1cfacdaaf7b2b21dd1808fb20e3b32454'
+          )){if($text.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Required protected/provenance contract missing: $required"}}
+          $report=Get-Content validation/star-ratings-release-provenance-v0.1.0/candidate-report.json -Raw|ConvertFrom-Json
+          if($report.authority_expanded -ne $false -or $report.new_auto_install_authority -ne $false){throw 'Star Ratings candidate unexpectedly expands authority.'}
+          if(($report.auto_authority -join '|') -ne 'better-local-files|eternal-jukebox|ivLyrics|playlist-maker'){throw 'Automatic authority set drifted.'}
+          if($report.registry_fingerprint -ne '0f05406d7152de1d975f888cb8270be8249115211ba9f41e0157342cd42efbd8' -or $report.source_adapter_fingerprint -ne 'c0611a7b96f6ff09d1e235119efce2f2def6eb6d0a4e8e93e276cfa622c3c42d'){throw 'Registry/source-adapter fingerprint drifted.'}
+          Write-Host 'STAR_RATINGS_V010_POLICY_PARSE_PASS'
+
+      - name: Re-authenticate all 13 release dist files and run provenance fixtures
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $addon=(Resolve-Path 'validation/star-ratings-release-provenance-v0.1.0/out/bin/addon-manager.ps1').Path
+          $tokens=$null;$errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile($addon,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw 'Candidate AST parse failed before helper extraction.'}
+          $wanted=@('Test-PathSafe','Get-StarRatingsReleaseCatalog','Get-StarRatingsReleaseFileProvenance','Resolve-StarRatingsInstalledReleaseProvenance')
+          $defs=@($ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $n.Name},$true))
+          if($defs.Count -ne $wanted.Count){throw "Failed to extract exact candidate helper set. found=$($defs.Name -join ',')"}
+          $harness=Join-Path $env:RUNNER_TEMP 'star-ratings-provenance-harness.ps1'
+          ($defs|Sort-Object{$wanted.IndexOf($_.Name)}|ForEach-Object{$_.Extent.Text}) -join "`r`n`r`n" | Set-Content -LiteralPath $harness -Encoding UTF8
+          . $harness
+
+          $catalog=@(Get-StarRatingsReleaseCatalog)
+          if($catalog.Count -ne 13){throw "Star Ratings catalog must contain exactly 13 releases; got $($catalog.Count)"}
+          $fixtureRoot=Join-Path $env:RUNNER_TEMP 'star-ratings-provenance-fixtures'
+          Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $fixtureRoot -Force|Out-Null
+          $downloaded=@{}
+          foreach($row in $catalog){
+            $url="https://raw.githubusercontent.com/brimell/spicetify-star-ratings/$($row.TagCommit)/dist/star-ratings.js"
+            $path=Join-Path $fixtureRoot ("star-ratings-{0}.js" -f $row.Version)
+            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $path
+            if((Get-Item $path).Length -ne [int64]$row.Size){throw "Official Star Ratings dist size drift: $($row.Version)"}
+            if((Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$row.Sha256){throw "Official Star Ratings dist SHA drift: $($row.Version)"}
+            $proof=Get-StarRatingsReleaseFileProvenance -Path $path
+            if(-not[bool]$proof.Proven -or [bool]$proof.Ambiguous -or [string]$proof.Version -cne [string]$row.Version -or [string]$proof.TagCommit -cne [string]$row.TagCommit){throw "Exact Star Ratings release provenance failed: $($row.Version)"}
+            $downloaded[[string]$row.Version]=$path
+            Write-Host "STAR_RATINGS_EXACT_RELEASE_PROVEN_PASS version=$($row.Version) sha=$($row.Sha256)"
+          }
+
+          $app=Join-Path $fixtureRoot 'appdata-original';$local=Join-Path $fixtureRoot 'local-original'
+          $active=Join-Path $app 'Spotify\Apps\xpui\extensions\sc-star-ratings.js'
+          New-Item -ItemType Directory -Force -Path (Split-Path -Parent $active)|Out-Null
+          Copy-Item -LiteralPath $downloaded['2.1.3'] -Destination $active -Force
+          $proof=Resolve-StarRatingsInstalledReleaseProvenance -AppDataRoot $app -LocalAppDataRoot $local
+          if(-not[bool]$proof.Proven -or [string]$proof.Version -cne '2.1.3' -or [string]$proof.ProofKind -cne 'active-exact-upstream-dist-v1'){throw 'Active exact upstream Star Ratings provenance failed.'}
+          Write-Host 'STAR_RATINGS_ACTIVE_ORIGINAL_PROVEN_PASS'
+
+          $app2=Join-Path $fixtureRoot 'appdata-transformed';$local2=Join-Path $fixtureRoot 'local-transformed'
+          $xpui=Join-Path $app2 'Spotify\Apps\xpui';$active2=Join-Path $xpui 'extensions\sc-star-ratings.js'
+          New-Item -ItemType Directory -Force -Path (Split-Path -Parent $active2)|Out-Null
+          Copy-Item -LiteralPath $downloaded['2.1.3'] -Destination $active2 -Force
+          $stateRoot=Join-Path $local2 'SpotifyControl\star-ratings-performance\runtime-v1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/star-ratings/apply-star-ratings-patch.ps1 -Mode Apply -XpuiRoot $xpui -StateRoot $stateRoot -TargetMetadataPath performance/star-ratings/target.json | Out-Host
+          if($LASTEXITCODE -ne 0){throw 'Existing Star Ratings performance fixture failed to create transformed+backup state.'}
+          $activeSha=(Get-FileHash $active2 -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($activeSha -cne '6e0d1c84408294a619d91191eec83a6d10794ef31093d31ccf1f1bd39ea8c8a3'){throw "Performance transformed SHA drift: $activeSha"}
+          $proof2=Resolve-StarRatingsInstalledReleaseProvenance -AppDataRoot $app2 -LocalAppDataRoot $local2
+          if(-not[bool]$proof2.Proven -or [string]$proof2.Version -cne '2.1.3' -or [string]$proof2.ProofKind -cne 'performance-original-backup-v1' -or [string]$proof2.ActiveMode -cne 'transformed'){throw 'Performance original backup Star Ratings provenance failed.'}
+          Write-Host 'STAR_RATINGS_TRANSFORMED_BACKUP_PROVEN_PASS'
+
+          Remove-Item -LiteralPath (Join-Path $stateRoot 'active-state.json') -Force
+          $noState=Resolve-StarRatingsInstalledReleaseProvenance -AppDataRoot $app2 -LocalAppDataRoot $local2
+          if([bool]$noState.Proven -or [string]$noState.Reason -cne 'performance-state-missing'){throw 'Known transformed active bytes without state were incorrectly proven.'}
+          Write-Host 'STAR_RATINGS_TRANSFORM_WITHOUT_STATE_FAIL_CLOSED_PASS'
+
+          # Re-create valid state, then prove state-path and backup tampering both fail closed.
+          Copy-Item -LiteralPath $downloaded['2.1.3'] -Destination $active2 -Force
+          Remove-Item -LiteralPath $stateRoot -Recurse -Force -ErrorAction SilentlyContinue
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/star-ratings/apply-star-ratings-patch.ps1 -Mode Apply -XpuiRoot $xpui -StateRoot $stateRoot -TargetMetadataPath performance/star-ratings/target.json | Out-Null
+          if($LASTEXITCODE -ne 0){throw 'Failed to recreate valid Star Ratings performance state.'}
+          $statePath=Join-Path $stateRoot 'active-state.json'
+          $state=Get-Content $statePath -Raw|ConvertFrom-Json
+          $state.backup_path=Join-Path $fixtureRoot 'forged-original.bin'
+          $state|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $statePath -Encoding UTF8
+          $badState=Resolve-StarRatingsInstalledReleaseProvenance -AppDataRoot $app2 -LocalAppDataRoot $local2
+          if([bool]$badState.Proven -or [string]$badState.Reason -cne 'performance-state-contract-mismatch'){throw 'Forged performance backup path was incorrectly trusted.'}
+          Write-Host 'STAR_RATINGS_FORGED_STATE_FAIL_CLOSED_PASS'
+
+          Copy-Item -LiteralPath $downloaded['2.1.3'] -Destination $active2 -Force
+          Remove-Item -LiteralPath $stateRoot -Recurse -Force -ErrorAction SilentlyContinue
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/star-ratings/apply-star-ratings-patch.ps1 -Mode Apply -XpuiRoot $xpui -StateRoot $stateRoot -TargetMetadataPath performance/star-ratings/target.json | Out-Null
+          if($LASTEXITCODE -ne 0){throw 'Failed to recreate valid Star Ratings state for backup tamper fixture.'}
+          $backup=Join-Path $stateRoot 'star-ratings-observer-debounce-v1\original.bin'
+          [IO.File]::AppendAllText($backup,'tamper')
+          $badBackup=Resolve-StarRatingsInstalledReleaseProvenance -AppDataRoot $app2 -LocalAppDataRoot $local2
+          if([bool]$badBackup.Proven -or [string]$badBackup.Reason -cne 'performance-original-backup-unproven'){throw 'Tampered Star Ratings original backup was incorrectly trusted.'}
+          Write-Host 'STAR_RATINGS_TAMPERED_BACKUP_FAIL_CLOSED_PASS'
+
+          $app3=Join-Path $fixtureRoot 'appdata-rescue-only';$local3=Join-Path $fixtureRoot 'local-rescue-only'
+          $rescue=Join-Path $app3 'spicetify\Extensions\sc-star-ratings.js'
+          New-Item -ItemType Directory -Force -Path (Split-Path -Parent $rescue)|Out-Null
+          Copy-Item -LiteralPath $downloaded['2.1.3'] -Destination $rescue -Force
+          $rescueProof=Resolve-StarRatingsInstalledReleaseProvenance -AppDataRoot $app3 -LocalAppDataRoot $local3
+          if([bool]$rescueProof.Proven -or [string]$rescueProof.Reason -cne 'active-file-missing'){throw 'Spicetify rescue copy was incorrectly accepted as Star Ratings release provenance.'}
+          Write-Host 'STAR_RATINGS_RESCUE_COPY_EXCLUDED_PASS'
+
+          $bad=Join-Path $fixtureRoot 'unknown.js';Set-Content -LiteralPath $bad -Value 'unknown-star-ratings-bytes' -Encoding ASCII
+          $badProof=Get-StarRatingsReleaseFileProvenance -Path $bad
+          if([bool]$badProof.Proven){throw 'Unknown Star Ratings bytes were incorrectly proven.'}
+          $dup=@(Get-StarRatingsReleaseCatalog)+[pscustomobject]@{Version='9.9.9';Tag='9.9.9';TagCommit='0000000000000000000000000000000000000000';Size=[int64]43396;Sha256='198fd7c3307de8f2efc36f40df4e79846188cf35a1d5b550ed3d8ab85e8139b1'}
+          $amb=Get-StarRatingsReleaseFileProvenance -Path $downloaded['2.1.3'] -Catalog $dup
+          if([bool]$amb.Proven -or -not[bool]$amb.Ambiguous -or [int]$amb.MatchCount -ne 2){throw 'Ambiguous Star Ratings catalog did not fail closed.'}
+          Write-Host 'STAR_RATINGS_UNKNOWN_AND_AMBIGUOUS_FAIL_CLOSED_PASS'
+
+      - name: Run current immutable Star Ratings performance regression
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File performance/star-ratings/tests/test-star-ratings-patch.ps1
+          if($LASTEXITCODE -ne 0){throw 'Existing Star Ratings performance regression failed.'}
+          Write-Host 'STAR_RATINGS_PERFORMANCE_REGRESSION_UNCHANGED_PASS'
+
+      - name: Run full candidate Addon Manager read-only SelfTest
+        shell: powershell
+        run: |
+          $addon='validation/star-ratings-release-provenance-v0.1.0/out/bin/addon-manager.ps1'
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Candidate Addon Manager SelfTest failed.'}
+          Write-Host 'STAR_RATINGS_V010_ADDON_SELFTEST_PASS'
+
+      - name: Prove no production surface or protected authority changed
+        shell: powershell
+        run: |
+          $base='5cf131e7bc168f686c7b6fc933a713f4d96b9dd3'
+          git diff --exit-code -- "$base...HEAD" -- manifest.json manifest.schema.json packages performance README.md validation/v0.6.26
+          if($LASTEXITCODE -ne 0){throw 'Validation branch changed a production/stable release surface.'}
+          $report=Get-Content validation/star-ratings-release-provenance-v0.1.0/candidate-report.json -Raw|ConvertFrom-Json
+          if($report.star_ratings_policy.mutation_mode -ne 'deny' -or $report.star_ratings_policy.inventory_policy -ne 'source-watch-only' -or $report.star_ratings_policy.data_policy -ne 'playlist-backed-ratings-preserve'){throw 'Star Ratings protected policy drifted.'}
+          if(($report.excluded_inputs -join '|') -notmatch 'spicetify-rescue-copy' -or ($report.excluded_inputs -join '|') -notmatch 'spotify-playlist-data'){throw 'Protected provenance exclusions are incomplete.'}
+          Write-Host 'STAR_RATINGS_V010_NO_PRODUCTION_CHANGE_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: star-ratings-release-provenance-v010
+          path: |
+            validation/star-ratings-release-provenance-v0.1.0/out/bin/spotify-control.ps1
+            validation/star-ratings-release-provenance-v0.1.0/out/bin/addon-manager.ps1
+            validation/star-ratings-release-provenance-v0.1.0/candidate-report.json
+          if-no-files-found: error
