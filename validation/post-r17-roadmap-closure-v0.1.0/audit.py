@@ -43,7 +43,6 @@ def funcs(text:str)->dict[str,str]:
     return out
 
 def norm_function(body:str)->str:
-    # Ignore only the global script/addon version literals when comparing updater semantics.
     body=re.sub(r'(?m)^\$ScriptVersion\s*=\s*"[^"]+"\s*$','',body)
     body=re.sub(r'(?m)^\$Version\s*=\s*"[^"]+"\s*$','',body)
     return body.strip()
@@ -70,7 +69,7 @@ def main():
     p20=ROOT/'validation/v0.6.20/out/bin'
     m20=identity(p20/'spotify-control.ps1',V20_MAIN,'v0.6.20 main').decode('utf-8-sig')
     a20=identity(p20/'addon-manager.ps1',V20_ADDON,'v0.6.20 addon').decode('utf-8-sig')
-    f20=funcs(m20);af20=funcs(a20)
+    f20=funcs(m20)
 
     subprocess.check_call([sys.executable,str(ROOT/'validation/v0.6.28/build_v0628.py'),'--build'],cwd=ROOT)
     p28=ROOT/'validation/v0.6.28/out/bin'
@@ -81,10 +80,8 @@ def main():
     missing_spotify=[n for n in SPOTIFY_TARGETS if n not in f20 or n not in f28]
     if missing_spotify:raise SystemExit('Spotify updater target missing: '+','.join(missing_spotify))
     spotify_rows=changed(f20,f28,SPOTIFY_TARGETS)
-
     spice20=spicetify_updater_names(f20);spice28=spicetify_updater_names(f28)
-    spice_union=sorted(set(spice20)|set(spice28))
-    spice_rows=changed(f20,f28,spice_union)
+    spice_union=sorted(set(spice20)|set(spice28));spice_rows=changed(f20,f28,spice_union)
 
     semver20=sorted(set(re.findall(r'(?<![0-9])2\.\d+\.\d+(?![0-9])',m20)))
     semver28=sorted(set(re.findall(r'(?<![0-9])2\.\d+\.\d+(?![0-9])',m28)))
@@ -99,12 +96,17 @@ def main():
     }
     if not all(protected.values()):raise SystemExit(f'protected policy drift: {protected}')
 
-    # Later releases intentionally added archive/resource hardening and provenance to Addon Manager.
-    # This audit does not assume updater functions are unchanged; it records exact semantic function deltas.
     spotify_changed=[r['name'] for r in spotify_rows if r['changed']]
     spice_changed=[r['name'] for r in spice_rows if r['changed']]
     new_spice=[n for n in spice28 if n not in spice20]
     removed_spice=[n for n in spice20 if n not in spice28]
+    updater_semantics_unchanged=not(spotify_changed or spice_changed or new_spice or removed_spice)
+    semver_literals_unchanged=(semver20==semver28)
+    roadmap_closed=updater_semantics_unchanged and semver_literals_unchanged
+    if not roadmap_closed:
+        reason='current updater semantics or Spicetify semver literal surface differs from the exact v0.6.20 code that passed the current-upstream audits; review the delta before closure'
+    else:
+        reason='exact v0.6.28/r17 preserves every audited Spotify updater function and every Spicetify updater-related function from the exact v0.6.20 code that passed PRs #47-#49; no new Spicetify semver literal was introduced, and current r17 addon authority/provenance audits are complete, so no external updater retest or r18 production change is justified for the currently known roadmap scope'
 
     report={
       'schema':1,'audit':'post-r17-roadmap-closure-v0.1.0','production_base':BASE,'validation_head':git('rev-parse','HEAD'),
@@ -114,21 +116,22 @@ def main():
       'prior_validation_evidence':KNOWN_COMPLETED,
       'spotify_updater_function_comparison':{'targets':spotify_rows,'changed':spotify_changed},
       'spicetify_updater_function_comparison':{'v20_names':spice20,'v28_names':spice28,'rows':spice_rows,'changed':spice_changed,'new':new_spice,'removed':removed_spice},
-      'spicetify_semver_literals':{'v0.6.20':semver20,'v0.6.28':semver28},
+      'spicetify_semver_literals':{'v0.6.20':semver20,'v0.6.28':semver28,'unchanged':semver_literals_unchanged},
       'addon_policy':{'automatic_authority':auto,'protected_contracts':protected},
       'completed_current_r17_evidence':{
         'pithaya_provenance_audit_run':40508042354,
         'ivlyrics_v7016_acceptance_run':40509106218,
         'sc_cover_ambience_production_release':'0.6.28/r17',
-        'star_ratings_provenance':'0.6.27/r16',
-        'tagify_provenance':'0.6.26/r15',
-        'splitify_provenance':'0.6.25/r14',
+        'star_ratings_provenance':'0.6.27/r16','tagify_provenance':'0.6.26/r15','splitify_provenance':'0.6.25/r14',
       },
       'decision':{
+        'updater_semantics_unchanged_since_current_upstream_audits':updater_semantics_unchanged,
+        'prior_current_upstream_audits_transfer_to_exact_r17':roadmap_closed,
+        'needs_external_updater_retest':not roadmap_closed,
+        'known_roadmap_scope_closed':roadmap_closed,
         'production_change_justified':False,
         'r18_release_justified':False,
-        'needs_external_updater_retest':bool(spotify_changed or spice_changed or new_spice or removed_spice),
-        'reason':'current-vs-v0.6.20 updater function delta inventory completed; any changed updater functions require semantic review against the already-successful current-upstream audits before declaring roadmap closure',
+        'reason':reason,
       }
     }
     OUT.write_text(json.dumps(report,indent=2,sort_keys=True)+'\n',encoding='utf-8')
@@ -137,6 +140,7 @@ def main():
     print('POST_R17_SPICETIFY_NEW='+','.join(new_spice))
     print('POST_R17_SPICETIFY_REMOVED='+','.join(removed_spice))
     print('POST_R17_SEMVER_LITERALS='+','.join(semver28))
+    print('POST_R17_KNOWN_ROADMAP_SCOPE_CLOSED='+str(roadmap_closed).lower())
     print('POST_R17_ROADMAP_CLOSURE_AUDIT_PASS')
 
 if __name__=='__main__':main()
