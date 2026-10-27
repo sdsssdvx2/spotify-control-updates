@@ -64,6 +64,7 @@ jobs:
           $p='validation/marketplace-lifecycle-identity-ledger-v0.1.0/marketplace-identity-ledger.ps1'
           $t=Get-Content -LiteralPath $p -Raw
           foreach($needle in @(
+            'function Update-MarketplaceIdentityLifecycleLedger',
             "managed_by','marketplace-record-v1'",
             "mutation_mode','deny'",
             'safe_to_expand_mutation_authority',
@@ -73,7 +74,7 @@ jobs:
             'mutation_performed',
             'user_removed',
             'reinstalled_at',
-            'source_identity drift',
+            'Marketplace source identity drift for stable key',
             'Duplicate Marketplace identity in report'
           )){if(-not $t.Contains($needle)){throw "Missing fail-closed contract marker: $needle"}}
           if($t -match "mutation_mode\s*=\s*'auto'"){throw 'Validation core must never grant auto mutation authority.'}
