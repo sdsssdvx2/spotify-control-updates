@@ -21,38 +21,116 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Prove validation-only scope
+        shell: pwsh
+        run: |
+          $base = 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          $changed = @(git diff --name-only "$base...HEAD")
+          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect validation diff.' }
+          foreach ($path in $changed) {
+            if ($path -notlike 'validation/settings-preserving-addon-lifecycle-v0.1.0/*' -and $path -ne '.github/workflows/validate-settings-preserving-addon-lifecycle-v010.yml') {
+              throw "Validation branch modified production/out-of-scope path: $path"
+            }
+          }
+          Write-Host ('VALIDATION_ONLY_SCOPE_PASS=' + ($changed -join '|'))
+
       - name: Reconstruct exact r17 and audit mutation surfaces
         shell: pwsh
         run: |
           python validation/settings-preserving-addon-lifecycle-v0.1.0/audit_current_r17.py
 
-      - name: Parse reconstructed Addon Manager with Windows PowerShell
+      - name: Build deterministic state-guard candidate twice
+        shell: pwsh
+        run: |
+          $builder = 'validation/settings-preserving-addon-lifecycle-v0.1.0/build_candidate.py'
+          $candidate = 'validation/settings-preserving-addon-lifecycle-v0.1.0/out-candidate/addon-manager-state-guard-candidate.ps1'
+          python $builder
+          if ($LASTEXITCODE -ne 0) { throw 'First candidate build failed.' }
+          $sha1 = (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant()
+          $size1 = (Get-Item -LiteralPath $candidate).Length
+          python $builder
+          if ($LASTEXITCODE -ne 0) { throw 'Second candidate build failed.' }
+          $sha2 = (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant()
+          $size2 = (Get-Item -LiteralPath $candidate).Length
+          if ($sha1 -ne $sha2 -or $size1 -ne $size2) { throw 'Candidate build is not deterministic.' }
+          Write-Host "STATE_GUARD_DETERMINISTIC_BUILD_PASS size=$size1 sha256=$sha1"
+
+      - name: Prove candidate wiring and unchanged mutation authority
+        shell: pwsh
+        run: |
+          $path = 'validation/settings-preserving-addon-lifecycle-v0.1.0/out-candidate/addon-manager-state-guard-candidate.ps1'
+          $text = [IO.File]::ReadAllText((Resolve-Path $path))
+          $matches = [regex]::Matches($text, '(?m)^function\s+([A-Za-z0-9_-]+)\s*\{')
+          $functions = @{}
+          for ($i = 0; $i -lt $matches.Count; $i++) {
+            $start = $matches[$i].Index
+            $end = if ($i + 1 -lt $matches.Count) { $matches[$i + 1].Index } else { $text.Length }
+            $functions[$matches[$i].Groups[1].Value] = $text.Substring($start, $end - $start)
+          }
+          foreach ($required in @('Get-AddonUserStateTargets','Get-AddonUserStateEntrySnapshot','Get-AddonUserStateSnapshot','New-AddonUserStateTransactionBackup','Test-AddonUserStateSnapshotUnchanged','Restore-AddonUserStateTransactionBackup','Invoke-AddonUserStateGuardSelfTest','Update-AutoApps','Commit-LastTransaction','Rollback-LastTransaction','Get-AddonPolicyRegistry')) {
+            if (-not $functions.ContainsKey($required)) { throw "Missing candidate function: $required" }
+          }
+          $registry = $functions['Get-AddonPolicyRegistry']
+          $auto = @([regex]::Matches($registry, "name='([^']+)'.*?mutation_mode='auto'", 'IgnoreCase') | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
+          $expected = @('better-local-files','eternal-jukebox','ivLyrics','playlist-maker') | Sort-Object
+          if (($auto -join '|').ToLowerInvariant() -ne ($expected -join '|').ToLowerInvariant()) { throw "Mutation authority changed unexpectedly: $($auto -join '|')" }
+          $update = $functions['Update-AutoApps']
+          $guardPos = $update.IndexOf('New-AddonUserStateTransactionBackup -TxId $txid')
+          $appBackupPos = $update.IndexOf('New-PithayaTransactionBackup')
+          $swapPos = $update.IndexOf('Invoke-AtomicDirectorySwap')
+          if ($guardPos -lt 0 -or $appBackupPos -lt 0 -or $swapPos -lt 0 -or -not ($guardPos -lt $appBackupPos -and $appBackupPos -lt $swapPos)) { throw 'User-state backup is not guaranteed before app backup/swap.' }
+          if ($functions['New-AddonUserStateTransactionBackup'] -match '\bTest-Due\b') { throw 'Transaction user-state backup incorrectly inherited the 168-hour periodic gate.' }
+          if ($functions['Commit-LastTransaction'] -notmatch 'Test-AddonUserStateSnapshotUnchanged') { throw 'Commit does not verify protected user state.' }
+          if ($functions['Commit-LastTransaction'] -match 'Restore-AddonUserStateTransactionBackup') { throw 'Commit may overwrite user state automatically.' }
+          if ($functions['Rollback-LastTransaction'] -match 'Restore-AddonUserStateTransactionBackup') { throw 'App rollback may overwrite possibly newer user state.' }
+          if ($functions['Restore-AddonUserStateTransactionBackup'] -notmatch 'AllowOverwriteCurrent') { throw 'Explicit overwrite authorization is missing from user-state restore.' }
+          $targets = $functions['Get-AddonUserStateTargets']
+          foreach ($needle in @('Browser','Default','IndexedDB','Local Storage','local-users','roaming-users','roaming-prefs','spicetify-config')) {
+            if ($targets -notmatch [regex]::Escape($needle)) { throw "Protected target missing: $needle" }
+          }
+          Write-Host ('STATE_GUARD_WIRING_PASS auto=' + ($auto -join '|'))
+
+      - name: Parse reconstructed r17 and candidate with Windows PowerShell
         shell: powershell
         run: |
-          $path = 'validation/settings-preserving-addon-lifecycle-v0.1.0/out/addon-manager-r17.ps1'
-          $text = [IO.File]::ReadAllText((Resolve-Path $path))
-          $tokens = $null
-          $errors = $null
-          [void][System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$tokens, [ref]$errors)
-          if ($errors.Count -ne 0) {
-            $errors | ForEach-Object { Write-Error $_.Message }
-            throw 'Reconstructed r17 Addon Manager failed Windows PowerShell parse.'
+          foreach ($path in @(
+            'validation/settings-preserving-addon-lifecycle-v0.1.0/out/addon-manager-r17.ps1',
+            'validation/settings-preserving-addon-lifecycle-v0.1.0/out-candidate/addon-manager-state-guard-candidate.ps1'
+          )) {
+            $text = [IO.File]::ReadAllText((Resolve-Path $path))
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$tokens, [ref]$errors)
+            if ($errors.Count -ne 0) {
+              $errors | ForEach-Object { Write-Error $_.Message }
+              throw "PowerShell parse failed: $path"
+            }
           }
-          Write-Host 'R17_WINDOWS_POWERSHELL_PARSE_PASS'
+          Write-Host 'R17_AND_STATE_GUARD_WINDOWS_POWERSHELL_PARSE_PASS'
 
-      - name: Run reconstructed r17 read-only SelfTest with synthetic Spotify root
+      - name: Run transaction-coupled user-state guard self-test
         shell: powershell
         run: |
           $spotifyRoot = Join-Path $env:LOCALAPPDATA 'Spotify'
           New-Item -ItemType Directory -Force -Path $spotifyRoot | Out-Null
-          & 'validation/settings-preserving-addon-lifecycle-v0.1.0/out/addon-manager-r17.ps1' -Action SelfTest
-          if ($LASTEXITCODE -ne 0) { throw "Addon Manager SelfTest failed: $LASTEXITCODE" }
+          & 'validation/settings-preserving-addon-lifecycle-v0.1.0/out-candidate/addon-manager-state-guard-candidate.ps1' -Action UserStateGuardSelfTest
+          if ($LASTEXITCODE -ne 0) { throw "User-state guard self-test failed: $LASTEXITCODE" }
 
-      - name: Upload exact audit evidence
+      - name: Run candidate full read-only SelfTest
+        shell: powershell
+        run: |
+          $spotifyRoot = Join-Path $env:LOCALAPPDATA 'Spotify'
+          New-Item -ItemType Directory -Force -Path $spotifyRoot | Out-Null
+          & 'validation/settings-preserving-addon-lifecycle-v0.1.0/out-candidate/addon-manager-state-guard-candidate.ps1' -Action SelfTest
+          if ($LASTEXITCODE -ne 0) { throw "Candidate Addon Manager SelfTest failed: $LASTEXITCODE" }
+
+      - name: Upload exact audit and candidate evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: settings-preserving-addon-lifecycle-v010-r17-audit
-          path: validation/settings-preserving-addon-lifecycle-v0.1.0/out/
+          name: settings-preserving-addon-lifecycle-v010-state-guard
+          path: |
+            validation/settings-preserving-addon-lifecycle-v0.1.0/out/
+            validation/settings-preserving-addon-lifecycle-v0.1.0/out-candidate/
           if-no-files-found: error
           retention-days: 14
