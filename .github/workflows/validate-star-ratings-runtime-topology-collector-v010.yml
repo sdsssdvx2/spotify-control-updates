@@ -110,7 +110,7 @@ jobs:
             if($after -cne $before){throw "Collector mutated source fixture: $kind"}
             $report=Get-Content $out -Raw|ConvertFrom-Json
             $want=[string]$expected.$kind
-            if([string]$report.derived.topology -cne $want){throw "Topology mismatch for $kind: $($report.derived.topology) != $want"}
+            if([string]$report.derived.topology -cne $want){throw "Topology mismatch for ${kind}: $($report.derived.topology) != $want"}
             if($report.read_only -ne $true -or $report.mutation_performed -ne $false -or [string]$report.spotify_process_action -cne 'none'){throw "Read-only contract failed for $kind"}
             if($report.derived.safe_to_expand_mutation_authority -ne $false){throw "Collector unexpectedly granted authority for $kind"}
             Write-Host "STAR_RATINGS_TOPOLOGY_FIXTURE_PASS kind=$kind topology=$want marketplace=$($report.marketplace.status)"
