@@ -9,7 +9,7 @@ on:
       - '.github/workflows/validate-marketplace-source-topology-v011.yml'
   pull_request:
     branches:
-      - main
+      - validate/marketplace-integrated-engine-v0.2.0
     paths:
       - 'validation/marketplace-source-topology-v0.1.0/**'
       - '.github/workflows/validate-marketplace-source-topology-v011.yml'
