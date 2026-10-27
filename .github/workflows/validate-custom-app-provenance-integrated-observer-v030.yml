@@ -1,0 +1,160 @@
+name: Validate Custom App Provenance Integrated Observer v0.3.0
+
+on:
+  push:
+    branches:
+      - validate/custom-app-provenance-integrated-observer-v0.3.0
+    paths:
+      - 'validation/custom-app-provenance-integrated-observer-v0.3.0/**'
+      - '.github/workflows/validate-custom-app-provenance-integrated-observer-v030.yml'
+  pull_request:
+    branches:
+      - validate/custom-app-provenance-enrollment-v0.1.0
+    paths:
+      - 'validation/custom-app-provenance-integrated-observer-v0.3.0/**'
+      - '.github/workflows/validate-custom-app-provenance-integrated-observer-v030.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact validation-only scope and parent lineage
+        shell: powershell
+        run: |
+          $actual=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $expected){throw "Not exact event head: $actual != $expected"}
+          $parent='b339f2b79a267c13cf3c5974aea2fff3786d3093'
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'Observer candidate is not descended from exact validated provenance head.'}
+          $allowed=@(
+            '.github/workflows/validate-custom-app-provenance-integrated-observer-v030.yml',
+            'validation/custom-app-provenance-integrated-observer-v0.3.0/build_candidate.py'
+          )
+          $changed=@(git diff --name-only "$parent...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Observer validation scope escaped: $($bad -join ', ')"}
+          foreach($required in $allowed){if($required -notin $changed){throw "Missing expected observer validation file: $required"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved during observer validation.'}
+          Write-Host "CUSTOM_APP_PROVENANCE_OBSERVER_SCOPE_PASS head=$actual"
+
+      - name: Prove all validated source identities are exact immutable blobs
+        shell: powershell
+        run: |
+          $pins=@(
+            @('4b7ef73fe416afdfb501173f145994b3ed817e42','validation/marketplace-source-topology-v0.1.0/build_candidate.py','1e32dd57c95f718f2aeaae6149da36762ca7f6fd'),
+            @('b339f2b79a267c13cf3c5974aea2fff3786d3093','validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1','4f0831fa2e5dc23c9a4ec98b6c7a9afbb3c9af55'),
+            @('b339f2b79a267c13cf3c5974aea2fff3786d3093','validation/custom-app-provenance-enrollment-v0.1.0/test_custom_app_provenance.ps1','50a2f10dd5b6b53f9e5a06284a53bc5dfc017f7d'),
+            @('62cc0803411ccd132e3bad3b6338b2ef783e0f4c','validation/marketplace-native-refresh-contract-v0.1.0/marketplace-native-refresh-contract.ps1','bd895ebcc11d9fb2f1c7857ee861e5b9e2c2cc3c')
+          )
+          foreach($pin in $pins){$actual=(git rev-parse "$($pin[0])`:$($pin[1])").Trim();if($actual -cne $pin[2]){throw "Pinned blob drift: $($pin[1]) $actual != $($pin[2])"}}
+          Write-Host 'CUSTOM_APP_PROVENANCE_OBSERVER_PINS_PASS'
+
+      - name: Re-run exact custom app provenance acceptance matrix
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-provenance-enrollment-v0.1.0/test_custom_app_provenance.ps1'
+          if($LASTEXITCODE -ne 0){throw 'Custom App provenance acceptance matrix failed.'}
+          Write-Host 'CUSTOM_APP_PROVENANCE_MATRIX_REPLAY_PASS'
+
+      - name: Re-run exact Marketplace native refresh contract self-test
+        shell: powershell
+        run: |
+          $tmp=Join-Path $env:RUNNER_TEMP 'marketplace-native-refresh-contract.ps1'
+          git show '62cc0803411ccd132e3bad3b6338b2ef783e0f4c:validation/marketplace-native-refresh-contract-v0.1.0/marketplace-native-refresh-contract.ps1' | Set-Content -LiteralPath $tmp -Encoding UTF8
+          $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile($tmp,[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Native refresh contract parse failed.'}
+          . $tmp
+          Invoke-MarketplaceNativeRefreshContractSelfTest
+          foreach($fixture in @(
+            [pscustomobject]@{kind='extension';source_kind='github-repository-key';ambiguous=$false;mutation_authorized=$false},
+            [pscustomobject]@{kind='theme';source_kind='github-repository-key';ambiguous=$false;mutation_authorized=$false},
+            [pscustomobject]@{kind='snippet';source_kind='snippet-key';ambiguous=$false;mutation_authorized=$false},
+            [pscustomobject]@{kind='unlisted';source_kind='github-repository-key';ambiguous=$false;mutation_authorized=$false}
+          )){if((Resolve-MarketplaceNativeRefreshContract $fixture).addon_manager_direct_mutation_allowed){throw "Native refresh contract granted direct mutation for $($fixture.kind)"}}
+          Write-Host 'MARKETPLACE_NATIVE_REFRESH_REPLAY_PASS'
+
+      - name: Build observer candidate twice and prove determinism
+        shell: powershell
+        run: |
+          $dir='validation/custom-app-provenance-integrated-observer-v0.3.0'
+          python "$dir/build_candidate.py" --build
+          if($LASTEXITCODE -ne 0){throw 'First observer candidate build failed.'}
+          $addon="$dir/out/bin/addon-manager.ps1";$main="$dir/out/bin/spotify-control.ps1";$report="$dir/candidate-validation.json"
+          $h1=(Get-FileHash -LiteralPath $addon -Algorithm SHA256).Hash.ToLowerInvariant();$s1=(Get-Item -LiteralPath $addon).Length
+          $m1=(Get-FileHash -LiteralPath $main -Algorithm SHA256).Hash.ToLowerInvariant();$ms1=(Get-Item -LiteralPath $main).Length
+          $r1=(Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash.ToLowerInvariant()
+          Remove-Item -LiteralPath "$dir/out" -Recurse -Force
+          Remove-Item -LiteralPath $report -Force
+          python "$dir/build_candidate.py" --build
+          if($LASTEXITCODE -ne 0){throw 'Second observer candidate build failed.'}
+          $h2=(Get-FileHash -LiteralPath $addon -Algorithm SHA256).Hash.ToLowerInvariant();$s2=(Get-Item -LiteralPath $addon).Length
+          $m2=(Get-FileHash -LiteralPath $main -Algorithm SHA256).Hash.ToLowerInvariant();$ms2=(Get-Item -LiteralPath $main).Length
+          $r2=(Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($h1 -cne $h2 -or $s1 -ne $s2){throw "Addon candidate is nondeterministic: $s1/$h1 vs $s2/$h2"}
+          if($m1 -cne $m2 -or $ms1 -ne $ms2){throw "Main candidate is nondeterministic: $ms1/$m1 vs $ms2/$m2"}
+          if($r1 -cne $r2){throw "Validation report is nondeterministic: $r1 vs $r2"}
+          if($ms2 -ne 284327 -or $m2 -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Validated Spotify Control bytes changed.'}
+          "OBSERVER_ADDON_SHA256=$h2"|Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "OBSERVER_ADDON_SIZE=$s2"|Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "CUSTOM_APP_PROVENANCE_OBSERVER_DETERMINISM_PASS addon_size=$s2 addon_sha256=$h2"
+
+      - name: Parse integrated candidate with Windows PowerShell 5.1 and run full Addon Manager SelfTest
+        shell: powershell
+        run: |
+          $addon=Resolve-Path 'validation/custom-app-provenance-integrated-observer-v0.3.0/out/bin/addon-manager.ps1'
+          $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile($addon,[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Integrated observer candidate PowerShell 5.1 parse failed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Integrated observer Addon Manager SelfTest failed.'}
+          Write-Host 'CUSTOM_APP_PROVENANCE_OBSERVER_SELFTEST_PASS'
+
+      - name: Audit deny-by-default authority and protected policy retention
+        shell: powershell
+        run: |
+          $addon=Get-Content 'validation/custom-app-provenance-integrated-observer-v0.3.0/out/bin/addon-manager.ps1' -Raw
+          foreach($marker in @(
+            "managed_by='custom-app-provenance-v1'","mutation_mode='deny'",'auto_update_authorized=$false','auto_install_authorized=$false',
+            'Test-CustomAppProvenanceMutationAuthority -Row $provRow','Resolve-MarketplaceNativeRefreshContract -Record $record',
+            'addon_manager_direct_mutation_allowed','source-change-blocked','New-RequiredSpotifyPersistenceBackup','Restore-SpotifyPersistenceBackup',
+            'must-remain-byte-identical-through-apply','playlist-backed-ratings-preserve','never-disable-or-optimize','preserve-ratings-tags-notes-and-browser-storage'
+          )){if($addon.IndexOf($marker,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Integrated observer safety marker missing: $marker"}}
+          $report=Get-Content 'validation/custom-app-provenance-integrated-observer-v0.3.0/candidate-validation.json' -Raw|ConvertFrom-Json
+          if([bool]$report.custom_app_provenance_mutation_authority_expanded -or [bool]$report.marketplace_direct_mutation_authority_expanded){throw 'Generic mutation authority expanded.'}
+          $expected=@('better-local-files','eternal-jukebox','ivLyrics','playlist-maker','tagify')
+          $actual=@($report.auto_authority)
+          if((Compare-Object ($expected|Sort-Object) ($actual|Sort-Object))){throw "Auto authority drift: $($actual -join ', ')"}
+          Write-Host 'CUSTOM_APP_PROVENANCE_OBSERVER_AUTHORITY_AUDIT_PASS'
+
+      - name: Prove production and validated parent surfaces remain immutable
+        shell: powershell
+        run: |
+          $parent='b339f2b79a267c13cf3c5974aea2fff3786d3093'
+          $changed=@(git diff --name-only "$parent...HEAD")
+          $expected=@('.github/workflows/validate-custom-app-provenance-integrated-observer-v030.yml','validation/custom-app-provenance-integrated-observer-v0.3.0/build_candidate.py')
+          $bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "Unexpected committed changed surface: $($bad -join ', ')"}
+          foreach($path in @('bin/spotify-control.ps1','bin/addon-manager.ps1','manifest.json','stable-version.json')){
+            git diff --quiet $parent HEAD -- $path
+            if($LASTEXITCODE -ne 0){throw "Production surface changed: $path"}
+          }
+          Write-Host 'CUSTOM_APP_PROVENANCE_OBSERVER_IMMUTABILITY_PASS'
+
+      - name: Upload observer validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-provenance-integrated-observer-v030-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            validation/custom-app-provenance-integrated-observer-v0.3.0/out/bin/spotify-control.ps1
+            validation/custom-app-provenance-integrated-observer-v0.3.0/out/bin/addon-manager.ps1
+            validation/custom-app-provenance-integrated-observer-v0.3.0/out/bin/Collect-Marketplace-Records.ps1
+            validation/custom-app-provenance-integrated-observer-v0.3.0/out/bin/LevelDbReadOnly.cs
+            validation/custom-app-provenance-integrated-observer-v0.3.0/candidate-validation.json
