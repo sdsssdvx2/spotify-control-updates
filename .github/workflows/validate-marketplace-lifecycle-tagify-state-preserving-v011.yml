@@ -1,0 +1,115 @@
+name: Validate Tagify State-Preserving Marketplace Lifecycle v0.1.1
+
+on:
+  push:
+    branches:
+      - validate/marketplace-lifecycle-tagify-state-preserving-v0.1.1
+    paths:
+      - 'validation/marketplace-lifecycle-tagify-state-preserving-v0.1.1/**'
+      - '.github/workflows/validate-marketplace-lifecycle-tagify-state-preserving-v011.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/marketplace-lifecycle-tagify-state-preserving-v0.1.1/**'
+      - '.github/workflows/validate-marketplace-lifecycle-tagify-state-preserving-v011.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact clean validation scope and pinned v0.1.0 lineage
+        shell: powershell
+        run: |
+          $base='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          $old='750c5dca0087d9bc8dd69b75dcc301b5e83ad0ec'
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'v0.1.1 validation is not based on exact stable main.'}
+          git cat-file -e "$old^{commit}";if($LASTEXITCODE -ne 0){throw 'Pinned v0.1.0 validation commit is unavailable.'}
+          foreach($p in @('validation/marketplace-lifecycle-tagify-state-preserving-v0.1.0/build_candidate.py','validation/marketplace-lifecycle-tagify-state-preserving-v0.1.0/test_tagify_state_preserving.ps1')){git cat-file -e "$old`:$p";if($LASTEXITCODE -ne 0){throw "Pinned v0.1.0 source is unavailable: $p"}}
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allowed=@('validation/marketplace-lifecycle-tagify-state-preserving-v0.1.1/build_candidate.py','.github/workflows/validate-marketplace-lifecycle-tagify-state-preserving-v011.yml')
+          $bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Out-of-scope files: $($bad -join ', ')"}
+          if($changed.Count -ne 2){throw "Expected exactly 2 clean validation files, got $($changed.Count): $($changed -join ', ')"}
+          Write-Host "TAGIFY_LIFECYCLE_V011_SCOPE_PASS head=$((git rev-parse HEAD).Trim()) pinned_v010=$old"
+
+      - name: Build corrected candidate twice and prove deterministic identity
+        shell: powershell
+        run: |
+          $dir='validation/marketplace-lifecycle-tagify-state-preserving-v0.1.1'
+          python -m py_compile "$dir/build_candidate.py";if($LASTEXITCODE -ne 0){throw 'v0.1.1 builder Python compile failed.'}
+          python "$dir/build_candidate.py";if($LASTEXITCODE -ne 0){throw 'First v0.1.1 build failed.'}
+          $main=Join-Path $dir 'out/bin/spotify-control.ps1';$addon=Join-Path $dir 'out/bin/addon-manager.ps1'
+          $m1=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant();$a1=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant();$ms1=(Get-Item $main).Length;$as1=(Get-Item $addon).Length
+          if($ms1 -ne 284327 -or $m1 -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw "Candidate main identity drift: $ms1/$m1"}
+          Remove-Item -LiteralPath (Join-Path $dir 'out') -Recurse -Force
+          python "$dir/build_candidate.py";if($LASTEXITCODE -ne 0){throw 'Second v0.1.1 build failed.'}
+          $m2=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant();$a2=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant();$ms2=(Get-Item $main).Length;$as2=(Get-Item $addon).Length
+          if($m2 -cne $m1 -or $a2 -cne $a1 -or $ms2 -ne $ms1 -or $as2 -ne $as1){throw 'Corrected candidate is not deterministic.'}
+          "$a2|$as2"|Set-Content $env:RUNNER_TEMP\tagify-v011-addon.txt -Encoding ASCII
+          Write-Host "TAGIFY_LIFECYCLE_V011_DETERMINISM_PASS main=$m2/$ms2 addon=$a2/$as2"
+
+      - name: Materialize pinned transaction acceptance and parse all PowerShell 5.1 sources
+        shell: powershell
+        run: |
+          $old='750c5dca0087d9bc8dd69b75dcc301b5e83ad0ec';$dir='validation/marketplace-lifecycle-tagify-state-preserving-v0.1.1'
+          $test=Join-Path $env:RUNNER_TEMP 'test_tagify_state_preserving.ps1'
+          git show "$old`:validation/marketplace-lifecycle-tagify-state-preserving-v0.1.0/test_tagify_state_preserving.ps1" | Set-Content -LiteralPath $test -Encoding UTF8
+          foreach($p in @((Join-Path $dir 'out/bin/spotify-control.ps1'),(Join-Path $dir 'out/bin/addon-manager.ps1'),$test)){$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Error ("{0}:{1} {2}" -f $p,$_.Extent.StartLineNumber,$_.Message)};throw "PowerShell 5.1 parse failed: $p"}}
+          Write-Host 'TAGIFY_LIFECYCLE_V011_PS51_PARSE_PASS'
+
+      - name: Audit corrected package identity and exact policy expansion
+        shell: powershell
+        run: |
+          $dir='validation/marketplace-lifecycle-tagify-state-preserving-v0.1.1';$addon=Get-Content (Join-Path $dir 'out/bin/addon-manager.ps1') -Raw
+          if(-not $addon.Contains("if([string]`$pkg.name -cne 'tagify-secret'){throw 'Tagify package identity mismatch.'}")){throw 'Correct Tagify package identity contract is missing.'}
+          if($addon.Contains("if(([string]`$pkg.name).ToLowerInvariant() -ne 'tagify')")){throw 'Rejected v0.1.0 package identity assumption remains.'}
+          foreach($required in @("name='tagify'; kind='custom-app'; source='alexk218/tagify'; inventory_policy='auto'; mutation_mode='auto'; handler='tagify'; install_mode='installed-only'","data_policy='preserve-ratings-tags-notes-and-browser-storage'","id='tagify-release-state-v1'","protected_state_kind='tagify-browser-storage-v1'",'must-remain-byte-identical-through-apply',"name='splitify'; kind='custom-app'; source='alexander-rebello/splitify'; inventory_policy='monitor-only'; mutation_mode='deny'","data_policy='never-disable-or-optimize'")){if(-not $addon.Contains($required)){throw "Required lifecycle/policy marker missing: $required"}}
+          $report=Get-Content (Join-Path $dir 'candidate-validation.json') -Raw|ConvertFrom-Json
+          if($report.correction.package_name_contract -cne 'tagify-secret' -or $report.correction.production_surface_changed -ne $false){throw 'Correction evidence contract mismatch.'}
+          if(($report.auto_authority -join ',') -cne 'better-local-files,eternal-jukebox,ivLyrics,playlist-maker,tagify'){throw 'Auto authority set mismatch.'}
+          Write-Host 'TAGIFY_LIFECYCLE_V011_POLICY_AUDIT_PASS'
+
+      - name: Run full candidate Addon Manager SelfTest in isolated profile
+        shell: powershell
+        run: |
+          $dir='validation/marketplace-lifecycle-tagify-state-preserving-v0.1.1';$root=Join-Path $env:RUNNER_TEMP 'tagify-v011-selftest'
+          $env:LOCALAPPDATA=Join-Path $root 'LocalAppData';$env:APPDATA=Join-Path $root 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $dir 'out/bin/addon-manager.ps1') -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Corrected candidate Addon Manager SelfTest failed.'}
+          Write-Host 'TAGIFY_LIFECYCLE_V011_ADDON_SELFTEST_PASS'
+
+      - name: Run pinned official-release state-preserving transaction acceptance
+        shell: powershell
+        run: |
+          $dir='validation/marketplace-lifecycle-tagify-state-preserving-v0.1.1';$test=Join-Path $env:RUNNER_TEMP 'test_tagify_state_preserving.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test -CandidatePath (Resolve-Path (Join-Path $dir 'out/bin/addon-manager.ps1'))
+          if($LASTEXITCODE -ne 0){throw 'Corrected Tagify state-preserving transaction acceptance failed.'}
+
+      - name: Prove stable production surfaces remain byte-identical
+        shell: powershell
+        run: |
+          $base='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          foreach($p in @('manifest.json','README.md','packages/v0.6.28/spotify-control.ps1','packages/v0.6.28/addon-manager.ps1','bin/spotify-control-agent.vbs','bootstrap/spotify-control-self-updater.ps1')){$a=(git rev-parse "$base`:$p").Trim();$b=(git rev-parse "HEAD`:$p").Trim();if($a -cne $b){throw "Production surface changed: $p"}}
+          Write-Host 'TAGIFY_LIFECYCLE_V011_PRODUCTION_UNCHANGED_PASS'
+
+      - name: Upload corrected validation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: tagify-state-preserving-lifecycle-v011
+          path: |
+            validation/marketplace-lifecycle-tagify-state-preserving-v0.1.1/candidate-validation.json
+            validation/marketplace-lifecycle-tagify-state-preserving-v0.1.1/out/bin/spotify-control.ps1
+            validation/marketplace-lifecycle-tagify-state-preserving-v0.1.1/out/bin/addon-manager.ps1
+          if-no-files-found: error
+          compression-level: 0
