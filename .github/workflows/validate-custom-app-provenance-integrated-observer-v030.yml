@@ -81,7 +81,7 @@ jobs:
           )){if((Resolve-MarketplaceNativeRefreshContract $fixture).addon_manager_direct_mutation_allowed){throw "Native refresh contract granted direct mutation for $($fixture.kind)"}}
           Write-Host 'MARKETPLACE_NATIVE_REFRESH_REPLAY_PASS'
 
-      - name: Build observer candidate twice and prove determinism
+      - name: Build observer candidate twice and prove exact deterministic identity
         shell: powershell
         run: |
           $dir='validation/custom-app-provenance-integrated-observer-v0.3.0'
@@ -102,6 +102,7 @@ jobs:
           if($m1 -cne $m2 -or $ms1 -ne $ms2){throw "Main candidate is nondeterministic: $ms1/$m1 vs $ms2/$m2"}
           if($r1 -cne $r2){throw "Validation report is nondeterministic: $r1 vs $r2"}
           if($ms2 -ne 284327 -or $m2 -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Validated Spotify Control bytes changed.'}
+          if($s2 -ne 428643 -or $h2 -cne '8de197a78e40faad6e934c0eef4bb123f6652fc6e35cf440733c813c6df86e52'){throw "Pinned observer Addon Manager identity drift: $s2/$h2"}
           "OBSERVER_ADDON_SHA256=$h2"|Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "OBSERVER_ADDON_SIZE=$s2"|Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host "CUSTOM_APP_PROVENANCE_OBSERVER_DETERMINISM_PASS addon_size=$s2 addon_sha256=$h2"
@@ -112,6 +113,9 @@ jobs:
           $addon=Resolve-Path 'validation/custom-app-provenance-integrated-observer-v0.3.0/out/bin/addon-manager.ps1'
           $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile($addon,[ref]$tokens,[ref]$errors)|Out-Null
           if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Integrated observer candidate PowerShell 5.1 parse failed.'}
+          $root=Join-Path $env:RUNNER_TEMP 'custom-app-provenance-observer-selftest'
+          $env:LOCALAPPDATA=Join-Path $root 'LocalAppData';$env:APPDATA=Join-Path $root 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
           if($LASTEXITCODE -ne 0){throw 'Integrated observer Addon Manager SelfTest failed.'}
           Write-Host 'CUSTOM_APP_PROVENANCE_OBSERVER_SELFTEST_PASS'
