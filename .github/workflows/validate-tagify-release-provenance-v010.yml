@@ -1,0 +1,203 @@
+name: Validate Tagify Exact Release Provenance v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/tagify-release-provenance-v0.1.0
+    paths:
+      - 'validation/tagify-release-provenance-v0.1.0/**'
+      - '.github/workflows/validate-tagify-release-provenance-v010.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/tagify-release-provenance-v0.1.0/**'
+      - '.github/workflows/validate-tagify-release-provenance-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact validation-only scope
+        shell: powershell
+        run: |
+          $base='9b97ffba51060e92e687fadeb361da7ba95a1dd0'
+          $actual=(git rev-parse HEAD).Trim()
+          $eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -ne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Tagify provenance validation is not based on exact stable v0.6.25 main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          $expected=@('.github/workflows/validate-tagify-release-provenance-v010.yml','validation/tagify-release-provenance-v0.1.0/build_candidate.py')
+          if(($changed|Sort-Object) -join '|' -cne ($expected|Sort-Object) -join '|'){throw "Unexpected validation scope: $($changed -join ', ')"}
+          Write-Host "TAGIFY_V010_SCOPE_PASS head=$actual"
+
+      - name: Build deterministic prospective v0.6.26 r15 candidate
+        shell: powershell
+        run: |
+          python -m py_compile validation/tagify-release-provenance-v0.1.0/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'Tagify candidate builder failed Python compile.'}
+          python validation/tagify-release-provenance-v0.1.0/build_candidate.py --build
+          if($LASTEXITCODE -ne 0){throw 'Tagify candidate build failed.'}
+          $main='validation/tagify-release-provenance-v0.1.0/out/bin/spotify-control.ps1'
+          $addon='validation/tagify-release-provenance-v0.1.0/out/bin/addon-manager.ps1'
+          if((Get-Item $main).Length -ne 284311 -or (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'd7b484a2a7b10a27db0f182d71fe36f590784171db7208189540045bcf4f54d1'){throw 'Prospective v0.6.26 main identity mismatch.'}
+          if((Get-Item $addon).Length -ne 291294 -or (Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -ne '4aa56dd5d4ef07da21d3bdf5c76227fabb49c64767a281b1e11ee48e7211a09f'){throw 'Prospective r15 addon identity mismatch.'}
+          Copy-Item $main "$main.first";Copy-Item $addon "$addon.first"
+          python validation/tagify-release-provenance-v0.1.0/build_candidate.py --build
+          if($LASTEXITCODE -ne 0){throw 'Second deterministic Tagify candidate build failed.'}
+          if((Get-FileHash $main -Algorithm SHA256).Hash -cne (Get-FileHash "$main.first" -Algorithm SHA256).Hash){throw 'Main candidate is not deterministic.'}
+          if((Get-FileHash $addon -Algorithm SHA256).Hash -cne (Get-FileHash "$addon.first" -Algorithm SHA256).Hash){throw 'Addon candidate is not deterministic.'}
+          Remove-Item "$main.first","$addon.first" -Force
+          Write-Host 'TAGIFY_V010_DETERMINISTIC_BUILD_PASS'
+
+      - name: Parse candidate and prove protected policy surface
+        shell: powershell
+        run: |
+          $main='validation/tagify-release-provenance-v0.1.0/out/bin/spotify-control.ps1'
+          $addon='validation/tagify-release-provenance-v0.1.0/out/bin/addon-manager.ps1'
+          foreach($file in @($main,$addon)){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0}: {1}" -f $file,$_.Message)};throw "PowerShell 5.1 parser failed: $file"}
+          }
+          $text=Get-Content $addon -Raw
+          foreach($required in @(
+            'function Get-TagifyReleaseCatalog','function Get-TagifyTreeFingerprint','function Resolve-TagifyInstalledReleaseProvenance',
+            '.Sort([System.StringComparer]::OrdinalIgnoreCase)','75d66f6e06ec76c8f96fbc7941617e7330844979a87d3297e8e4ff824c3b6a1a',
+            'protect-ratings-tags-notes','playlist-backed-ratings-preserve','never-disable-or-optimize',
+            'function Resolve-SplitifyInstalledReleaseProvenance','60311e81ae11727528fd5e34879533e1cfacdaaf7b2b21dd1808fb20e3b32454'
+          )){if($text.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Required protected/provenance contract missing: $required"}}
+          $report=Get-Content validation/tagify-release-provenance-v0.1.0/candidate-report.json -Raw|ConvertFrom-Json
+          if($report.authority_expanded -ne $false -or $report.new_auto_install_authority -ne $false){throw 'Tagify candidate unexpectedly expands authority.'}
+          if(($report.auto_authority -join '|') -ne 'better-local-files|eternal-jukebox|ivLyrics|playlist-maker'){throw 'Automatic authority set drifted.'}
+          if($report.registry_fingerprint -ne '0f05406d7152de1d975f888cb8270be8249115211ba9f41e0157342cd42efbd8' -or $report.source_adapter_fingerprint -ne 'c0611a7b96f6ff09d1e235119efce2f2def6eb6d0a4e8e93e276cfa622c3c42d'){throw 'Registry/source-adapter fingerprint drifted.'}
+          Write-Host 'TAGIFY_V010_POLICY_PARSE_PASS'
+
+      - name: Re-authenticate seven official Tagify release trees and run exact provenance fixtures
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $addon=(Resolve-Path 'validation/tagify-release-provenance-v0.1.0/out/bin/addon-manager.ps1').Path
+          $tokens=$null;$errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile($addon,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw 'Candidate AST parse failed before helper extraction.'}
+          $wanted=@('Test-PathSafe','Get-TagifyReleaseCatalog','Get-TagifyTreeFingerprint','Resolve-TagifyInstalledReleaseProvenance')
+          $defs=@($ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $n.Name},$true))
+          if($defs.Count -ne $wanted.Count){throw "Failed to extract exact candidate helper set. found=$($defs.Name -join ',')"}
+          $harness=Join-Path $env:RUNNER_TEMP 'tagify-provenance-harness.ps1'
+          ($defs|Sort-Object{$wanted.IndexOf($_.Name)}|ForEach-Object{$_.Extent.Text}) -join "`r`n`r`n" | Set-Content -LiteralPath $harness -Encoding UTF8
+          . $harness
+
+          $catalog=@(Get-TagifyReleaseCatalog)
+          $expected=@(
+            [pscustomobject]@{Version='2.5.0';Tag='v2.5.0';Size=494087;Sha='5a47106d50b08aa377a3402258dee94db63797360e21dccf59f81f0827fcaccc';Tree='3b5ba1c33e4415fe530a029fd93af8f0fc84748eb2ac432422f31747a40c28dc';Files=13},
+            [pscustomobject]@{Version='3.0.0';Tag='v3.0.0';Size=909371;Sha='ee04ec7eeb45054b798337ccd9e08f66a2cc881348f74b7a4d2adfbc93ef07b1';Tree='ac6d7f7567d78cbfbb37df40dc3d76273df3dde80f0962efaea3a217dcba99d0';Files=18},
+            [pscustomobject]@{Version='3.1.0';Tag='v3.1.0';Size=1355380;Sha='a84b9c2aefd43035b16edf537b91652b934c09f1ef5037ed17b3738f1e4ecc91';Tree='f896dc5f83acd8272315aa171ea7893d744dc029422b15574da9c60190750c4e';Files=21},
+            [pscustomobject]@{Version='3.2.0';Tag='v3.2.0';Size=1436949;Sha='346f0e746abf3e29aca754240da2e9d2c87e75d7e35fd27109575fed66629c31';Tree='516f364e8519983ae1bd64158b552a3bb68ed54414402e4ab9523f3e6abe1559';Files=22},
+            [pscustomobject]@{Version='3.3.0';Tag='v3.3.0';Size=1470208;Sha='12f2efc0221014464eff2d5884a83bd05882138e87bcd0c208e734538c71604c';Tree='108e8afba7bcab8cfe8657431041a0118140a774ba4996e60ce91cfa8a4cf2d9';Files=22},
+            [pscustomobject]@{Version='3.3.1';Tag='v3.3.1';Size=1471676;Sha='b7510e525297c297d6007305acef947c35bf2df34e0fae492c41a31f555db957';Tree='8f8abd6f80f88321d6517c1496c985da146e313a949e80f4e4b41c34ad27178a';Files=22},
+            [pscustomobject]@{Version='3.3.2';Tag='v3.3.2';Size=1554948;Sha='5261538c8f596cf179b1f6efd20e0a0a60c73b4cd765115fc6bc25c6a6b3b76b';Tree='e751c2692d0edb5d63ac359df0b81c024ddca4f02e9de46cd5e4d8f3266bbf71';Files=22}
+          )
+          if($catalog.Count -ne 7){throw "Tagify candidate catalog must contain exactly seven identity-marked releases; got $($catalog.Count)"}
+          if(($catalog.Version -join '|') -cne ($expected.Version -join '|')){throw "Tagify candidate catalog version set/order drifted: $($catalog.Version -join '|')"}
+
+          $fixtureRoot=Join-Path $env:RUNNER_TEMP 'tagify-provenance-fixtures'
+          Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $fixtureRoot -Force|Out-Null
+          $roots=@{}
+          foreach($row in $expected){
+            $zip=Join-Path $fixtureRoot ("tagify-{0}.zip" -f $row.Version)
+            $url="https://github.com/alexk218/tagify/releases/download/$($row.Tag)/tagify-$($row.Tag).zip"
+            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $zip
+            if((Get-Item $zip).Length -ne [int64]$row.Size){throw "Authenticated Tagify asset size drift: $($row.Version)"}
+            if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne $row.Sha){throw "Authenticated Tagify asset SHA drift: $($row.Version)"}
+            $dest=Join-Path $fixtureRoot ("extract-{0}" -f $row.Version)
+            Expand-Archive -LiteralPath $zip -DestinationPath $dest -Force
+            $root=Join-Path $dest 'tagify'
+            if(-not(Test-Path -LiteralPath $root -PathType Container)){throw "Expected Tagify install root missing: $($row.Version)"}
+            $fp=Get-TagifyTreeFingerprint -RootPath $root
+            if([int]$fp.FileCount -ne [int]$row.Files -or [string]$fp.TreeSha256 -cne [string]$row.Tree){throw "Official Tagify tree fingerprint mismatch: $($row.Version) files=$($fp.FileCount) tree=$($fp.TreeSha256)"}
+            $proof=Resolve-TagifyInstalledReleaseProvenance -InstalledPath $root
+            if(-not[bool]$proof.Proven -or [bool]$proof.Ambiguous -or [string]$proof.Version -cne [string]$row.Version -or [string]$proof.Tag -cne [string]$row.Tag){throw "Exact Tagify release provenance failed: $($row.Version)"}
+            $roots[$row.Version]=$root
+            Write-Host "TAGIFY_EXACT_RELEASE_PROVEN_PASS version=$($row.Version) tree=$($fp.TreeSha256)"
+          }
+
+          $latest=$roots['3.3.2']
+          $originalCulture=[Threading.Thread]::CurrentThread.CurrentCulture
+          $originalUi=[Threading.Thread]::CurrentThread.CurrentUICulture
+          try{
+            foreach($culture in @('en-US','tr-TR','ko-KR')){
+              $ci=[Globalization.CultureInfo]::GetCultureInfo($culture)
+              [Threading.Thread]::CurrentThread.CurrentCulture=$ci;[Threading.Thread]::CurrentThread.CurrentUICulture=$ci
+              $fp=Get-TagifyTreeFingerprint -RootPath $latest
+              if($fp.TreeSha256 -cne 'e751c2692d0edb5d63ac359df0b81c024ddca4f02e9de46cd5e4d8f3266bbf71'){throw "Tagify fingerprint changed under culture $culture"}
+            }
+          }finally{[Threading.Thread]::CurrentThread.CurrentCulture=$originalCulture;[Threading.Thread]::CurrentThread.CurrentUICulture=$originalUi}
+          Write-Host 'TAGIFY_CULTURE_INVARIANCE_PASS'
+
+          foreach($mode in @('extra','missing','content','metadata-version-only')){
+            $drift=Join-Path $fixtureRoot "drift-$mode"
+            Copy-Item -LiteralPath $latest -Destination $drift -Recurse -Force
+            if($mode -eq 'extra'){Set-Content -LiteralPath (Join-Path $drift '__unexpected.txt') -Value 'drift' -Encoding ASCII}
+            elseif($mode -eq 'missing'){Remove-Item -LiteralPath (Join-Path $drift 'package.json') -Force}
+            elseif($mode -eq 'content'){Add-Content -LiteralPath (Join-Path $drift 'manifest.json') -Value ' ' -Encoding UTF8}
+            else{
+              $pkg=Join-Path $drift 'package.json';$raw=Get-Content $pkg -Raw;$raw=$raw.Replace('"version": "3.3.2"','"version": "9.9.9"');Set-Content -LiteralPath $pkg -Value $raw -Encoding UTF8 -NoNewline
+            }
+            $proof=Resolve-TagifyInstalledReleaseProvenance -InstalledPath $drift
+            if([bool]$proof.Proven){throw "Tagify drift incorrectly accepted: $mode"}
+          }
+          Write-Host 'TAGIFY_DRIFT_FAIL_CLOSED_PASS'
+
+          $exact=@($catalog|Where-Object{$_.Version -ceq '3.3.2'})[0]
+          $ambiguous=@($catalog)+@([pscustomobject]@{Version='99.0.0';Tag='v99.0.0';TreeSha256=$exact.TreeSha256;FileCount=$exact.FileCount;AssetSize=1;AssetDigest='sha256:' + ('0'*64)})
+          $amb=Resolve-TagifyInstalledReleaseProvenance -InstalledPath $latest -Catalog $ambiguous
+          if([bool]$amb.Proven -or -not[bool]$amb.Ambiguous -or [int]$amb.MatchCount -ne 2){throw 'Ambiguous Tagify catalog did not fail closed.'}
+          Write-Host 'TAGIFY_AMBIGUOUS_CATALOG_FAIL_CLOSED_PASS'
+
+      - name: Run full candidate Addon Manager read-only SelfTest
+        shell: powershell
+        run: |
+          $addon='validation/tagify-release-provenance-v0.1.0/out/bin/addon-manager.ps1'
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Prospective r15 Addon Manager SelfTest failed.'}
+          Write-Host 'TAGIFY_V010_ADDON_SELFTEST_PASS'
+
+      - name: Prove no production surface or protected authority changed
+        shell: powershell
+        run: |
+          $base='9b97ffba51060e92e687fadeb361da7ba95a1dd0'
+          $changed=@(git diff --name-only "$base...HEAD")
+          foreach($path in $changed){if($path -notlike 'validation/tagify-release-provenance-v0.1.0/*' -and $path -ne '.github/workflows/validate-tagify-release-provenance-v010.yml'){throw "Unexpected production change: $path"}}
+          git diff --exit-code $base -- manifest.json manifest.schema.json packages performance README.md
+          if($LASTEXITCODE -ne 0){throw 'Validation branch changed a production release surface.'}
+          $addon=Get-Content 'validation/tagify-release-provenance-v0.1.0/out/bin/addon-manager.ps1' -Raw
+          foreach($forbidden in @('Get-TagifyReleaseCatalog','Get-TagifyTreeFingerprint','Resolve-TagifyInstalledReleaseProvenance')){
+            $start=$addon.IndexOf("function $forbidden {")
+            $end=$addon.IndexOf("`nfunction ",$start+1)
+            if($start -lt 0){throw "Missing helper for side-effect audit: $forbidden"};if($end -lt 0){$end=$addon.Length}
+            $block=$addon.Substring($start,$end-$start)
+            foreach($token in @('Invoke-WebRequest','Invoke-RestMethod','Remove-Item','Copy-Item','Move-Item','Start-Process','Expand-Archive','$env:APPDATA','$env:LOCALAPPDATA','IndexedDB','localStorage','spicetify apply','spicetify backup','spicetify restore')){if($block.IndexOf($token,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "$forbidden gained forbidden side-effect/data token: $token"}}
+          }
+          Write-Host 'TAGIFY_V010_NO_PRODUCTION_OR_USER_DATA_MUTATION_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tagify-release-provenance-v010
+          path: |
+            validation/tagify-release-provenance-v0.1.0/out/bin/spotify-control.ps1
+            validation/tagify-release-provenance-v0.1.0/out/bin/addon-manager.ps1
+            validation/tagify-release-provenance-v0.1.0/candidate-report.json
+          if-no-files-found: error
