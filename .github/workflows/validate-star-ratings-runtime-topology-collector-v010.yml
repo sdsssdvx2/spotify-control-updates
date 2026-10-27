@@ -1,0 +1,162 @@
+name: Validate Star Ratings Runtime Topology Collector v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/star-ratings-runtime-topology-collector-v0.1.0
+    paths:
+      - 'validation/star-ratings-runtime-topology-collector-v0.1.0/**'
+      - '.github/workflows/validate-star-ratings-runtime-topology-collector-v010.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/star-ratings-runtime-topology-collector-v0.1.0/**'
+      - '.github/workflows/validate-star-ratings-runtime-topology-collector-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact validation-only scope
+        shell: powershell
+        run: |
+          $base='25daf4a295e7737bd12e96b584467da53245e37a'
+          $actual=(git rev-parse HEAD).Trim()
+          $eventHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'Collector validation is not based on exact stable v0.6.27 main.'}
+          $changed=@(git diff --name-only "$base...HEAD"|Sort-Object)
+          $expected=@(
+            '.github/workflows/validate-star-ratings-runtime-topology-collector-v010.yml',
+            'validation/star-ratings-runtime-topology-collector-v0.1.0/Collect-StarRatings-Topology.ps1',
+            'validation/star-ratings-runtime-topology-collector-v0.1.0/LevelDbReadOnly.cs',
+            'validation/star-ratings-runtime-topology-collector-v0.1.0/Run-StarRatings-Topology.cmd',
+            'validation/star-ratings-runtime-topology-collector-v0.1.0/fixture_builder.py'
+          )|Sort-Object
+          if(($changed -join '|') -cne ($expected -join '|')){throw "Unexpected validation scope: $($changed -join ', ')"}
+          Write-Host "STAR_RATINGS_TOPOLOGY_SCOPE_PASS head=$actual"
+
+      - name: Parse scripts and prove no source mutation command surface
+        shell: powershell
+        run: |
+          $collector='validation/star-ratings-runtime-topology-collector-v0.1.0/Collect-StarRatings-Topology.ps1'
+          $tokens=$null;$errors=$null
+          $ast=[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $collector),[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Collector PowerShell 5.1 parse failed.'}
+          $forbidden=@('Remove-Item','Set-Content','Add-Content','Copy-Item','Move-Item','Rename-Item','Clear-Content','Set-Item','Set-ItemProperty','New-ItemProperty','Remove-ItemProperty','Start-Process','Stop-Process','Restart-Service','Stop-Service','Start-Service','Invoke-Expression')
+          $commands=@($ast.FindAll({param($n) $n -is [System.Management.Automation.Language.CommandAst]},$true))
+          foreach($cmd in $commands){
+            $name=$cmd.GetCommandName()
+            if($name -and $forbidden -contains $name){throw "Forbidden mutation/process command in collector: $name"}
+          }
+          $text=Get-Content $collector -Raw
+          foreach($forbiddenText in @('spicetify apply','spicetify config','taskkill','Stop-Process','Start-Process','Set-Acl','icacls')){
+            if($text.IndexOf($forbiddenText,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Forbidden mutation/process text in collector: $forbiddenText"}
+          }
+          python -m py_compile validation/star-ratings-runtime-topology-collector-v0.1.0/fixture_builder.py
+          if($LASTEXITCODE -ne 0){throw 'Fixture builder Python compile failed.'}
+          Write-Host 'STAR_RATINGS_TOPOLOGY_PARSE_AND_READONLY_SURFACE_PASS'
+
+      - name: Build synthetic LevelDB fixtures
+        shell: powershell
+        run: |
+          $fixtureRoot=Join-Path $env:RUNNER_TEMP 'star-ratings-topology-fixtures'
+          python validation/star-ratings-runtime-topology-collector-v0.1.0/fixture_builder.py --out $fixtureRoot
+          if($LASTEXITCODE -ne 0){throw 'Fixture generation failed.'}
+          if(-not(Test-Path (Join-Path $fixtureRoot 'expected.json'))){throw 'Expected fixture map missing.'}
+          Write-Host "STAR_RATINGS_TOPOLOGY_FIXTURE_BUILD_PASS root=$fixtureRoot"
+
+      - name: Exercise live-record, Snappy, tombstone, fallback and corruption contracts
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $fixtureRoot=Join-Path $env:RUNNER_TEMP 'star-ratings-topology-fixtures'
+          $reports=Join-Path $env:RUNNER_TEMP 'star-ratings-topology-reports'
+          New-Item -ItemType Directory -Force -Path $reports|Out-Null
+          $collector=(Resolve-Path 'validation/star-ratings-runtime-topology-collector-v0.1.0/Collect-StarRatings-Topology.ps1').Path
+          $expected=Get-Content (Join-Path $fixtureRoot 'expected.json') -Raw|ConvertFrom-Json
+
+          function Get-Snapshot([string]$root){
+            $rows=@()
+            foreach($file in @(Get-ChildItem -LiteralPath $root -File -Recurse -Force|Sort-Object FullName)){
+              $rel=$file.FullName.Substring($root.Length).TrimStart('\')
+              $sha=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              $rows+=("{0}|{1}|{2}" -f $rel,[int64]$file.Length,$sha)
+            }
+            return ($rows -join "`n")
+          }
+
+          $kinds=@('dual','configured-only','marketplace-only','tombstoned','corrupt','localstorage-only')
+          foreach($kind in $kinds){
+            $root=Join-Path $fixtureRoot $kind
+            $app=Join-Path $root 'appdata'
+            $local=Join-Path $root 'localappdata'
+            $out=Join-Path $reports ($kind+'.json')
+            $before=Get-Snapshot $root
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $collector -AppDataRoot $app -LocalAppDataRoot $local -OutputPath $out | Out-Host
+            if($LASTEXITCODE -ne 0){throw "Collector failed for fixture $kind"}
+            $after=Get-Snapshot $root
+            if($after -cne $before){throw "Collector mutated source fixture: $kind"}
+            $report=Get-Content $out -Raw|ConvertFrom-Json
+            $want=[string]$expected.$kind
+            if([string]$report.derived.topology -cne $want){throw "Topology mismatch for $kind: $($report.derived.topology) != $want"}
+            if($report.read_only -ne $true -or $report.mutation_performed -ne $false -or [string]$report.spotify_process_action -cne 'none'){throw "Read-only contract failed for $kind"}
+            if($report.derived.safe_to_expand_mutation_authority -ne $false){throw "Collector unexpectedly granted authority for $kind"}
+            Write-Host "STAR_RATINGS_TOPOLOGY_FIXTURE_PASS kind=$kind topology=$want marketplace=$($report.marketplace.status)"
+          }
+
+          $dual=Get-Content (Join-Path $reports 'dual.json') -Raw|ConvertFrom-Json
+          if($dual.marketplace.installed -ne $true -or $dual.spicetify_config.configured -ne $true){throw 'Dual fixture evidence contract failed.'}
+          $configured=Get-Content (Join-Path $reports 'configured-only.json') -Raw|ConvertFrom-Json
+          if($configured.marketplace.installed -ne $false -or $configured.spicetify_config.configured -ne $true){throw 'Configured-only fixture evidence contract failed.'}
+          $market=Get-Content (Join-Path $reports 'marketplace-only.json') -Raw|ConvertFrom-Json
+          if($market.marketplace.installed -ne $true -or $market.spicetify_config.configured -ne $false){throw 'Marketplace-only fixture evidence contract failed.'}
+          $tomb=Get-Content (Join-Path $reports 'tombstoned.json') -Raw|ConvertFrom-Json
+          if($tomb.marketplace.installed -ne $false){throw 'Newer LevelDB tombstone did not override stale positive SST record.'}
+          $corrupt=Get-Content (Join-Path $reports 'corrupt.json') -Raw|ConvertFrom-Json
+          if($null -ne $corrupt.marketplace.installed -or [string]$corrupt.marketplace.status -cne 'inconclusive'){throw 'Corrupt LevelDB was not fail-closed/inconclusive.'}
+          $fallback=Get-Content (Join-Path $reports 'localstorage-only.json') -Raw|ConvertFrom-Json
+          if($fallback.marketplace.installed -ne $true){throw 'Legacy Local Storage fallback fixture was not proven.'}
+          Write-Host 'STAR_RATINGS_TOPOLOGY_ALL_FIXTURES_PASS'
+
+      - name: Prove stable production surface unchanged
+        shell: powershell
+        run: |
+          $base='25daf4a295e7737bd12e96b584467da53245e37a'
+          foreach($path in @('manifest.json','README.md','performance/star-ratings/apply-star-ratings-patch.ps1','performance/star-ratings/target.json')){
+            if((git rev-parse "$base`:$path").Trim() -cne (git rev-parse "HEAD`:$path").Trim()){throw "Production surface changed: $path"}
+          }
+          Write-Host 'STAR_RATINGS_TOPOLOGY_NO_PRODUCTION_CHANGE_PASS'
+
+      - name: Build one-shot collector package
+        shell: powershell
+        run: |
+          $src='validation/star-ratings-runtime-topology-collector-v0.1.0'
+          $stage=Join-Path $env:RUNNER_TEMP 'SpotifyControl-StarRatings-Topology-Collector-v0.1.0'
+          New-Item -ItemType Directory -Force -Path $stage|Out-Null
+          foreach($name in @('Collect-StarRatings-Topology.ps1','LevelDbReadOnly.cs','Run-StarRatings-Topology.cmd')){Copy-Item -LiteralPath (Join-Path $src $name) -Destination (Join-Path $stage $name)}
+          $zip=Join-Path $PWD 'SpotifyControl-StarRatings-Topology-Collector-v0.1.0.zip'
+          Compress-Archive -LiteralPath $stage -DestinationPath $zip -Force
+          $sha=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $size=(Get-Item $zip).Length
+          "${sha}  SpotifyControl-StarRatings-Topology-Collector-v0.1.0.zip"|Set-Content -LiteralPath ($zip+'.sha256.txt') -Encoding ASCII
+          Write-Host "STAR_RATINGS_TOPOLOGY_PACKAGE_PASS size=$size sha256=$sha"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: star-ratings-runtime-topology-collector-v010
+          path: |
+            SpotifyControl-StarRatings-Topology-Collector-v0.1.0.zip
+            SpotifyControl-StarRatings-Topology-Collector-v0.1.0.zip.sha256.txt
+          if-no-files-found: error
