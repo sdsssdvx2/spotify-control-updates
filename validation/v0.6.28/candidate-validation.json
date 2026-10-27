@@ -1,0 +1,74 @@
+{
+  "addon_version": "0.6.5-r17",
+  "authority_expanded": false,
+  "auto_authority": [
+    "better-local-files",
+    "eternal-jukebox",
+    "ivLyrics",
+    "playlist-maker"
+  ],
+  "base_addon": {
+    "sha256": "c8d52542faaf033c0ede8216f71fe2e40d73636bd343d3faf88eb926e5017152",
+    "size": 303745
+  },
+  "base_main": {
+    "sha256": "9eb51ff9e001ebd84fd43532a2b3869f6d61f9b230a8008742119e8892202787",
+    "size": 284317
+  },
+  "base_version": "0.6.27",
+  "candidate_addon": {
+    "sha256": "5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285",
+    "size": 323385
+  },
+  "candidate_main": {
+    "sha256": "af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0",
+    "size": 284321
+  },
+  "cover_ambience_policy": {
+    "data_policy": "never-disable-or-optimize",
+    "install_mode": "recovery-owned",
+    "inventory_policy": "rescue-copy-cleanup-only",
+    "mutation_mode": "deny",
+    "rollback_strategy": "external-owner",
+    "version_strategy": "owner-cleanup-only"
+  },
+  "direct_copy_cleanup_authorized": false,
+  "disable_or_optimize_authorized": false,
+  "new_auto_install_authority": false,
+  "ownership_migration_authorized": false,
+  "registry_fingerprint": "0f05406d7152de1d975f888cb8270be8249115211ba9f41e0157342cd42efbd8",
+  "rollback_last_source_adapter_independent": true,
+  "sc_cover_ambience_provenance": {
+    "active_current_proven": true,
+    "catalog_payload_sha256": "c12391e57a393d37d70ffd7a984bdbb6af9f4a83cf3c2b0a8c9bf040247c731f",
+    "current_commit": "9454b55e454fb354ecedcf3f72c5a4f0a9671651",
+    "current_sha256": "0aea69246e14156b22a10261af07b84f3abc58bed4368e03f740ed76db329738",
+    "current_size": 10267,
+    "marketplace_installed": true,
+    "mode": "official-git-file-commit-snapshot-v1",
+    "persistent_configured": true,
+    "raw_real_pc_report_committed": false,
+    "real_pc_report_sha256": "7349326c6567806f6c45bacb741d32649a6afc424b797d7249358cd9b8f5b38b",
+    "real_pc_report_size": 16730,
+    "real_pc_topology": "dual-owned-risk",
+    "snapshot_count": 35,
+    "source_current_proven": true
+  },
+  "schema": 2,
+  "source_adapter_fingerprint": "c0611a7b96f6ff09d1e235119efce2f2def6eb6d0a4e8e93e276cfa622c3c42d",
+  "splitify_provenance_preserved": true,
+  "star_ratings_provenance_preserved": true,
+  "tagify_provenance_preserved": true,
+  "validated_source": {
+    "artifact_digest": "sha256:de9a7f8b1bdb5aae2c13b7914df8dea783e7fa4f59b9e23a451280a48a9be2e8",
+    "artifact_id": 12733622589,
+    "blob": "a52961092730a3216ea2d4b4dceaaa814f33ce4e",
+    "head": "f8ed342f0f414abba3d2a42f93720057ae8b55e5",
+    "path": "validation/sc-cover-ambience-commit-provenance-v0.1.0/build_candidate.py",
+    "pr": 93,
+    "pr_closed_unmerged": true,
+    "pr_run": "40503043002",
+    "stable_pr_run": "40503042928"
+  },
+  "version": "0.6.28"
+}
