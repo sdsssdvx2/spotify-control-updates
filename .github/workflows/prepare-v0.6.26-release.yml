@@ -46,7 +46,7 @@ jobs:
           if((Get-Item $main).Length -ne 284311 -or (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'd7b484a2a7b10a27db0f182d71fe36f590784171db7208189540045bcf4f54d1'){throw 'v0.6.26 main candidate identity mismatch.'}
           if((Get-Item $addon).Length -ne 291294 -or (Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -ne '4aa56dd5d4ef07da21d3bdf5c76227fabb49c64767a281b1e11ee48e7211a09f'){throw 'r15 Addon Manager candidate identity mismatch.'}
           $r=Get-Content validation/v0.6.26/candidate-validation.json -Raw|ConvertFrom-Json
-          if($r.validated_source.head -ne '91980963f1bd7cca987a3fc15c0a70074ea72c08' -or $r.validated_source.blob -ne 'e8fed5168af55843f22c66b5a3a82165b1bb13fe'){throw 'Validated Tagify source pin drifted.'}
+          if($r.validated_source.head -ne '91980963f1bd7cca987a3fc15c0a70074ea72c08' -or $r.validated_source.blob -ne '6988eff6b99266ed4601db31c8984d83bc11c44e'){throw 'Validated Tagify source pin drifted.'}
           if($r.audit_evidence.catalog_json_sha256 -ne '75d66f6e06ec76c8f96fbc7941617e7330844979a87d3297e8e4ff824c3b6a1a'){throw 'Tagify release catalog evidence pin drifted.'}
           if($r.authority_expanded -ne $false -or $r.new_auto_install_authority -ne $false){throw 'Candidate unexpectedly expands authority.'}
           if(($r.auto_authority -join '|') -ne 'better-local-files|eternal-jukebox|ivLyrics|playlist-maker'){throw 'Candidate automatic authority set drifted.'}
