@@ -38,7 +38,9 @@ jobs:
           if((git merge-base $base HEAD).Trim() -ne $base){throw 'Tagify provenance validation is not based on exact stable v0.6.25 main.'}
           $changed=@(git diff --name-only "$base...HEAD")
           $expected=@('.github/workflows/validate-tagify-release-provenance-v010.yml','validation/tagify-release-provenance-v0.1.0/build_candidate.py')
-          if(($changed|Sort-Object) -join '|' -cne ($expected|Sort-Object) -join '|'){throw "Unexpected validation scope: $($changed -join ', ')"}
+          $changedKey=(($changed|Sort-Object) -join '|')
+          $expectedKey=(($expected|Sort-Object) -join '|')
+          if($changedKey -cne $expectedKey){throw "Unexpected validation scope: $($changed -join ', ')"}
           Write-Host "TAGIFY_V010_SCOPE_PASS head=$actual"
 
       - name: Build deterministic prospective v0.6.26 r15 candidate
