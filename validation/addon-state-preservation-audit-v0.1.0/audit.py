@@ -54,19 +54,35 @@ def main() -> None:
         "Backup-SpotifyWebData",
         "Update-AutoApps",
         "Rollback-LastTransaction",
+        "Commit-LastTransaction",
+        "Normalize-PithayaTransaction",
+        "Write-TransactionLedger",
+        "Archive-TransactionLedger",
+        "New-PithayaTransactionBackup",
+        "Restore-PithayaChange",
+        "Copy-TreeSafe",
+        "Test-PathSafe",
+        "Get-DirectoryGitSnapshot",
         "Get-AddonPolicyRegistry",
         "Get-AddonInventory",
     }
     exact = {name: functions[name] for name in sorted(call_markers) if name in functions}
 
+    preamble = text.split("\nfunction ", 1)[0]
+    assignments = []
+    for line in preamble.splitlines():
+        if any(token in line for token in ("Transaction", "BackupRoot", "DataBackupRoot", "StatePath", "LatestReport")):
+            assignments.append(line)
+
     report = {
-        "schema": 1,
+        "schema": 2,
         "base_main": BASE_SHA,
         "stable_addon": identity,
         "function_count": len(functions),
         "relevant_function_names": relevant,
         "exact_requested_functions_present": sorted(exact),
         "exact_requested_functions": exact,
+        "preamble_relevant_assignments": assignments,
         "webview_tokens": {
             token: text.count(token)
             for token in (
@@ -83,6 +99,7 @@ def main() -> None:
     print("ADDON_STATE_PRESERVATION_AUDIT_IDENTITY_PASS", identity["size"], identity["sha256"])
     print("ADDON_STATE_PRESERVATION_RELEVANT_FUNCTIONS=" + "|".join(relevant))
     print("ADDON_STATE_PRESERVATION_EXACT_FUNCTIONS=" + "|".join(sorted(exact)))
+    print("ADDON_STATE_PRESERVATION_PREAMBLE=" + " || ".join(assignments))
     print("ADDON_STATE_PRESERVATION_WEBVIEW_TOKENS=" + json.dumps(report["webview_tokens"], sort_keys=True))
 
 
