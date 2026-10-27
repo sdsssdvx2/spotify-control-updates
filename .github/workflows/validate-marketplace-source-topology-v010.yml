@@ -55,7 +55,7 @@ jobs:
           $root=Join-Path $env:RUNNER_TEMP 'source-topology-upstream';New-Item -ItemType Directory -Force -Path $root|Out-Null
           $market=Join-Path $root 'marketplace';git init -q $market;git -C $market remote add origin https://github.com/spicetify/marketplace.git;git -C $market fetch -q --depth=1 origin 7f357885a3514a55d426fd43edfd705d583a5cdd;git -C $market checkout -q FETCH_HEAD
           $constants=Get-Content -LiteralPath (Join-Path $market 'src/constants.ts') -Raw
-          foreach($marker in @('installedExtensions','installedSnippets','installedThemes','marketplace:installed-extensions','marketplace:installed-snippets','marketplace:installed-themes')){if($constants.IndexOf($marker,[StringComparison]::Ordinal) -lt 0){throw "Pinned Marketplace storage contract missing: $marker"}}
+          foreach($marker in @('installedExtensions','installedSnippets','installedThemes','installed-extensions','installed-snippets','installed-themes')){if($constants.IndexOf($marker,[StringComparison]::Ordinal) -lt 0){throw "Pinned Marketplace storage contract missing: $marker"}}
           if($constants.IndexOf('installedCustomApps',[StringComparison]::OrdinalIgnoreCase) -ge 0){throw 'Pinned Marketplace unexpectedly exposes an installed CustomApps list.'}
           $grid=Get-Content -LiteralPath (Join-Path $market 'src/components/Grid.tsx') -Raw
           foreach($marker in @('theme:','extension:','snippet:','installedThemes','installedExtensions','installedSnippets')){if($grid.IndexOf($marker,[StringComparison]::Ordinal) -lt 0){throw "Pinned Marketplace Installed grid contract missing: $marker"}}
