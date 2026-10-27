@@ -1,0 +1,72 @@
+name: Validate Post-r17 Roadmap Closure v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/post-r17-roadmap-closure-v0.1.0
+    paths:
+      - 'validation/post-r17-roadmap-closure-v0.1.0/**'
+      - '.github/workflows/validate-post-r17-roadmap-closure-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-windows:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Prove exact validation-only scope
+        shell: powershell
+        run: |
+          $base='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          $actual=(git rev-parse HEAD).Trim();$eventHead='${{ github.sha }}'
+          if($actual -cne $eventHead){throw "Not exact event head: $actual != $eventHead"}
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'Closure audit no longer descends from exact v0.6.28/r17 production main.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          foreach($p in $changed){$ok=($p -like 'validation/post-r17-roadmap-closure-v0.1.0/*' -or $p -ceq '.github/workflows/validate-post-r17-roadmap-closure-v010.yml');if(-not$ok){throw "Unexpected validation path: $p"}}
+          if($changed.Count -ne 2){throw "Expected exactly two validation-only files, got $($changed.Count)."}
+          Write-Host "POST_R17_ROADMAP_SCOPE_PASS head=$actual"
+
+      - name: Compare exact v0.6.20 updater semantics to exact v0.6.28/r17
+        shell: powershell
+        run: |
+          python -m py_compile validation/post-r17-roadmap-closure-v0.1.0/audit.py
+          if($LASTEXITCODE -ne 0){throw 'Closure audit source failed compile.'}
+          python validation/post-r17-roadmap-closure-v0.1.0/audit.py
+          if($LASTEXITCODE -ne 0){throw 'Post-r17 roadmap closure audit failed.'}
+
+      - name: Assert safety and exact current policy
+        shell: powershell
+        run: |
+          $r=Get-Content validation/post-r17-roadmap-closure-v0.1.0/audit-result.json -Raw|ConvertFrom-Json
+          if($r.read_only -ne $true -or $r.mutation_performed -ne $false -or $r.authority_expanded -ne $false){throw 'Closure audit safety contract failed.'}
+          if(($r.addon_policy.automatic_authority -join '|') -cne 'better-local-files|eternal-jukebox|ivLyrics|playlist-maker'){throw 'Automatic authority drifted.'}
+          foreach($p in $r.addon_policy.protected_contracts.PSObject.Properties){if($p.Value -ne $true){throw "Protected contract failed: $($p.Name)"}}
+          Write-Host "POST_R17_SPOTIFY_CHANGED=$($r.spotify_updater_function_comparison.changed -join ',')"
+          Write-Host "POST_R17_SPICETIFY_CHANGED=$($r.spicetify_updater_function_comparison.changed -join ',')"
+          Write-Host "POST_R17_SPICETIFY_NEW=$($r.spicetify_updater_function_comparison.new -join ',')"
+          Write-Host "POST_R17_SPICETIFY_REMOVED=$($r.spicetify_updater_function_comparison.removed -join ',')"
+          Write-Host 'POST_R17_ROADMAP_POLICY_PASS'
+
+      - name: Parse exact r17 and prove production surfaces unchanged
+        shell: powershell
+        run: |
+          $main='validation/v0.6.28/out/bin/spotify-control.ps1';$addon='validation/v0.6.28/out/bin/addon-manager.ps1'
+          foreach($file in @($main,$addon)){$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw "PowerShell 5.1 parse failed: $file"}}
+          $base='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          git diff --exit-code $base -- manifest.json manifest.schema.json packages performance validation/v0.6.28 README.md
+          if($LASTEXITCODE -ne 0){throw 'Closure audit changed production/release surface.'}
+          Write-Host 'POST_R17_ROADMAP_NO_PRODUCTION_CHANGE_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: post-r17-roadmap-closure-v010
+          path: validation/post-r17-roadmap-closure-v0.1.0/audit-result.json
+          if-no-files-found: error
