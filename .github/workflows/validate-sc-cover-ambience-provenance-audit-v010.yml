@@ -1,0 +1,115 @@
+name: Validate SC Cover Ambience Provenance Audit v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/sc-cover-ambience-provenance-audit-v0.1.0
+    paths:
+      - 'validation/sc-cover-ambience-provenance-audit-v0.1.0/**'
+      - '.github/workflows/validate-sc-cover-ambience-provenance-audit-v010.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/sc-cover-ambience-provenance-audit-v0.1.0/**'
+      - '.github/workflows/validate-sc-cover-ambience-provenance-audit-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact validation-only scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='25daf4a295e7737bd12e96b584467da53245e37a'
+          actual="$(git rev-parse HEAD)"
+          event_head='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          test "$actual" = "$event_head"
+          test "$(git merge-base "$base" HEAD)" = "$base"
+          mapfile -t changed < <(git diff --name-only "$base...HEAD" | sort)
+          expected=(
+            '.github/workflows/validate-sc-cover-ambience-provenance-audit-v010.yml'
+            'validation/sc-cover-ambience-provenance-audit-v0.1.0/audit.py'
+          )
+          mapfile -t expected_sorted < <(printf '%s\n' "${expected[@]}" | sort)
+          test "$(printf '%s|' "${changed[@]}")" = "$(printf '%s|' "${expected_sorted[@]}")"
+          echo "SC_COVER_AMBIENCE_AUDIT_SCOPE_PASS head=$actual"
+
+      - name: Run immutable upstream provenance audit
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python -m py_compile validation/sc-cover-ambience-provenance-audit-v0.1.0/audit.py
+          python validation/sc-cover-ambience-provenance-audit-v0.1.0/audit.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          p = Path('validation/sc-cover-ambience-provenance-audit-v0.1.0/catalog.json')
+          r = json.loads(p.read_text(encoding='utf-8'))
+          assert r['result'] == 'AUDIT_PASS'
+          assert r['stable_base'] == '25daf4a295e7737bd12e96b584467da53245e37a'
+          u = r['upstream']
+          assert u['repository'] == 'Theblockbuster1/spicetify-extensions'
+          assert u['repository_id'] == 459688330
+          assert u['default_branch'] == 'main'
+          assert u['source_path'] == 'CoverAmbience/CoverAmbience.js'
+          assert u['manifest_entry']['name'] == 'Cover Ambience'
+          assert u['manifest_entry']['main'] == 'CoverAmbience/CoverAmbience.js'
+          assert u['archived'] is False and u['disabled'] is False
+          assert u['release_count'] == 0
+          assert u['path_commit_count'] >= 1
+          assert u['snapshot_count'] >= 1
+          assert isinstance(u['current']['size'], int) and u['current']['size'] > 0
+          assert len(u['current']['sha256']) == 64
+          assert any(
+              s['is_current']
+              and s['size'] == u['current']['size']
+              and s['sha256'] == u['current']['sha256']
+              for s in u['snapshots']
+          )
+          assert len(u['catalog_payload_sha256']) == 64
+          model = r['provenance_model']
+          assert model['kind'] == 'official-git-file-snapshot'
+          assert model['exact_local_match_inputs'] == ['size', 'sha256']
+          assert model['unknown_or_modified_bytes'] == 'unproven'
+          c = r['production_contract']
+          assert c['safe_for_read_only_provenance'] is True
+          assert c['safe_to_expand_mutation_authority'] is False
+          assert c['safe_to_auto_remove_direct_copy_without_runtime_ownership_evidence'] is False
+          assert c['next_gate'] == 'read-only real-PC Cover Ambience ownership topology evidence'
+          assert c['mutation_authority_change'] is False
+          assert c['auto_install_authority_change'] is False
+          assert c['user_data_mutation'] is False
+          assert c['disable_or_optimize'] is False
+          print('SC_COVER_AMBIENCE_AUDIT_REPORT_CONTRACT_PASS')
+          PY
+
+      - name: Prove stable production surfaces unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='25daf4a295e7737bd12e96b584467da53245e37a'
+          for path in manifest.json README.md performance/star-ratings/apply-star-ratings-patch.ps1 performance/star-ratings/target.json validation/v0.6.27/build_v0627.py; do
+            test "$(git rev-parse "$base:$path")" = "$(git rev-parse "HEAD:$path")"
+          done
+          echo 'SC_COVER_AMBIENCE_AUDIT_NO_PRODUCTION_CHANGE_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sc-cover-ambience-provenance-audit-v010
+          path: validation/sc-cover-ambience-provenance-audit-v0.1.0/catalog.json
+          if-no-files-found: error
