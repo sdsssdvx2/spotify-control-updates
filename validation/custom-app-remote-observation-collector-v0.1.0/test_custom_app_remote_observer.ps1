@@ -28,10 +28,7 @@ function New-TestZip {
     }finally{$archive.Dispose()}
 }
 function E([string]$Path,[string]$Content){[pscustomobject]@{path=$Path;content=$Content}}
-function SymlinkAttributes {
-    $bytes=[BitConverter]::GetBytes([uint32]0xA1FF0000)
-    return [BitConverter]::ToInt32($bytes,0)
-}
+function SymlinkAttributes { return [int]-1577123840 }
 
 try{
     # 1. Canonical source normalization accepts exact GitHub identities and secure URLs only.
