@@ -290,10 +290,9 @@ function Combine-ProfileMarketplaceEvidence([string]$ProfileLabel, [string]$Prof
 }
 
 function Get-MarketplaceEvidence {
-    $profiles = @(
-        Combine-ProfileMarketplaceEvidence 'Browser' (Join-Path $LocalAppDataRoot 'Spotify\Browser')
-        Combine-ProfileMarketplaceEvidence 'Default' (Join-Path $LocalAppDataRoot 'Spotify\Default')
-    )
+    $profiles = @()
+    $profiles += Combine-ProfileMarketplaceEvidence -ProfileLabel 'Browser' -ProfileRoot (Join-Path $LocalAppDataRoot 'Spotify\Browser')
+    $profiles += Combine-ProfileMarketplaceEvidence -ProfileLabel 'Default' -ProfileRoot (Join-Path $LocalAppDataRoot 'Spotify\Default')
     $present = @($profiles | Where-Object { $_.exists })
     if (@($present | Where-Object { $_.installed -eq $true }).Count -gt 0) {
         $installed = $true; $status = 'installed'
