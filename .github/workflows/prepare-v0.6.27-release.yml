@@ -1,0 +1,98 @@
+name: Prepare Spotify Control v0.6.27 Release
+
+on:
+  push:
+    branches:
+      - release/v0.6.27-star-ratings-release-provenance-r16
+    paths:
+      - '.github/workflows/prepare-v0.6.27-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  prepare-windows:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: release/v0.6.27-star-ratings-release-provenance-r16
+
+      - name: Verify exact stable base and seed-only release scope
+        shell: powershell
+        run: |
+          $base='5cf131e7bc168f686c7b6fc933a713f4d96b9dd3'
+          if((git merge-base $base HEAD).Trim() -ne $base){throw 'Release branch no longer descends from exact v0.6.26 stable main.'}
+          $m=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($m.latest_version -ne '0.6.26'){throw "Expected base manifest v0.6.26, got $($m.latest_version)"}
+          if($m.bootstrap.version -ne '1.0.6' -or $m.bootstrap.sha256 -ne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' -or [int64]$m.bootstrap.size -ne 42963){throw 'Bootstrap 1.0.6 identity drifted.'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allowed=@('validation/v0.6.27/build_v0627.py','validation/v0.6.27/release_transport.py','.github/workflows/prepare-v0.6.27-release.yml')
+          foreach($p in $changed){if($allowed -cnotcontains $p){throw "Unexpected pre-publication path: $p"}}
+          if($changed.Count -ne 3){throw "Expected exactly three release seed files, got $($changed.Count)."}
+          Write-Host "V0627_RELEASE_SEED_SCOPE_PASS head=$((git rev-parse HEAD).Trim())"
+
+      - name: Compile validated source and build deterministic packages
+        shell: powershell
+        run: |
+          python -m py_compile validation/v0.6.27/build_v0627.py validation/v0.6.27/release_transport.py
+          if($LASTEXITCODE -ne 0){throw 'v0.6.27 release source compile failed.'}
+          python validation/v0.6.27/release_transport.py --build-packages
+          if($LASTEXITCODE -ne 0){throw 'v0.6.27 package build failed.'}
+          $main='validation/v0.6.27/out/bin/spotify-control.ps1';$addon='validation/v0.6.27/out/bin/addon-manager.ps1'
+          if((Get-Item $main).Length -ne 284317 -or (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -ne '9eb51ff9e001ebd84fd43532a2b3869f6d61f9b230a8008742119e8892202787'){throw 'v0.6.27 main candidate identity mismatch.'}
+          if((Get-Item $addon).Length -ne 303745 -or (Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'c8d52542faaf033c0ede8216f71fe2e40d73636bd343d3faf88eb926e5017152'){throw 'r16 Addon Manager candidate identity mismatch.'}
+          $r=Get-Content validation/v0.6.27/candidate-validation.json -Raw|ConvertFrom-Json
+          if($r.validated_source.head -ne 'ac6a89298af835b65d4948ed0587341bb3cc7ff9' -or $r.validated_source.blob -ne '99efd34930aca9f463983f801fe91593539017f1'){throw 'Validated Star Ratings source pin drifted.'}
+          if($r.audit_evidence.catalog_json_sha256 -ne '2592f43a26c3c49b9d58b8244654d27448d801995465c7c8e4ba8d3159b9aa27'){throw 'Star Ratings release catalog evidence pin drifted.'}
+          if($r.authority_expanded -ne $false -or $r.new_auto_install_authority -ne $false){throw 'Candidate unexpectedly expands authority.'}
+          if(($r.auto_authority -join '|') -ne 'better-local-files|eternal-jukebox|ivLyrics|playlist-maker'){throw 'Candidate automatic authority set drifted.'}
+          if($r.star_ratings_policy.inventory_policy -ne 'source-watch-only' -or $r.star_ratings_policy.mutation_mode -ne 'deny' -or $r.star_ratings_policy.data_policy -ne 'playlist-backed-ratings-preserve'){throw 'Star Ratings protected policy drifted.'}
+          Write-Host 'V0627_RELEASE_PACKAGE_BUILD_PASS'
+
+      - name: Commit immutable transport source
+        shell: powershell
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add packages/v0.6.27 validation/v0.6.27/candidate-validation.json validation/v0.6.27/release-metadata.json
+          $staged=@(git diff --cached --name-only)
+          if(-not $staged.Count){throw 'No v0.6.27 immutable transport output was staged.'}
+          foreach($p in $staged){if($p -notlike 'packages/v0.6.27/*' -and $p -cne 'validation/v0.6.27/candidate-validation.json' -and $p -cne 'validation/v0.6.27/release-metadata.json'){throw "Unexpected staged transport path: $p"}}
+          git commit -m 'release: freeze v0.6.27 immutable transport'
+          if($LASTEXITCODE -ne 0){throw 'Immutable transport commit failed.'}
+          $source=(git rev-parse HEAD).Trim()
+          if($source -notmatch '^[0-9a-f]{40}$'){throw 'Immutable source commit SHA is invalid.'}
+          "SOURCE_COMMIT=$source" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "V0627_IMMUTABLE_SOURCE_COMMIT=$source"
+
+      - name: Write manifest against immutable transport commit
+        shell: powershell
+        run: |
+          python validation/v0.6.27/release_transport.py --write-manifest --source-commit $env:SOURCE_COMMIT
+          if($LASTEXITCODE -ne 0){throw 'v0.6.27 manifest generation failed.'}
+          git diff --exit-code -- packages/v0.6.27 validation/v0.6.27/candidate-validation.json validation/v0.6.27/release-metadata.json
+          if($LASTEXITCODE -ne 0){throw 'Manifest generation changed deterministic transport output after source commit.'}
+          $m=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($m.latest_version -ne '0.6.27'){throw "Prepared manifest latest version mismatch: $($m.latest_version)"}
+          if($m.source_commit -ne $env:SOURCE_COMMIT){throw 'Prepared manifest does not pin immutable transport commit.'}
+          if($m.bootstrap.version -ne '1.0.6' -or $m.bootstrap.sha256 -ne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' -or [int64]$m.bootstrap.size -ne 42963){throw 'Prepared Bootstrap identity changed.'}
+          $edge=@($m.updates|Where-Object{$_.from_version -eq '0.6.26' -and $_.to_version -eq '0.6.27'})
+          if($edge.Count -ne 1 -or @($edge[0].patches).Count -ne 2){throw 'Prepared v0.6.26 -> v0.6.27 update edge is invalid.'}
+          Write-Host "V0627_MANIFEST_PREP_PASS payload=$($m.payload_set_sha256) source=$($m.source_commit)"
+
+      - name: Commit prepared manifest and push both release commits
+        shell: powershell
+        run: |
+          git add manifest.json
+          $staged=@(git diff --cached --name-only)
+          if($staged.Count -ne 1 -or $staged[0] -cne 'manifest.json'){throw "Expected only manifest.json staged, got: $($staged -join ', ')"}
+          git commit -m 'release: publish v0.6.27 stable manifest'
+          if($LASTEXITCODE -ne 0){throw 'Prepared manifest commit failed.'}
+          $final=(git rev-parse HEAD).Trim()
+          git push origin HEAD:release/v0.6.27-star-ratings-release-provenance-r16
+          if($LASTEXITCODE -ne 0){throw 'Prepared release push failed.'}
+          Write-Host "V0627_PREPARED_RELEASE_HEAD=$final"
