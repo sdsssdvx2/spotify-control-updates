@@ -1,0 +1,147 @@
+name: Validate Marketplace Record Discovery v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/marketplace-record-discovery-v0.1.0
+    paths:
+      - 'validation/marketplace-record-discovery-v0.1.0/**'
+      - '.github/workflows/validate-marketplace-record-discovery-v010.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'validation/marketplace-record-discovery-v0.1.0/**'
+      - '.github/workflows/validate-marketplace-record-discovery-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact validation scope
+        shell: powershell
+        run: |
+          $actual=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $expected){throw "Not exact event head: $actual != $expected"}
+          $base='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'Validation branch base drifted from exact v0.6.28/r17 stable main.'}
+          $allowed=@(
+            '.github/workflows/validate-marketplace-record-discovery-v010.yml',
+            'validation/marketplace-record-discovery-v0.1.0/Collect-Marketplace-Records.ps1',
+            'validation/marketplace-record-discovery-v0.1.0/fixture_builder.py',
+            'validation/marketplace-record-discovery-v0.1.0/build_package.py'
+          )
+          $changed=@(git diff --name-only "$base...HEAD");$unexpected=@($changed|Where-Object{$_ -notin $allowed})
+          if($unexpected.Count){throw "Validation scope escaped: $($unexpected -join ', ')"}
+          foreach($required in $allowed){if($required -notin $changed){throw "Missing expected validation file: $required"}}
+          Write-Host "MARKETPLACE_RECORD_SCOPE_PASS head=$actual"
+
+      - name: Pin reader provenance and build deterministic package
+        shell: powershell
+        run: |
+          python -m py_compile validation/marketplace-record-discovery-v0.1.0/fixture_builder.py validation/marketplace-record-discovery-v0.1.0/build_package.py
+          if($LASTEXITCODE -ne 0){throw 'Python compile failed.'}
+          $blob=(git rev-parse '14a2f9bfacc54e617aec024b44b7f367dec28bbe:validation/star-ratings-runtime-topology-collector-v0.1.0/LevelDbReadOnly.cs').Trim()
+          if($blob -cne '66de32a1dafcb4fbca9ebe0509cf326fd8a65a5e'){throw "Pinned LevelDB reader drift: $blob"}
+          python validation/marketplace-record-discovery-v0.1.0/build_package.py --build
+          if($LASTEXITCODE -ne 0){throw 'Package build failed.'}
+          $zip='validation/marketplace-record-discovery-v0.1.0/dist/marketplace-record-discovery-v0.1.0.zip'
+          $first=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          python validation/marketplace-record-discovery-v0.1.0/build_package.py --build
+          if($LASTEXITCODE -ne 0){throw 'Second package build failed.'}
+          $second=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($first -cne $second){throw "Package build nondeterministic: $first != $second"}
+          Write-Host "MARKETPLACE_RECORD_PACKAGE_DETERMINISTIC_PASS sha256=$second"
+
+      - name: PowerShell 5.1 parse
+        shell: powershell
+        run: |
+          $file='validation/marketplace-record-discovery-v0.1.0/Collect-Marketplace-Records.ps1'
+          $tokens=$null;$errors=$null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Collector PowerShell 5.1 parse failed.'}
+          Write-Host 'MARKETPLACE_RECORD_PS51_PARSE_PASS'
+
+      - name: Build synthetic LevelDB fixtures and pin input identity
+        shell: powershell
+        run: |
+          $root='validation/marketplace-record-discovery-v0.1.0/fixtures'
+          python validation/marketplace-record-discovery-v0.1.0/fixture_builder.py --out $root
+          if($LASTEXITCODE -ne 0){throw 'Fixture build failed.'}
+          $lines=@(Get-ChildItem -LiteralPath $root -Recurse -File|Sort-Object FullName|ForEach-Object{"$($_.FullName.Substring((Resolve-Path $root).Path.Length))|$($_.Length)|$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"})
+          $fingerprint=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes(($lines -join "`n")))).ToLowerInvariant()
+          "FIXTURE_BEFORE=$fingerprint"|Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "MARKETPLACE_RECORD_FIXTURE_IDENTITY_PASS sha256=$fingerprint"
+
+      - name: Run six read-only discovery fixtures
+        shell: powershell
+        run: |
+          $base=(Resolve-Path 'validation/marketplace-record-discovery-v0.1.0').Path
+          $collector=Join-Path $base 'Collect-Marketplace-Records.ps1';$reader=Join-Path $base 'package/LevelDbReadOnly.cs';$fixtures=Join-Path $base 'fixtures';$reports=Join-Path $base 'reports'
+          New-Item -ItemType Directory -Force -Path $reports|Out-Null
+          foreach($kind in @('indexeddb','orphan','wal-tombstone','corrupt','localstorage','dual-profiles')){
+            $local=Join-Path (Join-Path $fixtures $kind) 'localappdata';$out=Join-Path $reports ($kind+'.json')
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $collector -LocalAppDataRoot $local -ReaderPath $reader -OutputPath $out
+            if($LASTEXITCODE -ne 0){throw "Collector failed fixture: $kind"}
+          }
+          Write-Host 'MARKETPLACE_RECORD_SIX_FIXTURES_EXECUTED'
+
+      - name: Assert discovery semantics
+        shell: powershell
+        run: |
+          $r='validation/marketplace-record-discovery-v0.1.0/reports'
+          $indexed=Get-Content "$r/indexeddb.json" -Raw|ConvertFrom-Json
+          if($indexed.status -cne 'ok' -or [int]$indexed.record_count -ne 3){throw 'IndexedDB baseline discovery failed.'}
+          $k=@($indexed.records|ForEach-Object{$_.kind}|Sort-Object)
+          if(($k -join '|') -cne 'extension|snippet|theme'){throw "IndexedDB type classification failed: $($k -join '|')"}
+          foreach($row in @($indexed.records|Where-Object{$_.kind -ne 'snippet'})){if(-not $row.identity_from_marketplace_key -or [string]::IsNullOrWhiteSpace([string]$row.github_owner) -or [string]::IsNullOrWhiteSpace([string]$row.github_repo)){throw 'GitHub source identity derivation failed.'}}
+          $orphan=Get-Content "$r/orphan.json" -Raw|ConvertFrom-Json
+          if($orphan.status -cne 'ok' -or [int]$orphan.record_count -ne 4 -or @($orphan.records|Where-Object{$_.kind -eq 'unlisted'}).Count -ne 1){throw 'Unlisted/orphan record handling failed.'}
+          $wal=Get-Content "$r/wal-tombstone.json" -Raw|ConvertFrom-Json
+          if($wal.status -cne 'ok' -or [int]$wal.record_count -ne 2 -or @($wal.records|Where-Object{$_.key -like '*theme-repo*'}).Count -ne 0){throw 'WAL tombstone/latest-record semantics failed.'}
+          $corrupt=Get-Content "$r/corrupt.json" -Raw|ConvertFrom-Json
+          if($corrupt.status -cne 'inconclusive'){throw 'Corrupt DB did not fail closed.'}
+          $legacy=Get-Content "$r/localstorage.json" -Raw|ConvertFrom-Json
+          if($legacy.status -cne 'ok' -or [int]$legacy.record_count -ne 3){throw "Legacy Local Storage fallback failed: status=$($legacy.status) count=$($legacy.record_count)"}
+          $dual=Get-Content "$r/dual-profiles.json" -Raw|ConvertFrom-Json
+          if($dual.status -cne 'ok' -or [int]$dual.record_count -ne 3){throw 'Dual-profile merge failed.'}
+          foreach($row in @($dual.records)){if(@($row.profiles).Count -ne 2){throw "Dual-profile identity merge failed for $($row.key)"}}
+          foreach($name in @('indexeddb','orphan','wal-tombstone','localstorage','dual-profiles')){
+            $x=Get-Content "$r/$name.json" -Raw|ConvertFrom-Json
+            if($x.read_only -ne $true -or $x.mutation_performed -ne $false -or $x.derived.safe_to_expand_mutation_authority -ne $false){throw "Safety contract failed: $name"}
+          }
+          Write-Host 'MARKETPLACE_RECORD_SEMANTICS_PASS'
+
+      - name: Prove fixture inputs were not modified
+        shell: powershell
+        run: |
+          $root='validation/marketplace-record-discovery-v0.1.0/fixtures'
+          $lines=@(Get-ChildItem -LiteralPath $root -Recurse -File|Sort-Object FullName|ForEach-Object{"$($_.FullName.Substring((Resolve-Path $root).Path.Length))|$($_.Length)|$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"})
+          $after=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes(($lines -join "`n")))).ToLowerInvariant()
+          if($after -cne $env:FIXTURE_BEFORE){throw "Read-only collector modified fixture inputs: $env:FIXTURE_BEFORE != $after"}
+          Write-Host "MARKETPLACE_RECORD_READ_ONLY_PASS sha256=$after"
+
+      - name: Prove production and prior validated policy surfaces untouched
+        shell: powershell
+        run: |
+          git diff --exit-code d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2...HEAD -- manifest.json manifest.schema.json packages README.md validation/v0.6.28 .github/workflows/validate-stable-main.yml
+          if($LASTEXITCODE -ne 0){throw 'Validation branch changed production/stable surfaces.'}
+          Write-Host 'MARKETPLACE_RECORD_PRODUCTION_UNCHANGED_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: marketplace-record-discovery-v010
+          path: |
+            validation/marketplace-record-discovery-v0.1.0/dist/marketplace-record-discovery-v0.1.0.zip
+            validation/marketplace-record-discovery-v0.1.0/reports/*.json
+          if-no-files-found: error
