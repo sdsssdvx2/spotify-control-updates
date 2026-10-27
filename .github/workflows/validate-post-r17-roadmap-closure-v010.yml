@@ -42,18 +42,21 @@ jobs:
           python validation/post-r17-roadmap-closure-v0.1.0/audit.py
           if($LASTEXITCODE -ne 0){throw 'Post-r17 roadmap closure audit failed.'}
 
-      - name: Assert safety and exact current policy
+      - name: Assert safety and exact current roadmap closure
         shell: powershell
         run: |
           $r=Get-Content validation/post-r17-roadmap-closure-v0.1.0/audit-result.json -Raw|ConvertFrom-Json
           if($r.read_only -ne $true -or $r.mutation_performed -ne $false -or $r.authority_expanded -ne $false){throw 'Closure audit safety contract failed.'}
           if(($r.addon_policy.automatic_authority -join '|') -cne 'better-local-files|eternal-jukebox|ivLyrics|playlist-maker'){throw 'Automatic authority drifted.'}
           foreach($p in $r.addon_policy.protected_contracts.PSObject.Properties){if($p.Value -ne $true){throw "Protected contract failed: $($p.Name)"}}
+          if($r.decision.updater_semantics_unchanged_since_current_upstream_audits -ne $true){throw 'Current updater semantics differ from already validated current-upstream code.'}
+          if($r.decision.prior_current_upstream_audits_transfer_to_exact_r17 -ne $true -or $r.decision.needs_external_updater_retest -ne $false){throw 'Prior current-upstream audit transfer contract failed.'}
+          if($r.decision.known_roadmap_scope_closed -ne $true -or $r.decision.production_change_justified -ne $false -or $r.decision.r18_release_justified -ne $false){throw 'Known roadmap closure decision failed.'}
           Write-Host "POST_R17_SPOTIFY_CHANGED=$($r.spotify_updater_function_comparison.changed -join ',')"
           Write-Host "POST_R17_SPICETIFY_CHANGED=$($r.spicetify_updater_function_comparison.changed -join ',')"
           Write-Host "POST_R17_SPICETIFY_NEW=$($r.spicetify_updater_function_comparison.new -join ',')"
           Write-Host "POST_R17_SPICETIFY_REMOVED=$($r.spicetify_updater_function_comparison.removed -join ',')"
-          Write-Host 'POST_R17_ROADMAP_POLICY_PASS'
+          Write-Host 'POST_R17_KNOWN_ROADMAP_SCOPE_CLOSED_PASS'
 
       - name: Parse exact r17 and prove production surfaces unchanged
         shell: powershell
