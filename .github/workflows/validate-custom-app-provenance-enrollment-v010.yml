@@ -1,0 +1,98 @@
+name: Validate Custom App Provenance Enrollment v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/custom-app-provenance-enrollment-v0.1.0
+    paths:
+      - 'validation/custom-app-provenance-enrollment-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-provenance-enrollment-v010.yml'
+  pull_request:
+    branches:
+      - validate/marketplace-source-topology-v0.1.0
+    paths:
+      - 'validation/custom-app-provenance-enrollment-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-provenance-enrollment-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact scope and validated parent lineage
+        shell: powershell
+        run: |
+          $actual=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $expected){throw "Not exact event head: $actual != $expected"}
+          $production='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2';$parent='4b7ef73fe416afdfb501173f145994b3ed817e42'
+          if((git merge-base $production HEAD).Trim() -cne $production){throw 'Provenance validation is not descended from exact production main.'}
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'Provenance validation is not descended from exact source-topology validation head.'}
+          $allowed=@('.github/workflows/validate-custom-app-provenance-enrollment-v010.yml','validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1','validation/custom-app-provenance-enrollment-v0.1.0/test_custom_app_provenance.ps1')
+          $changed=@(git diff --name-only "$parent...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Validation scope escaped: $($bad -join ', ')"}
+          foreach($required in $allowed){if($required -notin $changed){throw "Missing expected validation-only file: $required"}}
+          $parentBuilder=(git rev-parse '4b7ef73fe416afdfb501173f145994b3ed817e42:validation/marketplace-source-topology-v0.1.0/build_candidate.py').Trim()
+          if($parentBuilder -cne '1e32dd57c95f718f2aeaae6149da36762ca7f6fd'){throw "Parent source-topology builder drift: $parentBuilder"}
+          Write-Host "CUSTOM_APP_PROVENANCE_SCOPE_PASS head=$actual"
+
+      - name: Parse provenance core and acceptance matrix with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          foreach($file in @('validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1','validation/custom-app-provenance-enrollment-v0.1.0/test_custom_app_provenance.ps1')){
+            $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0}:{1} {2}" -f $file,$_.Extent.StartLineNumber,$_.Message)};throw "PowerShell 5.1 parse failed: $file"}
+          }
+          Write-Host 'CUSTOM_APP_PROVENANCE_PS51_PASS'
+
+      - name: Run provenance enrollment acceptance matrix
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-provenance-enrollment-v0.1.0/test_custom_app_provenance.ps1'
+          if($LASTEXITCODE -ne 0){throw 'Custom app provenance acceptance matrix failed.'}
+          Write-Host 'CUSTOM_APP_PROVENANCE_MATRIX_PASS'
+
+      - name: Audit provenance core as read-only and mutation-denied
+        shell: powershell
+        run: |
+          $core=Get-Content -LiteralPath 'validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1' -Raw
+          foreach($required in @('proven-local-git-origin','declared-package-only','conflicting-source-claims','source-change-blocked','user-removed','unsafe-local-lifecycle',"mutation_mode='deny'",'auto_update_authorized=$false','auto_install_authorized=$false','git-file-indirection-denied','git-reparse-point-denied')){if($core.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Provenance safety marker missing: $required"}}
+          foreach($forbidden in @('Invoke-WebRequest','Invoke-RestMethod','Start-Process','Copy-Item','Move-Item','Remove-Item','spicetify apply','spicetify config')){if($core.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Read-only provenance core contains forbidden mutation/network primitive: $forbidden"}}
+          Write-Host 'CUSTOM_APP_PROVENANCE_READ_ONLY_DENY_PASS'
+
+      - name: Rebuild exact parent source-topology candidate and re-run self-test
+        shell: powershell
+        run: |
+          $builder='validation/marketplace-source-topology-v0.1.0/build_candidate.py';python -m py_compile $builder;if($LASTEXITCODE -ne 0){throw 'Parent builder compile failed.'};python $builder --build;if($LASTEXITCODE -ne 0){throw 'Parent source-topology rebuild failed.'}
+          $addon='validation/marketplace-source-topology-v0.1.0/out/bin/addon-manager.ps1';$main='validation/marketplace-source-topology-v0.1.0/out/bin/spotify-control.ps1'
+          if((Get-Item $main).Length -ne 284327 -or (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Validated Spotify Control bytes drifted.'}
+          $root=Join-Path $env:RUNNER_TEMP 'parent-selftest';$env:LOCALAPPDATA=Join-Path $root 'LocalAppData';$env:APPDATA=Join-Path $root 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest;if($LASTEXITCODE -ne 0){throw 'Parent Addon Manager SelfTest failed.'}
+          Write-Host "CUSTOM_APP_PROVENANCE_PARENT_REPRO_PASS addon=$((Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant())"
+
+      - name: Prove production and parent validation surfaces remain immutable
+        shell: powershell
+        run: |
+          $parent='4b7ef73fe416afdfb501173f145994b3ed817e42';$expected=@('.github/workflows/validate-custom-app-provenance-enrollment-v010.yml','validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1','validation/custom-app-provenance-enrollment-v0.1.0/test_custom_app_provenance.ps1')
+          $changed=@(git diff --name-only "$parent...HEAD");$bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "Unexpected changed surface: $($bad -join ', ')"}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production origin/main moved during provenance validation.'}
+          Write-Host 'CUSTOM_APP_PROVENANCE_IMMUTABILITY_PASS'
+
+      - name: Upload provenance validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-provenance-enrollment-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1
+            validation/custom-app-provenance-enrollment-v0.1.0/test_custom_app_provenance.ps1
+          if-no-files-found: error
+          compression-level: 0
