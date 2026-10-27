@@ -65,6 +65,12 @@ def main() -> None:
         "Get-DirectoryGitSnapshot",
         "Get-AddonPolicyRegistry",
         "Get-AddonInventory",
+        "Assert-AddonTransactionRegistryAuthorization",
+        "Assert-AddonSourceAdapterTransactionAuthorization",
+        "Invoke-TransactionSelfTest",
+        "Invoke-AddonTransactionRegistrySelfTest",
+        "New-AddonSourceAdapterTransactionProvenance",
+        "Test-AddonSourceAdapterTransactionProvenance",
     }
     exact = {name: functions[name] for name in sorted(call_markers) if name in functions}
 
@@ -75,7 +81,7 @@ def main() -> None:
             assignments.append(line)
 
     report = {
-        "schema": 2,
+        "schema": 3,
         "base_main": BASE_SHA,
         "stable_addon": identity,
         "function_count": len(functions),
