@@ -69,7 +69,7 @@ $expired=New-PostSwapApplyAdmissionFixtureV010 'expired' -Nonce (N '4');$r=Invok
 
 $store=New-PostSwapApplyAdmissionFixtureV010 'store-tamper' -Nonce (N '3');[IO.File]::WriteAllText((Join-Path $store.f.atomic.q.x.store.store 'current.json'),'{not-json',[Text.UTF8Encoding]::new($false));$r=Invoke-PostSwapApplyAdmissionFixtureV010 $store;Assert-PostSwapApplyAdmissionDeniedV010 $r 'persisted-store-tamper';Assert-True ([string]$r.reason -like 'persisted-consumption-read-denied:*') 'store tamper reason drifted';$count++
 
-$cid=New-PostSwapApplyAdmissionFixtureV010 'wrong-consumption' -Nonce (N '2');$r=Invoke-PostSwapApplyAdmissionFixtureV010 -Fixture $cid -ConsumptionId ('0'*64);Assert-PostSwapApplyAdmissionDeniedV010 $r 'wrong-consumption-id';Assert-True ([string]$r.reason -ceq 'persisted-consumption-not-found-or-ambiguous') 'wrong consumption reason drifted';$count++
+$cid=New-PostSwapApplyAdmissionFixtureV010 'wrong-consumption' -Nonce (N '2');$r=Invoke-PostSwapApplyAdmissionFixtureV010 -Fixture $cid -ConsumptionId ('0'*64);Assert-PostSwapApplyAdmissionDeniedV010 $r 'wrong-consumption-id';Assert-True ([string]$r.reason -ceq 'consumption-continuity-mismatch') 'wrong consumption reason drifted';$count++
 
 $removed=New-PostSwapApplyAdmissionFixtureV010 'removed' -Nonce (N '1');$life=Copy-Deep $removed.f.atomic.q.x.f.lifecycle;$life.present=$false;$life.user_removed=$true;$r=Invoke-PostSwapApplyAdmissionFixtureV010 -Fixture $removed -Lifecycle $life;Assert-PostSwapApplyAdmissionDeniedV010 $r 'user-removed';Assert-True ([string]$r.reason -ceq 'lifecycle-not-safe-current-single-location') 'user removal reason drifted';$count++
 
