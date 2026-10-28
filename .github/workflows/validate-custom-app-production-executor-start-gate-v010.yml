@@ -32,7 +32,7 @@ jobs:
         run: |
           $h=(git rev-parse HEAD).Trim();$pins=@(
             @($h,'validation/custom-app-production-executor-start-gate-v0.1.0/custom-app-production-executor-start-gate.ps1','1fa3ca9e77b4c8a48ef56afd656fd102e1636676'),
-            @($h,'validation/custom-app-production-executor-start-gate-v0.1.0/test_custom_app_production_executor_start_gate.ps1','aca5aa72eeb7cb36790a2863329c872af0e58178'),
+            @($h,'validation/custom-app-production-executor-start-gate-v0.1.0/test_custom_app_production_executor_start_gate.ps1','f63b309beacd2a8f822f6f8c2801c7bb68409c35'),
             @('1b680f0fc637b393aa7571690c8aa40adda59800','validation/custom-app-production-consumption-persistence-v0.1.0/custom-app-production-consumption-persistence.ps1','d5b70c943d0880e98ee907ae52d4c02ad8720f73'),
             @('1b680f0fc637b393aa7571690c8aa40adda59800','validation/custom-app-production-consumption-persistence-v0.1.0/custom-app-production-consumption-persistence-contract-v011.ps1','07de3a6d3aec00636d8b1c7bd20dcbc72d1b7ada'),
             @('1b680f0fc637b393aa7571690c8aa40adda59800','validation/custom-app-production-consumption-persistence-v0.1.0/test_custom_app_production_consumption_persistence_v011.ps1','85f347144c5a5c5a323b61c0179d7da2aab6e1da'),
