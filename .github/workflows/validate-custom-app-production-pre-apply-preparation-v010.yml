@@ -1,0 +1,92 @@
+name: Validate Custom App Production Pre-Apply Preparation v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-pre-apply-preparation-v0.1.0]
+    paths: ['validation/custom-app-production-pre-apply-preparation-v0.1.0/**','.github/workflows/validate-custom-app-production-pre-apply-preparation-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-stage-executor-v0.1.0]
+    paths: ['validation/custom-app-production-pre-apply-preparation-v0.1.0/**','.github/workflows/validate-custom-app-production-pre-apply-preparation-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"}
+
+      - name: Prove exact scope lineage and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h -cne $e){throw "head mismatch $h != $e"}
+          $p='6ba560e7980c3492fb032ebc720f029caa97b15c';if((git merge-base $p HEAD).Trim() -cne $p){throw 'not descended from exact validated production stage-executor head'}
+          $a=@('.github/workflows/validate-custom-app-production-pre-apply-preparation-v010.yml','validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1','validation/custom-app-production-pre-apply-preparation-v0.1.0/test_custom_app_production_pre_apply_preparation.ps1');$c=@(git diff --name-only "$p...HEAD");$b=@($c|?{$_ -notin $a});if($b.Count){throw "scope escaped: $($b -join ', ')"};foreach($x in $a){if($x -notin $c){throw "missing $x"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
+          'CUSTOM_APP_PRODUCTION_PRE_APPLY_SCOPE_PASS'
+
+      - name: Prove exact immutable dependency pins
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$pins=@(
+            @($h,'validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1','3022a48a6495781b487ae8db51608a01127af24b'),
+            @($h,'validation/custom-app-production-pre-apply-preparation-v0.1.0/test_custom_app_production_pre_apply_preparation.ps1','cc79e9879dd629956613cd8ecbe73971203f2d5e'),
+            @('6ba560e7980c3492fb032ebc720f029caa97b15c','validation/custom-app-production-stage-executor-v0.1.0/custom-app-production-stage-executor.ps1','349d4028997a9cc7a94540286c8b9ba6d6a5b050'),
+            @('6ba560e7980c3492fb032ebc720f029caa97b15c','validation/custom-app-production-stage-executor-v0.1.0/test_custom_app_production_stage_executor.ps1','4bb9d6d3ef7822809e75e28b3fb0cc03cb96861a'),
+            @('13f4314b81816b1b1c3bb3c2fb4280b6c015f8de','validation/custom-app-production-stage-acquisition-admission-v0.1.0/custom-app-production-stage-acquisition-admission.ps1','df343c9da93444cdb86753ffa17db8b260baec0c'),
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'))
+          foreach($p in $pins){$b=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($b -cne $p[2]){throw "pin drift $($p[1]) $b != $($p[2])"}}
+          'CUSTOM_APP_PRODUCTION_PRE_APPLY_PINS_PASS'
+
+      - name: Parse and audit pre-apply authority separation
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-pre-apply-preparation-v0.1.0';foreach($f in @("$d/custom-app-production-pre-apply-preparation.ps1","$d/test_custom_app_production_pre_apply_preparation.ps1")){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|%{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $core=Get-Content "$d/custom-app-production-pre-apply-preparation.ps1" -Raw
+          foreach($m in @('Test-CustomAppProductionStageExecutorResultV010','Resolve-CustomAppProductionStageAdmissionV010','Get-CustomAppLocalRuntimeBaseline','Get-CustomAppUpdateTreeSnapshotV010','New-CustomAppProductionAppRollbackBackupV010','Get-SpotifyPersistenceSnapshot','New-RequiredSpotifyPersistenceBackup','Test-CustomAppProductionPersistenceBackupV010','pre-apply-backups-prepared-verified','requires_atomic_apply_rollback_executor=$true','requires_fresh_revalidation_before_apply=$true','requires_cleanup_if_not_applied=$true','apply_authorized=$false','live_destination_authorized=$false','production_execution_authorized=$false','production_mutation_authorized=$false')){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "pre-apply marker missing $m"}}
+          if(([regex]::Matches($core,'Resolve-CustomAppProductionStageAdmissionV010')).Count -ne 1){throw 'pre-apply admission must be rerun exactly once'}
+          if(([regex]::Matches($core,'New-RequiredSpotifyPersistenceBackup')).Count -ne 1){throw 'required persistence backup call count drifted'}
+          foreach($x in @('Invoke-CustomAppStageAcquisitionV010','Invoke-CustomAppUpdateTransactionV010','Restore-SpotifyPersistenceBackup','spicetify apply','spicetify config','Start-Process','Invoke-WebRequest','Invoke-RestMethod','Move-Item','Remove-Item','Save-AddonState')){if($core.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge 0){throw "pre-apply core gained forbidden execution/mutation primitive $x"}}
+          if($core -match 'apply_authorized\s*=\s*\$true|live_destination_authorized\s*=\s*\$true|production_execution_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true|preparation_is_authority\s*=\s*\$true|backups_are_authority\s*=\s*\$true'){throw 'pre-apply authority escaped'}
+          $test=Get-Content "$d/test_custom_app_production_pre_apply_preparation.ps1" -Raw;foreach($m in @('stage-authority-tamper','wrong-key','user-removed','live-drift','stage-drift','store-drift','backup-root-overlap',"-Name 'future-app'",'rollback backup omitted strong .git provenance','app backup tamper','persistence backup tamper','retained stage tamper','preparation fingerprint tamper')){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "pre-apply coverage missing $m"}}
+          'CUSTOM_APP_PRODUCTION_PRE_APPLY_PARSE_AUDIT_PASS'
+
+      - name: Run pre-apply preparation matrix twice
+        shell: powershell
+        run: |
+          1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-pre-apply-preparation-v0.1.0/test_custom_app_production_pre_apply_preparation.ps1';if($LASTEXITCODE){throw "pre-apply matrix failed pass $_"}}
+          'CUSTOM_APP_PRODUCTION_PRE_APPLY_MATRIX_REPEAT_PASS'
+
+      - name: Replay exact parent stage executor and transaction contracts
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-stage-executor-v0.1.0/test_custom_app_production_stage_executor.ps1';if($LASTEXITCODE){throw 'stage-executor regression'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-update-transaction-protocol-v0.1.0/test_custom_app_update_transaction.ps1';if($LASTEXITCODE){throw 'transaction protocol regression'}
+          'CUSTOM_APP_PRODUCTION_PRE_APPLY_PARENT_CONTRACTS_PASS'
+
+      - name: Rebuild exact candidate and run Addon Manager SelfTest
+        shell: powershell
+        run: |
+          python 'validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py' --build;if($LASTEXITCODE){throw 'build failed'};$a='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/addon-manager.ps1';$m='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/spotify-control.ps1';$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();if((Get-Item $a).Length-ne 523216 -or $ah-cne'b2cec989ef399aed4a8763105121b21181ffb493ed9e3e884baa1d62a634f94b'){throw 'addon drift'};if($mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'main drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'production-preapply-selftest';$env:LOCALAPPDATA=Join-Path $s 'Local';$env:APPDATA=Join-Path $s 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'SelfTest failed'}
+          'CUSTOM_APP_PRODUCTION_PRE_APPLY_SELFTEST_PASS'
+
+      - name: Prove protected-surface immutability and write evidence
+        shell: powershell
+        run: |
+          $p='6ba560e7980c3492fb032ebc720f029caa97b15c';$e=@('.github/workflows/validate-custom-app-production-pre-apply-preparation-v010.yml','validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1','validation/custom-app-production-pre-apply-preparation-v0.1.0/test_custom_app_production_pre_apply_preparation.ps1');$c=@(git diff --name-only "$p...HEAD");$b=@($c|?{$_ -notin $e});if($b.Count){throw "unexpected surface $($b -join ', ')"}
+          foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-stage-executor-v0.1.0/custom-app-production-stage-executor.ps1','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'};$d='validation/custom-app-production-pre-apply-preparation-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_stage_executor_parent=$p;validated_persistence_core='57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b';validated_transaction_core='1a2461a6929e9cabd50d27f95e0744f83443b9e8';stage_result_revalidated=$true;fresh_admission_rerun=$true;fresh_live_and_stage_revalidated=$true;exact_app_rollback_backup=$true;strong_git_metadata_preserved=$true;spotify_spicetify_persistence_backup=$true;persistence_before_after_byte_state_preserved=$true;backup_integrity_revalidated=$true;live_code_mutated=$false;apply_authority=$false;production_execution_authority=$false;production_mutation_authority=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'CUSTOM_APP_PRODUCTION_PRE_APPLY_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-pre-apply-preparation-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1
+            validation/custom-app-production-pre-apply-preparation-v0.1.0/test_custom_app_production_pre_apply_preparation.ps1
+            validation/custom-app-production-pre-apply-preparation-v0.1.0/ci-evidence.json
+          if-no-files-found: error
