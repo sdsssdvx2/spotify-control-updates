@@ -50,7 +50,7 @@ jobs:
             @('da3bf726c2c888bd6ac8c4aaee8fd13660a9235f','validation/custom-app-remote-binding-observer-v0.4.0/custom-app-remote-binding-state.ps1','bd19cbb3da2087e68b2452fe62471d4eca2cd990'),
             @('da3bf726c2c888bd6ac8c4aaee8fd13660a9235f','validation/custom-app-remote-binding-observer-v0.4.0/test_custom_app_remote_binding_state.ps1','30cee886506b75a7d4ba4425f5dce01999faa4a4'),
             @('da3bf726c2c888bd6ac8c4aaee8fd13660a9235f','validation/custom-app-remote-binding-observer-v0.4.0/build_candidate.py','7b13595a185bead3f1c3cee80caee10dd19ea996'),
-            @('HEAD','validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py','9f81cd1b5f663bab0f4862d2a17d239a9ac59fd1')
+            @('HEAD','validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py','8c076811e5b58ac572fddfb1ac0341c19ac8040c')
           )
           foreach($pin in $pins){$blob=(git rev-parse "$($pin[0])`:$($pin[1])").Trim();if($blob -cne $pin[2]){throw "Pinned blob drift: $($pin[1]) $blob != $($pin[2])"}}
           Write-Host 'CUSTOM_APP_REMOTE_BINDING_V041_BLOB_PIN_PASS'
