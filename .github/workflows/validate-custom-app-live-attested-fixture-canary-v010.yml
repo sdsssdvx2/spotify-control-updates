@@ -59,6 +59,8 @@ jobs:
             @('979e9d6362ead31016b9532f98629d6bcc2bbb56','validation/custom-app-promotion-eligibility-gate-v0.1.0/custom-app-promotion-eligibility.ps1','94c1b0ba8f2454078252a723f89ccc0327cbc181')
           )
           foreach($p in $pins){$blob=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($blob -cne $p[2]){throw "Pinned live-attestation dependency drift: $($p[1]) $blob != $($p[2])"}}
+          $builder=Get-Content 'validation/v0.6.28/build_v0628.py' -Raw
+          if($builder.IndexOf('$Version = "0.6.5-r17"',[StringComparison]::Ordinal) -lt 0){throw 'Validated r17 Addon Manager version context marker drifted.'}
           Write-Host 'CUSTOM_APP_LIVE_ATTESTED_DEPENDENCY_PINS_PASS'
 
       - name: Parse composition and live acceptance with Windows PowerShell 5.1
@@ -110,6 +112,10 @@ jobs:
             }
             return [IO.Path]::GetFullPath($Destination)
           }
+          # The validated persistence guard records the Addon Manager version in its backup manifest.
+          # In production this global exists in addon-manager.ps1; the standalone harness must mirror that exact context.
+          $Version='0.6.5-r17'
+          if($Version -cne '0.6.5-r17'){throw 'Live harness manager version context drift.'}
           . (Resolve-Path 'validation/custom-app-live-attested-fixture-canary-v0.1.0/test_live_attested_fixture_canary.ps1')
           Write-Host 'CUSTOM_APP_LIVE_ATTESTED_TAGIFY_PASS'
 
@@ -156,7 +162,7 @@ jobs:
           $dir='validation/custom-app-live-attested-fixture-canary-v0.1.0'
           $e=[ordered]@{
             schema=1;head=(git rev-parse HEAD).Trim();validated_receipt_parent='635e25a4a06320cd103e07b1506f0ba8787e5c3a';validated_executor_parent='a5d5839a9d6c1dd01c1fced6e9e1f5f76d16b5ca';production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
-            composition_blob='329eb4c7310d5a7ef57df0ac6bc07bbe5c0269c4';live_test_blob='09fb6a48149d115ede6fd89fa291c464774a7c54';live_paths=@('committed-preserved','denied-no-mutation','rolled-back-restored')
+            composition_blob='329eb4c7310d5a7ef57df0ac6bc07bbe5c0269c4';live_test_blob='09fb6a48149d115ede6fd89fa291c464774a7c54';manager_version_context='0.6.5-r17';live_paths=@('committed-preserved','denied-no-mutation','rolled-back-restored')
             receipt_is_authority=$false;requires_fresh_revalidation=$true;generic_canary_authority=$false;production_mutation_authority=$false
             parent_receipt_push_run=[int64]40682787583;parent_receipt_pr_run=[int64]40682985712;parent_receipt_push_digest='sha256:6e6d196d693a8e2927609bbdaf3da2cf9e8628a8e8d9f1eb08ea3016bd8643f7';parent_receipt_pr_digest='sha256:d7dbfbdb88d7ecbec0faf0d15ba90e43bd34d93d4b18f20608df19f35c4253d0'
           }
