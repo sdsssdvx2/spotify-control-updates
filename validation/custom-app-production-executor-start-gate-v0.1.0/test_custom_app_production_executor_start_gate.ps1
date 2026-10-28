@@ -73,7 +73,7 @@ $runtime=New-ExecutorStartFixtureV010 'runtime-drift' -Nonce 'cdcdcdcdcdcdcdcdcd
 $runtimeResult=Invoke-StartFixtureV010 $runtime
 Assert-StartDeniedV010 $runtimeResult 'runtime-drift';Assert-True ([string]$runtimeResult.reason -like 'executor-start-permit-revalidation-denied:*') 'runtime drift not denied';$count++
 
-$source=New-ExecutorStartFixtureV010 'source-drift' -Nonce 'dedededededededededededededededede';$source.consumption.fixture.f.provenance.source_identity='other/repo';$source.consumption.fixture.f.provenance.source_changed=$true;$source.consumption.fixture.f.provenance.requires_reenrollment=$true
+$source=New-ExecutorStartFixtureV010 'source-drift' -Nonce 'dededededededededededededededede';$source.consumption.fixture.f.provenance.source_identity='other/repo';$source.consumption.fixture.f.provenance.source_changed=$true;$source.consumption.fixture.f.provenance.requires_reenrollment=$true
 $sourceResult=Invoke-StartFixtureV010 $source
 Assert-StartDeniedV010 $sourceResult 'source-drift';Assert-True ([string]$sourceResult.reason -like 'executor-start-permit-revalidation-denied:*') 'source drift not denied';$count++
 
