@@ -1,4 +1,5 @@
 $ErrorActionPreference='Stop'
+Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
 $here=Split-Path -Parent $MyInvocation.MyCommand.Path
 $root=Resolve-Path (Join-Path $here '..\..')
 . (Join-Path $root 'validation\custom-app-remote-observation-collector-v0.1.0\custom-app-remote-observer.ps1')
