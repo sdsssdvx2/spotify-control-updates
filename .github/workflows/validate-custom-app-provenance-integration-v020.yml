@@ -1,0 +1,155 @@
+name: Validate Custom App Provenance Integration v0.2.0
+
+on:
+  push:
+    branches:
+      - validate/custom-app-provenance-integration-v0.2.0
+    paths:
+      - 'validation/custom-app-provenance-integration-v0.2.0/**'
+      - '.github/workflows/validate-custom-app-provenance-integration-v020.yml'
+  pull_request:
+    branches:
+      - validate/marketplace-source-topology-v0.1.0
+    paths:
+      - 'validation/custom-app-provenance-integration-v0.2.0/**'
+      - '.github/workflows/validate-custom-app-provenance-integration-v020.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact scope and validated lineage
+        shell: powershell
+        run: |
+          $actual=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $expected){throw "Not exact event head: $actual != $expected"}
+          $prod='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2';$parent='4b7ef73fe416afdfb501173f145994b3ed817e42'
+          if((git merge-base $prod HEAD).Trim() -cne $prod){throw 'Integration branch lost production lineage.'}
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'Integration branch is not descended from exact source-topology parent.'}
+          $allowed=@(
+            '.github/workflows/validate-custom-app-provenance-integration-v020.yml',
+            'validation/custom-app-provenance-integration-v0.2.0/README.md',
+            'validation/custom-app-provenance-integration-v0.2.0/INTEGRATION_PLAN.md',
+            'validation/custom-app-provenance-integration-v0.2.0/build_candidate.py'
+          )
+          $changed=@(git diff --name-only "$parent...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Integration validation scope escaped: $($bad -join ', ')"}
+          foreach($required in $allowed){if($required -notin $changed){throw "Missing expected integration file: $required"}}
+          if((git rev-parse origin/main).Trim() -cne $prod){throw 'Production main moved during integration validation.'}
+          Write-Host "PROVENANCE_INTEGRATION_SCOPE_PASS head=$actual"
+
+      - name: Prove pinned provenance and native-refresh source identities
+        shell: powershell
+        run: |
+          $pins=@(
+            @('b339f2b79a267c13cf3c5974aea2fff3786d3093','validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1','4f0831fa2e5dc23c9a4ec98b6c7a9afbb3c9af55'),
+            @('62cc0803411ccd132e3bad3b6338b2ef783e0f4c','validation/marketplace-native-refresh-contract-v0.1.0/marketplace-native-refresh-contract.ps1','bd895ebcc11d9fb2f1c7857ee861e5b9e2c2cc3c'),
+            @('4b7ef73fe416afdfb501173f145994b3ed817e42','validation/marketplace-source-topology-v0.1.0/build_candidate.py','1e32dd57c95f718f2aeaae6149da36762ca7f6fd')
+          )
+          foreach($pin in $pins){$blob=(git rev-parse "$($pin[0]):$($pin[1])").Trim();if($blob -cne $pin[2]){throw "Pinned source drift: $($pin[1]) $blob != $($pin[2])"}}
+          Write-Host 'PROVENANCE_INTEGRATION_PINS_PASS'
+
+      - name: Build deterministic integrated candidate twice
+        shell: powershell
+        run: |
+          python validation/custom-app-provenance-integration-v0.2.0/build_candidate.py --build
+          if($LASTEXITCODE -ne 0){throw 'First integration build failed.'}
+          $dir='validation/custom-app-provenance-integration-v0.2.0/out/bin'
+          $first=@{};Get-ChildItem $dir -File|ForEach-Object{$first[$_.Name]=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
+          python validation/custom-app-provenance-integration-v0.2.0/build_candidate.py --build
+          if($LASTEXITCODE -ne 0){throw 'Second integration build failed.'}
+          Get-ChildItem $dir -File|ForEach-Object{$h=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant();if($first[$_.Name] -cne $h){throw "Nondeterministic output: $($_.Name)"}}
+          $report=Get-Content 'validation/custom-app-provenance-integration-v0.2.0/candidate-validation.json' -Raw|ConvertFrom-Json
+          if($report.generic_custom_app_mutation_authority_expanded -or $report.generic_marketplace_mutation_authority_expanded){throw 'Generic mutation authority expanded.'}
+          if($report.marketplace_native_refresh_direct_mutation_allowed){throw 'Marketplace native-refresh contract granted direct mutation.'}
+          if([string]$report.custom_app_provenance_state_root -cne 'custom_app_provenance'){throw 'Provenance state root drift.'}
+          Write-Host 'PROVENANCE_INTEGRATION_DETERMINISTIC_BUILD_PASS'
+
+      - name: Parse candidate with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          foreach($file in @('validation/custom-app-provenance-integration-v0.2.0/out/bin/spotify-control.ps1','validation/custom-app-provenance-integration-v0.2.0/out/bin/addon-manager.ps1','validation/custom-app-provenance-integration-v0.2.0/out/bin/Collect-Marketplace-Records.ps1')){
+            $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw "PowerShell 5.1 parse failed: $file"}
+          }
+          Write-Host 'PROVENANCE_INTEGRATION_PS51_PARSE_PASS'
+
+      - name: Run full Addon Manager self-test
+        shell: powershell
+        run: |
+          $addon='validation/custom-app-provenance-integration-v0.2.0/out/bin/addon-manager.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Integrated Addon Manager SelfTest failed.'}
+          Write-Host 'PROVENANCE_INTEGRATION_ADDON_SELFTEST_PASS'
+
+      - name: Re-run exact standalone provenance acceptance matrix
+        shell: powershell
+        run: |
+          $core=Join-Path $env:RUNNER_TEMP 'custom-app-provenance.ps1';$test=Join-Path $env:RUNNER_TEMP 'test-custom-app-provenance.ps1'
+          git show b339f2b79a267c13cf3c5974aea2fff3786d3093:validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1 | Out-File -LiteralPath $core -Encoding utf8
+          git show b339f2b79a267c13cf3c5974aea2fff3786d3093:validation/custom-app-provenance-enrollment-v0.1.0/test_custom_app_provenance.ps1 | Out-File -LiteralPath $test -Encoding utf8
+          $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile($core,[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){throw 'Pinned provenance core parse failed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test -CorePath $core
+          if($LASTEXITCODE -ne 0){throw 'Pinned provenance acceptance matrix failed.'}
+          Write-Host 'PROVENANCE_INTEGRATION_PROVENANCE_MATRIX_PASS'
+
+      - name: Re-run Marketplace native refresh contract self-test
+        shell: powershell
+        run: |
+          $native=Join-Path $env:RUNNER_TEMP 'marketplace-native-refresh-contract.ps1'
+          git show 62cc0803411ccd132e3bad3b6338b2ef783e0f4c:validation/marketplace-native-refresh-contract-v0.1.0/marketplace-native-refresh-contract.ps1 | Out-File -LiteralPath $native -Encoding utf8
+          . $native
+          Invoke-MarketplaceNativeRefreshContractSelfTest
+          foreach($f in @(
+            [pscustomobject]@{kind='extension';source_kind='github-repository-key';ambiguous=$false;mutation_authorized=$false},
+            [pscustomobject]@{kind='theme';source_kind='github-repository-key';ambiguous=$false;mutation_authorized=$false},
+            [pscustomobject]@{kind='snippet';source_kind='snippet-key';ambiguous=$false;mutation_authorized=$false},
+            [pscustomobject]@{kind='unlisted';source_kind='github-repository-key';ambiguous=$false;mutation_authorized=$false}
+          )){if((Resolve-MarketplaceNativeRefreshContract $f).addon_manager_direct_mutation_allowed){throw 'Native refresh contract escaped direct mutation deny.'}}
+          Write-Host 'PROVENANCE_INTEGRATION_NATIVE_REFRESH_PASS'
+
+      - name: Audit integrated candidate authority and protected data guards
+        shell: powershell
+        run: |
+          $addon=Get-Content 'validation/custom-app-provenance-integration-v0.2.0/out/bin/addon-manager.ps1' -Raw
+          foreach($required in @(
+            'function Update-CustomAppProvenanceFromCurrentLifecycle',
+            'function Resolve-MarketplaceNativeRefreshContract',
+            'custom_app_provenance',
+            'New-RequiredSpotifyPersistenceBackup',
+            'Restore-SpotifyPersistenceBackup',
+            'preserve-ratings-tags-notes-and-browser-storage',
+            'playlist-backed-ratings-preserve',
+            'never-disable-or-optimize',
+            "source='alexk218/tagify'"
+          )){if($addon.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Missing integrated safety marker: $required"}}
+          foreach($forbidden in @('auto_update_authorized=$true','auto_install_authorized=$true','addon_manager_direct_mutation_allowed = $true')){if($addon.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Forbidden generic authority marker found: $forbidden"}}
+          Write-Host 'PROVENANCE_INTEGRATION_AUTHORITY_AUDIT_PASS'
+
+      - name: Prove production and validated parent remain immutable
+        shell: powershell
+        run: |
+          $prod='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2';$parent='4b7ef73fe416afdfb501173f145994b3ed817e42'
+          if((git rev-parse origin/main).Trim() -cne $prod){throw 'Production main moved.'}
+          $blob=(git rev-parse "$parent`:validation/marketplace-source-topology-v0.1.0/build_candidate.py").Trim();if($blob -cne '1e32dd57c95f718f2aeaae6149da36762ca7f6fd'){throw 'Source-topology parent builder drift.'}
+          $main='validation/custom-app-provenance-integration-v0.2.0/out/bin/spotify-control.ps1';$h=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant();if($h -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw "Spotify Control bytes drift: $h"}
+          Write-Host 'PROVENANCE_INTEGRATION_IMMUTABILITY_PASS'
+
+      - name: Upload integration validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-provenance-integration-v020-${{ github.run_id }}
+          path: |
+            validation/custom-app-provenance-integration-v0.2.0/out/bin/
+            validation/custom-app-provenance-integration-v0.2.0/candidate-validation.json
+            validation/custom-app-provenance-integration-v0.2.0/INTEGRATION_PLAN.md
+          if-no-files-found: error
