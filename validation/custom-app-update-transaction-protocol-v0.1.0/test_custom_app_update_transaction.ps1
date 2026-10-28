@@ -63,21 +63,21 @@ try{
     $x=New-GoodContext 'stage-git';$contexts.Add($x);New-Item -ItemType Directory -Force -Path (Join-Path $x.stage '.git')|Out-Null;[IO.File]::WriteAllText((Join-Path $x.stage '.git\config'),'x');NeedReason (Decide $x) 'stage-vcs-metadata-forbidden' 'stage .git'
     $x=New-GoodContext 'git-file';$contexts.Add($x);[IO.Directory]::Delete((Join-Path $x.live '.git'),$true);[IO.File]::WriteAllText((Join-Path $x.live '.git'),'gitdir: elsewhere');NeedReason (Decide $x) 'live-git-file-indirection-forbidden' 'live .git file'
 
-    $x=New-GoodContext 'commit';$contexts.Add($x);$plan=(Decide $x).plan;$pre=Get-CustomAppUpdateTreeSnapshotV010 $x.live;$res=Invoke-CustomAppUpdateFixtureTransactionV010 -Plan $plan -ValidationRoot $x.root -PersistenceProof (GoodProof)
+    $x=New-GoodContext 'commit';$contexts.Add($x);$plan=(Decide $x).plan;$pre=Get-CustomAppUpdateTreeSnapshotV010 -Root $x.live;$res=Invoke-CustomAppUpdateFixtureTransactionV010 -Plan $plan -ValidationRoot $x.root -PersistenceProof (GoodProof)
     Need ([bool]$res.committed -and [string]$res.status -ceq 'committed' -and -not [bool]$res.production_mutation_authorized) 'fixture transaction did not commit safely'
     $postRuntime=Get-CustomAppLocalRuntimeBaseline -Name 'future-app' -AppPath $x.live;Need ([string]$postRuntime.tree_sha256 -ceq [string]$plan.expected_remote_tree_sha256) 'committed runtime tree does not equal remote tree'
     Need (Test-Path -LiteralPath (Join-Path $x.live '.git\config') -PathType Leaf) 'local .git provenance was not preserved on commit'
     Need (([IO.File]::ReadAllText((Join-Path $x.live '.git\config'))).Contains('example/future-app')) 'preserved .git provenance content drifted'
     $replay=Invoke-CustomAppUpdateFixtureTransactionV010 -Plan $plan -ValidationRoot $x.root -PersistenceProof (GoodProof);Need (-not [bool]$replay.committed -and [string]$replay.status -ceq 'denied-before-apply') 'transaction replay was not denied'
 
-    $x=New-GoodContext 'rollback';$contexts.Add($x);$plan=(Decide $x).plan;$pre=Get-CustomAppUpdateTreeSnapshotV010 $x.live;$res=Invoke-CustomAppUpdateFixtureTransactionV010 -Plan $plan -ValidationRoot $x.root -PersistenceProof (GoodProof) -InjectPostApplyFailure
-    $after=Get-CustomAppUpdateTreeSnapshotV010 $x.live;Need ([bool]$res.rolled_back -and [bool]$res.rollback_verified -and [string]$after.tree_sha256 -ceq [string]$pre.tree_sha256) 'forced post-apply failure did not byte-restore live tree'
+    $x=New-GoodContext 'rollback';$contexts.Add($x);$plan=(Decide $x).plan;$pre=Get-CustomAppUpdateTreeSnapshotV010 -Root $x.live;$res=Invoke-CustomAppUpdateFixtureTransactionV010 -Plan $plan -ValidationRoot $x.root -PersistenceProof (GoodProof) -InjectPostApplyFailure
+    $after=Get-CustomAppUpdateTreeSnapshotV010 -Root $x.live;Need ([bool]$res.rolled_back -and [bool]$res.rollback_verified -and [string]$after.tree_sha256 -ceq [string]$pre.tree_sha256) 'forced post-apply failure did not byte-restore live tree'
 
     $x=New-GoodContext 'persistence-pre';$contexts.Add($x);$plan=(Decide $x).plan;$bad=[pscustomobject]@{backup_required=$true;backup_complete=$false;pre_snapshot_fingerprint=('a'*64);post_snapshot_fingerprint=('a'*64)};$res=Invoke-CustomAppUpdateFixtureTransactionV010 -Plan $plan -ValidationRoot $x.root -PersistenceProof $bad
     Need ([string]$res.status -ceq 'denied-before-apply' -and -not (Test-Path -LiteralPath $x.backup)) 'incomplete persistence backup mutated fixture'
 
-    $x=New-GoodContext 'persistence-post';$contexts.Add($x);$plan=(Decide $x).plan;$pre=Get-CustomAppUpdateTreeSnapshotV010 $x.live;$script:PostReads=0;$proof=[pscustomobject]@{backup_required=$true;backup_complete=$true;pre_snapshot_fingerprint=('a'*64)};$proof|Add-Member -MemberType ScriptProperty -Name post_snapshot_fingerprint -Value {$script:PostReads++;if($script:PostReads -eq 1){'a'*64}else{'b'*64}}
-    $res=Invoke-CustomAppUpdateFixtureTransactionV010 -Plan $plan -ValidationRoot $x.root -PersistenceProof $proof;$after=Get-CustomAppUpdateTreeSnapshotV010 $x.live
+    $x=New-GoodContext 'persistence-post';$contexts.Add($x);$plan=(Decide $x).plan;$pre=Get-CustomAppUpdateTreeSnapshotV010 -Root $x.live;$script:PostReads=0;$proof=[pscustomobject]@{backup_required=$true;backup_complete=$true;pre_snapshot_fingerprint=('a'*64)};$proof|Add-Member -MemberType ScriptProperty -Name post_snapshot_fingerprint -Value {$script:PostReads++;if($script:PostReads -eq 1){'a'*64}else{'b'*64}}
+    $res=Invoke-CustomAppUpdateFixtureTransactionV010 -Plan $plan -ValidationRoot $x.root -PersistenceProof $proof;$after=Get-CustomAppUpdateTreeSnapshotV010 -Root $x.live
     Need ([bool]$res.rolled_back -and [string]$res.reason -like 'Persistence verification failed after apply:*' -and [string]$after.tree_sha256 -ceq [string]$pre.tree_sha256) 'post-apply persistence drift did not roll back'
 
     $x=New-GoodContext 'stale-plan';$contexts.Add($x);$plan=(Decide $x).plan;[IO.File]::AppendAllText((Join-Path $x.live 'index.js'),'// local drift');$res=Invoke-CustomAppUpdateFixtureTransactionV010 -Plan $plan -ValidationRoot $x.root -PersistenceProof (GoodProof)
@@ -86,7 +86,7 @@ try{
     $x=New-GoodContext 'rollback-fail';$contexts.Add($x);$plan=(Decide $x).plan;$res=Invoke-CustomAppUpdateFixtureTransactionV010 -Plan $plan -ValidationRoot $x.root -PersistenceProof (GoodProof) -InjectPostApplyFailure -InjectRollbackFailure
     Need ([string]$res.status -ceq 'rollback-failed' -and -not [bool]$res.committed) 'rollback failure was incorrectly committed'
 
-    $x=New-GoodContext 'no-git';$contexts.Add($x);$d=Decide $x;Need ([bool]$d.eligible -and -not [bool]$d.plan.preserve_git) 'git-free fixture plan incorrectly requires VCS preservation'
+    $x=New-GoodContext 'no-git' $false;$contexts.Add($x);$d=Decide $x;Need ([bool]$d.eligible -and -not [bool]$d.plan.preserve_git) 'git-free fixture plan incorrectly requires VCS preservation'
 
     Write-Host "CUSTOM_APP_UPDATE_TRANSACTION_ACCEPTANCE_PASS cases=$script:Cases"
 } finally {
