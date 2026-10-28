@@ -55,14 +55,26 @@ jobs:
           1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-permit-reservation-v0.1.0/test_custom_app_production_permit_reservation.ps1';if($LASTEXITCODE){throw "reservation matrix failed pass $_"}}
           'CUSTOM_APP_PRODUCTION_RESERVATION_MATRIX_REPEAT_PASS'
 
-      - name: Replay permit admission and live parents
+      - name: Replay permit and admission parent matrices and pin live-attestation evidence
         shell: powershell
         run: |
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-permit-v0.1.0/test_custom_app_production_permit.ps1';if($LASTEXITCODE){throw 'permit matrix regression'}
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-live-attested-production-admission-v0.1.0/test_custom_app_live_attested_production_admission.ps1';if($LASTEXITCODE){throw 'admission matrix regression'}
-          function Copy-TreeSafe {param([Parameter(Mandatory=$true)][string]$Source,[Parameter(Mandatory=$true)][string]$Destination);if(-not(Test-PathSafe $Source 'Container')){throw 'source missing'};$s=[IO.Path]::GetFullPath($Source).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar);$ri=Get-Item -LiteralPath $s -Force;if(($ri.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne 0){throw 'root reparse'};if(Test-Path $Destination){throw 'dest exists'};[IO.Directory]::CreateDirectory([IO.Path]::GetFullPath($Destination))|Out-Null;foreach($e in @(Get-ChildItem -LiteralPath $s -Recurse -Force)){if(($e.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne 0){throw 'child reparse'};$r=$e.FullName.Substring($s.Length).TrimStart([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar);$t=Join-Path $Destination $r;if($e.PSIsContainer){[IO.Directory]::CreateDirectory($t)|Out-Null}else{$d=Split-Path -Parent $t;if(-not(Test-Path $d)){[IO.Directory]::CreateDirectory($d)|Out-Null};[IO.File]::Copy($e.FullName,$t,$false)}};return [IO.Path]::GetFullPath($Destination)}
-          $Version='0.6.5-r17';. (Resolve-Path 'validation/custom-app-live-attested-fixture-canary-v0.1.0/test_live_attested_fixture_canary.ps1')
-          'CUSTOM_APP_PRODUCTION_RESERVATION_PARENT_REPLAY_PASS'
+          $live='c3ce2311268a078ec6f2b4e512e56110aa347d58'
+          $livePins=@(
+            @('validation/custom-app-live-attested-fixture-canary-v0.1.0/custom-app-live-attested-fixture-canary.ps1','329eb4c7310d5a7ef57df0ac6bc07bbe5c0269c4'),
+            @('validation/custom-app-live-attested-fixture-canary-v0.1.0/test_live_attested_fixture_canary.ps1','09fb6a48149d115ede6fd89fa291c464774a7c54'),
+            @('.github/workflows/validate-custom-app-live-attested-fixture-canary-v010.yml','6b10ffb32cfaab86661ebceb02d03bdcd02f3ccc'))
+          foreach($p in $livePins){$b=(git rev-parse "$live`:$($p[0])").Trim();if($b -cne $p[1]){throw "validated live evidence blob drift $($p[0]) $b != $($p[1])"}}
+          $admission=(git show 'c128595c3ac7eab338f5d23d7041ae56a6822948:validation/custom-app-live-attested-production-admission-v0.1.0/custom-app-live-attested-production-admission.ps1') -join "`n"
+          foreach($m in @(
+            'c3ce2311268a078ec6f2b4e512e56110aa347d58','40694858363','40695079070','12819520599','12818612777',
+            'sha256:e025e59499e1e1e5e7a3f7a260cac57f42d9326325fa434d45b39b677fba8a9c',
+            'sha256:0966b860f4011939248dab1e56a91eb5917c4f51701bbba9c85814a38fd8eda1',
+            'committed_preserved_passed=$true','denied_no_mutation_passed=$true','rolled_back_restored_passed=$true','persistence_preserved_passed=$true','strong_git_provenance_preserved_passed=$true')){
+            if($admission.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "validated live qualification marker missing: $m"}
+          }
+          'CUSTOM_APP_PRODUCTION_RESERVATION_PARENT_EVIDENCE_PASS'
 
       - name: Rebuild exact parent candidate and SelfTest
         shell: powershell
@@ -75,7 +87,7 @@ jobs:
         shell: powershell
         run: |
           $p='d77f646d23652b0f066248230756d9e207a10fbd';$e=@('.github/workflows/validate-custom-app-production-permit-reservation-v010.yml','validation/custom-app-production-permit-reservation-v0.1.0/custom-app-production-permit-reservation.ps1','validation/custom-app-production-permit-reservation-v0.1.0/test_custom_app_production_permit_reservation.ps1');$c=@(git diff --name-only "$p...HEAD");$b=@($c|?{$_ -notin $e});if($b.Count){throw "unexpected surface $($b -join ', ')"};foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-permit-v0.1.0/custom-app-production-permit.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
-          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'};$d='validation/custom-app-production-permit-reservation-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_permit_parent=$p;append_only=$true;token_replay_blocked=$true;nonce_replay_blocked=$true;revision_cas_required=$true;atomic_persistence_before_executor_required=$true;reservation_is_authority=$false;production_execution_authority=$false;production_mutation_authority=$false;generic_future_app_positive=$true}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'};$d='validation/custom-app-production-permit-reservation-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_permit_parent=$p;validated_live_parent='c3ce2311268a078ec6f2b4e512e56110aa347d58';live_evidence_replayed_by_exact_pins=$true;append_only=$true;token_replay_blocked=$true;nonce_replay_blocked=$true;revision_cas_required=$true;atomic_persistence_before_executor_required=$true;reservation_is_authority=$false;production_execution_authority=$false;production_mutation_authority=$false;generic_future_app_positive=$true}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
           'CUSTOM_APP_PRODUCTION_RESERVATION_IMMUTABILITY_PASS'
 
       - uses: actions/upload-artifact@v4
