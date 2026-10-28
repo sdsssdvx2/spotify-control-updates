@@ -3,6 +3,7 @@ $validationRoot=Split-Path $PSScriptRoot -Parent
 . (Join-Path $validationRoot 'custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1')
 . (Join-Path $validationRoot 'custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1')
 . (Join-Path $PSScriptRoot 'custom-app-local-runtime-baseline.ps1')
+Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
 Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
 
 function Assert-Throws {
@@ -21,6 +22,33 @@ function New-FixtureApp {
     [IO.File]::WriteAllText((Join-Path $Root '.GIT/config'),'[remote "origin"]',[Text.Encoding]::UTF8)
 }
 
+function New-ForwardSlashFixtureZip {
+    param([Parameter(Mandatory=$true)][string]$SourceRoot,[Parameter(Mandatory=$true)][string]$ZipPath,[Parameter(Mandatory=$true)][string[]]$RelativePaths)
+    $stream=$null;$archive=$null
+    try{
+        $stream=[IO.File]::Open($ZipPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+        $archive=New-Object IO.Compression.ZipArchive($stream,[IO.Compression.ZipArchiveMode]::Create,$true)
+        foreach($relative in $RelativePaths){
+            if($relative.Contains('\')){throw "Fixture ZIP entry must use forward slashes: $relative"}
+            $source=Join-Path $SourceRoot ($relative.Replace('/',[IO.Path]::DirectorySeparatorChar))
+            if(-not (Test-Path -LiteralPath $source -PathType Leaf)){throw "Fixture ZIP source is missing: $relative"}
+            $entry=$archive.CreateEntry($relative,[IO.Compression.CompressionLevel]::Optimal)
+            $input=$null;$output=$null
+            try{
+                $input=[IO.File]::Open($source,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+                $output=$entry.Open()
+                $input.CopyTo($output)
+            } finally {
+                if($null -ne $output){$output.Dispose()}
+                if($null -ne $input){$input.Dispose()}
+            }
+        }
+    } finally {
+        if($null -ne $archive){$archive.Dispose()}
+        if($null -ne $stream){$stream.Dispose()}
+    }
+}
+
 $root=Join-Path $env:RUNNER_TEMP ('local-runtime-baseline-'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $root|Out-Null
 try{
@@ -33,12 +61,15 @@ try{
     if(-not (Test-CustomAppRemoteSha256 ([string]$baseline.tree_sha256))){throw 'Local runtime tree hash is invalid.'}
 
     # The exact same runtime files in a ZIP must produce the exact same tree fingerprint.
+    # Do not use ZipFile.CreateFromDirectory on Windows: it may write backslash entry names,
+    # while GitHub archives and the hardened remote observer require POSIX forward slashes.
     $clean=Join-Path $root 'clean';New-Item -ItemType Directory -Force -Path $clean,(Join-Path $clean 'assets')|Out-Null
     foreach($relative in @('index.js','manifest.json','assets/data.txt')){
         $dest=Join-Path $clean ($relative.Replace('/',[IO.Path]::DirectorySeparatorChar));$parent=Split-Path -Parent $dest
         New-Item -ItemType Directory -Force -Path $parent|Out-Null;[IO.File]::Copy((Join-Path $app ($relative.Replace('/',[IO.Path]::DirectorySeparatorChar))),$dest,$true)
     }
-    $zip=Join-Path $root 'clean.zip';[IO.Compression.ZipFile]::CreateFromDirectory($clean,$zip,[IO.Compression.CompressionLevel]::Optimal,$false)
+    $zip=Join-Path $root 'clean.zip'
+    New-ForwardSlashFixtureZip -SourceRoot $clean -ZipPath $zip -RelativePaths @('index.js','manifest.json','assets/data.txt')
     $remote=Get-CustomAppObserverZipEvidence -ZipPath $zip -WrapperMode none
     if([string]$remote.tree_sha256 -cne [string]$baseline.tree_sha256){throw "Local/remote tree formula mismatch: $($baseline.tree_sha256) != $($remote.tree_sha256)"}
     if([string]$remote.manifest_name -cne [string]$baseline.manifest_name -or [int]$remote.file_count -ne [int]$baseline.file_count){throw 'Local/remote manifest or file-count equivalence drift.'}
