@@ -1,0 +1,178 @@
+name: Validate Custom App Fixture Canary Permit v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-fixture-canary-permit-v0.1.0]
+    paths:
+      - 'validation/custom-app-fixture-canary-permit-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-fixture-canary-permit-v010.yml'
+  pull_request:
+    branches: [validate/custom-app-promotion-eligibility-gate-v0.1.0]
+    paths:
+      - 'validation/custom-app-fixture-canary-permit-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-fixture-canary-permit-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact permit-only scope, eligibility lineage, and frozen production
+        shell: powershell
+        run: |
+          $actual=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $expected){throw "Not exact event head: $actual != $expected"}
+          $parent='979e9d6362ead31016b9532f98629d6bcc2bbb56'
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'Fixture canary permit is not descended from exact validated promotion eligibility head.'}
+          $allowed=@(
+            '.github/workflows/validate-custom-app-fixture-canary-permit-v010.yml',
+            'validation/custom-app-fixture-canary-permit-v0.1.0/custom-app-fixture-canary-permit.ps1',
+            'validation/custom-app-fixture-canary-permit-v0.1.0/test_custom_app_fixture_canary_permit.ps1'
+          )
+          $changed=@(git diff --name-only "$parent...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Fixture canary permit validation scope escaped: $($bad -join ', ')"}
+          foreach($required in $allowed){if($required -notin $changed){throw "Missing expected fixture canary permit file: $required"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved during fixture canary permit validation.'}
+          Write-Host "CUSTOM_APP_FIXTURE_CANARY_SCOPE_PASS head=$actual"
+
+      - name: Prove immutable eligibility and shadow dependency objects
+        shell: powershell
+        run: |
+          $pins=@(
+            @('979e9d6362ead31016b9532f98629d6bcc2bbb56','validation/custom-app-promotion-eligibility-gate-v0.1.0/custom-app-promotion-eligibility.ps1','94c1b0ba8f2454078252a723f89ccc0327cbc181'),
+            @('979e9d6362ead31016b9532f98629d6bcc2bbb56','validation/custom-app-promotion-eligibility-gate-v0.1.0/test_custom_app_promotion_eligibility.ps1','4644a2bd0fa2c3a047d532df898200ce950274e3'),
+            @('22eb3561843fbe4016023d527186aa629512b67d','validation/custom-app-shadow-executor-v0.1.0/custom-app-shadow-executor.ps1','e0c39d0ffced966626ca5060346b8e6ed936589a'),
+            @('22eb3561843fbe4016023d527186aa629512b67d','validation/custom-app-shadow-executor-v0.1.0/test_custom_app_shadow_executor.ps1','0045d04e9ddb3bb6564e9a8dcf7b147e2684bcbc'),
+            @('22eb3561843fbe4016023d527186aa629512b67d','validation/custom-app-shadow-executor-v0.1.0/test_live_tagify_shadow_executor.ps1','20eb54baf6086131a03e27151cd53f5416fe3fae'),
+            @('c420a1df6f306c7ba74772b91241cb14abd04738','validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','e2f2fc656235883d2a82b106289973f6ded409a5'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+            @('d92daa3006093a7d966083193302965ee01905f6','validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py','92eb87048eac882483bee1ed97bde598cff57e7b')
+          )
+          foreach($p in $pins){$blob=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($blob -cne $p[2]){throw "Pinned fixture canary dependency drift: $($p[1]) $blob != $($p[2])"}}
+          Write-Host 'CUSTOM_APP_FIXTURE_CANARY_DEPENDENCY_PINS_PASS'
+
+      - name: Parse permit core and matrix with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          foreach($file in @(
+            'validation/custom-app-fixture-canary-permit-v0.1.0/custom-app-fixture-canary-permit.ps1',
+            'validation/custom-app-fixture-canary-permit-v0.1.0/test_custom_app_fixture_canary_permit.ps1'
+          )){
+            $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0} :: line={1} col={2} text=<{3}> :: {4}" -f $file,$_.Extent.StartLineNumber,$_.Extent.StartColumnNumber,$_.Extent.Text,$_.Message)};throw "PowerShell 5.1 parse failed: $file"}
+          }
+          Write-Host 'CUSTOM_APP_FIXTURE_CANARY_PS51_PARSE_PASS'
+
+      - name: Audit permit contract as HMAC-bound fixture-only and production-denied
+        shell: powershell
+        run: |
+          $core=Get-Content 'validation/custom-app-fixture-canary-permit-v0.1.0/custom-app-fixture-canary-permit.ps1' -Raw
+          foreach($m in @(
+            'System.Security.Cryptography.HMACSHA256','Test-CustomAppFixtureCanaryFixedTimeHexV010','fixture-canary-only','fixture-canary-v010',
+            'qualified_eligibility_head','979e9d6362ead31016b9532f98629d6bcc2bbb56','requires_fresh_eligibility_revalidation=$true','requires_single_use_consumption=$true',
+            'fixture_canary_execution_authorized=$true','mutation_mode=''deny''','mutation_authorized=$false','auto_update_authorized=$false','auto_install_authorized=$false',
+            'canary_execution_authorized=$false','production_mutation_authorized=$false','permit-replay-detected','permit-hmac-mismatch','permit-expired','permit-current-eligibility-binding-mismatch'
+          )){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Fixture canary safety marker missing: $m"}}
+          foreach($forbidden in @(
+            'Invoke-WebRequest','Invoke-RestMethod','Start-Process','New-Item','Remove-Item','Copy-Item','Move-Item','Set-Content','Out-File',
+            'spicetify apply','spicetify config','[IO.File]::Write','[IO.File]::Append','[IO.Directory]::Create','[IO.Directory]::Delete'
+          )){if($core.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Fixture canary permit gained forbidden side effect primitive: $forbidden"}}
+          if($core -match '(?<!fixture_)canary_execution_authorized\s*=\s*\$true'){throw 'Fixture canary permit grants generic canary execution authority.'}
+          if($core -match 'production_mutation_authorized\s*=\s*\$true'){throw 'Fixture canary permit grants production mutation authority.'}
+          Write-Host 'CUSTOM_APP_FIXTURE_CANARY_HMAC_SCOPE_AUDIT_PASS'
+
+      - name: Run fixture canary tamper and replay matrix twice
+        shell: powershell
+        run: |
+          1..2|ForEach-Object{
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-fixture-canary-permit-v0.1.0/test_custom_app_fixture_canary_permit.ps1'
+            if($LASTEXITCODE -ne 0){throw "Fixture canary permit matrix failed on pass $_."}
+          }
+          Write-Host 'CUSTOM_APP_FIXTURE_CANARY_MATRIX_REPEAT_PASS'
+
+      - name: Replay exact promotion eligibility matrix
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-promotion-eligibility-gate-v0.1.0/test_custom_app_promotion_eligibility.ps1'
+          if($LASTEXITCODE -ne 0){throw 'Promotion eligibility parent matrix regressed.'}
+          Write-Host 'CUSTOM_APP_FIXTURE_CANARY_PROMOTION_PARENT_PASS'
+
+      - name: Replay exact shadow offline and live pinned Tagify update
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-shadow-executor-v0.1.0/test_custom_app_shadow_executor.ps1'
+          if($LASTEXITCODE -ne 0){throw 'Shadow offline parent matrix regressed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-shadow-executor-v0.1.0/test_live_tagify_shadow_executor.ps1'
+          if($LASTEXITCODE -ne 0){throw 'Live pinned Tagify shadow update regressed.'}
+          Write-Host 'CUSTOM_APP_FIXTURE_CANARY_SHADOW_PARENT_PASS'
+
+      - name: Replay stage acquisition and transaction matrices
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-stage-acquisition-contract-v0.1.0/test_custom_app_stage_acquisition.ps1'
+          if($LASTEXITCODE -ne 0){throw 'Stage acquisition matrix regressed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-update-transaction-protocol-v0.1.0/test_custom_app_update_transaction.ps1'
+          if($LASTEXITCODE -ne 0){throw 'Transaction protocol matrix regressed.'}
+          Write-Host 'CUSTOM_APP_FIXTURE_CANARY_STAGE_TRANSACTION_PASS'
+
+      - name: Rebuild exact v0.4.1 parent and run full Addon Manager SelfTest
+        shell: powershell
+        run: |
+          python 'validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py' --build
+          if($LASTEXITCODE -ne 0){throw 'Exact v0.4.1 candidate rebuild failed.'}
+          $addon='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/addon-manager.ps1';$main='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/spotify-control.ps1'
+          $ah=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant();if((Get-Item $addon).Length -ne 523216 -or $ah -cne 'b2cec989ef399aed4a8763105121b21181ffb493ed9e3e884baa1d62a634f94b'){throw "Parent Addon Manager drift: $((Get-Item $addon).Length)/$ah"}
+          $mh=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant();if($mh -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw "Spotify Control parent drift: $mh"}
+          $sandbox=Join-Path $env:RUNNER_TEMP 'fixture-canary-parent-selftest';$env:LOCALAPPDATA=Join-Path $sandbox 'LocalAppData';$env:APPDATA=Join-Path $sandbox 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Exact parent Addon Manager SelfTest failed.'}
+          Write-Host 'CUSTOM_APP_FIXTURE_CANARY_PARENT_SELFTEST_PASS'
+
+      - name: Prove production and validated parent surfaces remain immutable
+        shell: powershell
+        run: |
+          $parent='979e9d6362ead31016b9532f98629d6bcc2bbb56';$changed=@(git diff --name-only "$parent...HEAD")
+          $expected=@(
+            '.github/workflows/validate-custom-app-fixture-canary-permit-v010.yml',
+            'validation/custom-app-fixture-canary-permit-v0.1.0/custom-app-fixture-canary-permit.ps1',
+            'validation/custom-app-fixture-canary-permit-v0.1.0/test_custom_app_fixture_canary_permit.ps1'
+          )
+          $bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "Unexpected fixture canary changed surface: $($bad -join ', ')"}
+          foreach($path in @(
+            'manifest.json','stable-version.json','validation/custom-app-promotion-eligibility-gate-v0.1.0/custom-app-promotion-eligibility.ps1',
+            'validation/custom-app-shadow-executor-v0.1.0/custom-app-shadow-executor.ps1','validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1',
+            'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py'
+          )){git diff --quiet $parent HEAD -- $path;if($LASTEXITCODE -ne 0){throw "Protected surface changed: $path"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved.'}
+          Write-Host 'CUSTOM_APP_FIXTURE_CANARY_IMMUTABILITY_PASS'
+
+      - name: Write fixture canary permit validation evidence
+        shell: powershell
+        run: |
+          $e=[ordered]@{
+            schema=1;head=(git rev-parse HEAD).Trim();validated_eligibility_parent='979e9d6362ead31016b9532f98629d6bcc2bbb56';production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+            permit='custom-app-fixture-canary-permit-v1';scope='fixture-canary-only';hmac='HMAC-SHA256';single_use=$true;ttl_max_minutes=10
+            fixture_canary_execution_capability=$true;generic_canary_execution_authority=$false;production_mutation_authority=$false;auto_update_authority=$false;auto_install_authority=$false
+            promotion_parent_replay='pass';shadow_parent_replay='pass';live_tagify_shadow_replay='pass';stage_transaction_replay='pass';parent_selftest='pass'
+          }
+          $e|ConvertTo-Json -Depth 5|Set-Content 'validation/custom-app-fixture-canary-permit-v0.1.0/ci-evidence.json' -Encoding UTF8
+
+      - name: Upload fixture canary permit validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-fixture-canary-permit-v010-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            validation/custom-app-fixture-canary-permit-v0.1.0/custom-app-fixture-canary-permit.ps1
+            validation/custom-app-fixture-canary-permit-v0.1.0/test_custom_app_fixture_canary_permit.ps1
+            validation/custom-app-fixture-canary-permit-v0.1.0/ci-evidence.json
