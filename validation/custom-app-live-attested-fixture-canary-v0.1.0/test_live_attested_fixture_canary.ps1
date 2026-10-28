@@ -2,22 +2,33 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 $here=Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot=Split-Path -Parent (Split-Path -Parent $here)
+$depRoot=Join-Path $env:TEMP ('custom-app-live-attested-deps-'+[guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $depRoot|Out-Null
 
-. (Join-Path $repoRoot 'validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1')
-. (Join-Path $repoRoot 'validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1')
-. (Join-Path $repoRoot 'validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1')
-. (Join-Path $repoRoot 'validation/custom-app-remote-observation-collector-v0.1.1/release-id-fix-v011.ps1')
-. (Join-Path $repoRoot 'validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1')
-. (Join-Path $repoRoot 'validation/custom-app-remote-source-contract-v0.1.1/release-continuity-v011.ps1')
-. (Join-Path $repoRoot 'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1')
-. (Join-Path $repoRoot 'validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1')
-. (Join-Path $repoRoot 'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1')
-. (Join-Path $repoRoot 'validation/custom-app-promotion-eligibility-gate-v0.1.0/custom-app-promotion-eligibility.ps1')
-. (Join-Path $repoRoot 'validation/custom-app-fixture-canary-permit-v0.1.0/custom-app-fixture-canary-permit.ps1')
-. (Join-Path $repoRoot 'validation/custom-app-shadow-executor-v0.1.0/custom-app-shadow-executor.ps1')
-. (Join-Path $repoRoot 'validation/custom-app-shadow-executor-v0.1.0/shadow-executor-safety-overlay.ps1')
-. (Join-Path $repoRoot 'validation/custom-app-fixture-canary-executor-v0.1.0/custom-app-fixture-canary-executor-v011.ps1')
-. (Join-Path $repoRoot 'validation/custom-app-fixture-canary-execution-receipt-v0.1.1/custom-app-fixture-canary-execution-receipt-v013.ps1')
+function Get-PinnedDependencyFile {
+    param([Parameter(Mandatory=$true)][string]$Commit,[Parameter(Mandatory=$true)][string]$RepoPath,[Parameter(Mandatory=$true)][string]$Name)
+    $lines=@(& git -C $repoRoot show "$Commit`:$RepoPath")
+    if($LASTEXITCODE -ne 0){throw "Could not materialize pinned dependency: $Commit`:$RepoPath"}
+    $out=Join-Path $depRoot $Name
+    [IO.File]::WriteAllText($out,(($lines -join "`n")+"`n"),[Text.UTF8Encoding]::new($false))
+    return $out
+}
+
+. (Get-PinnedDependencyFile '57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b' 'validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1' 'lifecycle-settings-core.ps1')
+. (Get-PinnedDependencyFile 'b339f2b79a267c13cf3c5974aea2fff3786d3093' 'validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1' 'custom-app-provenance.ps1')
+. (Get-PinnedDependencyFile '7d22b55c58c6e85a8a3ec9396800e65d81b0e7d2' 'validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1' 'custom-app-remote-observer.ps1')
+. (Get-PinnedDependencyFile '7d22b55c58c6e85a8a3ec9396800e65d81b0e7d2' 'validation/custom-app-remote-observation-collector-v0.1.1/release-id-fix-v011.ps1' 'release-id-fix-v011.ps1')
+. (Get-PinnedDependencyFile '19109205bd2e61e862c3b9acd61946568397ecb5' 'validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1' 'custom-app-remote-source-contract.ps1')
+. (Get-PinnedDependencyFile '19109205bd2e61e862c3b9acd61946568397ecb5' 'validation/custom-app-remote-source-contract-v0.1.1/release-continuity-v011.ps1' 'release-continuity-v011.ps1')
+. (Get-PinnedDependencyFile '7402ea5c77e58cd072f0166411d40e7726093f3c' 'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1' 'custom-app-local-runtime-baseline.ps1')
+. (Get-PinnedDependencyFile 'c420a1df6f306c7ba74772b91241cb14abd04738' 'validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1' 'custom-app-stage-acquisition.ps1')
+. (Get-PinnedDependencyFile '1a2461a6929e9cabd50d27f95e0744f83443b9e8' 'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1' 'custom-app-update-transaction.ps1')
+. (Get-PinnedDependencyFile '979e9d6362ead31016b9532f98629d6bcc2bbb56' 'validation/custom-app-promotion-eligibility-gate-v0.1.0/custom-app-promotion-eligibility.ps1' 'custom-app-promotion-eligibility.ps1')
+. (Get-PinnedDependencyFile '79c7ef064a216ee3ff34328be282d742f0f7abc0' 'validation/custom-app-fixture-canary-permit-v0.1.0/custom-app-fixture-canary-permit.ps1' 'custom-app-fixture-canary-permit.ps1')
+. (Get-PinnedDependencyFile '22eb3561843fbe4016023d527186aa629512b67d' 'validation/custom-app-shadow-executor-v0.1.0/custom-app-shadow-executor.ps1' 'custom-app-shadow-executor.ps1')
+. (Get-PinnedDependencyFile '22eb3561843fbe4016023d527186aa629512b67d' 'validation/custom-app-shadow-executor-v0.1.0/shadow-executor-safety-overlay.ps1' 'shadow-executor-safety-overlay.ps1')
+. (Get-PinnedDependencyFile 'a5d5839a9d6c1dd01c1fced6e9e1f5f76d16b5ca' 'validation/custom-app-fixture-canary-executor-v0.1.0/custom-app-fixture-canary-executor-v011.ps1' 'custom-app-fixture-canary-executor-v011.ps1')
+. (Get-PinnedDependencyFile '635e25a4a06320cd103e07b1506f0ba8787e5c3a' 'validation/custom-app-fixture-canary-execution-receipt-v0.1.1/custom-app-fixture-canary-execution-receipt-v013.ps1' 'custom-app-fixture-canary-execution-receipt-v013.ps1')
 . (Join-Path $here 'custom-app-live-attested-fixture-canary.ps1')
 
 function Assert-True {param([bool]$Condition,[string]$Message)if(-not $Condition){throw $Message}}
@@ -130,4 +141,5 @@ try {
 } finally {
     if($null -ne $oldStage -and $oldStage.PSObject.Properties['workspace_path']){try{Remove-CustomAppStageWorkspaceV010 -Path ([string]$oldStage.workspace_path)}catch{}}
     if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue}
+    if(Test-Path -LiteralPath $depRoot){Remove-Item -LiteralPath $depRoot -Recurse -Force -ErrorAction SilentlyContinue}
 }
