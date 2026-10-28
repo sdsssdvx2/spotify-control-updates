@@ -32,7 +32,7 @@ jobs:
         run: |
           $h=(git rev-parse HEAD).Trim();$pins=@(
             @($h,'validation/custom-app-production-stage-executor-v0.1.0/custom-app-production-stage-executor.ps1','349d4028997a9cc7a94540286c8b9ba6d6a5b050'),
-            @($h,'validation/custom-app-production-stage-executor-v0.1.0/test_custom_app_production_stage_executor.ps1','28fc63ec0331a419fd38e75ce550bac84b380c81'),
+            @($h,'validation/custom-app-production-stage-executor-v0.1.0/test_custom_app_production_stage_executor.ps1','4bb9d6d3ef7822809e75e28b3fb0cc03cb96861a'),
             @('13f4314b81816b1b1c3bb3c2fb4280b6c015f8de','validation/custom-app-production-stage-acquisition-admission-v0.1.0/custom-app-production-stage-acquisition-admission.ps1','df343c9da93444cdb86753ffa17db8b260baec0c'),
             @('13f4314b81816b1b1c3bb3c2fb4280b6c015f8de','validation/custom-app-production-stage-acquisition-admission-v0.1.0/test_custom_app_production_stage_acquisition_admission.ps1','4d63a76e7c667e41c9867d7a47f5d28568095c9e'),
             @('c420a1df6f306c7ba74772b91241cb14abd04738','validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','e2f2fc656235883d2a82b106289973f6ded409a5'),
