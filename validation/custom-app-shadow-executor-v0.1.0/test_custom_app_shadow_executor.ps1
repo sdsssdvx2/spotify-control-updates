@@ -19,9 +19,6 @@ function Get-PinnedDependencyFile([string]$Commit,[string]$RepoPath,[string]$Nam
 . (Join-Path $here 'custom-app-shadow-executor.ps1')
 . (Join-Path $here 'shadow-executor-safety-overlay.ps1')
 
-# The pinned lifecycle/settings core is an insertion module and intentionally relies on
-# stable Addon Manager base helpers. For this standalone validation harness, provide a
-# conservative equivalent surface: literal path checks plus reparse-denying byte copy.
 function Test-PathSafe {
     param([AllowNull()][string]$Path,[ValidateSet('Leaf','Container')][string]$Kind)
     if([string]::IsNullOrWhiteSpace($Path)){return $false}
@@ -84,7 +81,7 @@ function New-ShadowFixture {
     }
     $row=[pscustomobject]@{
         schema=1;managed_by='custom-app-remote-binding-observer-v1';name='future-app';active=$true;source_identity='example/future-app';binding=$binding
-        last_success='2026-10-28T11:01:00+00:00';last_status='remote-change-observed';last_remote_tree_sha256=[string]$stageBaseline.tree_sha256;last_remote_commit_sha=$commit
+        last_success='2026-10-28T11:01:00+00:00';last_status='remote-change-observed';last_local_tree_sha256=[string]$current.tree_sha256;last_local_manifest_name=[string]$current.manifest_name;last_remote_tree_sha256=[string]$stageBaseline.tree_sha256;last_remote_commit_sha=$commit
         update_observed=$true;requires_reenrollment=$false;user_removed=$false;mutation_mode='deny';auto_update_authorized=$false;auto_install_authorized=$false
     }
     $bindingCheck=Test-CustomAppStageBindingRowV010 -BindingRow $row -ExpectedName 'future-app';if(-not $bindingCheck.ok){throw "Fixture binding invalid: $($bindingCheck.reason)"}
