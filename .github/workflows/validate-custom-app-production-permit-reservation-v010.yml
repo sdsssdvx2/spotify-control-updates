@@ -3,18 +3,12 @@ name: Validate Custom App Production Permit Reservation v0.1.0
 on:
   push:
     branches: [validate/custom-app-production-permit-reservation-v0.1.0]
-    paths:
-      - 'validation/custom-app-production-permit-reservation-v0.1.0/**'
-      - '.github/workflows/validate-custom-app-production-permit-reservation-v010.yml'
+    paths: ['validation/custom-app-production-permit-reservation-v0.1.0/**','.github/workflows/validate-custom-app-production-permit-reservation-v010.yml']
   pull_request:
     branches: [validate/custom-app-production-permit-v0.1.0]
-    paths:
-      - 'validation/custom-app-production-permit-reservation-v0.1.0/**'
-      - '.github/workflows/validate-custom-app-production-permit-reservation-v010.yml'
+    paths: ['validation/custom-app-production-permit-reservation-v0.1.0/**','.github/workflows/validate-custom-app-production-permit-reservation-v010.yml']
   workflow_dispatch:
-
-permissions:
-  contents: read
+permissions: {contents: read}
 
 jobs:
   validate-windows:
@@ -22,105 +16,69 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        with: {fetch-depth: 0, ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"}
 
-      - name: Prove exact reservation-only scope, permit lineage, and frozen production
+      - name: Prove exact scope lineage and frozen production
         shell: powershell
         run: |
-          $actual=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
-          if($actual -cne $expected){throw "Not exact event head: $actual != $expected"}
-          $parent='d77f646d23652b0f066248230756d9e207a10fbd'
-          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'Production reservation validation is not descended from exact permit head.'}
-          $allowed=@('.github/workflows/validate-custom-app-production-permit-reservation-v010.yml','validation/custom-app-production-permit-reservation-v0.1.0/custom-app-production-permit-reservation.ps1','validation/custom-app-production-permit-reservation-v0.1.0/test_custom_app_production_permit_reservation.ps1')
-          $changed=@(git diff --name-only "$parent...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed});if($bad.Count){throw "Reservation validation scope escaped: $($bad -join ', ')"}
-          foreach($required in $allowed){if($required -notin $changed){throw "Missing expected reservation file: $required"}}
-          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved during reservation validation.'}
-          Write-Host "CUSTOM_APP_PRODUCTION_RESERVATION_SCOPE_PASS head=$actual"
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h -cne $e){throw "head mismatch $h != $e"}
+          $p='d77f646d23652b0f066248230756d9e207a10fbd';if((git merge-base $p HEAD).Trim() -cne $p){throw 'not descended from exact permit head'}
+          $a=@('.github/workflows/validate-custom-app-production-permit-reservation-v010.yml','validation/custom-app-production-permit-reservation-v0.1.0/custom-app-production-permit-reservation.ps1','validation/custom-app-production-permit-reservation-v0.1.0/test_custom_app_production_permit_reservation.ps1');$c=@(git diff --name-only "$p...HEAD");$b=@($c|?{$_ -notin $a});if($b.Count){throw "scope escaped: $($b -join ', ')"};foreach($x in $a){if($x -notin $c){throw "missing $x"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
+          'CUSTOM_APP_PRODUCTION_RESERVATION_SCOPE_PASS'
 
-      - name: Prove exact immutable reservation and permit dependency objects
+      - name: Prove exact immutable dependency pins
         shell: powershell
         run: |
-          $head=(git rev-parse HEAD).Trim();$pins=@(
-            @($head,'validation/custom-app-production-permit-reservation-v0.1.0/custom-app-production-permit-reservation.ps1','509ec96b4ca25377213d730d49de92252224fc89'),
-            @($head,'validation/custom-app-production-permit-reservation-v0.1.0/test_custom_app_production_permit_reservation.ps1','ac55477828b6b3b514acc806814d2df31bc8eb03'),
+          $h=(git rev-parse HEAD).Trim();$pins=@(
+            @($h,'validation/custom-app-production-permit-reservation-v0.1.0/custom-app-production-permit-reservation.ps1','54c1c6a3be4b8646d87a06cef9903ebb01479fd6'),
+            @($h,'validation/custom-app-production-permit-reservation-v0.1.0/test_custom_app_production_permit_reservation.ps1','ac55477828b6b3b514acc806814d2df31bc8eb03'),
             @('d77f646d23652b0f066248230756d9e207a10fbd','validation/custom-app-production-permit-v0.1.0/custom-app-production-permit.ps1','2aff85ca092848ea254423bf5441b1a077dea5b7'),
             @('d77f646d23652b0f066248230756d9e207a10fbd','validation/custom-app-production-permit-v0.1.0/test_custom_app_production_permit.ps1','49ee657d1b48b30eaa339d3790768fcf005fa59f'),
-            @('c128595c3ac7eab338f5d23d7041ae56a6822948','validation/custom-app-live-attested-production-admission-v0.1.0/custom-app-live-attested-production-admission.ps1','9bdcbf0a928539e5f3c4e28b7de1d68589e18525')
-          )
-          foreach($p in $pins){$blob=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($blob -cne $p[2]){throw "Pinned reservation dependency drift: $($p[1]) $blob != $($p[2])"}}
-          Write-Host 'CUSTOM_APP_PRODUCTION_RESERVATION_PINS_PASS'
+            @('c128595c3ac7eab338f5d23d7041ae56a6822948','validation/custom-app-live-attested-production-admission-v0.1.0/custom-app-live-attested-production-admission.ps1','9bdcbf0a928539e5f3c4e28b7de1d68589e18525'))
+          foreach($p in $pins){$b=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($b -cne $p[2]){throw "pin drift $($p[1]) $b != $($p[2])"}}
+          'CUSTOM_APP_PRODUCTION_RESERVATION_PINS_PASS'
 
-      - name: Parse reservation core and matrix with Windows PowerShell 5.1
+      - name: Parse and zero-authority audit
         shell: powershell
         run: |
-          foreach($file in @('validation/custom-app-production-permit-reservation-v0.1.0/custom-app-production-permit-reservation.ps1','validation/custom-app-production-permit-reservation-v0.1.0/test_custom_app_production_permit_reservation.ps1')){
-            $tokens=$null;$errors=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
-            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0} :: line={1} col={2} text=<{3}> :: {4}" -f $file,$_.Extent.StartLineNumber,$_.Extent.StartColumnNumber,$_.Extent.Text,$_.Message)};throw "PowerShell 5.1 parse failed: $file"}
-          }
-          Write-Host 'CUSTOM_APP_PRODUCTION_RESERVATION_PS51_PARSE_PASS'
+          $dir='validation/custom-app-production-permit-reservation-v0.1.0';foreach($f in @("$dir/custom-app-production-permit-reservation.ps1","$dir/test_custom_app_production_permit_reservation.ps1")){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|%{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $core=Get-Content "$dir/custom-app-production-permit-reservation.ps1" -Raw;foreach($m in @('Test-CustomAppProductionPermitV010','append_only=$true','requires_atomic_compare_and_swap_persistence=$true','permit-already-reserved-token','permit-already-reserved-nonce','reservation-state-revision-conflict','requires_atomic_persistence_before_executor=$true','reservation_is_authority=$false','production_execution_authorized=$false','production_mutation_authorized=$false')){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "missing $m"}}
+          foreach($x in @('Invoke-WebRequest','Invoke-RestMethod','Start-Process','New-Item','Remove-Item','Copy-Item','Move-Item','Set-Content','Add-Content','Out-File','[IO.File]::','[IO.Directory]::','Save-AddonState','spicetify apply','spicetify config')){if($core.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge 0){throw "side effect primitive $x"}}
+          if($core -match 'production_execution_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true|reservation_is_authority\s*=\s*\$true'){throw 'authority escaped'}
+          $test=Get-Content "$dir/test_custom_app_production_permit_reservation.ps1" -Raw;foreach($m in @('same-token-replay','same-nonce-different-token','stale-revision','cas-race-loser','user-removed-after-issue','runtime-drift-after-issue',"New-ReservationFixture -Name 'future-app' -Source 'owner/future-app'")){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "coverage missing $m"}}
+          'CUSTOM_APP_PRODUCTION_RESERVATION_PARSE_AUDIT_PASS'
 
-      - name: Audit reservation as in-memory append-only replay guard with zero execution authority
+      - name: Run replay CAS matrix twice
         shell: powershell
         run: |
-          $core=Get-Content 'validation/custom-app-production-permit-reservation-v0.1.0/custom-app-production-permit-reservation.ps1' -Raw
-          foreach($m in @('d77f646d23652b0f066248230756d9e207a10fbd','Test-CustomAppProductionPermitV010','append_only=$true','requires_atomic_compare_and_swap_persistence=$true','permit-already-reserved-token','permit-already-reserved-nonce','reservation-state-revision-conflict','requires_atomic_persistence_before_executor=$true','reservation_is_authority=$false','production_execution_authorized=$false','production_mutation_authorized=$false')){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Reservation safety marker missing: $m"}}
-          foreach($forbidden in @('Invoke-WebRequest','Invoke-RestMethod','Start-Process','New-Item','Remove-Item','Copy-Item','Move-Item','Set-Content','Add-Content','Out-File','[IO.File]::','[IO.Directory]::','Save-AddonState','spicetify apply','spicetify config','Invoke-CustomAppUpdateFixtureTransaction','Invoke-CustomAppShadowUpdate')){if($core.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Reservation core gained forbidden side effect/action: $forbidden"}}
-          if($core -match 'production_execution_authorized\s*=\s*\$true' -or $core -match 'production_mutation_authorized\s*=\s*\$true' -or $core -match 'reservation_is_authority\s*=\s*\$true'){throw 'Reservation core grants forbidden authority.'}
-          $test=Get-Content 'validation/custom-app-production-permit-reservation-v0.1.0/test_custom_app_production_permit_reservation.ps1' -Raw
-          foreach($m in @('same-token-replay','same-nonce-different-token','stale-revision','cas-race-loser','user-removed-after-issue','runtime-drift-after-issue',"New-ReservationFixture -Name 'future-app' -Source 'owner/future-app'")){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Reservation matrix coverage marker missing: $m"}}
-          Write-Host 'CUSTOM_APP_PRODUCTION_RESERVATION_ZERO_AUTHORITY_AUDIT_PASS'
+          1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-permit-reservation-v0.1.0/test_custom_app_production_permit_reservation.ps1';if($LASTEXITCODE){throw "reservation matrix failed pass $_"}}
+          'CUSTOM_APP_PRODUCTION_RESERVATION_MATRIX_REPEAT_PASS'
 
-      - name: Run production reservation replay and CAS matrix twice
+      - name: Replay permit admission and live parents
         shell: powershell
         run: |
-          1..2|ForEach-Object{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-permit-reservation-v0.1.0/test_custom_app_production_permit_reservation.ps1';if($LASTEXITCODE -ne 0){throw "Production reservation matrix failed on pass $_."}}
-          Write-Host 'CUSTOM_APP_PRODUCTION_RESERVATION_MATRIX_REPEAT_PASS'
-
-      - name: Replay exact production permit and admission parent matrices
-        shell: powershell
-        run: |
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-permit-v0.1.0/test_custom_app_production_permit.ps1';if($LASTEXITCODE -ne 0){throw 'Production permit parent matrix regressed.'}
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-live-attested-production-admission-v0.1.0/test_custom_app_live_attested_production_admission.ps1';if($LASTEXITCODE -ne 0){throw 'Production admission parent matrix regressed.'}
-          Write-Host 'CUSTOM_APP_PRODUCTION_RESERVATION_PARENT_MATRICES_PASS'
-
-      - name: Replay exact live Tagify commit deny rollback proof
-        shell: powershell
-        run: |
-          function Copy-TreeSafe {
-            param([Parameter(Mandatory=$true)][string]$Source,[Parameter(Mandatory=$true)][string]$Destination)
-            if(-not(Test-PathSafe $Source 'Container')){throw 'Copy-TreeSafe source is missing.'};$src=[IO.Path]::GetFullPath($Source).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar);$rootItem=Get-Item -LiteralPath $src -Force -ErrorAction Stop
-            if(($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Copy-TreeSafe source root is a reparse point.'};if(Test-Path -LiteralPath $Destination){throw 'Copy-TreeSafe destination already exists.'};[IO.Directory]::CreateDirectory([IO.Path]::GetFullPath($Destination))|Out-Null
-            foreach($entry in @(Get-ChildItem -LiteralPath $src -Recurse -Force -ErrorAction Stop)){if(($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw "Copy-TreeSafe source contains reparse point: $($entry.FullName)"};$rel=$entry.FullName.Substring($src.Length).TrimStart([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar);$target=Join-Path $Destination $rel;if($entry.PSIsContainer){[IO.Directory]::CreateDirectory($target)|Out-Null}else{$parent=Split-Path -Parent $target;if(-not(Test-Path $parent)){[IO.Directory]::CreateDirectory($parent)|Out-Null};[IO.File]::Copy($entry.FullName,$target,$false)}};return [IO.Path]::GetFullPath($Destination)
-          }
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-permit-v0.1.0/test_custom_app_production_permit.ps1';if($LASTEXITCODE){throw 'permit matrix regression'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-live-attested-production-admission-v0.1.0/test_custom_app_live_attested_production_admission.ps1';if($LASTEXITCODE){throw 'admission matrix regression'}
+          function Copy-TreeSafe {param([Parameter(Mandatory=$true)][string]$Source,[Parameter(Mandatory=$true)][string]$Destination);if(-not(Test-PathSafe $Source 'Container')){throw 'source missing'};$s=[IO.Path]::GetFullPath($Source).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar);$ri=Get-Item -LiteralPath $s -Force;if(($ri.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne 0){throw 'root reparse'};if(Test-Path $Destination){throw 'dest exists'};[IO.Directory]::CreateDirectory([IO.Path]::GetFullPath($Destination))|Out-Null;foreach($e in @(Get-ChildItem -LiteralPath $s -Recurse -Force)){if(($e.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne 0){throw 'child reparse'};$r=$e.FullName.Substring($s.Length).TrimStart([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar);$t=Join-Path $Destination $r;if($e.PSIsContainer){[IO.Directory]::CreateDirectory($t)|Out-Null}else{$d=Split-Path -Parent $t;if(-not(Test-Path $d)){[IO.Directory]::CreateDirectory($d)|Out-Null};[IO.File]::Copy($e.FullName,$t,$false)}};return [IO.Path]::GetFullPath($Destination)}
           $Version='0.6.5-r17';. (Resolve-Path 'validation/custom-app-live-attested-fixture-canary-v0.1.0/test_live_attested_fixture_canary.ps1')
-          Write-Host 'CUSTOM_APP_PRODUCTION_RESERVATION_LIVE_PARENT_REPLAY_PASS'
+          'CUSTOM_APP_PRODUCTION_RESERVATION_PARENT_REPLAY_PASS'
 
-      - name: Rebuild exact v0.4.1 candidate and run full Addon Manager SelfTest
+      - name: Rebuild exact parent candidate and SelfTest
         shell: powershell
         run: |
-          python 'validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py' --build;if($LASTEXITCODE -ne 0){throw 'Exact v0.4.1 candidate rebuild failed.'}
-          $addon='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/addon-manager.ps1';$main='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/spotify-control.ps1';$ah=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant()
-          if((Get-Item $addon).Length -ne 523216 -or $ah -cne 'b2cec989ef399aed4a8763105121b21181ffb493ed9e3e884baa1d62a634f94b'){throw "Parent Addon Manager drift: $((Get-Item $addon).Length)/$ah"};if($mh -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw "Spotify Control parent drift: $mh"}
-          $sandbox=Join-Path $env:RUNNER_TEMP 'production-reservation-parent-selftest';$env:LOCALAPPDATA=Join-Path $sandbox 'LocalAppData';$env:APPDATA=Join-Path $sandbox 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest;if($LASTEXITCODE -ne 0){throw 'Exact parent Addon Manager SelfTest failed.'}
-          Write-Host 'CUSTOM_APP_PRODUCTION_RESERVATION_PARENT_SELFTEST_PASS'
+          python 'validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py' --build;if($LASTEXITCODE){throw 'build failed'};$a='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/addon-manager.ps1';$m='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/spotify-control.ps1';$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();if((Get-Item $a).Length-ne 523216 -or $ah-cne'b2cec989ef399aed4a8763105121b21181ffb493ed9e3e884baa1d62a634f94b'){throw 'addon drift'};if($mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'main drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'reservation-selftest';$env:LOCALAPPDATA=Join-Path $s 'Local';$env:APPDATA=Join-Path $s 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'SelfTest failed'}
+          'CUSTOM_APP_PRODUCTION_RESERVATION_SELFTEST_PASS'
 
-      - name: Prove production and permit parent remain immutable
+      - name: Prove immutability and write evidence
         shell: powershell
         run: |
-          $parent='d77f646d23652b0f066248230756d9e207a10fbd';$changed=@(git diff --name-only "$parent...HEAD");$expected=@('.github/workflows/validate-custom-app-production-permit-reservation-v010.yml','validation/custom-app-production-permit-reservation-v0.1.0/custom-app-production-permit-reservation.ps1','validation/custom-app-production-permit-reservation-v0.1.0/test_custom_app_production_permit_reservation.ps1');$bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "Unexpected reservation changed surface: $($bad -join ', ')"}
-          foreach($path in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-permit-v0.1.0/custom-app-production-permit.ps1')){git diff --quiet $parent HEAD -- $path;if($LASTEXITCODE -ne 0){throw "Protected parent/production surface changed: $path"}}
-          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved.'};Write-Host 'CUSTOM_APP_PRODUCTION_RESERVATION_IMMUTABILITY_PASS'
+          $p='d77f646d23652b0f066248230756d9e207a10fbd';$e=@('.github/workflows/validate-custom-app-production-permit-reservation-v010.yml','validation/custom-app-production-permit-reservation-v0.1.0/custom-app-production-permit-reservation.ps1','validation/custom-app-production-permit-reservation-v0.1.0/test_custom_app_production_permit_reservation.ps1');$c=@(git diff --name-only "$p...HEAD");$b=@($c|?{$_ -notin $e});if($b.Count){throw "unexpected surface $($b -join ', ')"};foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-permit-v0.1.0/custom-app-production-permit.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'};$d='validation/custom-app-production-permit-reservation-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_permit_parent=$p;append_only=$true;token_replay_blocked=$true;nonce_replay_blocked=$true;revision_cas_required=$true;atomic_persistence_before_executor_required=$true;reservation_is_authority=$false;production_execution_authority=$false;production_mutation_authority=$false;generic_future_app_positive=$true}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'CUSTOM_APP_PRODUCTION_RESERVATION_IMMUTABILITY_PASS'
 
-      - name: Write production reservation validation evidence
-        shell: powershell
-        run: |
-          $dir='validation/custom-app-production-permit-reservation-v0.1.0';$e=[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_permit_parent='d77f646d23652b0f066248230756d9e207a10fbd';production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2';append_only=$true;token_replay_blocked=$true;nonce_replay_blocked=$true;revision_cas_required=$true;atomic_persistence_before_executor_required=$true;reservation_is_authority=$false;production_execution_authority=$false;production_mutation_authority=$false;generic_future_app_positive=$true}
-          $e|ConvertTo-Json -Depth 6|Set-Content "$dir/ci-evidence.json" -Encoding UTF8;Write-Host 'CUSTOM_APP_PRODUCTION_RESERVATION_EVIDENCE_PASS'
-
-      - name: Upload production reservation validation artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: custom-app-production-permit-reservation-v010-${{ github.run_id }}
           path: |

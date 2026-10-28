@@ -66,9 +66,7 @@ function Test-CustomAppProductionPermitReservationStateV010 {
     if($revision -lt 0){return [pscustomobject]@{ok=$false;reason='reservation-state-revision-invalid'}}
     $rows=@($State.reservations)
     if($rows.Count -ne $revision){return [pscustomobject]@{ok=$false;reason='reservation-state-revision-count-mismatch'}}
-    $tokens=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
-    $nonces=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
-    $ids=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+    $tokens=@{};$nonces=@{};$ids=@{}
     $expectedBefore=[int64]0
     foreach($row in $rows){
         if($null -eq $row -or [int]$row.schema -ne 1 -or [string]$row.managed_by -cne $CustomAppProductionReservationRowManagedBy -or [string]$row.qualified_permit_head -cne $CustomAppProductionReservationQualifiedPermitHead -or [string]$row.status -cne 'reserved'){return [pscustomobject]@{ok=$false;reason='reservation-row-owner-schema-parent-or-status-invalid'}}
@@ -77,16 +75,17 @@ function Test-CustomAppProductionPermitReservationStateV010 {
         if(-not [bool]$row.single_use -or [bool]$row.reservation_is_authority -or -not [bool]$row.requires_atomic_persistence_before_executor){return [pscustomobject]@{ok=$false;reason='reservation-row-consumption-contract-invalid'}}
         foreach($field in @('reservation_id','token_id','permit_hmac_sha256','current_tree_sha256','remote_tree_sha256','current_eligibility_fingerprint','live_attested_qualification_fingerprint','admission_fingerprint')){if(-not (Test-CustomAppProductionReservationSha256V010 (([string]$row.$field).Trim().ToLowerInvariant()))){return [pscustomobject]@{ok=$false;reason=('reservation-row-invalid-'+$field)}}}
         if(-not (Test-CustomAppProductionReservationNonceV010 ([string]$row.permit_nonce))){return [pscustomobject]@{ok=$false;reason='reservation-row-invalid-permit-nonce'}}
-        if(-not $tokens.Add(([string]$row.token_id).ToLowerInvariant())){return [pscustomobject]@{ok=$false;reason='reservation-state-duplicate-token'}}
-        if(-not $nonces.Add(([string]$row.permit_nonce).ToLowerInvariant())){return [pscustomobject]@{ok=$false;reason='reservation-state-duplicate-nonce'}}
-        if(-not $ids.Add(([string]$row.reservation_id).ToLowerInvariant())){return [pscustomobject]@{ok=$false;reason='reservation-state-duplicate-reservation-id'}}
+        $tokenKey=([string]$row.token_id).Trim().ToLowerInvariant();$nonceKey=([string]$row.permit_nonce).Trim().ToLowerInvariant();$idKey=([string]$row.reservation_id).Trim().ToLowerInvariant()
+        if($tokens.ContainsKey($tokenKey)){return [pscustomobject]@{ok=$false;reason='reservation-state-duplicate-token'}};$tokens[$tokenKey]=$true
+        if($nonces.ContainsKey($nonceKey)){return [pscustomobject]@{ok=$false;reason='reservation-state-duplicate-nonce'}};$nonces[$nonceKey]=$true
+        if($ids.ContainsKey($idKey)){return [pscustomobject]@{ok=$false;reason='reservation-state-duplicate-reservation-id'}};$ids[$idKey]=$true
         try{$before=[int64]$row.state_revision_before;$after=[int64]$row.state_revision_after}catch{return [pscustomobject]@{ok=$false;reason='reservation-row-revision-invalid'}}
         if($before -ne $expectedBefore -or $after -ne ($before+1)){return [pscustomobject]@{ok=$false;reason='reservation-row-revision-chain-invalid'}}
         $material=Get-CustomAppProductionReservationMaterialV010 -Row $row;$expectedId=Get-CustomAppProductionReservationSha256V010 -Text $material
         if(([string]$row.reservation_id).Trim().ToLowerInvariant() -cne $expectedId){return [pscustomobject]@{ok=$false;reason='reservation-row-id-mismatch'}}
         $expectedBefore=$after
     }
-    return [pscustomobject]@{ok=$true;reason='reservation-state-valid';revision=$revision;token_ids=@($tokens);nonces=@($nonces)}
+    return [pscustomobject]@{ok=$true;reason='reservation-state-valid';revision=$revision;token_ids=@($tokens.Keys);nonces=@($nonces.Keys)}
 }
 
 function Invoke-CustomAppProductionPermitReservationV010 {
@@ -117,7 +116,7 @@ function Invoke-CustomAppProductionPermitReservationV010 {
         mutation_mode='deny';mutation_authorized=$false;auto_update_authorized=$false;auto_install_authorized=$false;canary_execution_authorized=$false;production_execution_authorized=$false;production_mutation_authorized=$false
     }
     $row.reservation_id=Get-CustomAppProductionReservationSha256V010 -Text (Get-CustomAppProductionReservationMaterialV010 -Row $row)
-    $nextRows=New-Object System.Collections.Generic.List[object];foreach($existing in @($ReservationState.reservations)){$nextRows.Add($existing)};$nextRows.Add($row)
+    $nextRows=@();foreach($existing in @($ReservationState.reservations)){$nextRows += $existing};$nextRows += $row
     $next=[pscustomobject]@{
         schema=$CustomAppProductionReservationStateSchema;managed_by=$CustomAppProductionReservationStateManagedBy;revision=$after;reservations=@($nextRows)
         append_only=$true;requires_atomic_compare_and_swap_persistence=$true
