@@ -8,6 +8,19 @@ BASE_PATH = 'validation/custom-app-remote-binding-observer-v0.4.0/build_candidat
 BASE_BLOB = '7b13595a185bead3f1c3cee80caee10dd19ea996'
 OLD_STATE_BLOB = '7d1a14227cb357bbe34d8846d5ddb295b17990c1'
 NEW_STATE_BLOB = 'bd19cbb3da2087e68b2452fe62471d4eca2cd990'
+OLD_HOOK_CALL = "    inventory = replace_once(inventory, state_anchor, state_replacement, 'v0.4 remote observer inventory hook')"
+NEW_HOOK_CALL = """    # The exact validated v0.3 candidate intentionally preserves legacy CRLF outside
+    # newly generated observer blocks.  The provenance replacement ends immediately before
+    # this boundary, so the Save-AddonState -> Marketplace transition can be CRLF even though
+    # the pinned v0.4 builder source expresses its anchor with LF.  Do not normalize the whole
+    # candidate: retry this one exact pinned boundary with CRLF and preserve all other bytes.
+    if inventory.count(state_anchor) == 0:
+        crlf_anchor = state_anchor.replace('\\n', '\\r\\n')
+        if inventory.count(crlf_anchor) != 1:
+            raise RuntimeError(f'v0.4 remote observer inventory hook EOL variants drift: lf={inventory.count(state_anchor)} crlf={inventory.count(crlf_anchor)}')
+        state_anchor = crlf_anchor
+        state_replacement = state_replacement.replace('\\n', '\\r\\n')
+    inventory = replace_once(inventory, state_anchor, state_replacement, 'v0.4 remote observer inventory hook')"""
 
 
 def git_blob(commit: str, path: str) -> str:
@@ -29,6 +42,9 @@ def build() -> None:
     if source.count(OLD_STATE_BLOB) != 1:
         raise RuntimeError('v0.4.0 stale state blob anchor drift')
     source = source.replace(OLD_STATE_BLOB, NEW_STATE_BLOB, 1)
+    if source.count(OLD_HOOK_CALL) != 1:
+        raise RuntimeError(f'v0.4.0 inventory hook call anchor drift: {source.count(OLD_HOOK_CALL)}')
+    source = source.replace(OLD_HOOK_CALL, NEW_HOOK_CALL, 1)
     fake = ROOT / 'validation/custom-app-remote-binding-observer-v0.4.0/_v041_pinned_builder.py'
     ns = {'__file__': str(fake), '__name__': 'v041_pinned_builder'}
     exec(compile(source, str(fake), 'exec'), ns)
