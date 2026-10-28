@@ -174,5 +174,5 @@ jobs:
             validation/custom-app-remote-binding-observer-v0.4.0/out/bin/
             validation/custom-app-remote-binding-observer-v0.4.0/candidate-validation.json
             validation/custom-app-remote-binding-observer-v0.4.0/custom-app-remote-binding-state.ps1
-            validation/custom-app-remote-binding-observer-v0.4.0/test_custom_app_remote-binding-state.ps1
+            validation/custom-app-remote-binding-observer-v0.4.0/test_custom_app_remote_binding_state.ps1
             validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py
