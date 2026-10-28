@@ -37,6 +37,7 @@ jobs:
             @($h,'validation/custom-app-production-post-swap-apply-admission-v0.1.0/test_custom_app_production_post_swap_apply_admission.ps1','6e1391f583757e282314041f68af2bf7ba13dd05'),
             @('75a39eea7b0ef7d35d193962607752ef1a873ae0','validation/custom-app-production-transaction-finalization-v0.1.0/custom-app-production-transaction-finalization.ps1','2958ae3f92173215d32ef8bf284a9433c52caa61'),
             @('75a39eea7b0ef7d35d193962607752ef1a873ae0','validation/custom-app-production-transaction-finalization-v0.1.0/test_custom_app_production_transaction_finalization.ps1','5918c6e97a17a487affdf5bddaed2e5a8b037cee'),
+            @('75a39eea7b0ef7d35d193962607752ef1a873ae0','validation/custom-app-remote-binding-observer-v0.4.0/custom-app-remote-binding-state.ps1','bd19cbb3da2087e68b2452fe62471d4eca2cd990'),
             @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
             @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'))
           foreach($p in $pins){$b=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($b -cne $p[2]){throw "pin drift $($p[1]) $b != $($p[2])"}}
@@ -65,7 +66,8 @@ jobs:
       - name: Run post-swap apply-admission matrix twice
         shell: powershell
         run: |
-          1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-post-swap-apply-admission-v0.1.0/test_custom_app_production_post_swap_apply_admission.ps1';if($LASTEXITCODE){throw "post-swap apply admission matrix failed pass $_"}}
+          $cmd=". 'validation/custom-app-remote-binding-observer-v0.4.0/custom-app-remote-binding-state.ps1'; . 'validation/custom-app-production-post-swap-apply-admission-v0.1.0/test_custom_app_production_post_swap_apply_admission.ps1'"
+          1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command $cmd;if($LASTEXITCODE){throw "post-swap apply admission matrix failed pass $_"}}
           'CUSTOM_APP_PRODUCTION_POST_SWAP_APPLY_ADMISSION_MATRIX_REPEAT_PASS'
 
       - name: Replay exact transaction-finalization parent contract
