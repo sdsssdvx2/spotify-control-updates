@@ -53,7 +53,7 @@ jobs:
             @('7d22b55c58c6e85a8a3ec9396800e65d81b0e7d2','validation/custom-app-remote-observation-collector-v0.1.1/release-id-fix-v011.ps1','e0ae3c494959c6b738bfd1be56183931119542cf'),
             @('27aa2f2089e99d6354d5e724577cdd7687d36525','validation/custom-app-provenance-integrated-observer-v0.3.0/build_candidate.py','ef94a51510de3f922659e633c86dbd44f3083a3d'),
             @('HEAD','validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1','83156d9c14e40061a0728d28b582c1e65684a4a2'),
-            @('HEAD','validation/custom-app-local-runtime-baseline-v0.1.0/test_custom_app_local_runtime_baseline.ps1','86fafae6567e748e4f08b45adb63d329de31a436')
+            @('HEAD','validation/custom-app-local-runtime-baseline-v0.1.0/test_custom_app_local_runtime_baseline.ps1','4ebc626aefa7db157ddf17aae0f9ecb4f134e4c5')
           )
           foreach($pin in $pins){$blob=(git rev-parse "$($pin[0])`:$($pin[1])").Trim();if($blob -cne $pin[2]){throw "Pinned blob drift: $($pin[1]) $blob != $($pin[2])"}}
           Write-Host 'CUSTOM_APP_LOCAL_RUNTIME_BLOB_PIN_PASS'
