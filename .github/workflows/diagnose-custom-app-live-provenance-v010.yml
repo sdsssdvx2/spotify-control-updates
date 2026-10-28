@@ -18,11 +18,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Trace transaction git preservation and post-shadow provenance
+      - name: Capture compact transaction git-preservation boundary values
         shell: powershell
         run: |
           $src=Resolve-Path 'validation/custom-app-live-attested-fixture-canary-v0.1.0/test_live_attested_fixture_canary.ps1'
           $diag=Join-Path (Split-Path -Parent $src) 'diagnostic-live-provenance.ps1'
+          $full=Join-Path $env:RUNNER_TEMP 'diagnostic-full.txt'
+          $compact=Join-Path $env:RUNNER_TEMP 'diagnostic-compact.txt'
           $text=Get-Content -LiteralPath $src -Raw
 
           $provNeedle=@'
@@ -56,20 +58,40 @@ jobs:
           $text=$text.Replace($rootNeedle,$rootReplacement)
           [IO.File]::WriteAllText($diag,$text,[Text.UTF8Encoding]::new($false))
 
-          function Copy-TreeSafe {
-            param([Parameter(Mandatory=$true)][string]$Source,[Parameter(Mandatory=$true)][string]$Destination)
-            if(-not(Test-PathSafe $Source 'Container')){throw 'Copy-TreeSafe source is missing.'}
-            $src=[IO.Path]::GetFullPath($Source).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
-            $rootItem=Get-Item -LiteralPath $src -Force -ErrorAction Stop
-            if(($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Copy-TreeSafe source root is a reparse point.'}
-            if(Test-Path -LiteralPath $Destination){throw 'Copy-TreeSafe destination already exists.'}
-            [IO.Directory]::CreateDirectory([IO.Path]::GetFullPath($Destination))|Out-Null
-            foreach($entry in @(Get-ChildItem -LiteralPath $src -Recurse -Force -ErrorAction Stop)){
-              if(($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw "Copy-TreeSafe source contains reparse point: $($entry.FullName)"}
-              $rel=$entry.FullName.Substring($src.Length).TrimStart([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
-              $target=Join-Path $Destination $rel
-              if($entry.PSIsContainer){[IO.Directory]::CreateDirectory($target)|Out-Null}else{$parent=Split-Path -Parent $target;if(-not(Test-Path $parent)){[IO.Directory]::CreateDirectory($parent)|Out-Null};[IO.File]::Copy($entry.FullName,$target,$false)}
-            }
-            return [IO.Path]::GetFullPath($Destination)
+          try {
+            & {
+              function Copy-TreeSafe {
+                param([Parameter(Mandatory=$true)][string]$Source,[Parameter(Mandatory=$true)][string]$Destination)
+                if(-not(Test-PathSafe $Source 'Container')){throw 'Copy-TreeSafe source is missing.'}
+                $src=[IO.Path]::GetFullPath($Source).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+                $rootItem=Get-Item -LiteralPath $src -Force -ErrorAction Stop
+                if(($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Copy-TreeSafe source root is a reparse point.'}
+                if(Test-Path -LiteralPath $Destination){throw 'Copy-TreeSafe destination already exists.'}
+                [IO.Directory]::CreateDirectory([IO.Path]::GetFullPath($Destination))|Out-Null
+                foreach($entry in @(Get-ChildItem -LiteralPath $src -Recurse -Force -ErrorAction Stop)){
+                  if(($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw "Copy-TreeSafe source contains reparse point: $($entry.FullName)"}
+                  $rel=$entry.FullName.Substring($src.Length).TrimStart([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+                  $target=Join-Path $Destination $rel
+                  if($entry.PSIsContainer){[IO.Directory]::CreateDirectory($target)|Out-Null}else{$parent=Split-Path -Parent $target;if(-not(Test-Path $parent)){[IO.Directory]::CreateDirectory($parent)|Out-Null};[IO.File]::Copy($entry.FullName,$target,$false)}
+                }
+                return [IO.Path]::GetFullPath($Destination)
+              }
+              . $diag
+            } *> $full
+          } catch {
+            $_ | Out-String | Add-Content -LiteralPath $full -Encoding UTF8
           }
-          . $diag
+          $matches=@(Select-String -LiteralPath $full -Pattern '^DIAG_TX_|^DIAG_PROVENANCE|evidence provenance not strong/current' -CaseSensitive:$false)
+          $matches|ForEach-Object{$_.Line}|Set-Content -LiteralPath $compact -Encoding UTF8
+          Write-Host '=== COMPACT DIAGNOSTIC ==='
+          Get-Content -LiteralPath $compact
+          "full_log=$full`ncompact_log=$compact"|Set-Content (Join-Path $env:RUNNER_TEMP 'diagnostic-paths.txt') -Encoding UTF8
+      - name: Upload compact diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-live-provenance-diagnostic-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/diagnostic-compact.txt
+            ${{ runner.temp }}/diagnostic-paths.txt
+          if-no-files-found: error
