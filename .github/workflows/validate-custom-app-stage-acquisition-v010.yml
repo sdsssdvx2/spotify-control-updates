@@ -1,0 +1,178 @@
+name: Validate Custom App Stage Acquisition v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-stage-acquisition-contract-v0.1.0]
+    paths:
+      - 'validation/custom-app-stage-acquisition-contract-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-stage-acquisition-v010.yml'
+  pull_request:
+    branches: [validate/custom-app-update-transaction-protocol-v0.1.0]
+    paths:
+      - 'validation/custom-app-stage-acquisition-contract-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-stage-acquisition-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact validation-only scope, transaction lineage, and frozen production
+        shell: powershell
+        run: |
+          $actual=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $expected){throw "Not exact event head: $actual != $expected"}
+          $parent='1a2461a6929e9cabd50d27f95e0744f83443b9e8'
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'Stage acquisition is not descended from exact validated transaction head.'}
+          $allowed=@(
+            '.github/workflows/validate-custom-app-stage-acquisition-v010.yml',
+            'validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1',
+            'validation/custom-app-stage-acquisition-contract-v0.1.0/test_custom_app_stage_acquisition.ps1'
+          )
+          $changed=@(git diff --name-only "$parent...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Stage-acquisition scope escaped: $($bad -join ', ')"}
+          foreach($required in $allowed){if($required -notin $changed){throw "Missing expected stage-acquisition file: $required"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved during stage-acquisition validation.'}
+          Write-Host "CUSTOM_APP_STAGE_SCOPE_PASS head=$actual"
+
+      - name: Prove immutable validated dependency object identities
+        shell: powershell
+        run: |
+          $pins=@(
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/test_custom_app_update_transaction.ps1','a2f3c1feb507bf5933206e46d7e4b35b4731036f'),
+            @('7d22b55c58c6e85a8a3ec9396800e65d81b0e7d2','validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1','3a49ceebd13fa993b086eb2643130fb02c746bd1'),
+            @('7d22b55c58c6e85a8a3ec9396800e65d81b0e7d2','validation/custom-app-remote-observation-collector-v0.1.1/release-id-fix-v011.ps1','e0ae3c494959c6b738bfd1be56183931119542cf'),
+            @('19109205bd2e61e862c3b9acd61946568397ecb5','validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1','f8c91f5a566b24c82257742942bdc6fecfe68eb2'),
+            @('19109205bd2e61e862c3b9acd61946568397ecb5','validation/custom-app-remote-source-contract-v0.1.1/release-continuity-v011.ps1','dbec4f817f4f4eab92d89d1f8dc623b1da435ac3'),
+            @('7402ea5c77e58cd072f0166411d40e7726093f3c','validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1','83156d9c14e40061a0728d28b582c1e65684a4a2'),
+            @('d92daa3006093a7d966083193302965ee01905f6','validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py','92eb87048eac882483bee1ed97bde598cff57e7b')
+          )
+          foreach($p in $pins){$blob=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($blob -cne $p[2]){throw "Pinned dependency drift: $($p[1]) $blob != $($p[2])"}}
+          Write-Host 'CUSTOM_APP_STAGE_DEPENDENCY_PINS_PASS'
+
+      - name: Parse stage contract and acceptance matrix with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          foreach($file in @('validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','validation/custom-app-stage-acquisition-contract-v0.1.0/test_custom_app_stage_acquisition.ps1')){
+            $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0} :: line={1} col={2} text=<{3}> :: {4}" -f $file,$_.Extent.StartLineNumber,$_.Extent.StartColumnNumber,$_.Extent.Text,$_.Message)};throw "PowerShell 5.1 parse failed: $file"}
+          }
+          Write-Host 'CUSTOM_APP_STAGE_PS51_PARSE_PASS'
+
+      - name: Audit isolated staging and strict deny authority boundary
+        shell: powershell
+        run: |
+          $core=Get-Content 'validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1' -Raw
+          foreach($required in @(
+            'spotify-control-stage-acquisition','Test-CustomAppStageStrictDeniedAuthorityV010',
+            'authority-schema-missing-',"mutation_mode -cne 'deny'",'production_mutation_authorized=$false',
+            'last_observed_asset_id','last_observed_asset_digest_sha256','releases/assets/',
+            "'/zipball/'",'Stage archive contains forbidden VCS metadata.','case-colliding logical path',
+            'Get-CustomAppLocalRuntimeBaseline','Stage archive tree does not match the immutable binding.',
+            'Stage acquisition GitHub numeric repository identity drift.','Stage acquisition immutable commit resolution drift.'
+          )){if($core.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Stage safety marker missing: $required"}}
+          foreach($forbidden in @('spicetify apply','spicetify config','CustomApps\\','Spotify\\Users','Browser\\Default')){if($core.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Stage contract unexpectedly references production mutation/user-data surface: $forbidden"}}
+          if($core.IndexOf('production_mutation_authorized=$true',[StringComparison]::OrdinalIgnoreCase) -ge 0){throw 'Stage contract grants production authority.'}
+          Write-Host 'CUSTOM_APP_STAGE_STATIC_AUDIT_PASS'
+
+      - name: Run offline stage acquisition safety matrix twice
+        shell: powershell
+        run: |
+          1..2|ForEach-Object{
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-stage-acquisition-contract-v0.1.0/test_custom_app_stage_acquisition.ps1'
+            if($LASTEXITCODE -ne 0){throw "Stage acquisition acceptance matrix failed on pass $_."}
+          }
+          Write-Host 'CUSTOM_APP_STAGE_MATRIX_REPEAT_PASS'
+
+      - name: Live pinned Tagify release acquisition proves exact asset digest to exact stage tree
+        shell: powershell
+        run: |
+          $base='validation'
+          . "$base/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1"
+          . "$base/custom-app-remote-observation-collector-v0.1.1/release-id-fix-v011.ps1"
+          . "$base/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1"
+          . "$base/custom-app-remote-source-contract-v0.1.1/release-continuity-v011.ps1"
+          . "$base/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1"
+          . "$base/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1"
+          $old=Get-CustomAppObserverReleaseObservation -Source 'alexk218/tagify' -ReleaseId 416245914
+          $new=Get-CustomAppObserverReleaseObservation -Source 'alexk218/tagify' -ReleaseId 418974188
+          if([int64]$new.github_repo_id -ne 1021838879 -or [string]$new.commit_sha -cne 'bacd80f76c621a3acc06965bb3160ce1056fad7b' -or [int64]$new.asset_id -ne 660754674 -or [string]$new.asset_digest_sha256 -cne '5261538c8f596cf179b1f6efd20e0a0a60c73b4cd765115fc6bc25c6a6b3b76b'){throw 'Pinned Tagify v3.3.2 identity drift.'}
+          $binding=[pscustomobject]@{
+            schema=1;managed_by='custom-app-remote-source-v1';source_identity='alexk218/tagify';github_repo_id=[int64]$new.github_repo_id;surface_kind='release-asset';layout_root='.';manifest_name=[string]$new.manifest_name
+            last_verified_local_tree_sha256=[string]$old.tree_sha256;last_verified_remote_tree_sha256=[string]$new.tree_sha256;last_verified_commit_sha=[string]$new.commit_sha
+            release_asset_selector='unique-zip-asset';asset_name=[string]$new.asset_name;last_observed_asset_id=[int64]$new.asset_id;last_observed_asset_digest_sha256=[string]$new.asset_digest_sha256
+            mutation_mode='deny';auto_update_authorized=$false;auto_install_authorized=$false
+          }
+          $row=[pscustomobject]@{
+            schema=1;managed_by='custom-app-remote-binding-observer-v1';name='tagify';active=$true;source_identity='alexk218/tagify';binding=$binding;last_success='2026-10-28T10:00:00+00:00'
+            last_status='remote-change-observed';last_remote_tree_sha256=[string]$new.tree_sha256;last_remote_commit_sha=[string]$new.commit_sha;update_observed=$true;requires_reenrollment=$false;user_removed=$false
+            mutation_mode='deny';auto_update_authorized=$false;auto_install_authorized=$false
+          }
+          $stage=$null
+          try{
+            $stage=Invoke-CustomAppStageAcquisitionV010 -Name 'tagify' -BindingRow $row
+            if([string]$stage.status -cne 'staged-verified' -or [string]$stage.stage_baseline.tree_sha256 -cne [string]$new.tree_sha256 -or [string]$stage.stage_baseline.manifest_name -cne [string]$new.manifest_name){throw 'Live Tagify acquired stage does not match pinned remote runtime.'}
+            if([string]$stage.archive_sha256 -cne '5261538c8f596cf179b1f6efd20e0a0a60c73b4cd765115fc6bc25c6a6b3b76b'){throw 'Live Tagify staged archive digest drift.'}
+            if(Test-CustomAppStageAcquisitionMutationAuthorityV010 $stage){throw 'Live Tagify stage gained mutation authority.'}
+            Write-Host "CUSTOM_APP_STAGE_LIVE_TAGIFY_PASS old_tree=$($old.tree_sha256) new_tree=$($new.tree_sha256) stage=$($stage.stage_baseline.tree_sha256)"
+          }finally{if($null -ne $stage -and -not [string]::IsNullOrWhiteSpace([string]$stage.workspace_path)){Remove-CustomAppStageWorkspaceV010 -Path ([string]$stage.workspace_path)}}
+
+      - name: Replay transaction protocol and prior remote/local component matrices
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-update-transaction-protocol-v0.1.0/test_custom_app_update_transaction.ps1';if($LASTEXITCODE -ne 0){throw 'Validated transaction protocol regressed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-remote-source-contract-v0.1.0/test_custom_app_remote_source_contract.ps1';if($LASTEXITCODE -ne 0){throw 'Remote-source contract regressed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-remote-source-contract-v0.1.1/test_release_continuity_v011.ps1';if($LASTEXITCODE -ne 0){throw 'Release continuity regressed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-local-runtime-baseline-v0.1.0/test_custom_app_local_runtime_baseline.ps1';if($LASTEXITCODE -ne 0){throw 'Local runtime baseline regressed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-remote-binding-observer-v0.4.0/test_custom_app_remote_binding_state.ps1';if($LASTEXITCODE -ne 0){throw 'Remote binding state regressed.'}
+          Write-Host 'CUSTOM_APP_STAGE_COMPONENT_REPLAY_PASS'
+
+      - name: Rebuild exact v0.4.1 candidate and replay full Addon Manager SelfTest
+        shell: powershell
+        run: |
+          python 'validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py' --build
+          if($LASTEXITCODE -ne 0){throw 'Exact v0.4.1 parent candidate rebuild failed.'}
+          $addon='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/addon-manager.ps1';$main='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/spotify-control.ps1'
+          $ah=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant();if((Get-Item $addon).Length -ne 523216 -or $ah -cne 'b2cec989ef399aed4a8763105121b21181ffb493ed9e3e884baa1d62a634f94b'){throw "Parent Addon Manager drift: $((Get-Item $addon).Length)/$ah"}
+          if((Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control parent bytes drifted.'}
+          $sandbox=Join-Path $env:RUNNER_TEMP 'stage-parent-selftest';$env:LOCALAPPDATA=Join-Path $sandbox 'LocalAppData';$env:APPDATA=Join-Path $sandbox 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Exact parent Addon Manager SelfTest failed.'}
+          Write-Host 'CUSTOM_APP_STAGE_PARENT_SELFTEST_PASS'
+
+      - name: Prove production, parent, and user-data mutation surfaces remain immutable
+        shell: powershell
+        run: |
+          $parent='1a2461a6929e9cabd50d27f95e0744f83443b9e8';$changed=@(git diff --name-only "$parent...HEAD")
+          $expected=@('.github/workflows/validate-custom-app-stage-acquisition-v010.yml','validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','validation/custom-app-stage-acquisition-contract-v0.1.0/test_custom_app_stage_acquisition.ps1')
+          $bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "Unexpected stage-acquisition changed surface: $($bad -join ', ')"}
+          foreach($path in @('manifest.json','stable-version.json','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py')){git diff --quiet $parent HEAD -- $path;if($LASTEXITCODE -ne 0){throw "Protected surface changed: $path"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved.'}
+          Write-Host 'CUSTOM_APP_STAGE_IMMUTABILITY_PASS'
+
+      - name: Write stage validation evidence
+        shell: powershell
+        run: |
+          $e=[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_transaction_parent='1a2461a6929e9cabd50d27f95e0744f83443b9e8';production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2';contract='custom-app-stage-acquisition-v1';production_mutation_authority=$false;strict_missing_authority_schema_denied=$true;remote_identity='exact-commit-or-exact-asset-id-plus-sha256';stage_root='dedicated-temp-only';post_extract_baseline='must-equal-verified-remote-tree';live_tagify_release='pass';transaction_replay='pass'}
+          $e|ConvertTo-Json -Depth 5|Set-Content 'validation/custom-app-stage-acquisition-contract-v0.1.0/ci-evidence.json' -Encoding UTF8
+
+      - name: Upload stage acquisition validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-stage-acquisition-v010-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1
+            validation/custom-app-stage-acquisition-contract-v0.1.0/test_custom_app_stage_acquisition.ps1
+            validation/custom-app-stage-acquisition-contract-v0.1.0/ci-evidence.json
