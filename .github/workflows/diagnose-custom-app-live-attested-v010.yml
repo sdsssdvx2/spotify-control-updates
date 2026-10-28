@@ -1,0 +1,29 @@
+name: Diagnose Custom App Live-Attested v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-live-attested-fixture-canary-v0.1.0]
+    paths:
+      - '.github/workflows/diagnose-custom-app-live-attested-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-windows:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Trace exact live-attested test variable assignments
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Continue'
+          Set-PSDebug -Trace 2
+          . (Resolve-Path 'validation/custom-app-live-attested-fixture-canary-v0.1.0/test_live_attested_fixture_canary.ps1')
+          $code=$LASTEXITCODE
+          Set-PSDebug -Off
+          if($code -ne 0){exit $code}
