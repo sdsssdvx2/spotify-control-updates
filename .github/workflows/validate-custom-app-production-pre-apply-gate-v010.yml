@@ -1,0 +1,40 @@
+name: Validate Custom App Production Pre-Apply Gate v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-pre-apply-gate-v0.1.0]
+    paths: ['validation/custom-app-production-pre-apply-gate-v0.1.0/**','.github/workflows/validate-custom-app-production-pre-apply-gate-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  inspect-contracts:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Prove frozen lineage
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$p='6ba560e7980c3492fb032ebc720f029caa97b15c';if((git merge-base $p HEAD).Trim() -cne $p){throw 'pre-apply branch lineage drift'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          'PRE_APPLY_INTROSPECTION_LINEAGE_PASS'
+      - name: Introspect exact existing function signatures
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop';Set-StrictMode -Version 2.0
+          . (Resolve-Path 'validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1')
+          . (Resolve-Path 'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1')
+          $names=@(
+            'Get-SpotifyPersistenceSurfaceDefinitions','Get-SpotifyPersistenceSnapshot','New-RequiredSpotifyPersistenceBackup','Restore-SpotifyPersistenceBackup',
+            'Get-CustomAppTreeFingerprintV010','New-CustomAppCodeBackupV010','Restore-CustomAppCodeBackupV010',
+            'New-CustomAppUpdateTransactionV010','Test-CustomAppUpdateTransactionV010','Set-CustomAppUpdateTransactionPhaseV010'
+          )
+          foreach($n in $names){
+            $c=Get-Command $n -CommandType Function -ErrorAction SilentlyContinue
+            if($null -eq $c){Write-Host "SIGNATURE_MISSING name=$n";continue}
+            $p=@($c.Parameters.GetEnumerator()|ForEach-Object{[string]$_.Key})
+            Write-Host ("SIGNATURE name=$n params="+($p -join ','))
+          }
+          'PRE_APPLY_INTROSPECTION_SIGNATURES_PASS'
