@@ -37,6 +37,21 @@ function Test-CustomAppProductionPostSwapPermitIntegrityV010 {
     return [pscustomobject]@{ok=$true;reason='permit-cryptographically-valid-post-swap';token_id=$token;expires_at=$expires}
 }
 
+function Test-CustomAppProductionPostSwapPermitStageContinuityV010 {
+    param([Parameter(Mandatory=$true)]$Permit,[Parameter(Mandatory=$true)]$StageExecutorResult,[Parameter(Mandatory=$true)][string]$Name)
+    $pairs=@(
+        @('name',[string]$Permit.name,[string]$Name),
+        @('source_identity',[string]$Permit.source_identity,[string]$StageExecutorResult.source_identity),
+        @('surface_kind',[string]$Permit.surface_kind,[string]$StageExecutorResult.surface_kind),
+        @('current_tree_sha256',[string]$Permit.current_tree_sha256,[string]$StageExecutorResult.local_tree_sha256),
+        @('remote_tree_sha256',[string]$Permit.remote_tree_sha256,[string]$StageExecutorResult.remote_tree_sha256),
+        @('remote_commit_sha',[string]$Permit.remote_commit_sha,[string]$StageExecutorResult.remote_commit_sha)
+    )
+    foreach($pair in $pairs){if(([string]$pair[1]).Trim().ToLowerInvariant() -cne ([string]$pair[2]).Trim().ToLowerInvariant()){return [pscustomobject]@{ok=$false;reason=('permit-stage-continuity-mismatch-'+[string]$pair[0])}}}
+    try{if([int64]$Permit.github_repo_id -ne [int64]$StageExecutorResult.github_repo_id){return [pscustomobject]@{ok=$false;reason='permit-stage-continuity-mismatch-github_repo_id'}}}catch{return [pscustomobject]@{ok=$false;reason='permit-stage-repo-id-invalid'}}
+    return [pscustomobject]@{ok=$true;reason='permit-stage-identity-continuity-valid'}
+}
+
 function Test-CustomAppProductionPostSwapConsumptionContinuityV010 {
     param(
         [Parameter(Mandatory=$true)][string]$AllowedRoot,[Parameter(Mandatory=$true)][string]$StoreDirectory,[Parameter(Mandatory=$true)][string]$ExpectedConsumptionId,
@@ -121,6 +136,8 @@ function Resolve-CustomAppProductionPostSwapApplyAdmissionV010 {
 
     $permitCheck=Test-CustomAppProductionPostSwapPermitIntegrityV010 -Permit $Permit -SessionKey $SessionKey -Now $Now
     if(-not [bool]$permitCheck.ok){return & $deny ('permit-integrity-denied:'+[string]$permitCheck.reason)}
+    $permitStage=Test-CustomAppProductionPostSwapPermitStageContinuityV010 -Permit $Permit -StageExecutorResult $StageExecutorResult -Name $Name
+    if(-not [bool]$permitStage.ok){return & $deny ([string]$permitStage.reason)}
     $consumption=Test-CustomAppProductionPostSwapConsumptionContinuityV010 -AllowedRoot $AllowedRoot -StoreDirectory $StoreDirectory -ExpectedConsumptionId $cid -Permit $Permit -StageExecutorResult $StageExecutorResult -Name $Name
     if(-not [bool]$consumption.ok){return & $deny ([string]$consumption.reason)}
 
