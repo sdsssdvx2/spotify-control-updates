@@ -1,0 +1,159 @@
+name: Validate Custom App Remote Observation Collector v0.1.1
+
+on:
+  push:
+    branches: [validate/custom-app-remote-observation-collector-v0.1.1]
+    paths:
+      - 'validation/custom-app-remote-observation-collector-v0.1.1/**'
+      - '.github/workflows/validate-custom-app-remote-observation-collector-v011.yml'
+  pull_request:
+    branches: [validate/custom-app-remote-observation-collector-v0.1.0]
+    paths:
+      - 'validation/custom-app-remote-observation-collector-v0.1.1/**'
+      - '.github/workflows/validate-custom-app-remote-observation-collector-v011.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact v0.1.1 amendment scope and failed-parent lineage
+        shell: powershell
+        run: |
+          $actual=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $expected){throw "Not exact event head: $actual != $expected"}
+          $parent='dba3bb40d720192813a1df9f6cbff3b00c60844f'
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'v0.1.1 collector amendment is not descended from exact failed v0.1.0 head.'}
+          $allowed=@(
+            '.github/workflows/validate-custom-app-remote-observation-collector-v011.yml',
+            'validation/custom-app-remote-observation-collector-v0.1.1/release-id-fix-v011.ps1',
+            'validation/custom-app-remote-observation-collector-v0.1.1/test_release_id_fix_v011.ps1'
+          )
+          $changed=@(git diff --name-only "$parent...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "v0.1.1 amendment scope escaped: $($bad -join ', ')"}
+          foreach($required in $allowed){if($required -notin $changed){throw "Missing expected v0.1.1 file: $required"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved during collector amendment validation.'}
+          Write-Host "CUSTOM_APP_REMOTE_OBSERVER_V011_SCOPE_PASS head=$actual"
+
+      - name: Prove exact parent, contract, observer, and amendment blob pins
+        shell: powershell
+        run: |
+          $pins=@(
+            @('dba3bb40d720192813a1df9f6cbff3b00c60844f','validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1','3a49ceebd13fa993b086eb2643130fb02c746bd1'),
+            @('dba3bb40d720192813a1df9f6cbff3b00c60844f','validation/custom-app-remote-observation-collector-v0.1.0/test_custom_app_remote_observer.ps1','1d0518cefbd3532cacc5ba82e01546afbc8ad1f8'),
+            @('b53bcf39f715f1c35c7d1f99e157cdecb0a2a572','validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1','f8c91f5a566b24c82257742942bdc6fecfe68eb2'),
+            @('19109205bd2e61e862c3b9acd61946568397ecb5','validation/custom-app-remote-source-contract-v0.1.1/release-continuity-v011.ps1','dbec4f817f4f4eab92d89d1f8dc623b1da435ac3'),
+            @('27aa2f2089e99d6354d5e724577cdd7687d36525','validation/custom-app-provenance-integrated-observer-v0.3.0/build_candidate.py','ef94a51510de3f922659e633c86dbd44f3083a3d'),
+            @('HEAD','validation/custom-app-remote-observation-collector-v0.1.1/release-id-fix-v011.ps1','502aa6181c811aa347c11c1bde84540a37666c7c'),
+            @('HEAD','validation/custom-app-remote-observation-collector-v0.1.1/test_release_id_fix_v011.ps1','debc50b845a251fecdc13a86b4ba5702cbb920ab')
+          )
+          foreach($pin in $pins){$blob=(git rev-parse "$($pin[0])`:$($pin[1])").Trim();if($blob -cne $pin[2]){throw "Pinned blob drift: $($pin[1]) $blob != $($pin[2])"}}
+          Write-Host 'CUSTOM_APP_REMOTE_OBSERVER_V011_BLOB_PIN_PASS'
+
+      - name: Parse amendment scripts with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          foreach($file in @(
+            'validation/custom-app-remote-observation-collector-v0.1.1/release-id-fix-v011.ps1',
+            'validation/custom-app-remote-observation-collector-v0.1.1/test_release_id_fix_v011.ps1'
+          )){
+            $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error "$file :: $($_.Message)"};throw "PS5.1 parse failed: $file"}
+          }
+          Write-Host 'CUSTOM_APP_REMOTE_OBSERVER_V011_PS51_PARSE_PASS'
+
+      - name: Re-run parent offline ZIP and temp-safety acceptance matrix
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-remote-observation-collector-v0.1.0/test_custom_app_remote_observer.ps1'
+          if($LASTEXITCODE -ne 0){throw 'Parent remote observer offline acceptance matrix failed.'}
+          Write-Host 'CUSTOM_APP_REMOTE_OBSERVER_V011_PARENT_OFFLINE_PASS'
+
+      - name: Audit parent collector plus amendment as bounded observer-only code
+        shell: powershell
+        run: |
+          $core=Get-Content 'validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1' -Raw
+          $fix=Get-Content 'validation/custom-app-remote-observation-collector-v0.1.1/release-id-fix-v011.ps1' -Raw
+          foreach($text in @($core,$fix)){
+            foreach($literal in @('Expand-Archive','ExtractToDirectory','Start-Process','spicetify apply','spicetify config','CustomApps','LOCALAPPDATA','APPDATA','HKCU:','HKLM:')){if($text.IndexOf($literal,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Collector/amendment gained forbidden install/user-state primitive: $literal"}}
+            foreach($cmd in @('Copy-Item','Move-Item','Set-Content','Out-File','Add-Content')){if([regex]::IsMatch($text,"(?im)^\s*$([regex]::Escape($cmd))\b")){throw "Collector/amendment gained forbidden command token: $cmd"}}
+          }
+          foreach($required in @('ConvertTo-CustomAppObserverReleaseIdV011','positive Int64','release endpoint returned a different release ID','mutation_authorized=$false','auto_update_authorized=$false','auto_install_authorized=$false')){if(($fix.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0) -and ($core.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0)){throw "v0.1.1 safety marker missing: $required"}}
+          Write-Host 'CUSTOM_APP_REMOTE_OBSERVER_V011_STATIC_AUDIT_PASS'
+
+      - name: Re-run validated remote-source contract matrices
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-remote-source-contract-v0.1.0/test_custom_app_remote_source_contract.ps1'
+          if($LASTEXITCODE -ne 0){throw 'Validated v0.1.0 41-case matrix regressed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-remote-source-contract-v0.1.1/test_release_continuity_v011.ps1'
+          if($LASTEXITCODE -ne 0){throw 'Validated v0.1.1 14-case matrix regressed.'}
+          Write-Host 'CUSTOM_APP_REMOTE_OBSERVER_V011_CONTRACT_REPLAY_PASS'
+
+      - name: Live pinned Tagify explicit release-ID collector-contract acceptance
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-remote-observation-collector-v0.1.1/test_release_id_fix_v011.ps1'
+          if($LASTEXITCODE -ne 0){throw 'v0.1.1 explicit release-ID live acceptance failed.'}
+
+      - name: Prove repo-commit observer remains conservative on pinned Tagify commit
+        shell: powershell
+        run: |
+          . (Resolve-Path 'validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1')
+          . (Resolve-Path 'validation/custom-app-remote-observation-collector-v0.1.1/release-id-fix-v011.ps1')
+          $o=Get-CustomAppObserverRepoCommitObservation -Source 'alexk218/tagify' -CommitSha 'bacd80f76c621a3acc06965bb3160ce1056fad7b'
+          if([int64]$o.github_repo_id -ne 1021838879 -or [string]$o.commit_sha -cne 'bacd80f76c621a3acc06965bb3160ce1056fad7b' -or -not [bool]$o.wrapper_stripped){throw 'Pinned Tagify repo observation identity/wrapper drift.'}
+          if([bool]$o.mutation_authorized -or [bool]$o.auto_update_authorized -or [bool]$o.auto_install_authorized){throw 'Repo observation gained mutation authority.'}
+          Write-Host "CUSTOM_APP_REMOTE_OBSERVER_V011_REPO_COMMIT_PASS build_required=$($o.build_required) roots=$($o.app_root_count) layout=$($o.layout_root) tree=$($o.tree_sha256)"
+
+      - name: Rebuild exact provenance observer parent and run full Addon Manager SelfTest
+        shell: powershell
+        run: |
+          $blob=(git rev-parse '27aa2f2089e99d6354d5e724577cdd7687d36525:validation/custom-app-provenance-integrated-observer-v0.3.0/build_candidate.py').Trim()
+          if($blob -cne 'ef94a51510de3f922659e633c86dbd44f3083a3d'){throw "Observer parent builder drift: $blob"}
+          python 'validation/custom-app-provenance-integrated-observer-v0.3.0/build_candidate.py' --build
+          if($LASTEXITCODE -ne 0){throw 'Validated observer parent rebuild failed.'}
+          $addon='validation/custom-app-provenance-integrated-observer-v0.3.0/out/bin/addon-manager.ps1';$main='validation/custom-app-provenance-integrated-observer-v0.3.0/out/bin/spotify-control.ps1'
+          $as=(Get-Item $addon).Length;$ah=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant();$ms=(Get-Item $main).Length;$mh=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($as -ne 428643 -or $ah -cne '8de197a78e40faad6e934c0eef4bb123f6652fc6e35cf440733c813c6df86e52'){throw "Observer Addon Manager drift: $as/$ah"}
+          if($ms -ne 284327 -or $mh -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw "Spotify Control drift: $ms/$mh"}
+          $root=Join-Path $env:RUNNER_TEMP 'remote-observer-v011-parent-selftest';$env:LOCALAPPDATA=Join-Path $root 'LocalAppData';$env:APPDATA=Join-Path $root 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Validated observer parent SelfTest failed.'}
+          Write-Host 'CUSTOM_APP_REMOTE_OBSERVER_V011_PARENT_SELFTEST_PASS'
+
+      - name: Prove production and failed v0.1.0 parent remain immutable
+        shell: powershell
+        run: |
+          $parent='dba3bb40d720192813a1df9f6cbff3b00c60844f';$changed=@(git diff --name-only "$parent...HEAD")
+          $expected=@(
+            '.github/workflows/validate-custom-app-remote-observation-collector-v011.yml',
+            'validation/custom-app-remote-observation-collector-v0.1.1/release-id-fix-v011.ps1',
+            'validation/custom-app-remote-observation-collector-v0.1.1/test_release_id_fix_v011.ps1'
+          )
+          $bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "Unexpected v0.1.1 changed surface: $($bad -join ', ')"}
+          foreach($path in @('bin/spotify-control.ps1','bin/addon-manager.ps1','manifest.json','stable-version.json','validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1','validation/custom-app-remote-source-contract-v0.1.1/release-continuity-v011.ps1')){git diff --quiet $parent HEAD -- $path;if($LASTEXITCODE -ne 0){throw "Protected parent/production surface changed: $path"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved.'}
+          Write-Host 'CUSTOM_APP_REMOTE_OBSERVER_V011_IMMUTABILITY_PASS'
+
+      - name: Upload v0.1.1 remote observer validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-remote-observation-collector-v011-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1
+            validation/custom-app-remote-observation-collector-v0.1.0/test_custom_app_remote_observer.ps1
+            validation/custom-app-remote-observation-collector-v0.1.1/release-id-fix-v011.ps1
+            validation/custom-app-remote-observation-collector-v0.1.1/test_release_id_fix_v011.ps1
