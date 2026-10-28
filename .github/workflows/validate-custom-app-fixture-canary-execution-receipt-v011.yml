@@ -50,7 +50,7 @@ jobs:
           $head=(git rev-parse HEAD).Trim()
           $pins=@(
             @($head,'validation/custom-app-fixture-canary-execution-receipt-v0.1.1/custom-app-fixture-canary-execution-receipt-v013.ps1','6b1c318262d3000f27514aed23df5371950524d4'),
-            @($head,'validation/custom-app-fixture-canary-execution-receipt-v0.1.1/test_custom_app_fixture_canary_execution_receipt_v013.ps1','828a9a92b0cb5675a466a828b876667e14c4f886'),
+            @($head,'validation/custom-app-fixture-canary-execution-receipt-v0.1.1/test_custom_app_fixture_canary_execution_receipt_v013.ps1','f915747a189be3313d8e19b964821d813d25d533'),
             @('a5d5839a9d6c1dd01c1fced6e9e1f5f76d16b5ca','validation/custom-app-fixture-canary-executor-v0.1.0/custom-app-fixture-canary-executor-v011.ps1','80e4319bee6c63d1eaf0cf12726a0fbf569642b9'),
             @('a5d5839a9d6c1dd01c1fced6e9e1f5f76d16b5ca','validation/custom-app-fixture-canary-executor-v0.1.0/test_custom_app_fixture_canary_executor.ps1','e27c2ce80115a5114cc94e2e99b84fc109432457'),
             @('79c7ef064a216ee3ff34328be282d742f0f7abc0','validation/custom-app-fixture-canary-permit-v0.1.0/custom-app-fixture-canary-permit.ps1','fefd8ccbde5231a70f55f41576c172fba4fede14'),
@@ -152,7 +152,7 @@ jobs:
           $dir='validation/custom-app-fixture-canary-execution-receipt-v0.1.1'
           $e=[ordered]@{
             schema=1;head=(git rev-parse HEAD).Trim();validated_executor_parent='a5d5839a9d6c1dd01c1fced6e9e1f5f76d16b5ca';permit_implementation_parent='79c7ef064a216ee3ff34328be282d742f0f7abc0';eligibility_parent='979e9d6362ead31016b9532f98629d6bcc2bbb56';production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
-            receipt_core_blob='6b1c318262d3000f27514aed23df5371950524d4';receipt_test_blob='828a9a92b0cb5675a466a828b876667e14c4f886';receipt='custom-app-fixture-canary-execution-receipt-v1';implementation='v0.1.3';hmac='HMAC-SHA256';receipt_is_authority=$false;requires_fresh_revalidation=$true;production_mutation_authority=$false;generic_canary_authority=$false
+            receipt_core_blob='6b1c318262d3000f27514aed23df5371950524d4';receipt_test_blob='f915747a189be3313d8e19b964821d813d25d533';receipt='custom-app-fixture-canary-execution-receipt-v1';implementation='v0.1.3';hmac='HMAC-SHA256';receipt_is_authority=$false;requires_fresh_revalidation=$true;production_mutation_authority=$false;generic_canary_authority=$false
             classifications=@('committed-preserved','denied-no-mutation','rolled-back-restored','failure-unqualified');executor_push_run=[int64]40679218583;executor_pr_run=[int64]40679419324;executor_push_artifact=[int64]12811478206;executor_pr_artifact=[int64]12812541217;executor_push_digest='sha256:1326445d22627b6af1542656f47ec2b7933cba47d1112769d52f8b755510e12e';executor_pr_digest='sha256:164d003804c8b6d4bf71f0965c9c7be68d8dacceebb098545341446fa8aa68f7';executor_parent_replay='pass';permit_parent_replay='pass';promotion_parent_replay='pass';parent_selftest='pass'
           }
           $e|ConvertTo-Json -Depth 6|Set-Content "$dir/ci-evidence.json" -Encoding UTF8
