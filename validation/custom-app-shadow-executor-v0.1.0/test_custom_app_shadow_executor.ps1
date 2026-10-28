@@ -112,7 +112,7 @@ try{
     Need ([string]$r.status -ceq 'committed-shadow-fixture' -and [bool]$r.committed -and -not [bool]$r.production_mutation_authorized) "normal shadow commit failed: $($r.status) / $($r.reason)"
     $after=Get-CustomAppLocalRuntimeBaseline -Name 'future-app' -AppPath $f.live;Need ([string]$after.tree_sha256 -ceq [string]$f.remote.tree_sha256) 'normal shadow commit did not install remote runtime tree'
     Need (Test-Path -LiteralPath (Join-Path $f.live '.git\config') -PathType Leaf) 'safe live git provenance was not preserved'
-    $persist=Get-SpotifyPersistenceSnapshot -LocalAppDataRoot $f.local -AppDataRootRoot $f.app;Need ([string]$persist.fingerprint -ceq [string]$f.persistence_before.fingerprint) 'normal shadow commit changed persistence'
+    $persist=Get-SpotifyPersistenceSnapshot -LocalAppDataRoot $f.local -AppDataRoot $f.app;Need ([string]$persist.fingerprint -ceq [string]$f.persistence_before.fingerprint) 'normal shadow commit changed persistence'
     Need ([string]$r.post_provenance_fingerprint -cne [string]$r.fresh_provenance_fingerprint) 'package version change did not exercise allowed post-update provenance fingerprint change'
 } finally {Remove-ShadowFixture $f}
 
