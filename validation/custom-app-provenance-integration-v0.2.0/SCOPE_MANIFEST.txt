@@ -1,0 +1,10 @@
+.github/workflows/validate-custom-app-provenance-integration-v020.yml
+validation/custom-app-provenance-integration-v0.2.0/README.md
+validation/custom-app-provenance-integration-v0.2.0/INTEGRATION_PLAN.md
+validation/custom-app-provenance-integration-v0.2.0/CI_EXPECTATIONS.md
+validation/custom-app-provenance-integration-v0.2.0/NOTICE.txt
+validation/custom-app-provenance-integration-v0.2.0/.validation-scope
+validation/custom-app-provenance-integration-v0.2.0/SCOPE_NOTE.md
+validation/custom-app-provenance-integration-v0.2.0/DO_NOT_MERGE
+validation/custom-app-provenance-integration-v0.2.0/SCOPE_MANIFEST.txt
+validation/custom-app-provenance-integration-v0.2.0/build_candidate.py
