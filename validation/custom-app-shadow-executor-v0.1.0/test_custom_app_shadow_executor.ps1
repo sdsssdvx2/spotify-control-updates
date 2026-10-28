@@ -1,13 +1,21 @@
 $ErrorActionPreference='Stop'
 $here=Split-Path -Parent $MyInvocation.MyCommand.Path
 $root=Split-Path -Parent (Split-Path -Parent $here)
-$base=[string]$root
-. (Join-Path $base 'validation\marketplace-lifecycle-settings-core-v0.1.0\lifecycle-settings-core.ps1')
-. (Join-Path $base 'validation\custom-app-provenance-enrollment-v0.1.0\custom-app-provenance.ps1')
-. (Join-Path $base 'validation\custom-app-remote-source-contract-v0.1.0\custom-app-remote-source-contract.ps1')
-. (Join-Path $base 'validation\custom-app-local-runtime-baseline-v0.1.0\custom-app-local-runtime-baseline.ps1')
-. (Join-Path $base 'validation\custom-app-stage-acquisition-contract-v0.1.0\custom-app-stage-acquisition.ps1')
-. (Join-Path $base 'validation\custom-app-update-transaction-protocol-v0.1.0\custom-app-update-transaction.ps1')
+$depRoot=Join-Path $env:TEMP ('custom-app-shadow-deps-'+[guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $depRoot|Out-Null
+function Get-PinnedDependencyFile([string]$Commit,[string]$RepoPath,[string]$Name){
+    $lines=@(& git -C $root show "$Commit`:$RepoPath")
+    if($LASTEXITCODE -ne 0){throw "Could not materialize pinned dependency: $Commit`:$RepoPath"}
+    $out=Join-Path $depRoot $Name
+    [IO.File]::WriteAllText($out,(($lines -join "`n")+"`n"),[Text.UTF8Encoding]::new($false))
+    return $out
+}
+. (Get-PinnedDependencyFile '57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b' 'validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1' 'lifecycle-settings-core.ps1')
+. (Get-PinnedDependencyFile 'b339f2b79a267c13cf3c5974aea2fff3786d3093' 'validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1' 'custom-app-provenance.ps1')
+. (Get-PinnedDependencyFile '19109205bd2e61e862c3b9acd61946568397ecb5' 'validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1' 'custom-app-remote-source-contract.ps1')
+. (Get-PinnedDependencyFile '7402ea5c77e58cd072f0166411d40e7726093f3c' 'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1' 'custom-app-local-runtime-baseline.ps1')
+. (Get-PinnedDependencyFile 'c420a1df6f306c7ba74772b91241cb14abd04738' 'validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1' 'custom-app-stage-acquisition.ps1')
+. (Get-PinnedDependencyFile '1a2461a6929e9cabd50d27f95e0744f83443b9e8' 'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1' 'custom-app-update-transaction.ps1')
 . (Join-Path $here 'custom-app-shadow-executor.ps1')
 . (Join-Path $here 'shadow-executor-safety-overlay.ps1')
 
