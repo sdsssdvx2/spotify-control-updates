@@ -1,6 +1,6 @@
 $ErrorActionPreference='Stop'
 $here=Split-Path -Parent $MyInvocation.MyCommand.Path
-$root=Resolve-Path (Join-Path $here '..\..')
+$root=Split-Path -Parent (Split-Path -Parent $here)
 $base=[string]$root
 . (Join-Path $base 'validation\marketplace-lifecycle-settings-core-v0.1.0\lifecycle-settings-core.ps1')
 . (Join-Path $base 'validation\custom-app-provenance-enrollment-v0.1.0\custom-app-provenance.ps1')
