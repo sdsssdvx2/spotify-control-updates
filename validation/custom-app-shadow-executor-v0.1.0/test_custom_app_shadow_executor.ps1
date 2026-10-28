@@ -19,6 +19,32 @@ function Get-PinnedDependencyFile([string]$Commit,[string]$RepoPath,[string]$Nam
 . (Join-Path $here 'custom-app-shadow-executor.ps1')
 . (Join-Path $here 'shadow-executor-safety-overlay.ps1')
 
+# The pinned lifecycle/settings core is an insertion module and intentionally relies on
+# stable Addon Manager base helpers. For this standalone validation harness, provide a
+# conservative equivalent surface: literal path checks plus reparse-denying byte copy.
+function Test-PathSafe {
+    param([AllowNull()][string]$Path,[ValidateSet('Leaf','Container')][string]$Kind)
+    if([string]::IsNullOrWhiteSpace($Path)){return $false}
+    try{return [bool](Test-Path -LiteralPath $Path -PathType $Kind -ErrorAction Stop)}catch{return $false}
+}
+function Copy-TreeSafe {
+    param([Parameter(Mandatory=$true)][string]$Source,[Parameter(Mandatory=$true)][string]$Destination)
+    if(-not(Test-PathSafe $Source 'Container')){throw 'Copy-TreeSafe source is missing.'}
+    $src=[IO.Path]::GetFullPath($Source).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    $root=Get-Item -LiteralPath $src -Force -ErrorAction Stop
+    if(($root.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Copy-TreeSafe source root is a reparse point.'}
+    if(Test-Path -LiteralPath $Destination){throw 'Copy-TreeSafe destination already exists.'}
+    [IO.Directory]::CreateDirectory([IO.Path]::GetFullPath($Destination))|Out-Null
+    foreach($entry in @(Get-ChildItem -LiteralPath $src -Recurse -Force -ErrorAction Stop)){
+        if(($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw "Copy-TreeSafe source contains reparse point: $($entry.FullName)"}
+        $rel=$entry.FullName.Substring($src.Length).TrimStart([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+        $target=Join-Path $Destination $rel
+        if($entry.PSIsContainer){[IO.Directory]::CreateDirectory($target)|Out-Null}
+        else{$parent=Split-Path -Parent $target;if(-not(Test-Path $parent)){[IO.Directory]::CreateDirectory($parent)|Out-Null};[IO.File]::Copy($entry.FullName,$target,$false)}
+    }
+    return [IO.Path]::GetFullPath($Destination)
+}
+
 $script:Cases=0
 function Need([bool]$Condition,[string]$Message){$script:Cases++;if(-not $Condition){throw "CASE $($script:Cases) FAILED: $Message"}}
 function Write-Utf8NoBom([string]$Path,[string]$Text){$parent=Split-Path -Parent $Path;if(-not(Test-Path $parent)){New-Item -ItemType Directory -Force -Path $parent|Out-Null};[IO.File]::WriteAllText($Path,$Text,[Text.UTF8Encoding]::new($false))}
@@ -86,7 +112,7 @@ try{
     Need ([string]$r.status -ceq 'committed-shadow-fixture' -and [bool]$r.committed -and -not [bool]$r.production_mutation_authorized) "normal shadow commit failed: $($r.status) / $($r.reason)"
     $after=Get-CustomAppLocalRuntimeBaseline -Name 'future-app' -AppPath $f.live;Need ([string]$after.tree_sha256 -ceq [string]$f.remote.tree_sha256) 'normal shadow commit did not install remote runtime tree'
     Need (Test-Path -LiteralPath (Join-Path $f.live '.git\config') -PathType Leaf) 'safe live git provenance was not preserved'
-    $persist=Get-SpotifyPersistenceSnapshot -LocalAppDataRoot $f.local -AppDataRoot $f.app;Need ([string]$persist.fingerprint -ceq [string]$f.persistence_before.fingerprint) 'normal shadow commit changed persistence'
+    $persist=Get-SpotifyPersistenceSnapshot -LocalAppDataRoot $f.local -AppDataRootRoot $f.app;Need ([string]$persist.fingerprint -ceq [string]$f.persistence_before.fingerprint) 'normal shadow commit changed persistence'
     Need ([string]$r.post_provenance_fingerprint -cne [string]$r.fresh_provenance_fingerprint) 'package version change did not exercise allowed post-update provenance fingerprint change'
 } finally {Remove-ShadowFixture $f}
 
