@@ -68,7 +68,7 @@ jobs:
             'validation/custom-app-provenance-enrollment-v0.1.0/test_custom_app_provenance.ps1',
             'validation/runtime-observer-integration-v0.1.0/marketplace-native-refresh-contract.ps1'
           )
-          foreach($f in $files){$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Error "$f: $($_.Message)"};throw "PowerShell 5.1 parse failed: $f"}}
+          foreach($f in $files){$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Error "${f}: $($_.Message)"};throw "PowerShell 5.1 parse failed: $f"}}
           Write-Host 'RUNTIME_OBSERVER_PS51_SOURCE_PARSE_PASS'
 
       - name: Run exact provenance enrollment acceptance matrix
