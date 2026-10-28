@@ -1,0 +1,172 @@
+name: Validate Runtime Observer Integration v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/runtime-observer-integration-v0.1.0
+    paths:
+      - 'validation/runtime-observer-integration-v0.1.0/**'
+      - '.github/workflows/validate-runtime-observer-integration-v010.yml'
+  pull_request:
+    branches:
+      - validate/custom-app-provenance-enrollment-v0.1.0
+    paths:
+      - 'validation/runtime-observer-integration-v0.1.0/**'
+      - '.github/workflows/validate-runtime-observer-integration-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact scope and validated lineage
+        shell: powershell
+        run: |
+          $actual=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $expected){throw "Not exact event head: $actual != $expected"}
+          $base='b339f2b79a267c13cf3c5974aea2fff3786d3093'
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'Runtime observer integration is not descended from exact validated provenance head.'}
+          $allowed=@(
+            '.github/workflows/validate-runtime-observer-integration-v010.yml',
+            'validation/runtime-observer-integration-v0.1.0/build_candidate.py',
+            'validation/runtime-observer-integration-v0.1.0/marketplace-native-refresh-contract.ps1'
+          )
+          $changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Validation scope escaped: $($bad -join ', ')"}
+          foreach($required in $allowed){if($required -notin $changed){throw "Missing expected validation file: $required"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved during validation.'}
+          Write-Host "RUNTIME_OBSERVER_SCOPE_PASS head=$actual"
+
+      - name: Verify immutable source pins
+        shell: powershell
+        run: |
+          $pins=@(
+            @('4b7ef73fe416afdfb501173f145994b3ed817e42','validation/marketplace-source-topology-v0.1.0/build_candidate.py','1e32dd57c95f718f2aeaae6149da36762ca7f6fd'),
+            @('b339f2b79a267c13cf3c5974aea2fff3786d3093','validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1','4f0831fa2e5dc23c9a4ec98b6c7a9afbb3c9af55'),
+            @('b339f2b79a267c13cf3c5974aea2fff3786d3093','validation/custom-app-provenance-enrollment-v0.1.0/test_custom_app_provenance.ps1','50a2f10dd5b6b53f9e5a06284a53bc5dfc017f7d'),
+            @('62cc0803411ccd132e3bad3b6338b2ef783e0f4c','validation/marketplace-native-refresh-contract-v0.1.0/marketplace-native-refresh-contract.ps1','bd895ebcc11d9fb2f1c7857ee861e5b9e2c2cc3c')
+          )
+          foreach($p in $pins){$actual=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($actual -cne $p[2]){throw "Pinned blob drift: $($p[1]) $actual != $($p[2])"}}
+          $local=(git rev-parse 'HEAD:validation/runtime-observer-integration-v0.1.0/marketplace-native-refresh-contract.ps1').Trim()
+          if($local -cne 'bd895ebcc11d9fb2f1c7857ee861e5b9e2c2cc3c'){throw "Local native-refresh contract drift: $local"}
+          Write-Host 'RUNTIME_OBSERVER_PINS_PASS'
+
+      - name: Parse observer sources with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $files=@(
+            'validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1',
+            'validation/custom-app-provenance-enrollment-v0.1.0/test_custom_app_provenance.ps1',
+            'validation/runtime-observer-integration-v0.1.0/marketplace-native-refresh-contract.ps1'
+          )
+          foreach($f in $files){$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Error "$f: $($_.Message)"};throw "PowerShell 5.1 parse failed: $f"}}
+          Write-Host 'RUNTIME_OBSERVER_PS51_SOURCE_PARSE_PASS'
+
+      - name: Run exact provenance enrollment acceptance matrix
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-provenance-enrollment-v0.1.0/test_custom_app_provenance.ps1'
+          if($LASTEXITCODE -ne 0){throw 'Custom App provenance acceptance matrix failed.'}
+
+      - name: Run exact Marketplace native refresh contract self-test
+        shell: powershell
+        run: |
+          . (Resolve-Path 'validation/runtime-observer-integration-v0.1.0/marketplace-native-refresh-contract.ps1')
+          Invoke-MarketplaceNativeRefreshContractSelfTest
+          foreach($f in @(
+            [pscustomobject]@{kind='extension';source_kind='github-repository-key';ambiguous=$false;mutation_authorized=$false},
+            [pscustomobject]@{kind='theme';source_kind='github-repository-key';ambiguous=$false;mutation_authorized=$false},
+            [pscustomobject]@{kind='snippet';source_kind='snippet-key';ambiguous=$false;mutation_authorized=$false},
+            [pscustomobject]@{kind='unlisted';source_kind='github-repository-key';ambiguous=$false;mutation_authorized=$false}
+          )){if([bool](Resolve-MarketplaceNativeRefreshContract $f).addon_manager_direct_mutation_allowed){throw "Direct Marketplace mutation authority escaped for kind=$($f.kind)"}}
+          Write-Host 'RUNTIME_OBSERVER_NATIVE_REFRESH_PASS'
+
+      - name: Build deterministic integrated candidate twice
+        shell: powershell
+        run: |
+          python validation/runtime-observer-integration-v0.1.0/build_candidate.py --build
+          if($LASTEXITCODE -ne 0){throw 'First runtime observer candidate build failed.'}
+          $main='validation/runtime-observer-integration-v0.1.0/out/bin/spotify-control.ps1'
+          $addon='validation/runtime-observer-integration-v0.1.0/out/bin/addon-manager.ps1'
+          $h1=(Get-FileHash -LiteralPath $addon -Algorithm SHA256).Hash.ToLowerInvariant();$s1=(Get-Item -LiteralPath $addon).Length
+          $mh=(Get-FileHash -LiteralPath $main -Algorithm SHA256).Hash.ToLowerInvariant();$ms=(Get-Item -LiteralPath $main).Length
+          if($ms -ne 284327 -or $mh -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw "Spotify Control main drift: $ms $mh"}
+          python validation/runtime-observer-integration-v0.1.0/build_candidate.py --build
+          if($LASTEXITCODE -ne 0){throw 'Second runtime observer candidate build failed.'}
+          $h2=(Get-FileHash -LiteralPath $addon -Algorithm SHA256).Hash.ToLowerInvariant();$s2=(Get-Item -LiteralPath $addon).Length
+          if($h1 -cne $h2 -or $s1 -ne $s2){throw "Non-deterministic Addon Manager build: first=$s1/$h1 second=$s2/$h2"}
+          "RUNTIME_OBSERVER_ADDON_SHA256=$h2"|Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RUNTIME_OBSERVER_ADDON_SIZE=$s2"|Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "RUNTIME_OBSERVER_DETERMINISTIC_BUILD_PASS size=$s2 sha256=$h2"
+
+      - name: Parse candidate and run full Addon Manager SelfTest
+        shell: powershell
+        run: |
+          $addon=Resolve-Path 'validation/runtime-observer-integration-v0.1.0/out/bin/addon-manager.ps1'
+          $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile($addon,[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'Generated Addon Manager PowerShell 5.1 parse failed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Generated Addon Manager SelfTest failed.'}
+          Write-Host 'RUNTIME_OBSERVER_ADDON_SELFTEST_PASS'
+
+      - name: Audit observer-only authority and protected policies
+        shell: powershell
+        run: |
+          $addon=Get-Content -LiteralPath 'validation/runtime-observer-integration-v0.1.0/out/bin/addon-manager.ps1' -Raw
+          foreach($m in @(
+            "managed_by='custom-app-provenance-v1'","managed_by='marketplace-native-refresh-v1'","mutation_mode='deny'",
+            'auto_update_authorized=$false','auto_install_authorized=$false','source-change-blocked',
+            'New-RequiredSpotifyPersistenceBackup','Restore-SpotifyPersistenceBackup',"protected_state_policy='must-remain-byte-identical-through-apply'",
+            "name='tagify'","source='alexk218/tagify'","name='splitify'","name='star-ratings'",'playlist-backed-ratings-preserve',
+            "name='sc-cover-ambience.js'",'never-disable-or-optimize'
+          )){if($addon.IndexOf($m,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Protected/observer marker missing: $m"}}
+          $report=Get-Content -LiteralPath 'validation/runtime-observer-integration-v0.1.0/candidate-validation.json' -Raw|ConvertFrom-Json
+          if([bool]$report.custom_app_provenance_authority_expanded -or [bool]$report.marketplace_direct_mutation_authority_expanded -or [bool]$report.production_surface_changed){throw 'Candidate report indicates forbidden authority/production expansion.'}
+          $expected=@('better-local-files','eternal-jukebox','ivLyrics','playlist-maker','tagify')
+          $actual=@($report.auto_authority|ForEach-Object{[string]$_}|Sort-Object);$want=@($expected|Sort-Object)
+          if(($actual -join '|') -cne ($want -join '|')){throw "Auto authority drift: $($actual -join ',')"}
+          Write-Host 'RUNTIME_OBSERVER_AUTHORITY_AUDIT_PASS'
+
+      - name: Prove production and validated parents remain immutable
+        shell: powershell
+        run: |
+          $base='b339f2b79a267c13cf3c5974aea2fff3786d3093'
+          $changed=@(git diff --name-only "$base...HEAD")
+          $expected=@('.github/workflows/validate-runtime-observer-integration-v010.yml','validation/runtime-observer-integration-v0.1.0/build_candidate.py','validation/runtime-observer-integration-v0.1.0/marketplace-native-refresh-contract.ps1')
+          $bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "Unexpected changed surface: $($bad -join ', ')"}
+          if((git rev-parse '4b7ef73fe416afdfb501173f145994b3ed817e42:validation/marketplace-source-topology-v0.1.0/build_candidate.py').Trim() -cne '1e32dd57c95f718f2aeaae6149da36762ca7f6fd'){throw 'Source-topology parent builder drifted.'}
+          if((git rev-parse 'b339f2b79a267c13cf3c5974aea2fff3786d3093:validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1').Trim() -cne '4f0831fa2e5dc23c9a4ec98b6c7a9afbb3c9af55'){throw 'Provenance parent drifted.'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved.'}
+          Write-Host 'RUNTIME_OBSERVER_IMMUTABILITY_PASS'
+
+      - name: Write validation evidence
+        shell: powershell
+        run: |
+          $e=[ordered]@{
+            schema=1;head=(git rev-parse HEAD).Trim();main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2';
+            addon_size=[int64]$env:RUNTIME_OBSERVER_ADDON_SIZE;addon_sha256=$env:RUNTIME_OBSERVER_ADDON_SHA256;
+            provenance_matrix='pass';native_refresh_contract='pass';addon_selftest='pass';authority_expanded=$false;production_changed=$false
+          }
+          $e|ConvertTo-Json -Depth 5|Set-Content -LiteralPath 'validation/runtime-observer-integration-v0.1.0/ci-evidence.json' -Encoding UTF8
+
+      - name: Upload runtime observer validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-observer-integration-v010-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            validation/runtime-observer-integration-v0.1.0/candidate-validation.json
+            validation/runtime-observer-integration-v0.1.0/ci-evidence.json
+            validation/runtime-observer-integration-v0.1.0/out/bin/addon-manager.ps1
+            validation/runtime-observer-integration-v0.1.0/out/bin/spotify-control.ps1
+            validation/runtime-observer-integration-v0.1.0/out/bin/Collect-Marketplace-Records.ps1
+            validation/runtime-observer-integration-v0.1.0/out/bin/LevelDbReadOnly.cs
