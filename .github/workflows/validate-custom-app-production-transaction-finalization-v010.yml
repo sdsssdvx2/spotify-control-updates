@@ -1,0 +1,88 @@
+name: Validate Custom App Production Transaction Finalization v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-transaction-finalization-v0.1.0]
+    paths: ['validation/custom-app-production-transaction-finalization-v0.1.0/**','.github/workflows/validate-custom-app-production-transaction-finalization-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-atomic-live-swap-v0.1.0]
+    paths: ['validation/custom-app-production-transaction-finalization-v0.1.0/**','.github/workflows/validate-custom-app-production-transaction-finalization-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope lineage and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h -cne $e){throw "head mismatch $h != $e"}
+          $p='574fe182168271fa3497d58e269e9af1f60d9033';if((git merge-base $p HEAD).Trim() -cne $p){throw 'not descended from exact validated atomic-live-swap head'}
+          $a=@('.github/workflows/validate-custom-app-production-transaction-finalization-v010.yml','validation/custom-app-production-transaction-finalization-v0.1.0/custom-app-production-transaction-finalization.ps1','validation/custom-app-production-transaction-finalization-v0.1.0/test_custom_app_production_transaction_finalization.ps1');$c=@(git diff --name-only "$p...HEAD");$b=@($c|?{$_ -notin $a});if($b.Count){throw "scope escaped: $($b -join ', ')"};foreach($x in $a){if($x -notin $c){throw "missing $x"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
+          'CUSTOM_APP_PRODUCTION_TRANSACTION_FINALIZATION_SCOPE_PASS'
+
+      - name: Prove exact immutable dependency pins
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$pins=@(
+            @($h,'validation/custom-app-production-transaction-finalization-v0.1.0/custom-app-production-transaction-finalization.ps1','2958ae3f92173215d32ef8bf284a9433c52caa61'),
+            @($h,'validation/custom-app-production-transaction-finalization-v0.1.0/test_custom_app_production_transaction_finalization.ps1','5918c6e97a17a487affdf5bddaed2e5a8b037cee'),
+            @('574fe182168271fa3497d58e269e9af1f60d9033','validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1','e91fa6a125f77352907c1119f6d9f47be9682550'),
+            @('574fe182168271fa3497d58e269e9af1f60d9033','validation/custom-app-production-atomic-live-swap-v0.1.0/test_custom_app_production_atomic_live_swap.ps1','d79de6567377cf751f61114c0c1f773299a77239'))
+          foreach($p in $pins){$b=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($b -cne $p[2]){throw "pin drift $($p[1]) $b != $($p[2])"}}
+          'CUSTOM_APP_PRODUCTION_TRANSACTION_FINALIZATION_PINS_PASS'
+
+      - name: Parse and audit cleanup-only confinement
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-transaction-finalization-v0.1.0';foreach($f in @("$d/custom-app-production-transaction-finalization.ps1","$d/test_custom_app_production_transaction_finalization.ps1")){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|%{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $core=Get-Content "$d/custom-app-production-transaction-finalization.ps1" -Raw
+          foreach($m in @('Test-CustomAppProductionAtomicSuccessResultV010','old-live-not-exact-pre-swap-tree','transaction-root-contents-not-exact-old-live-only','live-runtime-no-longer-exact-staged-tree','git-tree-drift','protected-persistence-drift-before-finalization','Remove-CustomAppAtomicDirectoryV010','transaction-workspace-finalized-live-and-persistence-reverified','stage_workspace_preserved=$true','app_backup_preserved=$true','persistence_backup_preserved=$true','requires_spicetify_apply_phase=$true','spicetify_apply_authorized=$false','production_mutation_authorized=$false')){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "finalization marker missing $m"}}
+          $deleteCalls=([regex]::Matches($core,'Remove-CustomAppAtomicDirectoryV010')).Count;if($deleteCalls -ne 1){throw "exact bounded cleanup call count drifted: $deleteCalls"}
+          foreach($x in @('[IO.Directory]::Move','[IO.File]::Copy','Copy-Item','Move-Item','Remove-Item','Invoke-WebRequest','Invoke-RestMethod','Start-Process','spicetify apply','spicetify config','Restore-CustomAppProductionAtomicLiveSwapV010')){if($core.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge 0){throw "finalizer gained forbidden primitive $x"}}
+          if($core -match 'spicetify_apply_authorized\s*=\s*\$true|additional_mutation_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true|result_is_authority\s*=\s*\$true'){throw 'finalizer authority escaped'}
+          $test=Get-Content "$d/test_custom_app_production_transaction_finalization.ps1" -Raw;foreach($m in @('future-app','atomic-result-not-success','atomic-authority','transaction-path-shape','extra-transaction-entry','old-live-drift','live-runtime-drift','git-drift','persistence-drift','prepared-result-tamper','stage-result-tamper','user-removed','throw-before-cleanup','throw-after-cleanup','post-cleanup-live-drift','post-cleanup-git-drift','post-cleanup-persistence-drift','authority-tampered finalization receipt','fingerprint-tampered finalization receipt')){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "finalization coverage missing $m"}}
+          'CUSTOM_APP_PRODUCTION_TRANSACTION_FINALIZATION_PARSE_AUDIT_PASS'
+
+      - name: Run transaction-finalization matrix twice
+        shell: powershell
+        run: |
+          1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-transaction-finalization-v0.1.0/test_custom_app_production_transaction_finalization.ps1';if($LASTEXITCODE){throw "transaction finalization matrix failed pass $_"}}
+          'CUSTOM_APP_PRODUCTION_TRANSACTION_FINALIZATION_MATRIX_REPEAT_PASS'
+
+      - name: Replay exact atomic-live-swap parent contract
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-atomic-live-swap-v0.1.0/test_custom_app_production_atomic_live_swap.ps1';if($LASTEXITCODE){throw 'atomic live-swap parent regression'}
+          'CUSTOM_APP_PRODUCTION_TRANSACTION_FINALIZATION_PARENT_PASS'
+
+      - name: Rebuild exact candidate and run Addon Manager SelfTest
+        shell: powershell
+        run: |
+          python 'validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py' --build;if($LASTEXITCODE){throw 'build failed'};$a='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/addon-manager.ps1';$m='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/spotify-control.ps1';$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();if((Get-Item $a).Length-ne 523216 -or $ah-cne'b2cec989ef399aed4a8763105121b21181ffb493ed9e3e884baa1d62a634f94b'){throw 'addon drift'};if($mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'main drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'production-transaction-finalization-selftest';$env:LOCALAPPDATA=Join-Path $s 'Local';$env:APPDATA=Join-Path $s 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'SelfTest failed'}
+          'CUSTOM_APP_PRODUCTION_TRANSACTION_FINALIZATION_SELFTEST_PASS'
+
+      - name: Prove protected-surface immutability and write evidence
+        shell: powershell
+        run: |
+          $p='574fe182168271fa3497d58e269e9af1f60d9033';$e=@('.github/workflows/validate-custom-app-production-transaction-finalization-v010.yml','validation/custom-app-production-transaction-finalization-v0.1.0/custom-app-production-transaction-finalization.ps1','validation/custom-app-production-transaction-finalization-v0.1.0/test_custom_app_production_transaction_finalization.ps1');$c=@(git diff --name-only "$p...HEAD");$b=@($c|?{$_ -notin $e});if($b.Count){throw "unexpected surface $($b -join ', ')"};foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1','validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'};$d='validation/custom-app-production-transaction-finalization-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_atomic_parent=$p;cleanup_only=$true;exact_old_live_proof=$true;fresh_live_runtime_postcheck=$true;fresh_git_postcheck=$true;fresh_persistence_postcheck=$true;stage_workspace_preserved=$true;app_backup_preserved=$true;persistence_backup_preserved=$true;spicetify_apply_authority=$false;production_mutation_authority=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'CUSTOM_APP_PRODUCTION_TRANSACTION_FINALIZATION_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-transaction-finalization-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-transaction-finalization-v0.1.0/custom-app-production-transaction-finalization.ps1
+            validation/custom-app-production-transaction-finalization-v0.1.0/test_custom_app_production_transaction_finalization.ps1
+            validation/custom-app-production-transaction-finalization-v0.1.0/ci-evidence.json
+          if-no-files-found: error
