@@ -1,0 +1,83 @@
+name: Validate Custom App Production Consumption Persistence v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-consumption-persistence-v0.1.0]
+    paths: ['validation/custom-app-production-consumption-persistence-v0.1.0/**','.github/workflows/validate-custom-app-production-consumption-persistence-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-executor-consumption-v0.1.0]
+    paths: ['validation/custom-app-production-consumption-persistence-v0.1.0/**','.github/workflows/validate-custom-app-production-consumption-persistence-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"}
+
+      - name: Prove exact scope lineage and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h -cne $e){throw "head mismatch $h != $e"}
+          $p='ed7fa27fc9bfaa78858e130743a2de508a3c0bf9';if((git merge-base $p HEAD).Trim() -cne $p){throw 'not descended from exact executor-consumption head'}
+          $a=@('.github/workflows/validate-custom-app-production-consumption-persistence-v010.yml','validation/custom-app-production-consumption-persistence-v0.1.0/custom-app-production-consumption-persistence.ps1','validation/custom-app-production-consumption-persistence-v0.1.0/test_custom_app_production_consumption_persistence.ps1','validation/custom-app-production-consumption-persistence-v0.1.0/probe_custom_app_production_consumption_persistence.ps1');$c=@(git diff --name-only "$p...HEAD");$b=@($c|?{$_ -notin $a});if($b.Count){throw "scope escaped: $($b -join ', ')"};foreach($x in $a){if($x -notin $c){throw "missing $x"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
+          'CUSTOM_APP_PRODUCTION_CONSUMPTION_PERSISTENCE_SCOPE_PASS'
+
+      - name: Prove exact immutable dependency pins
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$pins=@(
+            @($h,'validation/custom-app-production-consumption-persistence-v0.1.0/custom-app-production-consumption-persistence.ps1','d5b70c943d0880e98ee907ae52d4c02ad8720f73'),
+            @($h,'validation/custom-app-production-consumption-persistence-v0.1.0/test_custom_app_production_consumption_persistence.ps1','91a130130b8e789a64ac1e7141eb07581eab990d'),
+            @($h,'validation/custom-app-production-consumption-persistence-v0.1.0/probe_custom_app_production_consumption_persistence.ps1','365ff24ceeaf152e58bfe8d659411ff208734430'),
+            @('ed7fa27fc9bfaa78858e130743a2de508a3c0bf9','validation/custom-app-production-executor-consumption-v0.1.0/custom-app-production-executor-consumption.ps1','ac1459254ce060806a338a443c755bbc9f65c9a2'),
+            @('ed7fa27fc9bfaa78858e130743a2de508a3c0bf9','validation/custom-app-production-executor-consumption-v0.1.0/test_custom_app_production_executor_consumption.ps1','7811c3eb73b6ef6276d5f5ae05f50a9566a5cfad'))
+          foreach($p in $pins){$b=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($b -cne $p[2]){throw "pin drift $($p[1]) $b != $($p[2])"}}
+          'CUSTOM_APP_PRODUCTION_CONSUMPTION_PERSISTENCE_PINS_PASS'
+
+      - name: Parse and audit durable persistence confinement
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-consumption-persistence-v0.1.0';foreach($f in @("$d/custom-app-production-consumption-persistence.ps1","$d/test_custom_app_production_consumption_persistence.ps1","$d/probe_custom_app_production_consumption_persistence.ps1")){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|%{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $core=Get-Content "$d/custom-app-production-consumption-persistence.ps1" -Raw;foreach($m in @('FileShare]::None','FileMode]::CreateNew','Flush($true)','[IO.File]::Replace','previous_envelope_sha256','consumption-store-current-history-mismatch','Test-CustomAppProductionExecutorConsumptionStateV010','next-state-rewrites-history','requires_persisted_consumption_before_executor','persistence_is_authority=$false','executor_may_stage=$false','executor_may_apply=$false','production_execution_authorized=$false','production_mutation_authorized=$false','ReparsePoint')){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "durability/confinement marker missing $m"}}
+          foreach($x in @('Invoke-WebRequest','Invoke-RestMethod','Start-Process','spicetify apply','spicetify config','Save-AddonState')){if($core.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge 0){throw "forbidden external mutation/network primitive $x"}}
+          if($core -match 'persistence_is_authority\s*=\s*\$true|executor_may_stage\s*=\s*\$true|executor_may_apply\s*=\s*\$true|production_execution_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'persistence authority escaped'}
+          $test=Get-Content "$d/test_custom_app_production_consumption_persistence.ps1" -Raw;foreach($m in @('stale CAS','path escape','lock contention','simulated crash','current-tamper','current-rollback','history-rollback',"'future-app'",'expected-consumption-id.txt')){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "persistence coverage missing $m"}}
+          'CUSTOM_APP_PRODUCTION_CONSUMPTION_PERSISTENCE_PARSE_AUDIT_PASS'
+
+      - name: Run durable persistence matrix twice and independent process reload
+        shell: powershell
+        run: |
+          $reload=Join-Path $env:RUNNER_TEMP 'custom-app-production-consumption-reload-proof';$env:CUSTOM_APP_CONSUMPTION_RELOAD_ROOT=$reload
+          1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-consumption-persistence-v0.1.0/test_custom_app_production_consumption_persistence.ps1';if($LASTEXITCODE){throw "persistence matrix failed pass $_"}}
+          $id=(Get-Content -LiteralPath (Join-Path $reload 'expected-consumption-id.txt') -Raw).Trim();& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-consumption-persistence-v0.1.0/probe_custom_app_production_consumption_persistence.ps1' -AllowedRoot $reload -StoreDirectory (Join-Path $reload 'store') -ExpectedRevision 1 -ExpectedConsumptionId $id;if($LASTEXITCODE){throw 'independent reload probe failed'}
+          'CUSTOM_APP_PRODUCTION_CONSUMPTION_PERSISTENCE_REPEAT_RELOAD_PASS'
+
+      - name: Replay consumption parent matrix and exact Addon Manager SelfTest
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-executor-consumption-v0.1.0/test_custom_app_production_executor_consumption.ps1';if($LASTEXITCODE){throw 'consumption parent matrix regression'}
+          python 'validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py' --build;if($LASTEXITCODE){throw 'build failed'};$a='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/addon-manager.ps1';$m='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/spotify-control.ps1';$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();if((Get-Item $a).Length-ne 523216 -or $ah-cne'b2cec989ef399aed4a8763105121b21181ffb493ed9e3e884baa1d62a634f94b'){throw 'addon drift'};if($mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'main drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'consumption-persistence-selftest';$env:LOCALAPPDATA=Join-Path $s 'Local';$env:APPDATA=Join-Path $s 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'SelfTest failed'}
+          'CUSTOM_APP_PRODUCTION_CONSUMPTION_PERSISTENCE_PARENT_SELFTEST_PASS'
+
+      - name: Prove protected-surface immutability and write evidence
+        shell: powershell
+        run: |
+          $p='ed7fa27fc9bfaa78858e130743a2de508a3c0bf9';$e=@('.github/workflows/validate-custom-app-production-consumption-persistence-v010.yml','validation/custom-app-production-consumption-persistence-v0.1.0/custom-app-production-consumption-persistence.ps1','validation/custom-app-production-consumption-persistence-v0.1.0/test_custom_app_production_consumption_persistence.ps1','validation/custom-app-production-consumption-persistence-v0.1.0/probe_custom_app_production_consumption_persistence.ps1');$c=@(git diff --name-only "$p...HEAD");$b=@($c|?{$_ -notin $e});if($b.Count){throw "unexpected surface $($b -join ', ')"};foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-executor-consumption-v0.1.0/custom-app-production-executor-consumption.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'};$d='validation/custom-app-production-consumption-persistence-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_consumption_parent=$p;exclusive_lock=$true;revision_cas=$true;durable_flush_true=$true;atomic_current_replace=$true;append_only_history=$true;read_after_write_verify=$true;restart_reload_probe=$true;crash_window_fail_closed=$true;rollback_tamper_fail_closed=$true;persistence_authority=$false;executor_stage_authority=$false;executor_apply_authority=$false;production_execution_authority=$false;production_mutation_authority=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'CUSTOM_APP_PRODUCTION_CONSUMPTION_PERSISTENCE_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-consumption-persistence-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-consumption-persistence-v0.1.0/custom-app-production-consumption-persistence.ps1
+            validation/custom-app-production-consumption-persistence-v0.1.0/test_custom_app_production_consumption_persistence.ps1
+            validation/custom-app-production-consumption-persistence-v0.1.0/probe_custom_app_production_consumption_persistence.ps1
+            validation/custom-app-production-consumption-persistence-v0.1.0/ci-evidence.json
+          if-no-files-found: error
