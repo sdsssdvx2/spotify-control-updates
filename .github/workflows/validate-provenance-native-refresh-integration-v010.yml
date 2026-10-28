@@ -1,0 +1,165 @@
+name: Validate Provenance Native Refresh Integration v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/addon-manager-provenance-native-refresh-integration-v0.1.0
+  pull_request:
+    branches:
+      - validate/custom-app-provenance-enrollment-v0.1.0
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Fetch exact validation-line refs
+        shell: powershell
+        run: |
+          git fetch --no-tags origin validate/marketplace-source-topology-v0.1.0 validate/custom-app-provenance-enrollment-v0.1.0 validate/marketplace-native-refresh-contract-v0.1.0 main
+          if($LASTEXITCODE -ne 0){throw 'Could not fetch exact validation-line refs.'}
+
+      - name: Prove exact scope, lineage, and frozen production
+        shell: powershell
+        run: |
+          $actual=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $expected){throw "Not exact event head: $actual != $expected"}
+          $base='b339f2b79a267c13cf3c5974aea2fff3786d3093'
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'Integration branch is not descended from exact validated provenance head.'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved during validation.'}
+          $refs=@{
+            'origin/validate/marketplace-source-topology-v0.1.0'='4b7ef73fe416afdfb501173f145994b3ed817e42'
+            'origin/validate/custom-app-provenance-enrollment-v0.1.0'='b339f2b79a267c13cf3c5974aea2fff3786d3093'
+            'origin/validate/marketplace-native-refresh-contract-v0.1.0'='62cc0803411ccd132e3bad3b6338b2ef783e0f4c'
+          }
+          foreach($ref in $refs.Keys){$got=(git rev-parse $ref).Trim();if($got -cne $refs[$ref]){throw "Validation ref drift: $ref $got != $($refs[$ref])"}}
+          $allowed=@(
+            '.github/workflows/validate-provenance-native-refresh-integration-v010.yml',
+            'validation/addon-manager-provenance-native-refresh-integration-v0.1.0/README.md',
+            'validation/addon-manager-provenance-native-refresh-integration-v0.1.0/INTEGRATION_PLAN.md',
+            'validation/addon-manager-provenance-native-refresh-integration-v0.1.0/PROVENANCE_PIN.txt',
+            'validation/addon-manager-provenance-native-refresh-integration-v0.1.0/NATIVE_REFRESH_PIN.txt',
+            'validation/addon-manager-provenance-native-refresh-integration-v0.1.0/build_candidate.py'
+          )
+          $changed=@(git diff --name-only "$base...HEAD")
+          $bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Integration scope escaped: $($bad -join ', ')"}
+          foreach($required in $allowed){if($required -notin $changed){throw "Missing expected integration file: $required"}}
+          Write-Host "PROVENANCE_NATIVE_REFRESH_SCOPE_PASS head=$actual"
+
+      - name: Verify exact source object pins
+        shell: powershell
+        run: |
+          $pins=@(
+            @('4b7ef73fe416afdfb501173f145994b3ed817e42','validation/marketplace-source-topology-v0.1.0/build_candidate.py','1e32dd57c95f718f2aeaae6149da36762ca7f6fd'),
+            @('b339f2b79a267c13cf3c5974aea2fff3786d3093','validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1','4f0831fa2e5dc23c9a4ec98b6c7a9afbb3c9af55'),
+            @('b339f2b79a267c13cf3c5974aea2fff3786d3093','validation/custom-app-provenance-enrollment-v0.1.0/test_custom_app_provenance.ps1','50a2f10dd5b6b53f9e5a06284a53bc5dfc017f7d'),
+            @('62cc0803411ccd132e3bad3b6338b2ef783e0f4c','validation/marketplace-native-refresh-contract-v0.1.0/marketplace-native-refresh-contract.ps1','bd895ebcc11d9fb2f1c7857ee861e5b9e2c2cc3c')
+          )
+          foreach($pin in $pins){$blob=(git rev-parse "$($pin[0])`:$($pin[1])").Trim();if($blob -cne $pin[2]){throw "Pinned object drift: $($pin[1]) $blob != $($pin[2])"}}
+          Write-Host 'PROVENANCE_NATIVE_REFRESH_PINS_PASS'
+
+      - name: Build candidate twice and prove deterministic bytes
+        shell: powershell
+        run: |
+          $builder='validation/addon-manager-provenance-native-refresh-integration-v0.1.0/build_candidate.py'
+          python $builder --build
+          if($LASTEXITCODE -ne 0){throw 'First integration build failed.'}
+          $out='validation/addon-manager-provenance-native-refresh-integration-v0.1.0/out/bin'
+          $names=@('spotify-control.ps1','addon-manager.ps1','Collect-Marketplace-Records.ps1','LevelDbReadOnly.cs')
+          $first=@{}
+          foreach($n in $names){$p=Join-Path $out $n;$first[$n]=@((Get-Item $p).Length,(Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant())}
+          $report='validation/addon-manager-provenance-native-refresh-integration-v0.1.0/candidate-validation.json'
+          $firstReport=(Get-FileHash $report -Algorithm SHA256).Hash.ToLowerInvariant()
+          python $builder --build
+          if($LASTEXITCODE -ne 0){throw 'Second integration build failed.'}
+          foreach($n in $names){$p=Join-Path $out $n;$second=@((Get-Item $p).Length,(Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant());if($second[0] -ne $first[$n][0] -or $second[1] -cne $first[$n][1]){throw "Non-deterministic build output: $n"};Write-Host "DETERMINISTIC $n size=$($second[0]) sha256=$($second[1])"}
+          $secondReport=(Get-FileHash $report -Algorithm SHA256).Hash.ToLowerInvariant();if($secondReport -cne $firstReport){throw 'Non-deterministic candidate-validation.json'}
+          $main=Join-Path $out 'spotify-control.ps1';if((Get-Item $main).Length -ne 284327 -or (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Validated Spotify Control bytes changed.'}
+          Write-Host 'PROVENANCE_NATIVE_REFRESH_DETERMINISTIC_BUILD_PASS'
+
+      - name: Parse candidate with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $files=@(
+            'validation/addon-manager-provenance-native-refresh-integration-v0.1.0/out/bin/spotify-control.ps1',
+            'validation/addon-manager-provenance-native-refresh-integration-v0.1.0/out/bin/addon-manager.ps1',
+            'validation/addon-manager-provenance-native-refresh-integration-v0.1.0/out/bin/Collect-Marketplace-Records.ps1'
+          )
+          foreach($file in $files){$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Error "$file :: $($_.Message)"};throw "PowerShell 5.1 parse failed: $file"}}
+          Write-Host 'PROVENANCE_NATIVE_REFRESH_PS51_PARSE_PASS'
+
+      - name: Run full Addon Manager SelfTest
+        shell: powershell
+        run: |
+          $addon=Resolve-Path 'validation/addon-manager-provenance-native-refresh-integration-v0.1.0/out/bin/addon-manager.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Integrated Addon Manager SelfTest failed.'}
+          Write-Host 'PROVENANCE_NATIVE_REFRESH_ADDON_SELFTEST_PASS'
+
+      - name: Re-run exact provenance acceptance matrix from pinned source
+        shell: powershell
+        run: |
+          $tmp=Join-Path $env:RUNNER_TEMP 'pinned-provenance-acceptance';New-Item -ItemType Directory -Force -Path $tmp|Out-Null
+          $core=Join-Path $tmp 'custom-app-provenance.ps1';$test=Join-Path $tmp 'test_custom_app_provenance.ps1'
+          (git show 'b339f2b79a267c13cf3c5974aea2fff3786d3093:validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1')|Set-Content -LiteralPath $core -Encoding UTF8
+          (git show 'b339f2b79a267c13cf3c5974aea2fff3786d3093:validation/custom-app-provenance-enrollment-v0.1.0/test_custom_app_provenance.ps1')|Set-Content -LiteralPath $test -Encoding UTF8
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test -CorePath $core
+          if($LASTEXITCODE -ne 0){throw 'Pinned provenance acceptance matrix failed.'}
+          Write-Host 'PINNED_CUSTOM_APP_PROVENANCE_ACCEPTANCE_PASS'
+
+      - name: Re-run exact Marketplace native-refresh contract self-test
+        shell: powershell
+        run: |
+          $tmp=Join-Path $env:RUNNER_TEMP 'pinned-native-refresh';New-Item -ItemType Directory -Force -Path $tmp|Out-Null
+          $core=Join-Path $tmp 'marketplace-native-refresh-contract.ps1'
+          (git show '62cc0803411ccd132e3bad3b6338b2ef783e0f4c:validation/marketplace-native-refresh-contract-v0.1.0/marketplace-native-refresh-contract.ps1')|Set-Content -LiteralPath $core -Encoding UTF8
+          . $core
+          Invoke-MarketplaceNativeRefreshContractSelfTest
+          Write-Host 'PINNED_MARKETPLACE_NATIVE_REFRESH_SELFTEST_PASS'
+
+      - name: Audit observer-only authority and protected policies
+        shell: powershell
+        run: |
+          $addon=Get-Content 'validation/addon-manager-provenance-native-refresh-integration-v0.1.0/out/bin/addon-manager.ps1' -Raw
+          foreach($marker in @(
+            "managed_by='custom-app-provenance-v1'","mutation_mode='deny'",'auto_update_authorized=$false','auto_install_authorized=$false',
+            "source_status='source-change-blocked'",'addon_manager_direct_mutation_allowed=$false',
+            "name='splitify'","name='star-ratings'",'playlist-backed-ratings-preserve',"name='sc-cover-ambience.js'",'never-disable-or-optimize',
+            "name='tagify'","source='alexk218/tagify'",'preserve-ratings-tags-notes-and-browser-storage',
+            'New-RequiredSpotifyPersistenceBackup','Restore-SpotifyPersistenceBackup',"protected_state_policy='must-remain-byte-identical-through-apply'"
+          )){if($addon.IndexOf($marker,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Required protected marker missing: $marker"}}
+          $report=Get-Content 'validation/addon-manager-provenance-native-refresh-integration-v0.1.0/candidate-validation.json' -Raw|ConvertFrom-Json
+          if([bool]$report.generic_custom_app_mutation_authority_expanded -or [bool]$report.generic_marketplace_mutation_authority_expanded){throw 'Generic mutation authority expanded.'}
+          if(-not [bool]$report.policy_registry_byte_identical_to_source_topology_parent -or -not [bool]$report.mutation_authorization_byte_identical_to_source_topology_parent -or -not [bool]$report.schedule_authority_byte_identical_to_source_topology_parent){throw 'Existing authority surface drifted.'}
+          Write-Host 'PROVENANCE_NATIVE_REFRESH_OBSERVER_ONLY_AUDIT_PASS'
+
+      - name: Prove production and validated parents remain immutable
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main changed during integration validation.'}
+          if((git rev-parse '4b7ef73fe416afdfb501173f145994b3ed817e42:validation/marketplace-source-topology-v0.1.0/build_candidate.py').Trim() -cne '1e32dd57c95f718f2aeaae6149da36762ca7f6fd'){throw 'Source-topology parent identity drift.'}
+          if((git rev-parse 'b339f2b79a267c13cf3c5974aea2fff3786d3093:validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1').Trim() -cne '4f0831fa2e5dc23c9a4ec98b6c7a9afbb3c9af55'){throw 'Provenance parent identity drift.'}
+          if((git rev-parse '62cc0803411ccd132e3bad3b6338b2ef783e0f4c:validation/marketplace-native-refresh-contract-v0.1.0/marketplace-native-refresh-contract.ps1').Trim() -cne 'bd895ebcc11d9fb2f1c7857ee861e5b9e2c2cc3c'){throw 'Native-refresh parent identity drift.'}
+          Write-Host 'PROVENANCE_NATIVE_REFRESH_IMMUTABILITY_PASS'
+
+      - name: Upload integration validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: provenance-native-refresh-integration-v010-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            validation/addon-manager-provenance-native-refresh-integration-v0.1.0/candidate-validation.json
+            validation/addon-manager-provenance-native-refresh-integration-v0.1.0/out/bin/spotify-control.ps1
+            validation/addon-manager-provenance-native-refresh-integration-v0.1.0/out/bin/addon-manager.ps1
+            validation/addon-manager-provenance-native-refresh-integration-v0.1.0/out/bin/Collect-Marketplace-Records.ps1
+            validation/addon-manager-provenance-native-refresh-integration-v0.1.0/out/bin/LevelDbReadOnly.cs
