@@ -33,6 +33,11 @@ function Get-PinnedDependencyFile {
 
 function Assert-True {param([bool]$Condition,[string]$Message)if(-not $Condition){throw $Message}}
 function Assert-False {param([bool]$Condition,[string]$Message)if($Condition){throw $Message}}
+function Test-PathSafe {
+    param([AllowNull()][string]$Path,[ValidateSet('Leaf','Container')][string]$Kind)
+    if([string]::IsNullOrWhiteSpace($Path)){return $false}
+    try{return [bool](Test-Path -LiteralPath $Path -PathType $Kind -ErrorAction Stop)}catch{return $false}
+}
 function Assert-AuthorityClosed {
     param([Parameter(Mandatory=$true)]$Object,[string]$Label)
     if($Object.PSObject.Properties['mutation_mode']){Assert-True ([string]$Object.mutation_mode -ceq 'deny') "$Label mutation mode drifted"}
