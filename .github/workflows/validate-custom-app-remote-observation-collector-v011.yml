@@ -53,7 +53,7 @@ jobs:
             @('b53bcf39f715f1c35c7d1f99e157cdecb0a2a572','validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1','f8c91f5a566b24c82257742942bdc6fecfe68eb2'),
             @('19109205bd2e61e862c3b9acd61946568397ecb5','validation/custom-app-remote-source-contract-v0.1.1/release-continuity-v011.ps1','dbec4f817f4f4eab92d89d1f8dc623b1da435ac3'),
             @('27aa2f2089e99d6354d5e724577cdd7687d36525','validation/custom-app-provenance-integrated-observer-v0.3.0/build_candidate.py','ef94a51510de3f922659e633c86dbd44f3083a3d'),
-            @('HEAD','validation/custom-app-remote-observation-collector-v0.1.1/release-id-fix-v011.ps1','502aa6181c811aa347c11c1bde84540a37666c7c'),
+            @('HEAD','validation/custom-app-remote-observation-collector-v0.1.1/release-id-fix-v011.ps1','e0ae3c494959c6b738bfd1be56183931119542cf'),
             @('HEAD','validation/custom-app-remote-observation-collector-v0.1.1/test_release_id_fix_v011.ps1','debc50b845a251fecdc13a86b4ba5702cbb920ab')
           )
           foreach($pin in $pins){$blob=(git rev-parse "$($pin[0])`:$($pin[1])").Trim();if($blob -cne $pin[2]){throw "Pinned blob drift: $($pin[1]) $blob != $($pin[2])"}}
@@ -87,7 +87,12 @@ jobs:
             foreach($literal in @('Expand-Archive','ExtractToDirectory','Start-Process','spicetify apply','spicetify config','CustomApps','LOCALAPPDATA','APPDATA','HKCU:','HKLM:')){if($text.IndexOf($literal,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Collector/amendment gained forbidden install/user-state primitive: $literal"}}
             foreach($cmd in @('Copy-Item','Move-Item','Set-Content','Out-File','Add-Content')){if([regex]::IsMatch($text,"(?im)^\s*$([regex]::Escape($cmd))\b")){throw "Collector/amendment gained forbidden command token: $cmd"}}
           }
-          foreach($required in @('ConvertTo-CustomAppObserverReleaseIdV011','positive Int64','release endpoint returned a different release ID','mutation_authorized=$false','auto_update_authorized=$false','auto_install_authorized=$false')){if(($fix.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0) -and ($core.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0)){throw "v0.1.1 safety marker missing: $required"}}
+          foreach($required in @(
+            'ConvertTo-CustomAppObserverReleaseIdV011','positive Int64','release endpoint returned a different release ID',
+            'Invoke-CustomAppObserverBoundedArchiveDownloadV011','application/vnd.github+json','repository archive must start at api.github.com HTTPS',
+            'repository archive compressed download exceeded the safety limit while streaming',
+            'mutation_authorized=$false','auto_update_authorized=$false','auto_install_authorized=$false'
+          )){if(($fix.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0) -and ($core.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0)){throw "v0.1.1 safety marker missing: $required"}}
           Write-Host 'CUSTOM_APP_REMOTE_OBSERVER_V011_STATIC_AUDIT_PASS'
 
       - name: Re-run validated remote-source contract matrices
