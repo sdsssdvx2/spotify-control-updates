@@ -89,13 +89,15 @@ jobs:
             'Invoke-CustomAppStageAcquisitionV010','Invoke-CustomAppShadowWithAcquiredStageV010','Test-CustomAppFixtureCanaryPermitV010',
             "fixture_canary_execution_authorized=`$true","canary_execution_authorized=`$false","production_mutation_authorized=`$false","mutation_mode='deny'"
           )){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Executor safety marker missing: $m"}}
-          foreach($forbidden in @('$env:LOCALAPPDATA','$env:APPDATA','spicetify apply','spicetify config','Uninstall','Remove-AppxPackage','production_mutation_authorized=$true','canary_execution_authorized=$true')){if($core.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Executor contains forbidden production/user-path authority marker: $forbidden"}}
+          foreach($forbidden in @('$env:LOCALAPPDATA','$env:APPDATA','spicetify apply','spicetify config','Uninstall','Remove-AppxPackage')){if($core.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Executor contains forbidden production/user-path primitive: $forbidden"}}
+          if($core -match '(?<!fixture_)canary_execution_authorized\s*=\s*\$true'){throw 'Executor grants generic canary execution authority.'}
+          if($core -match 'production_mutation_authorized\s*=\s*\$true'){throw 'Executor grants production mutation authority.'}
           $consume=$core.IndexOf('Use-CustomAppFixtureCanaryPermitDurablyV011',[StringComparison]::Ordinal)
           $stage=$core.IndexOf('Invoke-CustomAppStageAcquisitionV010',[StringComparison]::Ordinal)
           if($consume -lt 0 -or $stage -lt 0 -or $consume -ge $stage){throw 'Durable permit consumption is not ordered before stage acquisition.'}
           $preApply=$core.IndexOf("-Phase 'pre-apply'",[StringComparison]::Ordinal)
-          $marker=$core.IndexOf('Test-CustomAppFixtureCanaryConsumptionMarkerV011',[StringComparison]::Ordinal,$preApply)
-          $delegate=$core.IndexOf('& $script:CustomAppFixtureCanaryExecutorOriginalTxV011',[StringComparison]::Ordinal,$preApply)
+          $marker=$core.IndexOf('Test-CustomAppFixtureCanaryConsumptionMarkerV011',$preApply,[StringComparison]::Ordinal)
+          $delegate=$core.IndexOf('& $script:CustomAppFixtureCanaryExecutorOriginalTxV011',$preApply,[StringComparison]::Ordinal)
           if($preApply -lt 0 -or $marker -lt 0 -or $delegate -lt 0 -or $preApply -ge $marker -or $marker -ge $delegate){throw 'Pre-apply HMAC/eligibility/marker barrier is not ordered before original transaction delegation.'}
           Write-Host 'CUSTOM_APP_FIXTURE_CANARY_EXECUTOR_ORDER_SCOPE_AUDIT_PASS'
 
