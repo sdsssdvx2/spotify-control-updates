@@ -112,24 +112,26 @@ function Update-CustomAppRemoteBindingFromObservationSetV040 {
     )
     $row=Ensure-CustomAppRemoteBindingRowV040 -State $State -Name $Name
     $elig=Test-CustomAppRemoteBindingEligibilityV040 -LifecycleRow $LifecycleRow -ProvenanceRow $ProvenanceRow
-    if(-not [bool]$elig.ok){return Set-CustomAppRemoteBindingInactiveV040 -Row $row -Status 'eligibility-denied' -Reason ([string]$elig.reason) -RequiresReenrollment:(-not [bool]$elig.user_removed) -UserRemoved:[bool]$elig.user_removed -ObservedAt $ObservedAt}
-    if($null -eq $LocalBaseline -or -not [bool]$LocalBaseline.safe -or -not [bool]$LocalBaseline.installable -or -not (Test-CustomAppRemoteSha256 ([string]$LocalBaseline.tree_sha256) -or [string]::IsNullOrWhiteSpace([string]$LocalBaseline.manifest_name)){
-        return Set-CustomAppRemoteBindingInactiveV040 -Row $row -Status 'local-baseline-denied' -Reason 'local-runtime-not-safe-installable-or-identifiable' -RequiresReenrollment:$true -ObservedAt $ObservedAt
+    if(-not [bool]$elig.ok){
+        return Set-CustomAppRemoteBindingInactiveV040 -Row $row -Status 'eligibility-denied' -Reason ([string]$elig.reason) -RequiresReenrollment (-not [bool]$elig.user_removed) -UserRemoved ([bool]$elig.user_removed) -ObservedAt $ObservedAt
     }
-    if([string]$ObservationSet.source_identity -cne [string]$elig.source){return Set-CustomAppRemoteBindingInactiveV040 -Row $row -Status 'remote-source-mismatch' -Reason 'observation-set-source-does-not-match-provenance' -RequiresReenrollment:$true -ObservedAt $ObservedAt}
+    if($null -eq $LocalBaseline -or -not [bool]$LocalBaseline.safe -or -not [bool]$LocalBaseline.installable -or -not (Test-CustomAppRemoteSha256 ([string]$LocalBaseline.tree_sha256)) -or [string]::IsNullOrWhiteSpace([string]$LocalBaseline.manifest_name)){
+        return Set-CustomAppRemoteBindingInactiveV040 -Row $row -Status 'local-baseline-denied' -Reason 'local-runtime-not-safe-installable-or-identifiable' -RequiresReenrollment $true -ObservedAt $ObservedAt
+    }
+    if([string]$ObservationSet.source_identity -cne [string]$elig.source){return Set-CustomAppRemoteBindingInactiveV040 -Row $row -Status 'remote-source-mismatch' -Reason 'observation-set-source-does-not-match-provenance' -RequiresReenrollment $true -ObservedAt $ObservedAt}
     if([bool]$ObservationSet.mutation_authorized -or [bool]$ObservationSet.auto_update_authorized -or [bool]$ObservationSet.auto_install_authorized){throw 'Remote observation set unexpectedly grants authority.'}
     $observations=@($ObservationSet.observations);$errors=@($ObservationSet.errors)
     $row.last_attempt=$ObservedAt;$row.last_local_tree_sha256=[string]$LocalBaseline.tree_sha256;$row.last_local_manifest_name=[string]$LocalBaseline.manifest_name;$row.user_removed=$false
 
     $binding=$(if($row.active -and $null -ne $row.binding){$row.binding}else{$null})
     if($null -ne $binding){
-        if([string]$binding.source_identity -cne [string]$elig.source){return Set-CustomAppRemoteBindingInactiveV040 -Row $row -Status 'binding-source-mismatch' -Reason 'active-binding-source-no-longer-matches-provenance' -RequiresReenrollment:$true -ObservedAt $ObservedAt}
+        if([string]$binding.source_identity -cne [string]$elig.source){return Set-CustomAppRemoteBindingInactiveV040 -Row $row -Status 'binding-source-mismatch' -Reason 'active-binding-source-no-longer-matches-provenance' -RequiresReenrollment $true -ObservedAt $ObservedAt}
         if($observations.Count -eq 0){$msg=$(if($errors.Count){(@($errors|ForEach-Object{([string]$_.surface)+':'+([string]$_.error)}) -join '; ')}else{'no-bound-surface-observation'});return Set-CustomAppRemoteBindingObservationFailureV040 -Row $row -ErrorText $msg -ObservedAt $ObservedAt}
-        if($observations.Count -ne 1){return Set-CustomAppRemoteBindingInactiveV040 -Row $row -Status 'bound-surface-ambiguous' -Reason 'expected-exactly-one-bound-surface-observation' -RequiresReenrollment:$true -ObservedAt $ObservedAt}
+        if($observations.Count -ne 1){return Set-CustomAppRemoteBindingInactiveV040 -Row $row -Status 'bound-surface-ambiguous' -Reason 'expected-exactly-one-bound-surface-observation' -RequiresReenrollment $true -ObservedAt $ObservedAt}
         $obs=$observations[0]
         $decision=Resolve-CustomAppRemoteSourceContractV011 -ProvenanceRow $ProvenanceRow -RemoteObservation $obs -Binding $binding -CurrentLocalTreeSha256 ([string]$LocalBaseline.tree_sha256) -CurrentLocalManifestName ([string]$LocalBaseline.manifest_name)
         if(Test-CustomAppRemoteSourceMutationAuthorityV011 $decision){throw 'Remote binding decision unexpectedly grants mutation authority.'}
-        if(-not [bool]$decision.conclusive -or [bool]$decision.requires_reenrollment){return Set-CustomAppRemoteBindingInactiveV040 -Row $row -Status ([string]$decision.status) -Reason ([string]$decision.reason) -RequiresReenrollment:$true -ObservedAt $ObservedAt}
+        if(-not [bool]$decision.conclusive -or [bool]$decision.requires_reenrollment){return Set-CustomAppRemoteBindingInactiveV040 -Row $row -Status ([string]$decision.status) -Reason ([string]$decision.reason) -RequiresReenrollment $true -ObservedAt $ObservedAt}
         $row.binding=Copy-CustomAppRemoteBindingCandidateForStateV040 -Binding $binding -RemoteObservation $obs
         $row.active=$true;$row.source_identity=[string]$elig.source;$row.last_success=$ObservedAt;$row.last_status=[string]$decision.status;$row.last_reason=[string]$decision.reason;$row.last_error=$null
         $row.last_remote_tree_sha256=[string]$decision.remote_tree_sha256;$row.last_remote_commit_sha=[string]$obs.commit_sha;$row.update_observed=[bool]$decision.update_observed;$row.requires_reenrollment=$false
@@ -147,8 +149,10 @@ function Update-CustomAppRemoteBindingFromObservationSetV040 {
         else{$denials.Add(([string]$decision.status)+':'+([string]$decision.reason))}
     }
     if($candidates.Count -ne 1){
-        $reason=$(if($candidates.Count -gt 1){'multiple-safe-remote-binding-candidates'}else{if($denials.Count){$denials -join '; '}else{'no-safe-remote-binding-candidate'}})
-        return Set-CustomAppRemoteBindingInactiveV040 -Row $row -Status $(if($candidates.Count -gt 1){'binding-ambiguous'}else{'binding-not-enrolled'}) -Reason $reason -RequiresReenrollment:$false -ObservedAt $ObservedAt
+        if($candidates.Count -gt 1){$reason='multiple-safe-remote-binding-candidates';$status='binding-ambiguous'}
+        elseif($denials.Count){$reason=($denials -join '; ');$status='binding-not-enrolled'}
+        else{$reason='no-safe-remote-binding-candidate';$status='binding-not-enrolled'}
+        return Set-CustomAppRemoteBindingInactiveV040 -Row $row -Status $status -Reason $reason -RequiresReenrollment $false -ObservedAt $ObservedAt
     }
     $chosen=$candidates[0];$decision=$chosen.decision;$obs=$chosen.observation
     $row.binding=Copy-CustomAppRemoteBindingCandidateForStateV040 -Binding $decision.binding_candidate -RemoteObservation $obs
@@ -164,7 +168,7 @@ function Update-CustomAppRemoteBindingEligibilityOnlyV040 {
     $row=Ensure-CustomAppRemoteBindingRowV040 -State $State -Name $Name
     $elig=Test-CustomAppRemoteBindingEligibilityV040 -LifecycleRow $LifecycleRow -ProvenanceRow $ProvenanceRow
     if([bool]$elig.ok){return $row}
-    return Set-CustomAppRemoteBindingInactiveV040 -Row $row -Status 'eligibility-denied' -Reason ([string]$elig.reason) -RequiresReenrollment:(-not [bool]$elig.user_removed) -UserRemoved:[bool]$elig.user_removed -ObservedAt $ObservedAt
+    return Set-CustomAppRemoteBindingInactiveV040 -Row $row -Status 'eligibility-denied' -Reason ([string]$elig.reason) -RequiresReenrollment (-not [bool]$elig.user_removed) -UserRemoved ([bool]$elig.user_removed) -ObservedAt $ObservedAt
 }
 
 function Assert-CustomAppRemoteBindingStateDeniedV040 {
