@@ -103,7 +103,8 @@ jobs:
           $local=Get-CustomAppLocalRuntimeBaseline -Name 'tagify' -AppPath $repo
           $remote=Get-CustomAppObserverRepoCommitObservation -Source 'alexk218/tagify' -CommitSha $commit
           if([string]$local.tree_sha256 -cne [string]$remote.tree_sha256){throw "Live local/zipball tree mismatch: $($local.tree_sha256) != $($remote.tree_sha256)"}
-          if([int]$local.file_count -ne [int]$remote.file_count){throw "Live local/zipball file-count mismatch: $($local.file_count) != $($remote.file_count)"}
+          $remoteFileCount=@($remote.files).Count
+          if([int]$local.file_count -ne [int]$remoteFileCount){throw "Live local/zipball file-count mismatch: $($local.file_count) != $remoteFileCount"}
           if(Test-CustomAppLocalRuntimeBaselineMutationAuthority $local){throw 'Live local baseline gained mutation authority.'}
           Write-Host "CUSTOM_APP_LOCAL_RUNTIME_LIVE_TAGIFY_EQUIVALENCE_PASS tree=$($local.tree_sha256) files=$($local.file_count) local_installable=$($local.installable) remote_build_required=$($remote.build_required)"
 
