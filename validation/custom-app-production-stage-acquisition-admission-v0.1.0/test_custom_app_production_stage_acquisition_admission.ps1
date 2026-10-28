@@ -2,6 +2,12 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $root 'validation/custom-app-production-executor-start-gate-v0.1.0/test_custom_app_production_executor_start_gate.ps1')
+Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
+. (Join-Path $root 'validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1')
+. (Join-Path $root 'validation/custom-app-remote-observation-collector-v0.1.1/release-id-fix-v011.ps1')
+. (Join-Path $root 'validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1')
+. (Join-Path $root 'validation/custom-app-remote-source-contract-v0.1.1/release-continuity-v011.ps1')
+. (Join-Path $root 'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1')
 . (Join-Path $root 'validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1')
 . (Join-Path $PSScriptRoot 'custom-app-production-stage-acquisition-admission.ps1')
 
