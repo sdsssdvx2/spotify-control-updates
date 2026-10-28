@@ -1,0 +1,99 @@
+name: Validate Custom App Production Atomic Live Swap v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-atomic-live-swap-v0.1.0]
+    paths: ['validation/custom-app-production-atomic-live-swap-v0.1.0/**','.github/workflows/validate-custom-app-production-atomic-live-swap-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-pre-apply-preparation-v0.1.0]
+    paths: ['validation/custom-app-production-atomic-live-swap-v0.1.0/**','.github/workflows/validate-custom-app-production-atomic-live-swap-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"}
+
+      - name: Prove exact scope lineage and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h-cne$e){throw "head mismatch $h != $e"}
+          $p='ddc84778ab4815d4174198727b8d1d052a02182e';if((git merge-base $p HEAD).Trim()-cne$p){throw 'not descended from exact validated pre-apply preparation head'}
+          $allowed=@('.github/workflows/validate-custom-app-production-atomic-live-swap-v010.yml','validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1','validation/custom-app-production-atomic-live-swap-v0.1.0/test_custom_app_production_atomic_live_swap.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|?{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x -notin $changed){throw "missing $x"}}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          'CUSTOM_APP_ATOMIC_LIVE_SWAP_SCOPE_PASS'
+
+      - name: Prove exact immutable dependency pins
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$pins=@(
+            @($h,'validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1','797677659b57a9d0f2380766afb8c0829fdea9d3'),
+            @($h,'validation/custom-app-production-atomic-live-swap-v0.1.0/test_custom_app_production_atomic_live_swap.ps1','cb44fafed81c66120d6392b7a58d5e9a0a7fd725'),
+            @('ddc84778ab4815d4174198727b8d1d052a02182e','validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1','9b039819e7b2278fe4cf15c8585336dd07a8e8e3'),
+            @('ddc84778ab4815d4174198727b8d1d052a02182e','validation/custom-app-production-pre-apply-preparation-v0.1.0/test_custom_app_production_pre_apply_preparation.ps1','cc79e9879dd629956613cd8ecbe73971203f2d5e'),
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'))
+          foreach($p in $pins){$b=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($b-cne$p[2]){throw "pin drift $($p[1]) $b != $($p[2])"}}
+          'CUSTOM_APP_ATOMIC_LIVE_SWAP_PINS_PASS'
+
+      - name: Parse and audit bounded mutation rollback contract
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-atomic-live-swap-v0.1.0';foreach($f in @("$d/custom-app-production-atomic-live-swap.ps1","$d/test_custom_app_production_atomic_live_swap.ps1")){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|%{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $core=Get-Content "$d/custom-app-production-atomic-live-swap.ps1" -Raw
+          foreach($m in @('Test-CustomAppProductionPreApplyPreparedResultV010','Get-CustomAppUpdateTreeSnapshotV010','Get-CustomAppLocalRuntimeBaseline','Test-CustomAppProductionPersistenceBackupV010','Restore-SpotifyPersistenceBackup','Copy-CustomAppAtomicTreeV010','Test-CustomAppAtomicGitSnapshotV010','protected-persistence-drift-after-swap','requires_spicetify_apply_phase=$true','spicetify_apply_authorized=$false','additional_mutation_authorized=$false','production_mutation_authorized=$false')){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "atomic marker missing $m"}}
+          if(([regex]::Matches($core,'\[IO\.Directory\]::Move\(')).Count-ne2){throw 'atomic live rename count drifted'}
+          if(([regex]::Matches($core,'Restore-SpotifyPersistenceBackup')).Count-ne1){throw 'persistence rollback call count drifted'}
+          foreach($x in @('Invoke-WebRequest','Invoke-RestMethod','Start-Process','spicetify apply','spicetify config','Save-AddonState','DownloadFile','DownloadString')){if($core.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "atomic core gained forbidden external primitive $x"}}
+          $test=Get-Content "$d/test_custom_app_production_atomic_live_swap.ps1" -Raw;foreach($m in @('prepared-fingerprint-tamper','user-removed','pre-swap-live-drift','pre-swap-stage-drift','pre-swap-persistence-drift','throw-before-live-move','throw-after-live-move','throw-after-candidate-move','runtime-drift-after-swap','git-drift-after-swap','persistence-drift-after-swap','throw-after-post-verify',"-Name 'future-app'")){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "atomic coverage missing $m"}}
+          'CUSTOM_APP_ATOMIC_LIVE_SWAP_PARSE_AUDIT_PASS'
+
+      - name: Materialize exact sibling validation dependencies
+        shell: powershell
+        run: |
+          $deps=@(
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'))
+          foreach($d in $deps){$path=$d[1];New-Item -ItemType Directory -Force -Path (Split-Path $path -Parent)|Out-Null;$env:ATOMIC_GIT_SPEC="$($d[0])`:$path";$env:ATOMIC_GIT_OUT=$path;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['ATOMIC_GIT_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['ATOMIC_GIT_SPEC']]))";if($LASTEXITCODE){throw "materialize failed $path"};$actual=(git hash-object $path).Trim();if($actual-cne$d[2]){throw "materialized blob drift $path $actual != $($d[2])"}}
+          'CUSTOM_APP_ATOMIC_LIVE_SWAP_MATERIALIZATION_PASS'
+
+      - name: Run atomic live swap rollback matrix twice
+        shell: powershell
+        run: |
+          1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-atomic-live-swap-v0.1.0/test_custom_app_production_atomic_live_swap.ps1';if($LASTEXITCODE){throw "atomic matrix failed pass $_"}}
+          'CUSTOM_APP_ATOMIC_LIVE_SWAP_MATRIX_REPEAT_PASS'
+
+      - name: Replay exact pre-apply preparation regression
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-pre-apply-preparation-v0.1.0/test_custom_app_production_pre_apply_preparation.ps1';if($LASTEXITCODE){throw 'pre-apply regression'}
+          'CUSTOM_APP_ATOMIC_LIVE_SWAP_PREAPPLY_REGRESSION_PASS'
+
+      - name: Rebuild exact candidate and run Addon Manager SelfTest
+        shell: powershell
+        run: |
+          python 'validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py' --build;if($LASTEXITCODE){throw 'build failed'};$a='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/addon-manager.ps1';$m='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/spotify-control.ps1';$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();if((Get-Item $a).Length-ne523216-or$ah-cne'b2cec989ef399aed4a8763105121b21181ffb493ed9e3e884baa1d62a634f94b'){throw 'addon drift'};if($mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'main drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'atomic-live-swap-selftest';$env:LOCALAPPDATA=Join-Path $s 'Local';$env:APPDATA=Join-Path $s 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'SelfTest failed'}
+          'CUSTOM_APP_ATOMIC_LIVE_SWAP_SELFTEST_PASS'
+
+      - name: Prove protected surfaces immutable and write evidence
+        shell: powershell
+        run: |
+          $p='ddc84778ab4815d4174198727b8d1d052a02182e';$expected=@('.github/workflows/validate-custom-app-production-atomic-live-swap-v010.yml','validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1','validation/custom-app-production-atomic-live-swap-v0.1.0/test_custom_app_production_atomic_live_swap.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|?{$_ -notin $expected});if($bad.Count){throw "unexpected changed surface $($bad -join ', ')"}
+          foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1','validation/custom-app-production-stage-executor-v0.1.0/custom-app-production-stage-executor.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
+          $d='validation/custom-app-production-atomic-live-swap-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_pre_apply_parent=$p;live_swap_scope='one-customapp-directory-only';same_parent_directory_renames=2;runtime_stage_equivalence_required=$true;git_provenance_preserved=$true;protected_persistence_must_remain_identical=$true;app_and_persistence_exact_rollback_on_post_mutation_failure=$true;fault_matrix_repeated=$true;spicetify_apply_executed=$false;spicetify_apply_authority=$false;generic_future_mutation_authority_expanded=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'CUSTOM_APP_ATOMIC_LIVE_SWAP_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-atomic-live-swap-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1
+            validation/custom-app-production-atomic-live-swap-v0.1.0/test_custom_app_production_atomic_live_swap.ps1
+            validation/custom-app-production-atomic-live-swap-v0.1.0/ci-evidence.json
+          if-no-files-found: error
