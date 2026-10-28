@@ -1,0 +1,180 @@
+name: Validate Custom App Production Promotion Gate v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-promotion-gate-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-promotion-gate-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-promotion-gate-v010.yml'
+  pull_request:
+    branches: [validate/custom-app-shadow-executor-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-promotion-gate-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-promotion-gate-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact gate-only scope, shadow lineage, and frozen production
+        shell: powershell
+        run: |
+          $actual=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $expected){throw "Not exact event head: $actual != $expected"}
+          $parent='22eb3561843fbe4016023d527186aa629512b67d'
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'Promotion gate is not descended from exact validated shadow executor head.'}
+          $allowed=@(
+            '.github/workflows/validate-custom-app-production-promotion-gate-v010.yml',
+            'validation/custom-app-production-promotion-gate-v0.1.0/custom-app-production-promotion-gate.ps1',
+            'validation/custom-app-production-promotion-gate-v0.1.0/test_custom_app_production_promotion_gate.ps1'
+          )
+          $changed=@(git diff --name-only "$parent...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Promotion-gate validation scope escaped: $($bad -join ', ')"}
+          foreach($required in $allowed){if($required -notin $changed){throw "Missing expected promotion-gate file: $required"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved during promotion-gate validation.'}
+          Write-Host "CUSTOM_APP_PROMOTION_GATE_SCOPE_PASS head=$actual"
+
+      - name: Prove exact immutable shadow dependency objects
+        shell: powershell
+        run: |
+          $parent='22eb3561843fbe4016023d527186aa629512b67d'
+          $pins=@(
+            @('validation/custom-app-shadow-executor-v0.1.0/custom-app-shadow-executor.ps1','e0c39d0ffced966626ca5060346b8e6ed936589a'),
+            @('validation/custom-app-shadow-executor-v0.1.0/shadow-executor-safety-overlay.ps1','250b7f17f6461b073b42f26319c2b229441f9421'),
+            @('validation/custom-app-shadow-executor-v0.1.0/test_custom_app_shadow_executor.ps1','0045d04e9ddb3bb6564e9a8dcf7b147e2684bcbc'),
+            @('validation/custom-app-shadow-executor-v0.1.0/test_live_tagify_shadow_executor.ps1','20eb54baf6086131a03e27151cd53f5416fe3fae'),
+            @('validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','e2f2fc656235883d2a82b106289973f6ded409a5'),
+            @('validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+            @('validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1','4f0831fa2e5dc23c9a4ec98b6c7a9afbb3c9af55'),
+            @('validation/custom-app-remote-binding-observer-v0.4.0/custom-app-remote-binding-state.ps1','bd19cbb3da2087e68b2452fe62471d4eca2cd990')
+          )
+          foreach($pin in $pins){$blob=(git rev-parse "$parent`:$($pin[0])").Trim();if($blob -cne $pin[1]){throw "Pinned promotion dependency drift: $($pin[0]) $blob != $($pin[1])"}}
+          Write-Host 'CUSTOM_APP_PROMOTION_GATE_DEPENDENCY_PINS_PASS'
+
+      - name: Parse promotion gate and matrix with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          foreach($file in @(
+            'validation/custom-app-production-promotion-gate-v0.1.0/custom-app-production-promotion-gate.ps1',
+            'validation/custom-app-production-promotion-gate-v0.1.0/test_custom_app_production_promotion_gate.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0} :: line={1} col={2} text=<{3}> :: {4}" -f $file,$_.Extent.StartLineNumber,$_.Extent.StartColumnNumber,$_.Extent.Text,$_.Message)};throw "PowerShell 5.1 parse failed: $file"}
+          }
+          Write-Host 'CUSTOM_APP_PROMOTION_GATE_PS51_PARSE_PASS'
+
+      - name: Audit gate as read-only decision-only and authority-denied
+        shell: powershell
+        run: |
+          $path='validation/custom-app-production-promotion-gate-v0.1.0/custom-app-production-promotion-gate.ps1'
+          $gate=Get-Content $path -Raw
+          foreach($marker in @(
+            'eligible_for_production_promotion',
+            'promotion_decision_only=$true',
+            'promotion_token_issued=$false',
+            "mutation_mode='deny'",
+            'mutation_authorized=$false',
+            'auto_update_authorized=$false',
+            'auto_install_authorized=$false',
+            'production_mutation_authorized=$false',
+            'shadow-protocol-evidence-complete-read-only-promotion-eligibility',
+            'shadow-persistence-byte-fingerprint-drift',
+            'provenance-not-strong-local-git-proof',
+            'binding-does-not-represent-a-new-remote-tree'
+          )){if($gate.IndexOf($marker,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Promotion-gate safety marker missing: $marker"}}
+          foreach($forbidden in @(
+            'Invoke-WebRequest','Invoke-RestMethod','Start-Process','Copy-Item','Move-Item','Remove-Item','New-Item','Set-Content','Add-Content','Out-File',
+            '[IO.File]::','[IO.Directory]::','Save-AddonState','spicetify apply','spicetify config',
+            'Invoke-CustomAppShadowExecutorV010','Invoke-CustomAppShadowWithAcquiredStageV010','Invoke-CustomAppStageAcquisitionV010','Invoke-CustomAppUpdateFixtureTransactionV010'
+          )){if($gate.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Promotion gate gained forbidden side effect/action: $forbidden"}}
+          if($gate.IndexOf('production_mutation_authorized=$true',[StringComparison]::OrdinalIgnoreCase) -ge 0){throw 'Promotion gate can grant production mutation authority.'}
+          Write-Host 'CUSTOM_APP_PROMOTION_GATE_READ_ONLY_AUDIT_PASS'
+
+      - name: Run promotion eligibility fail-closed matrix twice
+        shell: powershell
+        run: |
+          1..2|ForEach-Object{
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-promotion-gate-v0.1.0/test_custom_app_production_promotion_gate.ps1'
+            if($LASTEXITCODE -ne 0){throw "Promotion eligibility matrix failed on pass $_."}
+          }
+          Write-Host 'CUSTOM_APP_PROMOTION_GATE_MATRIX_REPEAT_PASS'
+
+      - name: Replay exact parent shadow matrix and v0.4.1 Addon Manager SelfTest
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-shadow-executor-v0.1.0/test_custom_app_shadow_executor.ps1'
+          if($LASTEXITCODE -ne 0){throw 'Exact parent offline shadow matrix regressed.'}
+          python 'validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py' --build
+          if($LASTEXITCODE -ne 0){throw 'Exact v0.4.1 candidate rebuild failed.'}
+          $addon='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/addon-manager.ps1';$main='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/spotify-control.ps1'
+          $ah=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant();if((Get-Item $addon).Length -ne 523216 -or $ah -cne 'b2cec989ef399aed4a8763105121b21181ffb493ed9e3e884baa1d62a634f94b'){throw "Parent Addon Manager drift: $((Get-Item $addon).Length)/$ah"}
+          $mh=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant();if($mh -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw "Spotify Control parent bytes drifted: $mh"}
+          $sandbox=Join-Path $env:RUNNER_TEMP 'promotion-parent-selftest';$env:LOCALAPPDATA=Join-Path $sandbox 'LocalAppData';$env:APPDATA=Join-Path $sandbox 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Exact v0.4.1 Addon Manager SelfTest failed.'}
+          Write-Host 'CUSTOM_APP_PROMOTION_GATE_PARENT_REPLAY_PASS'
+
+      - name: Prove production, shadow parent, and authority surfaces remain immutable
+        shell: powershell
+        run: |
+          $parent='22eb3561843fbe4016023d527186aa629512b67d'
+          $expected=@(
+            '.github/workflows/validate-custom-app-production-promotion-gate-v010.yml',
+            'validation/custom-app-production-promotion-gate-v0.1.0/custom-app-production-promotion-gate.ps1',
+            'validation/custom-app-production-promotion-gate-v0.1.0/test_custom_app_production_promotion_gate.ps1'
+          )
+          $changed=@(git diff --name-only "$parent...HEAD");$bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "Unexpected promotion-gate changed surface: $($bad -join ', ')"}
+          foreach($path in @(
+            'manifest.json','stable-version.json','addon-policy-registry.json',
+            'validation/custom-app-shadow-executor-v0.1.0/custom-app-shadow-executor.ps1',
+            'validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1',
+            'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1',
+            'validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1',
+            'validation/custom-app-remote-binding-observer-v0.4.0/custom-app-remote-binding-state.ps1'
+          )){git diff --quiet $parent HEAD -- $path;if($LASTEXITCODE -ne 0){throw "Protected surface changed: $path"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main changed during gate validation.'}
+          Write-Host 'CUSTOM_APP_PROMOTION_GATE_IMMUTABILITY_PASS'
+
+      - name: Write promotion gate evidence
+        shell: powershell
+        run: |
+          $dir='validation/custom-app-production-promotion-gate-v0.1.0'
+          $gateHash=(Get-FileHash "$dir/custom-app-production-promotion-gate.ps1" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $testHash=(Get-FileHash "$dir/test_custom_app_production_promotion_gate.ps1" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $evidence=[ordered]@{
+            schema=1
+            head=(git rev-parse HEAD).Trim()
+            parent_shadow='22eb3561843fbe4016023d527186aa629512b67d'
+            production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+            gate_sha256=$gateHash
+            test_sha256=$testHash
+            decision_only=$true
+            promotion_token_issued=$false
+            production_mutation_authorized=$false
+            generic_auto_authority_expanded=$false
+            parent_shadow_push_run=40673331603
+            parent_shadow_pr_run=40673541954
+          }
+          $evidence|ConvertTo-Json -Depth 10|Set-Content "$dir/promotion-gate-evidence.json" -Encoding UTF8
+          Write-Host 'CUSTOM_APP_PROMOTION_GATE_EVIDENCE_PASS'
+
+      - name: Upload promotion gate validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-promotion-gate-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-promotion-gate-v0.1.0/custom-app-production-promotion-gate.ps1
+            validation/custom-app-production-promotion-gate-v0.1.0/test_custom_app_production_promotion_gate.ps1
+            validation/custom-app-production-promotion-gate-v0.1.0/promotion-gate-evidence.json
+          if-no-files-found: error
