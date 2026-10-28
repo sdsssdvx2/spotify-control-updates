@@ -36,7 +36,9 @@ jobs:
             @($h,'validation/custom-app-production-transaction-finalization-v0.1.0/custom-app-production-transaction-finalization.ps1','2958ae3f92173215d32ef8bf284a9433c52caa61'),
             @($h,'validation/custom-app-production-transaction-finalization-v0.1.0/test_custom_app_production_transaction_finalization.ps1','5918c6e97a17a487affdf5bddaed2e5a8b037cee'),
             @('574fe182168271fa3497d58e269e9af1f60d9033','validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1','e91fa6a125f77352907c1119f6d9f47be9682550'),
-            @('574fe182168271fa3497d58e269e9af1f60d9033','validation/custom-app-production-atomic-live-swap-v0.1.0/test_custom_app_production_atomic_live_swap.ps1','d79de6567377cf751f61114c0c1f773299a77239'))
+            @('574fe182168271fa3497d58e269e9af1f60d9033','validation/custom-app-production-atomic-live-swap-v0.1.0/test_custom_app_production_atomic_live_swap.ps1','d79de6567377cf751f61114c0c1f773299a77239'),
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'))
           foreach($p in $pins){$b=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($b -cne $p[2]){throw "pin drift $($p[1]) $b != $($p[2])"}}
           'CUSTOM_APP_PRODUCTION_TRANSACTION_FINALIZATION_PINS_PASS'
 
@@ -51,6 +53,15 @@ jobs:
           if($core -match 'spicetify_apply_authorized\s*=\s*\$true|additional_mutation_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true|result_is_authority\s*=\s*\$true'){throw 'finalizer authority escaped'}
           $test=Get-Content "$d/test_custom_app_production_transaction_finalization.ps1" -Raw;foreach($m in @('future-app','atomic-result-not-success','atomic-authority','transaction-path-shape','extra-transaction-entry','old-live-drift','live-runtime-drift','git-drift','persistence-drift','prepared-result-tamper','stage-result-tamper','user-removed','throw-before-cleanup','throw-after-cleanup','post-cleanup-live-drift','post-cleanup-git-drift','post-cleanup-persistence-drift','authority-tampered finalization receipt','fingerprint-tampered finalization receipt')){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "finalization coverage missing $m"}}
           'CUSTOM_APP_PRODUCTION_TRANSACTION_FINALIZATION_PARSE_AUDIT_PASS'
+
+      - name: Materialize exact sibling validation dependencies
+        shell: powershell
+        run: |
+          $deps=@(
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'))
+          foreach($d in $deps){$path=$d[1];New-Item -ItemType Directory -Force -Path (Split-Path $path -Parent)|Out-Null;$env:FINALIZE_GIT_SPEC="$($d[0])`:$path";$env:FINALIZE_GIT_OUT=$path;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['FINALIZE_GIT_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['FINALIZE_GIT_SPEC']]))";if($LASTEXITCODE){throw "materialize failed $path"};$actual=(git hash-object $path).Trim();if($actual-cne$d[2]){throw "materialized blob drift $path $actual != $($d[2])"}}
+          'CUSTOM_APP_PRODUCTION_TRANSACTION_FINALIZATION_MATERIALIZATION_PASS'
 
       - name: Run transaction-finalization matrix twice
         shell: powershell
