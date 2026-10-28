@@ -60,7 +60,12 @@ jobs:
           $deps=@(
             @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
             @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'))
-          foreach($d in $deps){$path=$d[1];$dir=Split-Path $path -Parent;New-Item -ItemType Directory -Force -Path $dir|Out-Null;$spec="$($d[0])`:$path";& git show "--output=$path" $spec;if($LASTEXITCODE){throw "materialize failed $spec"};$actual=(git hash-object $path).Trim();if($actual-cne$d[2]){throw "materialized blob drift $path $actual != $($d[2])"}}
+          foreach($d in $deps){
+            $path=$d[1];$dir=Split-Path $path -Parent;New-Item -ItemType Directory -Force -Path $dir|Out-Null;$spec="$($d[0])`:$path"
+            $env:PREAPPLY_GIT_SPEC=$spec;$env:PREAPPLY_GIT_OUT=$path
+            python -c "import os,subprocess,pathlib; p=pathlib.Path(os.environ['PREAPPLY_GIT_OUT']); p.write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['PREAPPLY_GIT_SPEC']]))"
+            if($LASTEXITCODE){throw "materialize failed $spec"};$actual=(git hash-object $path).Trim();if($actual-cne$d[2]){throw "materialized blob drift $path $actual != $($d[2])"}
+          }
           'CUSTOM_APP_PRODUCTION_PRE_APPLY_MATERIALIZATION_PASS'
 
       - name: Run pre-apply preparation matrix twice
