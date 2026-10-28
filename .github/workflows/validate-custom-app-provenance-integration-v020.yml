@@ -41,7 +41,13 @@ jobs:
           $changed=@(git diff --name-only "$parent...HEAD")
           $bad=@($changed|Where-Object{$_ -cne $workflow -and -not $_.StartsWith($prefix,[StringComparison]::Ordinal)})
           if($bad.Count){throw "Integration validation scope escaped: $($bad -join ', ')"}
-          foreach($required in @($workflow,$prefix+'build_candidate.py',$prefix+'README.md',$prefix+'INTEGRATION_PLAN.md')){if($required -notin $changed){throw "Missing required integration validation file: $required"}}
+          $requiredFiles=@(
+            $workflow,
+            ($prefix+'build_candidate.py'),
+            ($prefix+'README.md'),
+            ($prefix+'INTEGRATION_PLAN.md')
+          )
+          foreach($required in $requiredFiles){if($required -notin $changed){throw "Missing required integration validation file: $required"}}
           if((git rev-parse origin/main).Trim() -cne $prod){throw 'Production main moved during integration validation.'}
           Write-Host "PROVENANCE_INTEGRATION_SCOPE_PASS head=$actual files=$($changed.Count)"
 
