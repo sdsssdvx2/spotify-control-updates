@@ -56,8 +56,8 @@ function Remove-CustomAppAtomicDirectoryV010 {
     if(-not ([IO.Path]::GetDirectoryName($target)).Equals($parent,[StringComparison]::OrdinalIgnoreCase)){ throw 'atomic-remove-parent-mismatch' }
     if(-not [string]::IsNullOrWhiteSpace($ExpectedName) -and [IO.Path]::GetFileName($target) -cne $ExpectedName){ throw 'atomic-remove-name-mismatch' }
     if(Test-Path -LiteralPath $target){
-        $item=Get-Item -LiteralPath $target -Force -ErrorAction Stop
-        if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint)-ne 0){ throw 'atomic-remove-reparse-point' }
+        $item = Get-Item -LiteralPath $target -Force -ErrorAction Stop
+        if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){ throw 'atomic-remove-reparse-point' }
         [IO.Directory]::Delete($target,$true)
     }
 }
@@ -86,29 +86,50 @@ function Invoke-CustomAppProductionAtomicLiveSwapValidationHookV010 {
 
 function Test-CustomAppProductionAtomicPreconditionsV010 {
     param(
-        [AllowNull()]$PreparedResult,[Parameter(Mandatory=$true)][string]$Name,[AllowNull()]$LifecycleRow,
-        [Parameter(Mandatory=$true)][string]$LocalAppDataRoot,[Parameter(Mandatory=$true)][string]$AppDataRoot
+        [Parameter(Mandatory=$true)][string]$AllowedRoot,[Parameter(Mandatory=$true)][string]$StoreDirectory,[Parameter(Mandatory=$true)][string]$ExpectedConsumptionId,
+        [AllowNull()]$StageExecutorResult,[AllowNull()]$PreparedResult,[AllowNull()]$Permit,[Parameter(Mandatory=$true)][string]$Name,[AllowNull()]$LifecycleRow,[AllowNull()]$ProvenanceRow,[AllowNull()]$BindingRow,
+        [AllowNull()]$ShadowProtocolQualification,[AllowNull()]$LiveAttestedQualification,[Parameter(Mandatory=$true)][byte[]]$SessionKey,
+        [Parameter(Mandatory=$true)][string]$LocalAppDataRoot,[Parameter(Mandatory=$true)][string]$AppDataRoot,[DateTimeOffset]$Now=[DateTimeOffset]::UtcNow,[int]$MaxRemoteObservationAgeHours=36
     )
     $preparedCheck = Test-CustomAppProductionPreApplyPreparedResultV010 -Result $PreparedResult
     if(-not [bool]$preparedCheck.ok){ return [pscustomobject]@{ok=$false;reason=('prepared-result-invalid:'+[string]$preparedCheck.reason)} }
-    if(([string]$PreparedResult.name).Trim().ToLowerInvariant() -cne $Name.Trim().ToLowerInvariant()){ return [pscustomobject]@{ok=$false;reason='prepared-name-mismatch'} }
+    $stageCheck = Test-CustomAppProductionStageExecutorResultV010 -Result $StageExecutorResult
+    if(-not [bool]$stageCheck.ok){ return [pscustomobject]@{ok=$false;reason=('stage-result-invalid:'+[string]$stageCheck.reason)} }
+    if(([string]$PreparedResult.stage_result_fingerprint).Trim().ToLowerInvariant() -cne ([string]$StageExecutorResult.result_fingerprint).Trim().ToLowerInvariant()){ return [pscustomobject]@{ok=$false;reason='prepared-stage-result-fingerprint-mismatch'} }
+    if(([string]$PreparedResult.consumption_id).Trim().ToLowerInvariant() -cne $ExpectedConsumptionId.Trim().ToLowerInvariant() -or ([string]$StageExecutorResult.consumption_id).Trim().ToLowerInvariant() -cne $ExpectedConsumptionId.Trim().ToLowerInvariant()){ return [pscustomobject]@{ok=$false;reason='consumption-continuity-mismatch'} }
+    if(([string]$PreparedResult.name).Trim().ToLowerInvariant() -cne $Name.Trim().ToLowerInvariant() -or ([string]$StageExecutorResult.name).Trim().ToLowerInvariant() -cne $Name.Trim().ToLowerInvariant()){ return [pscustomobject]@{ok=$false;reason='name-continuity-mismatch'} }
     if($null -eq $LifecycleRow -or [string]$LifecycleRow.managed_by -cne 'dynamic-spicetify-v1' -or -not [bool]$LifecycleRow.present -or [bool]$LifecycleRow.user_removed -or [bool]$LifecycleRow.ambiguous -or -not [bool]$LifecycleRow.safe_local_identity -or @($LifecycleRow.locations).Count -ne 1){ return [pscustomobject]@{ok=$false;reason='lifecycle-not-safe-current-single-location'} }
+
     $livePath = Assert-CustomAppAtomicSafeDirectoryV010 -Path ([string]$LifecycleRow.locations[0]) -Label 'live-path'
     $parentPath = Assert-CustomAppAtomicSafeDirectoryV010 -Path ([IO.Path]::GetDirectoryName($livePath)) -Label 'customapps-parent'
-    if([IO.Path]::GetFileName($livePath).Trim().ToLowerInvariant() -cne $Name.Trim().ToLowerInvariant()){ return [pscustomobject]@{ok=$false;reason='live-directory-name-mismatch'} }
     if(Test-CustomAppAtomicPathsOverlapV010 -A $livePath -B ([string]$PreparedResult.stage_workspace_path)){ return [pscustomobject]@{ok=$false;reason='live-stage-overlap'} }
     if(Test-CustomAppAtomicPathsOverlapV010 -A $livePath -B ([string]$PreparedResult.app_backup_root)){ return [pscustomobject]@{ok=$false;reason='live-app-backup-overlap'} }
     if(Test-CustomAppAtomicPathsOverlapV010 -A $livePath -B ([string]$PreparedResult.persistence_backup_root)){ return [pscustomobject]@{ok=$false;reason='live-persistence-backup-overlap'} }
 
     try { $liveRuntime = Get-CustomAppLocalRuntimeBaseline -Name $Name -AppPath $livePath }
     catch { return [pscustomobject]@{ok=$false;reason=('live-runtime-read-failed:'+[string]$_.Exception.Message)} }
-    if(-not [bool]$liveRuntime.safe -or -not [bool]$liveRuntime.installable -or (Test-CustomAppLocalRuntimeBaselineMutationAuthority $liveRuntime) -or [string]$liveRuntime.tree_sha256 -cne [string]$PreparedResult.live_tree_sha256){ return [pscustomobject]@{ok=$false;reason='live-runtime-precondition-mismatch'} }
+    if(-not [bool]$liveRuntime.safe -or -not [bool]$liveRuntime.installable -or (Test-CustomAppLocalRuntimeBaselineMutationAuthority $liveRuntime) -or [string]$liveRuntime.tree_sha256 -cne [string]$PreparedResult.live_tree_sha256 -or [string]$liveRuntime.tree_sha256 -cne [string]$StageExecutorResult.local_tree_sha256){ return [pscustomobject]@{ok=$false;reason='live-runtime-precondition-mismatch'} }
     try { $fullLive = Get-CustomAppUpdateTreeSnapshotV010 -Root $livePath }
     catch { return [pscustomobject]@{ok=$false;reason=('live-full-tree-read-failed:'+[string]$_.Exception.Message)} }
     if([string]$fullLive.tree_sha256 -cne [string]$PreparedResult.app_backup_tree_sha256 -or [int]$fullLive.file_count -ne [int]$PreparedResult.app_backup_file_count -or [int64]$fullLive.total_bytes -ne [int64]$PreparedResult.app_backup_total_bytes){ return [pscustomobject]@{ok=$false;reason='live-full-tree-no-longer-matches-rollback-backup'} }
+
+    $freshAdmission = Resolve-CustomAppProductionStageAdmissionV010 -AllowedRoot $AllowedRoot -StoreDirectory $StoreDirectory -ExpectedConsumptionId $ExpectedConsumptionId -Permit $Permit -Name $Name -LifecycleRow $LifecycleRow -ProvenanceRow $ProvenanceRow -BindingRow $BindingRow -CurrentBaseline $liveRuntime -ShadowProtocolQualification $ShadowProtocolQualification -LiveAttestedQualification $LiveAttestedQualification -SessionKey $SessionKey -Now $Now -MaxRemoteObservationAgeHours $MaxRemoteObservationAgeHours
+    if($null -eq $freshAdmission -or -not [bool]$freshAdmission.ok){ return [pscustomobject]@{ok=$false;reason=('fresh-stage-admission-denied:'+[string]$freshAdmission.reason)} }
+    $freshAdmissionCheck = Test-CustomAppProductionStageAdmissionDecisionV010 -Decision $freshAdmission.decision
+    if(-not [bool]$freshAdmissionCheck.ok){ return [pscustomobject]@{ok=$false;reason=('fresh-stage-admission-invalid:'+[string]$freshAdmissionCheck.reason)} }
+    $decision = $freshAdmission.decision
+    foreach($field in @('source_identity','surface_kind','remote_tree_sha256','remote_commit_sha','binding_fingerprint')){
+        if(([string]$decision.$field).Trim().ToLowerInvariant() -cne ([string]$StageExecutorResult.$field).Trim().ToLowerInvariant()){ return [pscustomobject]@{ok=$false;reason=('fresh-admission-stage-continuity-mismatch-'+$field)} }
+    }
+    if(([string]$decision.current_tree_sha256).Trim().ToLowerInvariant() -cne ([string]$PreparedResult.live_tree_sha256).Trim().ToLowerInvariant()){ return [pscustomobject]@{ok=$false;reason='fresh-admission-live-tree-mismatch'} }
+    if(([string]$decision.consumption_id).Trim().ToLowerInvariant() -cne $ExpectedConsumptionId.Trim().ToLowerInvariant()){ return [pscustomobject]@{ok=$false;reason='fresh-admission-consumption-mismatch'} }
+    if(([string]$decision.persistence_envelope_sha256).Trim().ToLowerInvariant() -cne ([string]$PreparedResult.persistence_envelope_sha256).Trim().ToLowerInvariant()){ return [pscustomobject]@{ok=$false;reason='fresh-admission-persistence-envelope-mismatch'} }
+    try { if([int64]$decision.github_repo_id -ne [int64]$StageExecutorResult.github_repo_id){ return [pscustomobject]@{ok=$false;reason='fresh-admission-repo-id-mismatch'} } }
+    catch { return [pscustomobject]@{ok=$false;reason='fresh-admission-repo-id-invalid'} }
+
     try { $stageRuntime = Get-CustomAppLocalRuntimeBaseline -Name $Name -AppPath ([string]$PreparedResult.stage_path) }
     catch { return [pscustomobject]@{ok=$false;reason=('stage-runtime-read-failed:'+[string]$_.Exception.Message)} }
-    if(-not [bool]$stageRuntime.safe -or -not [bool]$stageRuntime.installable -or (Test-CustomAppLocalRuntimeBaselineMutationAuthority $stageRuntime) -or [string]$stageRuntime.tree_sha256 -cne [string]$PreparedResult.stage_tree_sha256){ return [pscustomobject]@{ok=$false;reason='stage-runtime-precondition-mismatch'} }
+    if(-not [bool]$stageRuntime.safe -or -not [bool]$stageRuntime.installable -or (Test-CustomAppLocalRuntimeBaselineMutationAuthority $stageRuntime) -or [string]$stageRuntime.tree_sha256 -cne [string]$PreparedResult.stage_tree_sha256 -or [string]$stageRuntime.tree_sha256 -cne [string]$StageExecutorResult.remote_tree_sha256){ return [pscustomobject]@{ok=$false;reason='stage-runtime-precondition-mismatch'} }
     if(Test-Path -LiteralPath (Join-Path ([string]$PreparedResult.stage_path) '.git')){ return [pscustomobject]@{ok=$false;reason='stage-vcs-metadata-forbidden'} }
     try { $gitSnapshot = Get-CustomAppAtomicGitSnapshotV010 -LivePath $livePath }
     catch { return [pscustomobject]@{ok=$false;reason=('live-git-precondition-failed:'+[string]$_.Exception.Message)} }
@@ -117,7 +138,7 @@ function Test-CustomAppProductionAtomicPreconditionsV010 {
     try { $persistenceNow = Get-SpotifyPersistenceSnapshot -LocalAppDataRoot $LocalAppDataRoot -AppDataRoot $AppDataRoot }
     catch { return [pscustomobject]@{ok=$false;reason=('persistence-read-failed:'+[string]$_.Exception.Message)} }
     if([string]$persistenceNow.fingerprint -cne [string]$PreparedResult.persistence_fingerprint){ return [pscustomobject]@{ok=$false;reason='protected-persistence-drift-before-swap'} }
-    return [pscustomobject]@{ok=$true;reason='atomic-preconditions-valid';live_path=$livePath;parent_path=$parentPath;live_runtime=$liveRuntime;full_live=$fullLive;stage_runtime=$stageRuntime;git_snapshot=$gitSnapshot;persistence=$persistenceNow}
+    return [pscustomobject]@{ok=$true;reason='atomic-preconditions-valid';live_path=$livePath;parent_path=$parentPath;live_runtime=$liveRuntime;full_live=$fullLive;stage_runtime=$stageRuntime;git_snapshot=$gitSnapshot;persistence=$persistenceNow;fresh_admission=$decision}
 }
 
 function Restore-CustomAppProductionAtomicLiveSwapV010 {
@@ -143,10 +164,12 @@ function Restore-CustomAppProductionAtomicLiveSwapV010 {
 
 function Invoke-CustomAppProductionAtomicLiveSwapV010 {
     param(
-        [AllowNull()]$PreparedResult,[Parameter(Mandatory=$true)][string]$Name,[AllowNull()]$LifecycleRow,
-        [Parameter(Mandatory=$true)][string]$LocalAppDataRoot,[Parameter(Mandatory=$true)][string]$AppDataRoot
+        [Parameter(Mandatory=$true)][string]$AllowedRoot,[Parameter(Mandatory=$true)][string]$StoreDirectory,[Parameter(Mandatory=$true)][string]$ExpectedConsumptionId,
+        [AllowNull()]$StageExecutorResult,[AllowNull()]$PreparedResult,[AllowNull()]$Permit,[Parameter(Mandatory=$true)][string]$Name,[AllowNull()]$LifecycleRow,[AllowNull()]$ProvenanceRow,[AllowNull()]$BindingRow,
+        [AllowNull()]$ShadowProtocolQualification,[AllowNull()]$LiveAttestedQualification,[Parameter(Mandatory=$true)][byte[]]$SessionKey,
+        [Parameter(Mandatory=$true)][string]$LocalAppDataRoot,[Parameter(Mandatory=$true)][string]$AppDataRoot,[DateTimeOffset]$Now=[DateTimeOffset]::UtcNow,[int]$MaxRemoteObservationAgeHours=36
     )
-    $pre = Test-CustomAppProductionAtomicPreconditionsV010 -PreparedResult $PreparedResult -Name $Name -LifecycleRow $LifecycleRow -LocalAppDataRoot $LocalAppDataRoot -AppDataRoot $AppDataRoot
+    $pre = Test-CustomAppProductionAtomicPreconditionsV010 -AllowedRoot $AllowedRoot -StoreDirectory $StoreDirectory -ExpectedConsumptionId $ExpectedConsumptionId -StageExecutorResult $StageExecutorResult -PreparedResult $PreparedResult -Permit $Permit -Name $Name -LifecycleRow $LifecycleRow -ProvenanceRow $ProvenanceRow -BindingRow $BindingRow -ShadowProtocolQualification $ShadowProtocolQualification -LiveAttestedQualification $LiveAttestedQualification -SessionKey $SessionKey -LocalAppDataRoot $LocalAppDataRoot -AppDataRoot $AppDataRoot -Now $Now -MaxRemoteObservationAgeHours $MaxRemoteObservationAgeHours
     $baseFailure = { param([string]$Reason,[bool]$RollbackAttempted,[bool]$RollbackOk,$RollbackResult=$null) [pscustomobject]@{ok=$false;reason=$Reason;rollback_attempted=$RollbackAttempted;rollback_ok=$RollbackOk;rollback_result=$RollbackResult;live_code_swap_performed=$false;result_is_authority=$false;spicetify_apply_authorized=$false;additional_mutation_authorized=$false;production_mutation_authorized=$false} }
     if(-not [bool]$pre.ok){ return & $baseFailure ('atomic-precondition-denied:'+[string]$pre.reason) $false $false $null }
 
@@ -191,7 +214,7 @@ function Invoke-CustomAppProductionAtomicLiveSwapV010 {
 
         return [pscustomobject]@{
             ok=$true;reason='atomic-live-code-swap-verified-no-spicetify-apply';schema=$CustomAppProductionAtomicLiveSwapSchema;managed_by=$CustomAppProductionAtomicLiveSwapManagedBy;qualified_pre_apply_head=$CustomAppProductionAtomicLiveSwapQualifiedPreApplyHead
-            name=$Name;live_path=$livePath;transaction_root=$transactionRoot;old_live_path=$oldLivePath;post_runtime_tree_sha256=[string]$postRuntime.tree_sha256;preserved_git_tree_sha256=$(if([bool]$pre.git_snapshot.present){[string]$pre.git_snapshot.tree_sha256}else{$null});persistence_fingerprint=[string]$persistenceAfter.fingerprint
+            name=$Name;live_path=$livePath;transaction_root=$transactionRoot;old_live_path=$oldLivePath;fresh_admission_fingerprint=[string]$pre.fresh_admission.admission_fingerprint;post_runtime_tree_sha256=[string]$postRuntime.tree_sha256;preserved_git_tree_sha256=$(if([bool]$pre.git_snapshot.present){[string]$pre.git_snapshot.tree_sha256}else{$null});persistence_fingerprint=[string]$persistenceAfter.fingerprint
             rollback_attempted=$false;rollback_ok=$false;live_code_swap_performed=$true;requires_transaction_workspace_cleanup=$true;requires_spicetify_apply_phase=$true;result_is_authority=$false;spicetify_apply_authorized=$false;additional_mutation_authorized=$false;production_mutation_authorized=$false
         }
     } catch {
