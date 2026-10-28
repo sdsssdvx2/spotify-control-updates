@@ -59,7 +59,7 @@ jobs:
           )
           foreach($p in $pins){$blob=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($blob -cne $p[2]){throw "Pinned blob drift: $($p[1]) $blob != $($p[2])"}}
           $guard=(git show '57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b:validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1') -join "`n"
-          foreach($m in @('function New-RequiredSpotifyPersistenceBackup','function Restore-SpotifyPersistenceBackup','Browser\Default\IndexedDB','Browser\Default\Local Storage','Browser\Default\Session Storage','spicetify')){if($guard.IndexOf($m,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Pinned persistence guard contract missing: $m"}}
+          foreach($m in @('function New-RequiredSpotifyPersistenceBackup','function Restore-SpotifyPersistenceBackup','Browser','Default','IndexedDB','Local Storage','Session Storage','WebStorage','Local State','Preferences','config-xpui.ini')){if($guard.IndexOf($m,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Pinned persistence guard contract missing: $m"}}
           Write-Host 'CUSTOM_APP_UPDATE_TX_INPUT_PINS_PASS'
 
       - name: Parse transaction protocol and matrix with Windows PowerShell 5.1
@@ -89,7 +89,17 @@ jobs:
           }
           Write-Host 'CUSTOM_APP_UPDATE_TX_MATRIX_REPEAT_PASS'
 
-      - name: Replay validated source/baseline/binding component matrices
+      - name: Replay exact pinned persistence drift and restore self-test
+        shell: powershell
+        run: |
+          $tmp=Join-Path $env:RUNNER_TEMP 'lifecycle-settings-core-pinned.ps1'
+          (git show '57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b:validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1')|Set-Content -LiteralPath $tmp -Encoding UTF8
+          function Write-AddonLog { param([string]$Message) Write-Host $Message }
+          . $tmp
+          Invoke-LifecycleSettingsCoreSelfTest
+          Write-Host 'CUSTOM_APP_UPDATE_TX_PERSISTENCE_GUARD_REPLAY_PASS'
+
+      - name: Replay validated source baseline and binding component matrices
         shell: powershell
         run: |
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-remote-source-contract-v0.1.0/test_custom_app_remote_source_contract.ps1';if($LASTEXITCODE -ne 0){throw 'Remote-source matrix regressed.'}
@@ -98,7 +108,7 @@ jobs:
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-remote-binding-observer-v0.4.0/test_custom_app_remote_binding_state.ps1';if($LASTEXITCODE -ne 0){throw 'Remote binding state matrix regressed.'}
           Write-Host 'CUSTOM_APP_UPDATE_TX_COMPONENT_REPLAY_PASS'
 
-      - name: Prove parent, production, and authority surfaces remain immutable
+      - name: Prove parent production and authority surfaces remain immutable
         shell: powershell
         run: |
           $parent='d92daa3006093a7d966083193302965ee01905f6';$changed=@(git diff --name-only "$parent...HEAD")
@@ -111,7 +121,7 @@ jobs:
       - name: Write validation evidence
         shell: powershell
         run: |
-          $e=[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_parent='d92daa3006093a7d966083193302965ee01905f6';production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2';protocol='custom-app-update-transaction-v1';production_mutation_authority=$false;network_capability=$false;fixture_apply_only=$true;matrix='pass-twice';component_replay='pass';persistence_guard_contract='pinned-external-proof-interface'}
+          $e=[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_parent='d92daa3006093a7d966083193302965ee01905f6';production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2';protocol='custom-app-update-transaction-v1';production_mutation_authority=$false;network_capability=$false;fixture_apply_only=$true;matrix='pass-twice';component_replay='pass';persistence_guard_contract='exact-pinned-drift-restore-selftest-pass'}
           $e|ConvertTo-Json -Depth 5|Set-Content 'validation/custom-app-update-transaction-protocol-v0.1.0/ci-evidence.json' -Encoding UTF8
 
       - name: Upload transaction protocol validation artifact
