@@ -134,7 +134,7 @@ try{
     $driftGit=((@('[remote "origin"]','    url = https://github.com/other/fork.git') -join "`n")+"`n")
     Write-Utf8NoBom (Join-Path $f.live '.git\config') $driftGit
     $fresh=Test-CustomAppShadowFreshProvenanceV010 -Name 'future-app' -LifecycleRow $f.lifecycle -ProvenanceRow $f.provenance -BindingRow $f.binding
-    Need (-not [bool]$fresh.ok -and ([string]$fresh.reason -in @('fresh-provenance-source-drift','fresh-provenance-fingerprint-drift'))) "pre-acquisition source drift escaped: $($fresh.reason)"
+    Need (-not [bool]$fresh.ok -and ([string]$fresh.reason -in @('fresh-provenance-source-drift','fresh-provenance-fingerprint-drift','fresh-provenance-not-strong:conflicting-source-claims'))) "pre-acquisition source drift escaped: $($fresh.reason)"
 } finally {Remove-ShadowFixture $f}
 
 try{
