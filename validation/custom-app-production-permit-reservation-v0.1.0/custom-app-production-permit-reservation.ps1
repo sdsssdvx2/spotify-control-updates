@@ -76,7 +76,7 @@ function Test-CustomAppProductionPermitReservationStateV010 {
         if(-not [bool]$rowAuthority.ok){return [pscustomobject]@{ok=$false;reason=[string]$rowAuthority.reason}}
         if(-not [bool]$row.single_use -or [bool]$row.reservation_is_authority -or -not [bool]$row.requires_atomic_persistence_before_executor){return [pscustomobject]@{ok=$false;reason='reservation-row-consumption-contract-invalid'}}
         foreach($field in @('reservation_id','token_id','permit_hmac_sha256','current_tree_sha256','remote_tree_sha256','current_eligibility_fingerprint','live_attested_qualification_fingerprint','admission_fingerprint')){if(-not (Test-CustomAppProductionReservationSha256V010 (([string]$row.$field).Trim().ToLowerInvariant()))){return [pscustomobject]@{ok=$false;reason=('reservation-row-invalid-'+$field)}}}
-        if(-not (Test-CustomAppProductionReservationNonceV010 ([string]$row.permit_nonce)){return [pscustomobject]@{ok=$false;reason='reservation-row-invalid-permit-nonce'}}
+        if(-not (Test-CustomAppProductionReservationNonceV010 ([string]$row.permit_nonce))){return [pscustomobject]@{ok=$false;reason='reservation-row-invalid-permit-nonce'}}
         if(-not $tokens.Add(([string]$row.token_id).ToLowerInvariant())){return [pscustomobject]@{ok=$false;reason='reservation-state-duplicate-token'}}
         if(-not $nonces.Add(([string]$row.permit_nonce).ToLowerInvariant())){return [pscustomobject]@{ok=$false;reason='reservation-state-duplicate-nonce'}}
         if(-not $ids.Add(([string]$row.reservation_id).ToLowerInvariant())){return [pscustomobject]@{ok=$false;reason='reservation-state-duplicate-reservation-id'}}

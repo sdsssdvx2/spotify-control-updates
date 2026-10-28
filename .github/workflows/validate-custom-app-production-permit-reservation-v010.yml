@@ -43,7 +43,7 @@ jobs:
         shell: powershell
         run: |
           $head=(git rev-parse HEAD).Trim();$pins=@(
-            @($head,'validation/custom-app-production-permit-reservation-v0.1.0/custom-app-production-permit-reservation.ps1','474ce699fdea3fe46957f88d89d02cfc61742399'),
+            @($head,'validation/custom-app-production-permit-reservation-v0.1.0/custom-app-production-permit-reservation.ps1','509ec96b4ca25377213d730d49de92252224fc89'),
             @($head,'validation/custom-app-production-permit-reservation-v0.1.0/test_custom_app_production_permit_reservation.ps1','ac55477828b6b3b514acc806814d2df31bc8eb03'),
             @('d77f646d23652b0f066248230756d9e207a10fbd','validation/custom-app-production-permit-v0.1.0/custom-app-production-permit.ps1','2aff85ca092848ea254423bf5441b1a077dea5b7'),
             @('d77f646d23652b0f066248230756d9e207a10fbd','validation/custom-app-production-permit-v0.1.0/test_custom_app_production_permit.ps1','49ee657d1b48b30eaa339d3790768fcf005fa59f'),
