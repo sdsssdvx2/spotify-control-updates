@@ -25,9 +25,10 @@ jobs:
         continue-on-error: true
         run: |
           $src=Resolve-Path 'validation/custom-app-live-attested-fixture-canary-v0.1.0/test_live_attested_fixture_canary.ps1'
-          $diagDir=Join-Path $PWD 'validation/custom-app-live-attested-fixture-canary-v0.1.0/diagnostic-output'
+          $sourceDir=Split-Path -Parent ([string]$src)
+          $diagDir=Join-Path $sourceDir 'diagnostic-output'
           New-Item -ItemType Directory -Force -Path $diagDir|Out-Null
-          $diag=Join-Path $diagDir 'diagnostic-live-result.ps1'
+          $diag=Join-Path $sourceDir 'diagnostic-live-result.ps1'
           $full=Join-Path $diagDir 'diagnostic-full.txt'
           $compact=Join-Path $diagDir 'diagnostic-compact.txt'
           $text=Get-Content -LiteralPath $src -Raw
@@ -73,6 +74,7 @@ jobs:
           $lines|Set-Content -LiteralPath $compact -Encoding UTF8
           Write-Host '=== COMPACT DIAGNOSTIC ==='
           Get-Content -LiteralPath $compact
+          Remove-Item -LiteralPath $diag -Force -ErrorAction SilentlyContinue
 
       - name: Upload compact diagnostic evidence
         if: always()
