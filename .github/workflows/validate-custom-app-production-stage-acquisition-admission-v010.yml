@@ -1,0 +1,87 @@
+name: Validate Custom App Production Stage Acquisition Admission v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-stage-acquisition-admission-v0.1.0]
+    paths: ['validation/custom-app-production-stage-acquisition-admission-v0.1.0/**','.github/workflows/validate-custom-app-production-stage-acquisition-admission-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-executor-start-gate-v0.1.0]
+    paths: ['validation/custom-app-production-stage-acquisition-admission-v0.1.0/**','.github/workflows/validate-custom-app-production-stage-acquisition-admission-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"}
+
+      - name: Prove exact scope lineage and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h -cne $e){throw "head mismatch $h != $e"}
+          $p='29fe26f505d2f0fb8d9f47e76b5b819ebe1c129d';if((git merge-base $p HEAD).Trim() -cne $p){throw 'not descended from exact validated executor-start head'}
+          $a=@('.github/workflows/validate-custom-app-production-stage-acquisition-admission-v010.yml','validation/custom-app-production-stage-acquisition-admission-v0.1.0/custom-app-production-stage-acquisition-admission.ps1','validation/custom-app-production-stage-acquisition-admission-v0.1.0/test_custom_app_production_stage_acquisition_admission.ps1');$c=@(git diff --name-only "$p...HEAD");$b=@($c|?{$_ -notin $a});if($b.Count){throw "scope escaped: $($b -join ', ')"};foreach($x in $a){if($x -notin $c){throw "missing $x"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
+          'CUSTOM_APP_PRODUCTION_STAGE_ADMISSION_SCOPE_PASS'
+
+      - name: Prove exact immutable dependency pins
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$pins=@(
+            @($h,'validation/custom-app-production-stage-acquisition-admission-v0.1.0/custom-app-production-stage-acquisition-admission.ps1','df343c9da93444cdb86753ffa17db8b260baec0c'),
+            @($h,'validation/custom-app-production-stage-acquisition-admission-v0.1.0/test_custom_app_production_stage_acquisition_admission.ps1','c20996d7bc1c907be9711eae250c99eeeb9e0582'),
+            @('29fe26f505d2f0fb8d9f47e76b5b819ebe1c129d','validation/custom-app-production-executor-start-gate-v0.1.0/custom-app-production-executor-start-gate.ps1','1fa3ca9e77b4c8a48ef56afd656fd102e1636676'),
+            @('29fe26f505d2f0fb8d9f47e76b5b819ebe1c129d','validation/custom-app-production-executor-start-gate-v0.1.0/test_custom_app_production_executor_start_gate.ps1','f63b309beacd2a8f822f6f8c2801c7bb68409c35'),
+            @('c420a1df6f306c7ba74772b91241cb14abd04738','validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','e2f2fc656235883d2a82b106289973f6ded409a5'),
+            @('c420a1df6f306c7ba74772b91241cb14abd04738','validation/custom-app-stage-acquisition-contract-v0.1.0/test_custom_app_stage_acquisition.ps1','d5a2d439808f9419d79e4bc54f0a4ca3b1ade855'))
+          foreach($p in $pins){$b=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($b -cne $p[2]){throw "pin drift $($p[1]) $b != $($p[2])"}}
+          'CUSTOM_APP_PRODUCTION_STAGE_ADMISSION_PINS_PASS'
+
+      - name: Parse and audit non-authority admission separation
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-stage-acquisition-admission-v0.1.0';foreach($f in @("$d/custom-app-production-stage-acquisition-admission.ps1","$d/test_custom_app_production_stage_acquisition_admission.ps1")){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|%{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $core=Get-Content "$d/custom-app-production-stage-acquisition-admission.ps1" -Raw;foreach($m in @('Resolve-CustomAppProductionExecutorStartGateV010','Test-CustomAppProductionExecutorStartEligibilityV010','Test-CustomAppStageBindingRowV010','Get-CustomAppStageWorkspaceRootV010','fresh-start-and-stage-binding-eligible','stage_acquisition_eligible=$true','admission_is_authority=$false','requires_immediate_gate_rerun_by_stage_executor=$true','requires_exact_stage_contract=$true','requires_fresh_revalidation_after_stage=$true','requires_fresh_revalidation_before_apply=$true','stage_acquisition_authorized=$false','live_destination_authorized=$false','apply_authorized=$false','production_execution_authorized=$false','production_mutation_authorized=$false')){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "stage-admission marker missing $m"}}
+          foreach($x in @('Invoke-CustomAppStageAcquisitionV010','Invoke-WebRequest','Invoke-RestMethod','Start-Process','New-Item','Remove-Item','Copy-Item','Move-Item','Set-Content','Add-Content','Out-File','[IO.File]::Write','[IO.File]::Replace','Save-AddonState','spicetify apply','spicetify config')){if($core.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge 0){throw "admission gained side effect or staging executor primitive $x"}}
+          if($core -match 'admission_is_authority\s*=\s*\$true|stage_acquisition_authorized\s*=\s*\$true|live_destination_authorized\s*=\s*\$true|apply_authorized\s*=\s*\$true|executor_may_apply\s*=\s*\$true|production_execution_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'stage admission authority escaped'}
+          $test=Get-Content "$d/test_custom_app_production_stage_acquisition_admission.ps1" -Raw;foreach($m in @('wrong-consumption-id','wrong-key','expired','user-removed','binding-drift','runtime-drift',"-Name 'future-app'",'stage authority tamper','live destination authority tamper','workspace root drift','overlong stage eligibility','fingerprint tamper','missing exact-stage-contract')){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "stage-admission coverage missing $m"}}
+          'CUSTOM_APP_PRODUCTION_STAGE_ADMISSION_PARSE_AUDIT_PASS'
+
+      - name: Run production stage-admission matrix twice
+        shell: powershell
+        run: |
+          1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-stage-acquisition-admission-v0.1.0/test_custom_app_production_stage_acquisition_admission.ps1';if($LASTEXITCODE){throw "production stage admission matrix failed pass $_"}}
+          'CUSTOM_APP_PRODUCTION_STAGE_ADMISSION_MATRIX_REPEAT_PASS'
+
+      - name: Replay exact stage-acquisition contract acceptance
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-stage-acquisition-contract-v0.1.0/test_custom_app_stage_acquisition.ps1';if($LASTEXITCODE){throw 'stage-acquisition contract regression'}
+          'CUSTOM_APP_PRODUCTION_STAGE_ADMISSION_STAGE_CONTRACT_PASS'
+
+      - name: Replay parent executor-start and Addon Manager SelfTest
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-executor-start-gate-v0.1.0/test_custom_app_production_executor_start_gate.ps1';if($LASTEXITCODE){throw 'executor-start parent matrix regression'}
+          python 'validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py' --build;if($LASTEXITCODE){throw 'build failed'};$a='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/addon-manager.ps1';$m='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/spotify-control.ps1';$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();if((Get-Item $a).Length-ne 523216 -or $ah-cne'b2cec989ef399aed4a8763105121b21181ffb493ed9e3e884baa1d62a634f94b'){throw 'addon drift'};if($mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'main drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'production-stage-admission-selftest';$env:LOCALAPPDATA=Join-Path $s 'Local';$env:APPDATA=Join-Path $s 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'SelfTest failed'}
+          'CUSTOM_APP_PRODUCTION_STAGE_ADMISSION_PARENT_SELFTEST_PASS'
+
+      - name: Prove protected-surface immutability and write evidence
+        shell: powershell
+        run: |
+          $p='29fe26f505d2f0fb8d9f47e76b5b819ebe1c129d';$e=@('.github/workflows/validate-custom-app-production-stage-acquisition-admission-v010.yml','validation/custom-app-production-stage-acquisition-admission-v0.1.0/custom-app-production-stage-acquisition-admission.ps1','validation/custom-app-production-stage-acquisition-admission-v0.1.0/test_custom_app_production_stage_acquisition_admission.ps1');$c=@(git diff --name-only "$p...HEAD");$b=@($c|?{$_ -notin $e});if($b.Count){throw "unexpected surface $($b -join ', ')"};foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-executor-start-gate-v0.1.0/custom-app-production-executor-start-gate.ps1','validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'};$d='validation/custom-app-production-stage-acquisition-admission-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_executor_start_parent=$p;validated_stage_contract='c420a1df6f306c7ba74772b91241cb14abd04738';fresh_executor_start_gate_required=$true;exact_stage_binding_continuity=$true;isolated_stage_workspace_root_bound=$true;stage_acquisition_eligibility_only=$true;stage_acquisition_authority=$false;live_destination_authority=$false;apply_authority=$false;production_execution_authority=$false;production_mutation_authority=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'CUSTOM_APP_PRODUCTION_STAGE_ADMISSION_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-stage-acquisition-admission-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-stage-acquisition-admission-v0.1.0/custom-app-production-stage-acquisition-admission.ps1
+            validation/custom-app-production-stage-acquisition-admission-v0.1.0/test_custom_app_production_stage_acquisition_admission.ps1
+            validation/custom-app-production-stage-acquisition-admission-v0.1.0/ci-evidence.json
+          if-no-files-found: error
