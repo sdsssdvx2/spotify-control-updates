@@ -1,0 +1,148 @@
+name: Validate Custom App Local Runtime Baseline v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-local-runtime-baseline-v0.1.0]
+    paths:
+      - 'validation/custom-app-local-runtime-baseline-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-local-runtime-baseline-v010.yml'
+  pull_request:
+    branches: [validate/custom-app-remote-observation-collector-v0.1.1]
+    paths:
+      - 'validation/custom-app-local-runtime-baseline-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-local-runtime-baseline-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact validation-only scope and parent lineage
+        shell: powershell
+        run: |
+          $actual=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $expected){throw "Not exact event head: $actual != $expected"}
+          $parent='7d22b55c58c6e85a8a3ec9396800e65d81b0e7d2'
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'Local baseline validation is not descended from exact validated remote observer v0.1.1 head.'}
+          $allowed=@(
+            '.github/workflows/validate-custom-app-local-runtime-baseline-v010.yml',
+            'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1',
+            'validation/custom-app-local-runtime-baseline-v0.1.0/test_custom_app_local_runtime_baseline.ps1'
+          )
+          $changed=@(git diff --name-only "$parent...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Local baseline validation scope escaped: $($bad -join ', ')"}
+          foreach($required in $allowed){if($required -notin $changed){throw "Missing expected local baseline validation file: $required"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved during local baseline validation.'}
+          Write-Host "CUSTOM_APP_LOCAL_RUNTIME_SCOPE_PASS head=$actual"
+
+      - name: Prove exact dependency and local baseline blob pins
+        shell: powershell
+        run: |
+          $pins=@(
+            @('b53bcf39f715f1c35c7d1f99e157cdecb0a2a572','validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1','f8c91f5a566b24c82257742942bdc6fecfe68eb2'),
+            @('dba3bb40d720192813a1df9f6cbff3b00c60844f','validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1','3a49ceebd13fa993b086eb2643130fb02c746bd1'),
+            @('7d22b55c58c6e85a8a3ec9396800e65d81b0e7d2','validation/custom-app-remote-observation-collector-v0.1.1/release-id-fix-v011.ps1','e0ae3c494959c6b738bfd1be56183931119542cf'),
+            @('27aa2f2089e99d6354d5e724577cdd7687d36525','validation/custom-app-provenance-integrated-observer-v0.3.0/build_candidate.py','ef94a51510de3f922659e633c86dbd44f3083a3d'),
+            @('HEAD','validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1','83156d9c14e40061a0728d28b582c1e65684a4a2'),
+            @('HEAD','validation/custom-app-local-runtime-baseline-v0.1.0/test_custom_app_local_runtime_baseline.ps1','86fafae6567e748e4f08b45adb63d329de31a436')
+          )
+          foreach($pin in $pins){$blob=(git rev-parse "$($pin[0])`:$($pin[1])").Trim();if($blob -cne $pin[2]){throw "Pinned blob drift: $($pin[1]) $blob != $($pin[2])"}}
+          Write-Host 'CUSTOM_APP_LOCAL_RUNTIME_BLOB_PIN_PASS'
+
+      - name: Parse local baseline core and matrix with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          foreach($file in @(
+            'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1',
+            'validation/custom-app-local-runtime-baseline-v0.1.0/test_custom_app_local_runtime_baseline.ps1'
+          )){
+            $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error "$file :: $($_.Message)"};throw "PS5.1 parse failed: $file"}
+          }
+          Write-Host 'CUSTOM_APP_LOCAL_RUNTIME_PS51_PARSE_PASS'
+
+      - name: Audit local baseline core as read-only, offline, and deny-by-default
+        shell: powershell
+        run: |
+          $core=Get-Content 'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1' -Raw
+          foreach($literal in @('Invoke-WebRequest','Invoke-RestMethod','HttpClient','Start-Process','Copy-Item','Move-Item','Remove-Item','Set-Content','Out-File','Add-Content','spicetify apply','spicetify config','HKCU:','HKLM:','LOCALAPPDATA','APPDATA')){if($core.IndexOf($literal,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Local baseline core gained forbidden network/mutation/user-state primitive: $literal"}}
+          foreach($required in @(
+            'Test-CustomAppRemoteRelativePath','FileAttributes]::ReparsePoint','.git/',
+            'FileShare]::Read','Local runtime changed during baseline observation','Local runtime changed while reading manifest metadata',
+            'MaxFiles=20000','MaxFileBytes=67108864','MaxTotalBytes=268435456','MaxManifestBytes=1048576',
+            'mutation_authorized=$false','auto_update_authorized=$false','auto_install_authorized=$false'
+          )){if($core.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Local baseline safety marker missing: $required"}}
+          Write-Host 'CUSTOM_APP_LOCAL_RUNTIME_STATIC_AUDIT_PASS'
+
+      - name: Run local baseline equivalence and fail-closed matrix
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-local-runtime-baseline-v0.1.0/test_custom_app_local_runtime_baseline.ps1'
+          if($LASTEXITCODE -ne 0){throw 'Local runtime baseline matrix failed.'}
+
+      - name: Prove live Tagify repo checkout and GitHub zipball have identical tree identity
+        shell: powershell
+        run: |
+          . (Resolve-Path 'validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1')
+          . (Resolve-Path 'validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1')
+          . (Resolve-Path 'validation/custom-app-remote-observation-collector-v0.1.1/release-id-fix-v011.ps1')
+          . (Resolve-Path 'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1')
+          $commit='bacd80f76c621a3acc06965bb3160ce1056fad7b'
+          $repo=Join-Path $env:RUNNER_TEMP 'tagify-local-baseline';git init -q $repo;git -C $repo config core.autocrlf false;git -C $repo config core.eol lf;git -C $repo remote add origin https://github.com/alexk218/tagify.git
+          git -C $repo fetch -q --depth=1 origin $commit;if($LASTEXITCODE -ne 0){throw 'Could not fetch pinned Tagify commit.'};git -C $repo checkout -q --detach FETCH_HEAD
+          if((git -C $repo rev-parse HEAD).Trim() -cne $commit){throw 'Pinned Tagify local checkout drift.'}
+          $local=Get-CustomAppLocalRuntimeBaseline -Name 'tagify' -AppPath $repo
+          $remote=Get-CustomAppObserverRepoCommitObservation -Source 'alexk218/tagify' -CommitSha $commit
+          if([string]$local.tree_sha256 -cne [string]$remote.tree_sha256){throw "Live local/zipball tree mismatch: $($local.tree_sha256) != $($remote.tree_sha256)"}
+          if([int]$local.file_count -ne [int]$remote.file_count){throw "Live local/zipball file-count mismatch: $($local.file_count) != $($remote.file_count)"}
+          if(Test-CustomAppLocalRuntimeBaselineMutationAuthority $local){throw 'Live local baseline gained mutation authority.'}
+          Write-Host "CUSTOM_APP_LOCAL_RUNTIME_LIVE_TAGIFY_EQUIVALENCE_PASS tree=$($local.tree_sha256) files=$($local.file_count) local_installable=$($local.installable) remote_build_required=$($remote.build_required)"
+
+      - name: Replay validated remote contract matrix and exact v0.3 Addon Manager SelfTest
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-remote-source-contract-v0.1.0/test_custom_app_remote_source_contract.ps1'
+          if($LASTEXITCODE -ne 0){throw 'Validated remote-source contract matrix regressed.'}
+          python 'validation/custom-app-provenance-integrated-observer-v0.3.0/build_candidate.py' --build
+          if($LASTEXITCODE -ne 0){throw 'Validated v0.3 observer parent rebuild failed.'}
+          $addon='validation/custom-app-provenance-integrated-observer-v0.3.0/out/bin/addon-manager.ps1';$main='validation/custom-app-provenance-integrated-observer-v0.3.0/out/bin/spotify-control.ps1'
+          $as=(Get-Item $addon).Length;$ah=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant();$ms=(Get-Item $main).Length;$mh=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($as -ne 428643 -or $ah -cne '8de197a78e40faad6e934c0eef4bb123f6652fc6e35cf440733c813c6df86e52'){throw "v0.3 Addon Manager drift: $as/$ah"}
+          if($ms -ne 284327 -or $mh -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw "Spotify Control drift: $ms/$mh"}
+          $root=Join-Path $env:RUNNER_TEMP 'local-baseline-parent-selftest';$env:LOCALAPPDATA=Join-Path $root 'LocalAppData';$env:APPDATA=Join-Path $root 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Validated v0.3 Addon Manager SelfTest failed.'}
+          Write-Host 'CUSTOM_APP_LOCAL_RUNTIME_PARENT_SELFTEST_PASS'
+
+      - name: Prove production and validated remote-observer parent remain immutable
+        shell: powershell
+        run: |
+          $parent='7d22b55c58c6e85a8a3ec9396800e65d81b0e7d2';$changed=@(git diff --name-only "$parent...HEAD")
+          $expected=@(
+            '.github/workflows/validate-custom-app-local-runtime-baseline-v010.yml',
+            'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1',
+            'validation/custom-app-local-runtime-baseline-v0.1.0/test_custom_app_local_runtime_baseline.ps1'
+          )
+          $bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "Unexpected local baseline changed surface: $($bad -join ', ')"}
+          foreach($path in @('manifest.json','stable-version.json','validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1','validation/custom-app-remote-observation-collector-v0.1.1/release-id-fix-v011.ps1','validation/custom-app-provenance-integrated-observer-v0.3.0/build_candidate.py')){git diff --quiet $parent HEAD -- $path;if($LASTEXITCODE -ne 0){throw "Protected surface changed: $path"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved.'}
+          Write-Host 'CUSTOM_APP_LOCAL_RUNTIME_IMMUTABILITY_PASS'
+
+      - name: Upload local baseline validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-local-runtime-baseline-v010-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1
+            validation/custom-app-local-runtime-baseline-v0.1.0/test_custom_app_local_runtime_baseline.ps1
