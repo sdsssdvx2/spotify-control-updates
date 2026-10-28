@@ -1,0 +1,54 @@
+name: Diagnose Custom App Live Provenance v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-live-attested-fixture-canary-v0.1.0]
+    paths:
+      - '.github/workflows/diagnose-custom-app-live-provenance-v010.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-windows:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Print provenance object exactly before strong-current assertion
+        shell: powershell
+        run: |
+          $src=Resolve-Path 'validation/custom-app-live-attested-fixture-canary-v0.1.0/test_live_attested_fixture_canary.ps1'
+          $diag=Join-Path (Split-Path -Parent $src) 'diagnostic-live-provenance.ps1'
+          $text=Get-Content -LiteralPath $src -Raw
+          $needle=@'
+              Assert-True ([bool]$prov.source_proven -and ([string]$prov.source_candidate).Trim().ToLowerInvariant() -ceq 'alexk218/tagify') ($Scenario.id+' evidence provenance not strong/current')
+          '@.Trim()
+          $replacement=@'
+              Write-Host ('DIAG_PROVENANCE scenario='+[string]$Scenario.id+' safe='+[string]$prov.safe+' proven='+[string]$prov.source_proven+' candidate='+[string]$prov.source_candidate+' status='+[string]$prov.source_status+' git_reason='+[string]$prov.git.reason+' git_identity='+[string]$prov.git.identity+' git_sha='+[string]$prov.git.file_sha256+' pkg_reason='+[string]$prov.package.reason+' pkg_identity='+[string]$prov.package.identity+' pkg_safe='+[string]$prov.package.safe)
+              Assert-True ([bool]$prov.source_proven -and ([string]$prov.source_candidate).Trim().ToLowerInvariant() -ceq 'alexk218/tagify') ($Scenario.id+' evidence provenance not strong/current')
+          '@.Trim()
+          $count=([regex]::Matches($text,[regex]::Escape($needle))).Count
+          if($count -ne 1){throw "Diagnostic provenance anchor drift: $count"}
+          $text=$text.Replace($needle,$replacement)
+          [IO.File]::WriteAllText($diag,$text,[Text.UTF8Encoding]::new($false))
+          function Copy-TreeSafe {
+            param([Parameter(Mandatory=$true)][string]$Source,[Parameter(Mandatory=$true)][string]$Destination)
+            if(-not(Test-PathSafe $Source 'Container')){throw 'Copy-TreeSafe source is missing.'}
+            $src=[IO.Path]::GetFullPath($Source).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+            $rootItem=Get-Item -LiteralPath $src -Force -ErrorAction Stop
+            if(($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Copy-TreeSafe source root is a reparse point.'}
+            if(Test-Path -LiteralPath $Destination){throw 'Copy-TreeSafe destination already exists.'}
+            [IO.Directory]::CreateDirectory([IO.Path]::GetFullPath($Destination))|Out-Null
+            foreach($entry in @(Get-ChildItem -LiteralPath $src -Recurse -Force -ErrorAction Stop)){
+              if(($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw "Copy-TreeSafe source contains reparse point: $($entry.FullName)"}
+              $rel=$entry.FullName.Substring($src.Length).TrimStart([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+              $target=Join-Path $Destination $rel
+              if($entry.PSIsContainer){[IO.Directory]::CreateDirectory($target)|Out-Null}else{$parent=Split-Path -Parent $target;if(-not(Test-Path $parent)){[IO.Directory]::CreateDirectory($parent)|Out-Null};[IO.File]::Copy($entry.FullName,$target,$false)}
+            }
+            return [IO.Path]::GetFullPath($Destination)
+          }
+          . $diag
