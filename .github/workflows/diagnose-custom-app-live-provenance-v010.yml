@@ -48,31 +48,25 @@ jobs:
           $text=$text.Replace($needle,$replacement)
           [IO.File]::WriteAllText($diag,$text,[Text.UTF8Encoding]::new($false))
 
-          $runner=@'
           function Copy-TreeSafe {
               param([Parameter(Mandatory=$true)][string]$Source,[Parameter(Mandatory=$true)][string]$Destination)
               if(-not(Test-PathSafe $Source 'Container')){throw 'Copy-TreeSafe source is missing.'}
-              $src=[IO.Path]::GetFullPath($Source).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
-              $rootItem=Get-Item -LiteralPath $src -Force -ErrorAction Stop
+              $srcPath=[IO.Path]::GetFullPath($Source).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+              $rootItem=Get-Item -LiteralPath $srcPath -Force -ErrorAction Stop
               if(($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Copy-TreeSafe source root is a reparse point.'}
               if(Test-Path -LiteralPath $Destination){throw 'Copy-TreeSafe destination already exists.'}
               [IO.Directory]::CreateDirectory([IO.Path]::GetFullPath($Destination))|Out-Null
-              foreach($entry in @(Get-ChildItem -LiteralPath $src -Recurse -Force -ErrorAction Stop)){
+              foreach($entry in @(Get-ChildItem -LiteralPath $srcPath -Recurse -Force -ErrorAction Stop)){
                   if(($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw "Copy-TreeSafe source contains reparse point: $($entry.FullName)"}
-                  $rel=$entry.FullName.Substring($src.Length).TrimStart([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+                  $rel=$entry.FullName.Substring($srcPath.Length).TrimStart([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
                   $target=Join-Path $Destination $rel
                   if($entry.PSIsContainer){[IO.Directory]::CreateDirectory($target)|Out-Null}else{$parent=Split-Path -Parent $target;if(-not(Test-Path $parent)){[IO.Directory]::CreateDirectory($parent)|Out-Null};[IO.File]::Copy($entry.FullName,$target,$false)}
               }
               return [IO.Path]::GetFullPath($Destination)
           }
-          . '__DIAG__'
-          '@
-          $runner=$runner.Replace('__DIAG__',$diag.Replace("'","''"))
-          $runnerPath=Join-Path $diagDir 'run-diagnostic.ps1'
-          [IO.File]::WriteAllText($runnerPath,$runner,[Text.UTF8Encoding]::new($false))
 
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runnerPath *> $full
-          $exit=$LASTEXITCODE
+          $exit=0
+          try { . $diag *> $full } catch { $exit=1;($_ | Out-String)|Add-Content -LiteralPath $full -Encoding UTF8 }
           $lines=@(Select-String -LiteralPath $full -Pattern 'DIAG_COMMIT_RESULT|Committed live attestation classification drifted|live attestation verification failed|evidence provenance not strong/current' -CaseSensitive:$false | ForEach-Object{$_.Line})
           if($lines.Count -eq 0){$lines=@('NO_DIAGNOSTIC_MARKERS_FOUND')}
           $lines += ('PROCESS_EXIT='+$exit)
