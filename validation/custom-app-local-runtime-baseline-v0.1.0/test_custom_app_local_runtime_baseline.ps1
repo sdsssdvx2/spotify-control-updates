@@ -111,12 +111,12 @@ try{
     $junction=Join-Path $app 'unsafe-link'
     New-Item -ItemType Junction -Path $junction -Target $external -ErrorAction Stop|Out-Null
     Assert-Throws {Get-CustomAppLocalRuntimeBaseline -Name 'fixture-app' -AppPath $app|Out-Null} 'nested reparse point'
-    Remove-Item -LiteralPath $junction -Force
+    [IO.Directory]::Delete($junction,$false)
 
     # A reparse-point root itself is also denied.
     $rootJunction=Join-Path $root 'root-junction';New-Item -ItemType Junction -Path $rootJunction -Target $clean -ErrorAction Stop|Out-Null
     Assert-Throws {Get-CustomAppLocalRuntimeBaseline -Name 'root-junction' -AppPath $rootJunction|Out-Null} 'root reparse point'
-    Remove-Item -LiteralPath $rootJunction -Force
+    [IO.Directory]::Delete($rootJunction,$false)
 
     Write-Host "CUSTOM_APP_LOCAL_RUNTIME_BASELINE_V010_PASS tree=$treeBefore files=$($baseline.file_count) bytes=$($baseline.total_bytes) manifest=$($baseline.manifest_name)"
 } finally {
