@@ -28,7 +28,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
-      - name: Prove exact scope and validated lineage
+      - name: Prove exact validation-only scope and validated lineage
         shell: powershell
         run: |
           $actual=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
@@ -36,23 +36,21 @@ jobs:
           $prod='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2';$parent='4b7ef73fe416afdfb501173f145994b3ed817e42'
           if((git merge-base $prod HEAD).Trim() -cne $prod){throw 'Integration branch lost production lineage.'}
           if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'Integration branch is not descended from exact source-topology parent.'}
-          $allowed=@(
-            '.github/workflows/validate-custom-app-provenance-integration-v020.yml',
-            'validation/custom-app-provenance-integration-v0.2.0/README.md',
-            'validation/custom-app-provenance-integration-v0.2.0/INTEGRATION_PLAN.md',
-            'validation/custom-app-provenance-integration-v0.2.0/build_candidate.py'
-          )
-          $changed=@(git diff --name-only "$parent...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed})
+          $workflow='.github/workflows/validate-custom-app-provenance-integration-v020.yml'
+          $prefix='validation/custom-app-provenance-integration-v0.2.0/'
+          $changed=@(git diff --name-only "$parent...HEAD")
+          $bad=@($changed|Where-Object{$_ -cne $workflow -and -not $_.StartsWith($prefix,[StringComparison]::Ordinal)})
           if($bad.Count){throw "Integration validation scope escaped: $($bad -join ', ')"}
-          foreach($required in $allowed){if($required -notin $changed){throw "Missing expected integration file: $required"}}
+          foreach($required in @($workflow,$prefix+'build_candidate.py',$prefix+'README.md',$prefix+'INTEGRATION_PLAN.md')){if($required -notin $changed){throw "Missing required integration validation file: $required"}}
           if((git rev-parse origin/main).Trim() -cne $prod){throw 'Production main moved during integration validation.'}
-          Write-Host "PROVENANCE_INTEGRATION_SCOPE_PASS head=$actual"
+          Write-Host "PROVENANCE_INTEGRATION_SCOPE_PASS head=$actual files=$($changed.Count)"
 
-      - name: Prove pinned provenance and native-refresh source identities
+      - name: Prove exact pinned source identities
         shell: powershell
         run: |
           $pins=@(
             @('b339f2b79a267c13cf3c5974aea2fff3786d3093','validation/custom-app-provenance-enrollment-v0.1.0/custom-app-provenance.ps1','4f0831fa2e5dc23c9a4ec98b6c7a9afbb3c9af55'),
+            @('b339f2b79a267c13cf3c5974aea2fff3786d3093','validation/custom-app-provenance-enrollment-v0.1.0/test_custom_app_provenance.ps1','50a2f10dd5b6b53f9e5a06284a53bc5dfc017f7d'),
             @('62cc0803411ccd132e3bad3b6338b2ef783e0f4c','validation/marketplace-native-refresh-contract-v0.1.0/marketplace-native-refresh-contract.ps1','bd895ebcc11d9fb2f1c7857ee861e5b9e2c2cc3c'),
             @('4b7ef73fe416afdfb501173f145994b3ed817e42','validation/marketplace-source-topology-v0.1.0/build_candidate.py','1e32dd57c95f718f2aeaae6149da36762ca7f6fd')
           )
@@ -66,24 +64,28 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'First integration build failed.'}
           $dir='validation/custom-app-provenance-integration-v0.2.0/out/bin'
           $first=@{};Get-ChildItem $dir -File|ForEach-Object{$first[$_.Name]=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
+          $firstReport=(Get-FileHash 'validation/custom-app-provenance-integration-v0.2.0/candidate-validation.json' -Algorithm SHA256).Hash.ToLowerInvariant()
           python validation/custom-app-provenance-integration-v0.2.0/build_candidate.py --build
           if($LASTEXITCODE -ne 0){throw 'Second integration build failed.'}
           Get-ChildItem $dir -File|ForEach-Object{$h=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant();if($first[$_.Name] -cne $h){throw "Nondeterministic output: $($_.Name)"}}
+          $secondReport=(Get-FileHash 'validation/custom-app-provenance-integration-v0.2.0/candidate-validation.json' -Algorithm SHA256).Hash.ToLowerInvariant();if($firstReport -cne $secondReport){throw 'Nondeterministic validation report.'}
           $report=Get-Content 'validation/custom-app-provenance-integration-v0.2.0/candidate-validation.json' -Raw|ConvertFrom-Json
           if($report.generic_custom_app_mutation_authority_expanded -or $report.generic_marketplace_mutation_authority_expanded){throw 'Generic mutation authority expanded.'}
           if($report.marketplace_native_refresh_direct_mutation_allowed){throw 'Marketplace native-refresh contract granted direct mutation.'}
           if([string]$report.custom_app_provenance_state_root -cne 'custom_app_provenance'){throw 'Provenance state root drift.'}
-          Write-Host 'PROVENANCE_INTEGRATION_DETERMINISTIC_BUILD_PASS'
+          if(-not [bool]$report.provenance_persisted_in_inventory_cycle){throw 'Provenance observer was not persisted in inventory cycle.'}
+          Write-Host "PROVENANCE_INTEGRATION_DETERMINISTIC_BUILD_PASS addon_sha=$($report.candidate_addon.sha256) addon_size=$($report.candidate_addon.size)"
 
       - name: Parse candidate with Windows PowerShell 5.1
         shell: powershell
         run: |
           foreach($file in @('validation/custom-app-provenance-integration-v0.2.0/out/bin/spotify-control.ps1','validation/custom-app-provenance-integration-v0.2.0/out/bin/addon-manager.ps1','validation/custom-app-provenance-integration-v0.2.0/out/bin/Collect-Marketplace-Records.ps1')){
-            $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw "PowerShell 5.1 parse failed: $file"}
+            $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw "PowerShell 5.1 parse failed: $file"}
           }
           Write-Host 'PROVENANCE_INTEGRATION_PS51_PARSE_PASS'
 
-      - name: Run full Addon Manager self-test
+      - name: Run full integrated Addon Manager self-test
         shell: powershell
         run: |
           $addon='validation/custom-app-provenance-integration-v0.2.0/out/bin/addon-manager.ps1'
@@ -102,7 +104,7 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Pinned provenance acceptance matrix failed.'}
           Write-Host 'PROVENANCE_INTEGRATION_PROVENANCE_MATRIX_PASS'
 
-      - name: Re-run Marketplace native refresh contract self-test
+      - name: Re-run Marketplace native-refresh contract self-test
         shell: powershell
         run: |
           $native=Join-Path $env:RUNNER_TEMP 'marketplace-native-refresh-contract.ps1'
@@ -117,14 +119,17 @@ jobs:
           )){if((Resolve-MarketplaceNativeRefreshContract $f).addon_manager_direct_mutation_allowed){throw 'Native refresh contract escaped direct mutation deny.'}}
           Write-Host 'PROVENANCE_INTEGRATION_NATIVE_REFRESH_PASS'
 
-      - name: Audit integrated candidate authority and protected data guards
+      - name: Audit integrated authority and protected persistence boundaries
         shell: powershell
         run: |
           $addon=Get-Content 'validation/custom-app-provenance-integration-v0.2.0/out/bin/addon-manager.ps1' -Raw
           foreach($required in @(
             'function Update-CustomAppProvenanceFromCurrentLifecycle',
+            'function Update-CustomAppProvenanceEnrollment',
             'function Resolve-MarketplaceNativeRefreshContract',
             'custom_app_provenance',
+            "managed_by='custom-app-provenance-v1'",
+            "mutation_mode='deny'",
             'New-RequiredSpotifyPersistenceBackup',
             'Restore-SpotifyPersistenceBackup',
             'preserve-ratings-tags-notes-and-browser-storage',
@@ -132,10 +137,17 @@ jobs:
             'never-disable-or-optimize',
             "source='alexk218/tagify'"
           )){if($addon.IndexOf($required,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Missing integrated safety marker: $required"}}
-          foreach($forbidden in @('auto_update_authorized=$true','auto_install_authorized=$true','addon_manager_direct_mutation_allowed = $true')){if($addon.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Forbidden generic authority marker found: $forbidden"}}
+          $provStart=$addon.IndexOf('$CustomAppProvenanceSchema = 1',[StringComparison]::Ordinal)
+          $nativeStart=$addon.IndexOf('function New-MarketplaceRefreshDecision {',[StringComparison]::Ordinal)
+          $helperStart=$addon.IndexOf('function New-CustomAppProvenanceSyntheticEvidence {',[StringComparison]::Ordinal)
+          if($provStart -lt 0 -or $nativeStart -le $provStart -or $helperStart -le $nativeStart){throw 'Integrated source region ordering drift.'}
+          $provRegion=$addon.Substring($provStart,$nativeStart-$provStart)
+          foreach($bad in @('auto_update_authorized=$true','auto_install_authorized=$true')){if($provRegion.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Provenance core gained forbidden authority: $bad"}}
+          $nativeRegion=$addon.Substring($nativeStart,$helperStart-$nativeStart)
+          if($nativeRegion.IndexOf('addon_manager_direct_mutation_allowed = $true',[StringComparison]::OrdinalIgnoreCase) -ge 0){throw 'Native-refresh contract gained direct mutation authority.'}
           Write-Host 'PROVENANCE_INTEGRATION_AUTHORITY_AUDIT_PASS'
 
-      - name: Prove production and validated parent remain immutable
+      - name: Prove production and validated parents remain immutable
         shell: powershell
         run: |
           $prod='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2';$parent='4b7ef73fe416afdfb501173f145994b3ed817e42'
@@ -151,5 +163,6 @@ jobs:
           path: |
             validation/custom-app-provenance-integration-v0.2.0/out/bin/
             validation/custom-app-provenance-integration-v0.2.0/candidate-validation.json
+            validation/custom-app-provenance-integration-v0.2.0/README.md
             validation/custom-app-provenance-integration-v0.2.0/INTEGRATION_PLAN.md
           if-no-files-found: error
