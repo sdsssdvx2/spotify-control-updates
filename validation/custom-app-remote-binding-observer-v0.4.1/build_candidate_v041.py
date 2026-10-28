@@ -9,18 +9,32 @@ BASE_BLOB = '7b13595a185bead3f1c3cee80caee10dd19ea996'
 OLD_STATE_BLOB = '7d1a14227cb357bbe34d8846d5ddb295b17990c1'
 NEW_STATE_BLOB = 'bd19cbb3da2087e68b2452fe62471d4eca2cd990'
 OLD_HOOK_CALL = "    inventory = replace_once(inventory, state_anchor, state_replacement, 'v0.4 remote observer inventory hook')"
-NEW_HOOK_CALL = """    # The exact validated v0.3 candidate intentionally preserves legacy CRLF outside
-    # newly generated observer blocks.  The provenance replacement ends immediately before
-    # this boundary, so the Save-AddonState -> Marketplace transition can be CRLF even though
-    # the pinned v0.4 builder source expresses its anchor with LF.  Do not normalize the whole
-    # candidate: retry this one exact pinned boundary with CRLF and preserve all other bytes.
-    if inventory.count(state_anchor) == 0:
-        crlf_anchor = state_anchor.replace('\\n', '\\r\\n')
-        if inventory.count(crlf_anchor) != 1:
-            raise RuntimeError(f'v0.4 remote observer inventory hook EOL variants drift: lf={inventory.count(state_anchor)} crlf={inventory.count(crlf_anchor)}')
-        state_anchor = crlf_anchor
-        state_replacement = state_replacement.replace('\\n', '\\r\\n')
-    inventory = replace_once(inventory, state_anchor, state_replacement, 'v0.4 remote observer inventory hook')"""
+NEW_HOOK_CALL = """    # Hook by semantic ordering rather than a mixed-EOL adjacency string.  The exact
+    # validated v0.3 output intentionally preserves legacy line endings around generated
+    # observer blocks, so LF/CRLF adjacency is not an identity contract.  What *is* a safety
+    # contract is that current provenance is refreshed and persisted before any remote network
+    # observation, and that the remote observer runs before Marketplace discovery/reporting.
+    marketplace_marker = '    $marketplaceReport = Invoke-MarketplaceRecordDiscovery'
+    provenance_marker = '        $customAppProvenanceRows.Add($provRow)'
+    save_marker = '    Save-AddonState $state'
+    if inventory.count(marketplace_marker) != 1:
+        raise RuntimeError(f'v0.4 Marketplace discovery semantic anchor drift: {inventory.count(marketplace_marker)}')
+    if inventory.count(provenance_marker) != 1:
+        raise RuntimeError(f'v0.4 provenance semantic anchor drift: {inventory.count(provenance_marker)}')
+    marketplace_pos = inventory.index(marketplace_marker)
+    provenance_pos = inventory.index(provenance_marker)
+    save_pos = inventory.rfind(save_marker, 0, marketplace_pos)
+    if provenance_pos >= marketplace_pos or save_pos < 0 or save_pos <= provenance_pos:
+        raise RuntimeError(f'v0.4 safe observer ordering drift: provenance={provenance_pos} save={save_pos} marketplace={marketplace_pos}')
+    if inventory.count('Invoke-CustomAppRemoteBindingObserverCycleV040') != 0:
+        raise RuntimeError('v0.4 remote observer hook already present before integration')
+    remote_block = '''    # Generic remote-source observation is state-only and deliberately rate-limited.
+    # It never changes the existing five mutation-authorized registry entries.
+    $customAppRemoteBindingSummary=Invoke-CustomAppRemoteBindingObserverCycleV040 -State $state -ObservedAt $now -MinimumIntervalHours 24 -MaxNetworkObservationsPerCycle 2
+    Save-AddonState $state
+
+'''
+    inventory = inventory[:marketplace_pos] + remote_block + inventory[marketplace_pos:]"""
 
 
 def git_blob(commit: str, path: str) -> str:
