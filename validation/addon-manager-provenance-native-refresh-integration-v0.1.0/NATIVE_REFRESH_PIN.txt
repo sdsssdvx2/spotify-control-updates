@@ -1,0 +1,3 @@
+head=62cc0803411ccd132e3bad3b6338b2ef783e0f4c
+path=validation/marketplace-native-refresh-contract-v0.1.0/marketplace-native-refresh-contract.ps1
+blob=bd895ebcc11d9fb2f1c7857ee861e5b9e2c2cc3c
