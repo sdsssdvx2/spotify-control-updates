@@ -18,31 +18,37 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Capture transaction and provenance boundary values
+          ref: ${{ github.sha }}
+
+      - name: Capture exact commit executor and shadow result
         shell: powershell
         continue-on-error: true
         run: |
           $src=Resolve-Path 'validation/custom-app-live-attested-fixture-canary-v0.1.0/test_live_attested_fixture_canary.ps1'
           $diagDir=Join-Path $PWD 'validation/custom-app-live-attested-fixture-canary-v0.1.0/diagnostic-output'
           New-Item -ItemType Directory -Force -Path $diagDir|Out-Null
-          $diag=Join-Path $diagDir 'diagnostic-live-provenance.ps1'
+          $diag=Join-Path $diagDir 'diagnostic-live-result.ps1'
           $full=Join-Path $diagDir 'diagnostic-full.txt'
           $compact=Join-Path $diagDir 'diagnostic-compact.txt'
-          New-Item -ItemType File -Force -Path $full,$compact|Out-Null
           $text=Get-Content -LiteralPath $src -Raw
 
-          $provNeedle=@'
-              Assert-True ([bool]$prov.source_proven -and ([string]$prov.source_candidate).Trim().ToLowerInvariant() -ceq 'alexk218/tagify') ($Scenario.id+' evidence provenance not strong/current')
+          $needle='$commitAfter=Get-AttestedEvidenceV010 -Scenario $commitScenario;'
+          $replacement=@'
+          $shadowStatus='<null>';$shadowReason='<null>';$shadowCommitted=$false;$shadowRolledBack=$false
+          if($null -ne $commitResult.shadow_result){
+              $shadowStatus=[string]$commitResult.shadow_result.status
+              $shadowReason=[string]$commitResult.shadow_result.reason
+              $shadowCommitted=[bool]$commitResult.shadow_result.committed
+              $shadowRolledBack=[bool]$commitResult.shadow_result.rolled_back
+          }
+          Write-Host ('DIAG_COMMIT_RESULT status='+[string]$commitResult.status+' reason='+[string]$commitResult.reason+' committed='+[string]$commitResult.committed+' rolled_back='+[string]$commitResult.rolled_back+' shadow_status='+$shadowStatus+' shadow_reason='+$shadowReason+' shadow_committed='+$shadowCommitted+' shadow_rolled_back='+$shadowRolledBack)
+          $commitAfter=Get-AttestedEvidenceV010 -Scenario $commitScenario;
           '@.Trim()
-          $provReplacement=@'
-              Write-Host ('DIAG_PROVENANCE scenario='+[string]$Scenario.id+' safe='+[string]$prov.safe+' proven='+[string]$prov.source_proven+' candidate='+[string]$prov.source_candidate+' status='+[string]$prov.source_status+' git_reason='+[string]$prov.git.reason+' git_identity='+[string]$prov.git.identity+' git_sha='+[string]$prov.git.file_sha256+' pkg_reason='+[string]$prov.package.reason+' pkg_identity='+[string]$prov.package.identity+' pkg_safe='+[string]$prov.package.safe)
-              Assert-True ([bool]$prov.source_proven -and ([string]$prov.source_candidate).Trim().ToLowerInvariant() -ceq 'alexk218/tagify') ($Scenario.id+' evidence provenance not strong/current')
-          '@.Trim()
-          if(([regex]::Matches($text,[regex]::Escape($provNeedle))).Count -ne 1){throw 'Diagnostic provenance anchor drift.'}
-          $text=$text.Replace($provNeedle,$provReplacement)
+          if(([regex]::Matches($text,[regex]::Escape($needle))).Count -ne 1){throw 'Commit-result diagnostic anchor drift.'}
+          $text=$text.Replace($needle,$replacement)
+          [IO.File]::WriteAllText($diag,$text,[Text.UTF8Encoding]::new($false))
 
-          $rootNeedle='$root=Get-CustomAppFixtureCanaryRootV010;$oldStage=$null'
-          $rootReplacement=@'
+          $runner=@'
           function Copy-TreeSafe {
               param([Parameter(Mandatory=$true)][string]$Source,[Parameter(Mandatory=$true)][string]$Destination)
               if(-not(Test-PathSafe $Source 'Container')){throw 'Copy-TreeSafe source is missing.'}
@@ -52,43 +58,34 @@ jobs:
               if(Test-Path -LiteralPath $Destination){throw 'Copy-TreeSafe destination already exists.'}
               [IO.Directory]::CreateDirectory([IO.Path]::GetFullPath($Destination))|Out-Null
               foreach($entry in @(Get-ChildItem -LiteralPath $src -Recurse -Force -ErrorAction Stop)){
-                if(($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw "Copy-TreeSafe source contains reparse point: $($entry.FullName)"}
-                $rel=$entry.FullName.Substring($src.Length).TrimStart([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
-                $target=Join-Path $Destination $rel
-                if($entry.PSIsContainer){[IO.Directory]::CreateDirectory($target)|Out-Null}else{$parent=Split-Path -Parent $target;if(-not(Test-Path $parent)){[IO.Directory]::CreateDirectory($parent)|Out-Null};[IO.File]::Copy($entry.FullName,$target,$false)}
+                  if(($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw "Copy-TreeSafe source contains reparse point: $($entry.FullName)"}
+                  $rel=$entry.FullName.Substring($src.Length).TrimStart([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+                  $target=Join-Path $Destination $rel
+                  if($entry.PSIsContainer){[IO.Directory]::CreateDirectory($target)|Out-Null}else{$parent=Split-Path -Parent $target;if(-not(Test-Path $parent)){[IO.Directory]::CreateDirectory($parent)|Out-Null};[IO.File]::Copy($entry.FullName,$target,$false)}
               }
               return [IO.Path]::GetFullPath($Destination)
           }
-          $script:DiagOriginalTx=(Get-Item -LiteralPath 'Function:\Invoke-CustomAppUpdateFixtureTransactionV010' -ErrorAction Stop).ScriptBlock
-          Set-Item -LiteralPath 'Function:\Invoke-CustomAppUpdateFixtureTransactionV010' -Value {
-              param([Parameter(Mandatory=$true)]$Plan,[Parameter(Mandatory=$true)][string]$ValidationRoot,[Parameter(Mandatory=$true)]$PersistenceProof,[switch]$InjectPostApplyFailure,[switch]$InjectRollbackFailure)
-              $gitBefore=Test-Path -LiteralPath (Join-Path ([string]$Plan.live_path) '.git') -PathType Container
-              $rollbackGitBefore=Test-Path -LiteralPath (Join-Path ([string]$Plan.rollback_path) '.git') -PathType Container
-              Write-Host ('DIAG_TX_BEFORE preserve_git='+[string]$Plan.preserve_git+' live_git='+$gitBefore+' rollback_git='+$rollbackGitBefore+' live='+[string]$Plan.live_path)
-              $r=& $script:DiagOriginalTx -Plan $Plan -ValidationRoot $ValidationRoot -PersistenceProof $PersistenceProof -InjectPostApplyFailure:$InjectPostApplyFailure -InjectRollbackFailure:$InjectRollbackFailure
-              $gitAfter=Test-Path -LiteralPath (Join-Path ([string]$Plan.live_path) '.git') -PathType Container
-              $backupGitAfter=Test-Path -LiteralPath (Join-Path ([string]$Plan.backup_path) '.git') -PathType Container
-              $rollbackGitAfter=Test-Path -LiteralPath (Join-Path ([string]$Plan.rollback_path) '.git') -PathType Container
-              Write-Host ('DIAG_TX_AFTER status='+[string]$r.status+' reason='+[string]$r.reason+' committed='+[string]$r.committed+' rolled_back='+[string]$r.rolled_back+' live_git='+$gitAfter+' backup_git='+$backupGitAfter+' rollback_git='+$rollbackGitAfter)
-              return $r
-          }
-          $root=Get-CustomAppFixtureCanaryRootV010;$oldStage=$null
-          '@.Trim()
-          if(([regex]::Matches($text,[regex]::Escape($rootNeedle))).Count -ne 1){throw 'Diagnostic transaction anchor drift.'}
-          $text=$text.Replace($rootNeedle,$rootReplacement)
-          [IO.File]::WriteAllText($diag,$text,[Text.UTF8Encoding]::new($false))
+          . '__DIAG__'
+          '@
+          $runner=$runner.Replace('__DIAG__',$diag.Replace("'","''"))
+          $runnerPath=Join-Path $diagDir 'run-diagnostic.ps1'
+          [IO.File]::WriteAllText($runnerPath,$runner,[Text.UTF8Encoding]::new($false))
 
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $diag *> $full
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runnerPath *> $full
           $exit=$LASTEXITCODE
-          $matches=@(Select-String -LiteralPath $full -Pattern 'DIAG_TX_|DIAG_PROVENANCE|evidence provenance not strong/current' -CaseSensitive:$false)
-          if($matches.Count){$matches|ForEach-Object{$_.Line}|Set-Content -LiteralPath $compact -Encoding UTF8}else{'NO_DIAGNOSTIC_MARKERS_FOUND'}|Set-Content -LiteralPath $compact -Encoding UTF8
-          Add-Content -LiteralPath $compact -Value ('PROCESS_EXIT='+$exit) -Encoding UTF8
+          $lines=@(Select-String -LiteralPath $full -Pattern 'DIAG_COMMIT_RESULT|Committed live attestation classification drifted|live attestation verification failed|evidence provenance not strong/current' -CaseSensitive:$false | ForEach-Object{$_.Line})
+          if($lines.Count -eq 0){$lines=@('NO_DIAGNOSTIC_MARKERS_FOUND')}
+          $lines += ('PROCESS_EXIT='+$exit)
+          $lines|Set-Content -LiteralPath $compact -Encoding UTF8
           Write-Host '=== COMPACT DIAGNOSTIC ==='
           Get-Content -LiteralPath $compact
+
       - name: Upload compact diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: custom-app-live-provenance-diagnostic-${{ github.run_id }}
-          path: validation/custom-app-live-attested-fixture-canary-v0.1.0/diagnostic-output/diagnostic-compact.txt
-          if-no-files-found: error
+          path: |
+            validation/custom-app-live-attested-fixture-canary-v0.1.0/diagnostic-output/diagnostic-compact.txt
+            validation/custom-app-live-attested-fixture-canary-v0.1.0/diagnostic-output/diagnostic-full.txt
+          if-no-files-found: warn
