@@ -181,15 +181,16 @@ function Invoke-RuntimeObserverIntegrationSelfTest {
     $temp=Join-Path ([IO.Path]::GetTempPath()) ('spotify-control-provenance-'+[guid]::NewGuid().ToString('N'))
     try{
         $app=Join-Path $temp 'future-app';New-Item -ItemType Directory -Force -Path (Join-Path $app '.git')|Out-Null
-        @('[remote "origin"]','    url = https://github.com/Example/Future-App.git')|Set-Content -LiteralPath (Join-Path $app '.git\config') -Encoding UTF8
-        '{"repository":"https://github.com/example/future-app"}'|Set-Content -LiteralPath (Join-Path $app 'package.json') -Encoding UTF8
+        @('[remote "origin"]','    url = https://github.com/Example/Future-App.git')|Set-Content -LiteralPath (Join-Path $app '.git\config') -Encoding Ascii
+        '{"repository":"https://github.com/example/future-app"}'|Set-Content -LiteralPath (Join-Path $app 'package.json') -Encoding Ascii
         $state=[pscustomobject]@{}
         $obs=[pscustomobject]@{kind='custom-app';name='future-app';ownership='local-spicetify-observed';source_identity=$null;locations=@($app);ambiguous=$false;safe_local_identity=$true}
         [void](Update-AddonLifecycleObservations -State $state -Observations @($obs) -ObservedAt '2026-10-28T08:00:00+00:00')
         $s1=Update-CustomAppProvenanceFromLifecycleState -State $state -ObservedAt '2026-10-28T08:00:00+00:00'
         $p=$state.custom_app_provenance.PSObject.Properties['custom-app:future-app'].Value
         if([string]$p.source_identity -cne 'example/future-app' -or [string]$p.mutation_mode -cne 'deny' -or [bool]$p.auto_update_authorized -or [bool]$p.auto_install_authorized -or [int]$s1.active_proven_count -ne 1){throw 'Runtime observer self-test: strong Custom App provenance was not enrolled deny-only.'}
-        @('[remote "origin"]','    url = https://github.com/Example/Other-App.git')|Set-Content -LiteralPath (Join-Path $app '.git\config') -Encoding UTF8
+        @('[remote "origin"]','    url = https://github.com/Example/Other-App.git')|Set-Content -LiteralPath (Join-Path $app '.git\config') -Encoding Ascii
+        '{"repository":"https://github.com/example/other-app"}'|Set-Content -LiteralPath (Join-Path $app 'package.json') -Encoding Ascii
         $s2=Update-CustomAppProvenanceFromLifecycleState -State $state -ObservedAt '2026-10-28T08:01:00+00:00'
         if([string]$p.source_status -cne 'source-change-blocked' -or $null -ne $p.source_identity -or -not [bool]$p.requires_reenrollment -or [int]$s2.requires_reenrollment_count -lt 1){throw 'Runtime observer self-test: Custom App source swap was not blocked.'}
         [void](Update-AddonLifecycleObservations -State $state -Observations @() -ObservedAt '2026-10-28T08:02:00+00:00')
