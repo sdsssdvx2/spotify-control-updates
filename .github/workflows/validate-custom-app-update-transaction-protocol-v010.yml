@@ -108,7 +108,7 @@ jobs:
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
           if($LASTEXITCODE -ne 0){throw 'Exact parent Addon Manager SelfTest failed.'}
           $addonText=Get-Content $addon -Raw
-          foreach($m in @('function New-RequiredSpotifyPersistenceBackup','function Restore-SpotifyPersistenceBackup','Lifecycle/settings core self-test passed: user-removal tombstones, reinstalls, safe local discovery, persistence drift detection, and exact restore are verified.')){if($addonText.IndexOf($m,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Parent persistence self-test marker missing: $m"}}
+          foreach($m in @('function New-RequiredSpotifyPersistenceBackup','function Restore-SpotifyPersistenceBackup','Settings-preserving lifecycle core self-test passed: first-seen/delete tombstone/reinstall semantics plus exact persistence drift detection and verified restore.')){if($addonText.IndexOf($m,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Parent persistence self-test marker missing: $m"}}
           Write-Host 'CUSTOM_APP_UPDATE_TX_PARENT_PERSISTENCE_SELFTEST_PASS'
 
       - name: Replay validated source baseline and binding component matrices
