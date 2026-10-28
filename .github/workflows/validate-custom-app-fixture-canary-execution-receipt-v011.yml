@@ -1,0 +1,169 @@
+name: Validate Custom App Fixture Canary Execution Receipt v0.1.1
+
+on:
+  push:
+    branches: [validate/custom-app-fixture-canary-execution-receipt-v0.1.1]
+    paths:
+      - 'validation/custom-app-fixture-canary-execution-receipt-v0.1.1/**'
+      - '.github/workflows/validate-custom-app-fixture-canary-execution-receipt-v011.yml'
+  pull_request:
+    branches: [validate/custom-app-fixture-canary-executor-v0.1.0]
+    paths:
+      - 'validation/custom-app-fixture-canary-execution-receipt-v0.1.1/**'
+      - '.github/workflows/validate-custom-app-fixture-canary-execution-receipt-v011.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Prove exact v0.1.1 receipt-only scope, executor lineage, and frozen production
+        shell: powershell
+        run: |
+          $actual=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($actual -cne $expected){throw "Not exact event head: $actual != $expected"}
+          $parent='a5d5839a9d6c1dd01c1fced6e9e1f5f76d16b5ca'
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'Execution receipt v0.1.1 is not descended from exact validated fixture canary executor head.'}
+          $allowed=@(
+            '.github/workflows/validate-custom-app-fixture-canary-execution-receipt-v011.yml',
+            'validation/custom-app-fixture-canary-execution-receipt-v0.1.1/custom-app-fixture-canary-execution-receipt-v013.ps1',
+            'validation/custom-app-fixture-canary-execution-receipt-v0.1.1/test_custom_app_fixture_canary_execution_receipt_v013.ps1'
+          )
+          $changed=@(git diff --name-only "$parent...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed})
+          if($bad.Count){throw "Execution receipt v0.1.1 validation scope escaped: $($bad -join ', ')"}
+          foreach($required in $allowed){if($required -notin $changed){throw "Missing expected v0.1.1 receipt file: $required"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved during execution receipt v0.1.1 validation.'}
+          Write-Host "CUSTOM_APP_FIXTURE_CANARY_RECEIPT_V011_SCOPE_PASS head=$actual"
+
+      - name: Prove exact receipt implementation and immutable parent dependency objects
+        shell: powershell
+        run: |
+          $head=(git rev-parse HEAD).Trim()
+          $pins=@(
+            @($head,'validation/custom-app-fixture-canary-execution-receipt-v0.1.1/custom-app-fixture-canary-execution-receipt-v013.ps1','f14ebf8efc8ff478c518df4990e757f20a4d958f'),
+            @($head,'validation/custom-app-fixture-canary-execution-receipt-v0.1.1/test_custom_app_fixture_canary_execution_receipt_v013.ps1','828a9a92b0cb5675a466a828b876667e14c4f886'),
+            @('a5d5839a9d6c1dd01c1fced6e9e1f5f76d16b5ca','validation/custom-app-fixture-canary-executor-v0.1.0/custom-app-fixture-canary-executor-v011.ps1','80e4319bee6c63d1eaf0cf12726a0fbf569642b9'),
+            @('a5d5839a9d6c1dd01c1fced6e9e1f5f76d16b5ca','validation/custom-app-fixture-canary-executor-v0.1.0/test_custom_app_fixture_canary_executor.ps1','e27c2ce80115a5114cc94e2e99b84fc109432457'),
+            @('79c7ef064a216ee3ff34328be282d742f0f7abc0','validation/custom-app-fixture-canary-permit-v0.1.0/custom-app-fixture-canary-permit.ps1','fefd8ccbde5231a70f55f41576c172fba4fede14'),
+            @('979e9d6362ead31016b9532f98629d6bcc2bbb56','validation/custom-app-promotion-eligibility-gate-v0.1.0/custom-app-promotion-eligibility.ps1','94c1b0ba8f2454078252a723f89ccc0327cbc181'),
+            @('22eb3561843fbe4016023d527186aa629512b67d','validation/custom-app-shadow-executor-v0.1.0/custom-app-shadow-executor.ps1','e0c39d0ffced966626ca5060346b8e6ed936589a'),
+            @('c420a1df6f306c7ba74772b91241cb14abd04738','validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','e2f2fc656235883d2a82b106289973f6ded409a5'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+            @('d92daa3006093a7d966083193302965ee01905f6','validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py','92eb87048eac882483bee1ed97bde598cff57e7b')
+          )
+          foreach($p in $pins){$blob=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($blob -cne $p[2]){throw "Pinned receipt v0.1.1 dependency drift: $($p[1]) $blob != $($p[2])"}}
+          Write-Host 'CUSTOM_APP_FIXTURE_CANARY_RECEIPT_V011_DEPENDENCY_PINS_PASS'
+
+      - name: Parse receipt v0.1.3 core and matrix with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          foreach($file in @(
+            'validation/custom-app-fixture-canary-execution-receipt-v0.1.1/custom-app-fixture-canary-execution-receipt-v013.ps1',
+            'validation/custom-app-fixture-canary-execution-receipt-v0.1.1/test_custom_app_fixture_canary_execution_receipt_v013.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("{0} :: line={1} col={2} text=<{3}> :: {4}" -f $file,$_.Extent.StartLineNumber,$_.Extent.StartColumnNumber,$_.Extent.Text,$_.Message)};throw "PowerShell 5.1 parse failed: $file"}
+          }
+          Write-Host 'CUSTOM_APP_FIXTURE_CANARY_RECEIPT_V013_PS51_PARSE_PASS'
+
+      - name: Audit v0.1.3 receipt as HMAC-bound semantic evidence with zero authority
+        shell: powershell
+        run: |
+          $core=Get-Content 'validation/custom-app-fixture-canary-execution-receipt-v0.1.1/custom-app-fixture-canary-execution-receipt-v013.ps1' -Raw
+          foreach($m in @(
+            'System.Security.Cryptography.HMACSHA256','Test-CustomAppFixtureCanaryReceiptFixedTimeHexV013','Test-CustomAppFixtureCanaryReceiptSemanticsV013',
+            'a5d5839a9d6c1dd01c1fced6e9e1f5f76d16b5ca','79c7ef064a216ee3ff34328be282d742f0f7abc0','979e9d6362ead31016b9532f98629d6bcc2bbb56','d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2',
+            '40679218583','40679419324','12811478206','12812541217','sha256:1326445d22627b6af1542656f47ec2b7933cba47d1112769d52f8b755510e12e','sha256:164d003804c8b6d4bf71f0965c9c7be68d8dacceebb098545341446fa8aa68f7',
+            'committed-preserved','denied-no-mutation','rolled-back-restored','failure-unqualified',
+            'receipt_is_authority=$false','requires_fresh_revalidation_before_any_future_action=$true',"mutation_mode='deny'",'mutation_authorized=$false','auto_update_authorized=$false','auto_install_authorized=$false','canary_execution_authorized=$false','production_mutation_authorized=$false',
+            'executor_qualification_fingerprint','before_evidence_fingerprint','after_evidence_fingerprint','before_persistence_fingerprint','after_persistence_fingerprint','before_provenance_git_config_sha256','after_provenance_git_config_sha256','before_provenance_evidence_fingerprint','after_provenance_evidence_fingerprint','outcome_reason'
+          )){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Execution receipt v0.1.3 safety marker missing: $m"}}
+          foreach($forbidden in @('Invoke-WebRequest','Invoke-RestMethod','Start-Process','New-Item','Remove-Item','Copy-Item','Move-Item','Set-Content','Add-Content','Out-File','[IO.File]::','[IO.Directory]::','spicetify apply','spicetify config')){if($core.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "Execution receipt v0.1.3 gained forbidden side effect primitive: $forbidden"}}
+          if($core -match 'receipt_is_authority\s*=\s*\$true'){throw 'Execution receipt v0.1.3 can become authority.'}
+          if($core -match 'production_mutation_authorized\s*=\s*\$true'){throw 'Execution receipt v0.1.3 grants production authority.'}
+          if($core -match '(?<!fixture_)canary_execution_authorized\s*=\s*\$true'){throw 'Execution receipt v0.1.3 grants generic canary authority.'}
+          Write-Host 'CUSTOM_APP_FIXTURE_CANARY_RECEIPT_V013_PURE_EVIDENCE_AUDIT_PASS'
+
+      - name: Run receipt v0.1.3 crypto, outcome, and semantic matrix twice
+        shell: powershell
+        run: |
+          1..2|ForEach-Object{
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-fixture-canary-execution-receipt-v0.1.1/test_custom_app_fixture_canary_execution_receipt_v013.ps1'
+            if($LASTEXITCODE -ne 0){throw "Execution receipt v0.1.3 matrix failed on pass $_."}
+          }
+          Write-Host 'CUSTOM_APP_FIXTURE_CANARY_RECEIPT_V013_MATRIX_REPEAT_PASS'
+
+      - name: Replay exact independently validated fixture canary executor
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-fixture-canary-executor-v0.1.0/test_custom_app_fixture_canary_executor.ps1'
+          if($LASTEXITCODE -ne 0){throw 'Exact parent fixture canary executor acceptance regressed.'}
+          Write-Host 'CUSTOM_APP_FIXTURE_CANARY_RECEIPT_V011_EXECUTOR_PARENT_REPLAY_PASS'
+
+      - name: Replay exact permit and promotion authority matrices
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-fixture-canary-permit-v0.1.0/test_custom_app_fixture_canary_permit.ps1'
+          if($LASTEXITCODE -ne 0){throw 'Fixture canary permit parent matrix regressed.'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-promotion-eligibility-gate-v0.1.0/test_custom_app_promotion_eligibility.ps1'
+          if($LASTEXITCODE -ne 0){throw 'Promotion eligibility parent matrix regressed.'}
+          Write-Host 'CUSTOM_APP_FIXTURE_CANARY_RECEIPT_V011_AUTHORITY_PARENT_REPLAY_PASS'
+
+      - name: Rebuild exact v0.4.1 candidate and run full Addon Manager SelfTest
+        shell: powershell
+        run: |
+          python 'validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py' --build
+          if($LASTEXITCODE -ne 0){throw 'Exact v0.4.1 candidate rebuild failed.'}
+          $addon='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/addon-manager.ps1';$main='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/spotify-control.ps1'
+          $ah=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant();if((Get-Item $addon).Length -ne 523216 -or $ah -cne 'b2cec989ef399aed4a8763105121b21181ffb493ed9e3e884baa1d62a634f94b'){throw "Parent Addon Manager drift: $((Get-Item $addon).Length)/$ah"}
+          $mh=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant();if($mh -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw "Spotify Control parent drift: $mh"}
+          $sandbox=Join-Path $env:RUNNER_TEMP 'fixture-canary-receipt-v011-parent-selftest';$env:LOCALAPPDATA=Join-Path $sandbox 'LocalAppData';$env:APPDATA=Join-Path $sandbox 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Exact parent Addon Manager SelfTest failed.'}
+          Write-Host 'CUSTOM_APP_FIXTURE_CANARY_RECEIPT_V011_PARENT_SELFTEST_PASS'
+
+      - name: Prove production and validated executor parent remain immutable
+        shell: powershell
+        run: |
+          $parent='a5d5839a9d6c1dd01c1fced6e9e1f5f76d16b5ca';$changed=@(git diff --name-only "$parent...HEAD")
+          $expected=@(
+            '.github/workflows/validate-custom-app-fixture-canary-execution-receipt-v011.yml',
+            'validation/custom-app-fixture-canary-execution-receipt-v0.1.1/custom-app-fixture-canary-execution-receipt-v013.ps1',
+            'validation/custom-app-fixture-canary-execution-receipt-v0.1.1/test_custom_app_fixture_canary_execution_receipt_v013.ps1'
+          )
+          $bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "Unexpected execution receipt v0.1.1 changed surface: $($bad -join ', ')"}
+          foreach($path in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-fixture-canary-executor-v0.1.0/custom-app-fixture-canary-executor-v011.ps1','validation/custom-app-fixture-canary-permit-v0.1.0/custom-app-fixture-canary-permit.ps1','validation/custom-app-promotion-eligibility-gate-v0.1.0/custom-app-promotion-eligibility.ps1')){git diff --quiet $parent HEAD -- $path;if($LASTEXITCODE -ne 0){throw "Protected executor/production surface changed: $path"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved.'}
+          Write-Host 'CUSTOM_APP_FIXTURE_CANARY_RECEIPT_V011_IMMUTABILITY_PASS'
+
+      - name: Write execution receipt v0.1.1 validation evidence
+        shell: powershell
+        run: |
+          $dir='validation/custom-app-fixture-canary-execution-receipt-v0.1.1'
+          $e=[ordered]@{
+            schema=1;head=(git rev-parse HEAD).Trim();validated_executor_parent='a5d5839a9d6c1dd01c1fced6e9e1f5f76d16b5ca';permit_implementation_parent='79c7ef064a216ee3ff34328be282d742f0f7abc0';eligibility_parent='979e9d6362ead31016b9532f98629d6bcc2bbb56';production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+            receipt_core_blob='f14ebf8efc8ff478c518df4990e757f20a4d958f';receipt_test_blob='828a9a92b0cb5675a466a828b876667e14c4f886';receipt='custom-app-fixture-canary-execution-receipt-v1';implementation='v0.1.3';hmac='HMAC-SHA256';receipt_is_authority=$false;requires_fresh_revalidation=$true;production_mutation_authority=$false;generic_canary_authority=$false
+            classifications=@('committed-preserved','denied-no-mutation','rolled-back-restored','failure-unqualified');executor_push_run=[int64]40679218583;executor_pr_run=[int64]40679419324;executor_push_artifact=[int64]12811478206;executor_pr_artifact=[int64]12812541217;executor_push_digest='sha256:1326445d22627b6af1542656f47ec2b7933cba47d1112769d52f8b755510e12e';executor_pr_digest='sha256:164d003804c8b6d4bf71f0965c9c7be68d8dacceebb098545341446fa8aa68f7';executor_parent_replay='pass';permit_parent_replay='pass';promotion_parent_replay='pass';parent_selftest='pass'
+          }
+          $e|ConvertTo-Json -Depth 6|Set-Content "$dir/ci-evidence.json" -Encoding UTF8
+          Write-Host 'CUSTOM_APP_FIXTURE_CANARY_RECEIPT_V011_EVIDENCE_PASS'
+
+      - name: Upload execution receipt v0.1.1 validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-fixture-canary-execution-receipt-v011-${{ github.run_id }}
+          path: |
+            validation/custom-app-fixture-canary-execution-receipt-v0.1.1/custom-app-fixture-canary-execution-receipt-v013.ps1
+            validation/custom-app-fixture-canary-execution-receipt-v0.1.1/test_custom_app_fixture_canary_execution_receipt_v013.ps1
+            validation/custom-app-fixture-canary-execution-receipt-v0.1.1/ci-evidence.json
+          if-no-files-found: error
