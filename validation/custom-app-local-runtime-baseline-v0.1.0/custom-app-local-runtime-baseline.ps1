@@ -33,7 +33,7 @@ function Get-CustomAppLocalRuntimeEntrySnapshot {
         $dir=$stack.Pop()
         foreach($item in @(Get-ChildItem -LiteralPath $dir -Force -ErrorAction Stop)){
             $relative=Get-CustomAppLocalRuntimeRelativePath -Root $rootFull -FullPath $item.FullName
-            if($relative -ceq '.git' -or $relative.StartsWith('.git/',[StringComparison]::OrdinalIgnoreCase)){continue}
+            if($relative.Equals('.git',[StringComparison]::OrdinalIgnoreCase) -or $relative.StartsWith('.git/',[StringComparison]::OrdinalIgnoreCase)){continue}
             if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw "Local runtime contains a reparse point: $relative"}
             if($item.PSIsContainer){$stack.Push([string]$item.FullName);continue}
             if(-not $seen.Add($relative)){throw "Local runtime contains a case-colliding path: $relative"}
@@ -114,6 +114,8 @@ function Get-CustomAppLocalRuntimeBaseline {
             }catch{$manifestValid=$false;$manifestName=$null}
         }
     }
+    $final=Get-CustomAppLocalRuntimeEntrySnapshot -AppPath $AppPath -MaxFiles $MaxFiles -MaxFileBytes $MaxFileBytes -MaxTotalBytes $MaxTotalBytes
+    if(-not (Test-CustomAppLocalRuntimeSnapshotStable -Before $after -After $final)){throw 'Local runtime changed while reading manifest metadata.'}
     $ready=($index.Count -eq 1 -and $manifestFiles.Count -eq 1 -and $manifestValid)
     $reason=$(if($index.Count -ne 1){'root-index-js-missing-or-duplicate'}elseif($manifestFiles.Count -ne 1){'root-manifest-json-missing-or-duplicate'}elseif(-not $manifestValid){'root-manifest-invalid'}else{'safe-ready-local-runtime-root'})
     return [pscustomobject]@{
