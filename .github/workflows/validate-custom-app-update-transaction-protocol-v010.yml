@@ -19,7 +19,7 @@ permissions:
 jobs:
   validate-windows:
     runs-on: windows-2025
-    timeout-minutes: 45
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
         with:
@@ -93,15 +93,23 @@ jobs:
           }
           Write-Host 'CUSTOM_APP_UPDATE_TX_MATRIX_REPEAT_PASS'
 
-      - name: Replay exact pinned persistence drift and restore self-test
+      - name: Rebuild exact v0.4.1 parent candidate and replay full Addon Manager SelfTest
         shell: powershell
         run: |
-          $tmp=Join-Path $env:RUNNER_TEMP 'lifecycle-settings-core-pinned.ps1'
-          (git show '57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b:validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1')|Set-Content -LiteralPath $tmp -Encoding UTF8
-          function Write-AddonLog { param([string]$Message) Write-Host $Message }
-          . $tmp
-          Invoke-LifecycleSettingsCoreSelfTest
-          Write-Host 'CUSTOM_APP_UPDATE_TX_PERSISTENCE_GUARD_REPLAY_PASS'
+          python 'validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py' --build
+          if($LASTEXITCODE -ne 0){throw 'Exact parent v0.4.1 candidate rebuild failed.'}
+          $main='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/spotify-control.ps1'
+          $addon='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/addon-manager.ps1'
+          $mainHash=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant();if($mainHash -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw "Parent Spotify Control hash drift: $mainHash"}
+          $addonHash=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant();$addonSize=(Get-Item $addon).Length
+          if($addonSize -ne 523216 -or $addonHash -cne 'b2cec989ef399aed4a8763105121b21181ffb493ed9e3e884baa1d62a634f94b'){throw "Parent Addon Manager drift: $addonSize/$addonHash"}
+          $root=Join-Path $env:RUNNER_TEMP 'update-tx-parent-selftest';$env:LOCALAPPDATA=Join-Path $root 'LocalAppData';$env:APPDATA=Join-Path $root 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $addon -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Exact parent Addon Manager SelfTest failed.'}
+          $addonText=Get-Content $addon -Raw
+          foreach($m in @('function New-RequiredSpotifyPersistenceBackup','function Restore-SpotifyPersistenceBackup','Lifecycle/settings core self-test passed: user-removal tombstones, reinstalls, safe local discovery, persistence drift detection, and exact restore are verified.')){if($addonText.IndexOf($m,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "Parent persistence self-test marker missing: $m"}}
+          Write-Host 'CUSTOM_APP_UPDATE_TX_PARENT_PERSISTENCE_SELFTEST_PASS'
 
       - name: Replay validated source baseline and binding component matrices
         shell: powershell
@@ -125,7 +133,7 @@ jobs:
       - name: Write validation evidence
         shell: powershell
         run: |
-          $e=[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_parent='d92daa3006093a7d966083193302965ee01905f6';production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2';protocol='custom-app-update-transaction-v1';production_mutation_authority=$false;network_capability=$false;fixture_apply_only=$true;matrix='pass-twice';component_replay='pass';persistence_guard_contract='exact-pinned-drift-restore-selftest-pass'}
+          $e=[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_parent='d92daa3006093a7d966083193302965ee01905f6';production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2';protocol='custom-app-update-transaction-v1';production_mutation_authority=$false;network_capability=$false;fixture_apply_only=$true;matrix='pass-twice';component_replay='pass';persistence_guard_contract='exact-v0.4.1-parent-addon-selftest-pass'}
           $e|ConvertTo-Json -Depth 5|Set-Content 'validation/custom-app-update-transaction-protocol-v0.1.0/ci-evidence.json' -Encoding UTF8
 
       - name: Upload transaction protocol validation artifact
