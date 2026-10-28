@@ -31,7 +31,7 @@ jobs:
         shell: powershell
         run: |
           $h=(git rev-parse HEAD).Trim();$pins=@(
-            @($h,'validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1','b161596c5cf63e846f4806eb12fdcd37b58b3987'),
+            @($h,'validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1','9b039819e7b2278fe4cf15c8585336dd07a8e8e3'),
             @($h,'validation/custom-app-production-pre-apply-preparation-v0.1.0/test_custom_app_production_pre_apply_preparation.ps1','cc79e9879dd629956613cd8ecbe73971203f2d5e'),
             @('6ba560e7980c3492fb032ebc720f029caa97b15c','validation/custom-app-production-stage-executor-v0.1.0/custom-app-production-stage-executor.ps1','349d4028997a9cc7a94540286c8b9ba6d6a5b050'),
             @('6ba560e7980c3492fb032ebc720f029caa97b15c','validation/custom-app-production-stage-executor-v0.1.0/test_custom_app_production_stage_executor.ps1','4bb9d6d3ef7822809e75e28b3fb0cc03cb96861a'),
