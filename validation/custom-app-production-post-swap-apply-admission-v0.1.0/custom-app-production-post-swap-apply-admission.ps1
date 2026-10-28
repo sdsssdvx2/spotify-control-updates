@@ -122,7 +122,10 @@ function Resolve-CustomAppProductionPostSwapApplyAdmissionV010 {
     if($MaxRemoteObservationAgeHours -lt 1 -or $MaxRemoteObservationAgeHours -gt 168){return & $deny 'remote-observation-age-policy-invalid'}
 
     $finalCheck=Test-CustomAppProductionTransactionFinalizationResultV010 -Result $FinalizationResult
-    if(-not [bool]$finalCheck.ok){return & $deny ('finalization-result-invalid:'+[string]$finalCheck.reason)}
+    if(-not [bool]$finalCheck.ok){
+        if([string]$finalCheck.reason -ceq 'finalization-result-transaction-root-still-exists'){return & $deny 'finalized-transaction-workspace-reappeared'}
+        return & $deny ('finalization-result-invalid:'+[string]$finalCheck.reason)
+    }
     $preparedCheck=Test-CustomAppProductionPreApplyPreparedResultV010 -Result $PreparedResult
     if(-not [bool]$preparedCheck.ok){return & $deny ('prepared-result-invalid:'+[string]$preparedCheck.reason)}
     $stageCheck=Test-CustomAppProductionStageExecutorResultV010 -Result $StageExecutorResult
