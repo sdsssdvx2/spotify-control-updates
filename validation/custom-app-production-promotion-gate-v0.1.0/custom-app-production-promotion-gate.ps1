@@ -80,7 +80,7 @@ function New-CustomAppProductionPromotionDecisionV010 {
 
 function Resolve-CustomAppProductionPromotionEligibilityV010 {
     param(
-        [Parameter(Mandatory=$true)][string]$Name,
+        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$Name,
         [Parameter(Mandatory=$true)]$LifecycleRow,
         [Parameter(Mandatory=$true)]$ProvenanceRow,
         [Parameter(Mandatory=$true)]$BindingRow,
