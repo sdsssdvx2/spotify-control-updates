@@ -1,5 +1,6 @@
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
+$Version='fixture-canary-executor-validation-v0.1.0'
 $here=Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot=Split-Path -Parent (Split-Path -Parent $here)
 $depRoot=Join-Path $env:TEMP ('custom-app-fixture-canary-executor-deps-'+[guid]::NewGuid().ToString('N'))
@@ -37,7 +38,6 @@ function Assert-ProductionAuthorityDenied {
     if($Object.PSObject.Properties['mutation_mode'] -and [string]$Object.mutation_mode -cne 'deny'){throw "$Label mutation mode drifted"}
 }
 
-# Conservative standalone equivalents required by the pinned lifecycle/settings core.
 function Test-PathSafe {
     param([AllowNull()][string]$Path,[ValidateSet('Leaf','Container')][string]$Kind)
     if([string]::IsNullOrWhiteSpace($Path)){return $false}
@@ -117,7 +117,7 @@ function New-PermitForScenarioV011 {
 }
 
 $old=$null;$new=$null;$oldStage=$null;$root=Get-CustomAppFixtureCanaryRootV010
-try{
+try {
     if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction Stop}
     [IO.Directory]::CreateDirectory($root)|Out-Null;[IO.Directory]::CreateDirectory((Get-CustomAppFixtureCanaryConsumptionDirectoryV011))|Out-Null
     $old=Get-CustomAppObserverReleaseObservation -Source 'alexk218/tagify' -ReleaseId 416245914
@@ -138,14 +138,12 @@ try{
     $protocol=New-ProtocolQualificationV011;$key=[byte[]](0..31);$wrongKey=[byte[]](32..63)
     $issued=[DateTimeOffset]::Parse('2026-10-28T12:05:00+00:00')
 
-    # Wrong-key gate: must fail before durable consumption/staging.
     $wrong=New-ScenarioV011 -Id 'wrong-key' -Template $template -NewObservation $new
     $wrongPermit=New-PermitForScenarioV011 -Scenario $wrong -Protocol $protocol -Key $key -Nonce '00000000000000000000000000000001' -IssuedAt $issued
     $wrongGate=Test-CustomAppFixtureCanaryExecutorGateV011 -Name 'tagify' -LifecycleRow $wrong.lifecycle -ProvenanceRow $wrong.provenance -BindingRow $wrong.binding -ProtocolQualification $protocol -Permit $wrongPermit.permit -SessionKey $wrongKey -Now $issued.AddSeconds(20) -Phase 'pre-stage'
     Assert-False ([bool]$wrongGate.ok) 'Wrong-key gate unexpectedly passed.'
     Assert-True ([string]$wrongGate.reason -like '*permit-hmac-mismatch') ('Wrong-key reason drifted: '+[string]$wrongGate.reason)
 
-    # Durable replay with fresh in-memory state: disk marker alone must block second use.
     $durable=New-ScenarioV011 -Id 'durable-replay' -Template $template -NewObservation $new
     $durablePermit=New-PermitForScenarioV011 -Scenario $durable -Protocol $protocol -Key $key -Nonce '00000000000000000000000000000002' -IssuedAt $issued
     $state0=New-CustomAppFixtureCanaryConsumptionStateV010
@@ -155,7 +153,6 @@ try{
     Assert-False ([bool]$secondUse.ok) 'Durable permit replay unexpectedly passed with fresh memory state.'
     Assert-True ([string]$secondUse.reason -ceq 'durable-permit-replay-detected') ('Durable replay reason drifted: '+[string]$secondUse.reason)
 
-    # Expiry after staging: token is consumed, remote stage may complete, live tree must remain old.
     $expired=New-ScenarioV011 -Id 'expires-after-stage' -Template $template -NewObservation $new
     $expiredPermit=New-PermitForScenarioV011 -Scenario $expired -Protocol $protocol -Key $key -Nonce '00000000000000000000000000000003' -IssuedAt $issued -TtlMinutes 1
     $expiredResult=Invoke-CustomAppFixtureCanaryExecutorV011 -Name 'tagify' -LifecycleRow $expired.lifecycle -ProvenanceRow $expired.provenance -BindingRow $expired.binding -ProtocolQualification $protocol -Permit $expiredPermit.permit -SessionKey $key -ConsumptionState (New-CustomAppFixtureCanaryConsumptionStateV010) -LocalAppDataRoot $expired.local_root -AppDataRoot $expired.app_root -PersistenceBackupRoot $expired.backup_root -PreStageNow $issued.AddSeconds(15) -PreApplyNow $issued.AddMinutes(2)
@@ -165,7 +162,6 @@ try{
     $expiredAfter=Get-CustomAppLocalRuntimeBaseline -Name 'tagify' -AppPath $expired.live;Assert-True ([string]$expiredAfter.tree_sha256 -ceq [string]$old.tree_sha256) 'Expiry scenario mutated live runtime.'
     $expiredPersistence=Get-SpotifyPersistenceSnapshot -LocalAppDataRoot $expired.local_root -AppDataRoot $expired.app_root;Assert-True ([string]$expiredPersistence.fingerprint -ceq [string]$expired.persistence_before.fingerprint) 'Expiry scenario changed persistence.'
 
-    # Exact pre-apply durable marker barrier: remove marker after stage, transaction must not start.
     $marker=New-ScenarioV011 -Id 'marker-barrier' -Template $template -NewObservation $new
     $markerPermit=New-PermitForScenarioV011 -Scenario $marker -Protocol $protocol -Key $key -Nonce '00000000000000000000000000000004' -IssuedAt $issued
     $markerResult=Invoke-CustomAppFixtureCanaryExecutorV011 -Name 'tagify' -LifecycleRow $marker.lifecycle -ProvenanceRow $marker.provenance -BindingRow $marker.binding -ProtocolQualification $protocol -Permit $markerPermit.permit -SessionKey $key -ConsumptionState (New-CustomAppFixtureCanaryConsumptionStateV010) -LocalAppDataRoot $marker.local_root -AppDataRoot $marker.app_root -PersistenceBackupRoot $marker.backup_root -PreStageNow $issued.AddSeconds(15) -PreApplyNow $issued.AddSeconds(35) -InjectRemoveConsumptionMarkerBeforeApply
@@ -175,7 +171,6 @@ try{
     $markerAfter=Get-CustomAppLocalRuntimeBaseline -Name 'tagify' -AppPath $marker.live;Assert-True ([string]$markerAfter.tree_sha256 -ceq [string]$old.tree_sha256) 'Marker-barrier scenario mutated live runtime.'
     $markerPersistence=Get-SpotifyPersistenceSnapshot -LocalAppDataRoot $marker.local_root -AppDataRoot $marker.app_root;Assert-True ([string]$markerPersistence.fingerprint -ceq [string]$marker.persistence_before.fingerprint) 'Marker-barrier scenario changed persistence.'
 
-    # Valid fully gated canary execution.
     $valid=New-ScenarioV011 -Id 'valid' -Template $template -NewObservation $new
     $validPermit=New-PermitForScenarioV011 -Scenario $valid -Protocol $protocol -Key $key -Nonce '00000000000000000000000000000005' -IssuedAt $issued
     $validResult=Invoke-CustomAppFixtureCanaryExecutorV011 -Name 'tagify' -LifecycleRow $valid.lifecycle -ProvenanceRow $valid.provenance -BindingRow $valid.binding -ProtocolQualification $protocol -Permit $validPermit.permit -SessionKey $key -ConsumptionState (New-CustomAppFixtureCanaryConsumptionStateV010) -LocalAppDataRoot $valid.local_root -AppDataRoot $valid.app_root -PersistenceBackupRoot $valid.backup_root -PreStageNow $issued.AddSeconds(15) -PreApplyNow $issued.AddSeconds(35)
