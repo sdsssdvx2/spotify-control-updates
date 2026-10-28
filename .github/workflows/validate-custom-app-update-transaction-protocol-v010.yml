@@ -54,8 +54,8 @@ jobs:
             @('19109205bd2e61e862c3b9acd61946568397ecb5','validation/custom-app-remote-source-contract-v0.1.1/release-continuity-v011.ps1','dbec4f817f4f4eab92d89d1f8dc623b1da435ac3'),
             @('7402ea5c77e58cd072f0166411d40e7726093f3c','validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1','83156d9c14e40061a0728d28b582c1e65684a4a2'),
             @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
-            @('HEAD','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','de9067de98a4f5165b7aea433dfc5db575f71097'),
-            @('HEAD','validation/custom-app-update-transaction-protocol-v0.1.0/test_custom_app_update_transaction.ps1','e4906ebaee04b91f48ca5261500ac33da30d072d')
+            @('HEAD','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+            @('HEAD','validation/custom-app-update-transaction-protocol-v0.1.0/test_custom_app_update_transaction.ps1','a2f3c1feb507bf5933206e46d7e4b35b4731036f')
           )
           foreach($p in $pins){$blob=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($blob -cne $p[2]){throw "Pinned blob drift: $($p[1]) $blob != $($p[2])"}}
           $guard=(git show '57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b:validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1') -join "`n"
@@ -66,8 +66,12 @@ jobs:
         shell: powershell
         run: |
           foreach($file in @('validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','validation/custom-app-update-transaction-protocol-v0.1.0/test_custom_app_update_transaction.ps1')){
-            $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
-            if($errors.Count){$errors|ForEach-Object{Write-Error "$file :: $($_.Message)"};throw "PS5.1 parse failed: $file"}
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){
+              $errors|ForEach-Object{Write-Error ("{0} :: line={1} col={2} text=<{3}> :: {4}" -f $file,$_.Extent.StartLineNumber,$_.Extent.StartColumnNumber,$_.Extent.Text,$_.Message)}
+              throw "PS5.1 parse failed: $file"
+            }
           }
           Write-Host 'CUSTOM_APP_UPDATE_TX_PS51_PARSE_PASS'
 
