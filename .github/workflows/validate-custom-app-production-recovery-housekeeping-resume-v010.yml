@@ -1,0 +1,138 @@
+name: Validate Custom App Production Recovery Housekeeping Resume v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-recovery-housekeeping-resume-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-housekeeping-resume-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-recovery-evidence-admission-integration-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-housekeeping-resume-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 420
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope lineage and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h -cne $e){throw "head mismatch $h != $e"}
+          $p='5232e5adeb13e6942acb210b3cd13058e1eaaf05';if((git merge-base $p HEAD).Trim() -cne $p){throw 'not descended from exact validated recovery integration head'}
+          $allowed=@(
+            '.github/workflows/validate-custom-app-production-recovery-housekeeping-resume-v010.yml',
+            'validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/custom-app-production-recovery-housekeeping-resume-contract.ps1',
+            'validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/custom-app-production-recovery-housekeeping-resume-store.ps1',
+            'validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/custom-app-production-recovery-housekeeping-resume-writer.ps1',
+            'validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/custom-app-production-recovery-housekeeping-resume-gate.ps1',
+            'validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/test_custom_app_production_recovery_housekeeping_resume.ps1')
+          $changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x -notin $changed){throw "missing $x"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_HOUSEKEEPING_RESUME_SCOPE_PASS'
+
+      - name: Prove exact immutable pins
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$pins=@(
+            @($h,'validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/custom-app-production-recovery-housekeeping-resume-contract.ps1','7d9f6d8543d944f5141b3282536903af98cbed6a'),
+            @($h,'validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/custom-app-production-recovery-housekeeping-resume-store.ps1','c60b80138c8cd4189949a34795fb75a44e8e321e'),
+            @($h,'validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/custom-app-production-recovery-housekeeping-resume-writer.ps1','9ebed8dff0d8b1208103411f40192db2946a29f7'),
+            @($h,'validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/custom-app-production-recovery-housekeeping-resume-gate.ps1','f238267779564a61b3f45e2060ecb02f63366b60'),
+            @($h,'validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/test_custom_app_production_recovery_housekeeping_resume.ps1','39a5b94df9e5de1a957ab62c70941d10ccce8fe3'),
+            @('5232e5adeb13e6942acb210b3cd13058e1eaaf05','validation/custom-app-production-recovery-evidence-admission-integration-v0.1.0/custom-app-production-recovery-evidence-admission-integration.ps1','c92c727b5a2217f5b84a1072608bfc4662e68926'),
+            @('5232e5adeb13e6942acb210b3cd13058e1eaaf05','validation/custom-app-production-recovery-evidence-admission-integration-v0.1.0/test_custom_app_production_recovery_evidence_admission_integration.ps1','453be9908425716094172db98cd3ce9740999562'),
+            @('574fe182168271fa3497d58e269e9af1f60d9033','validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1','e91fa6a125f77352907c1119f6d9f47be9682550'),
+            @('67458cbb96b5d1ed92e26c2b81debd6894044749','validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1','3b14280d727287252f71611e4424d78e5705c2f1'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+            @('b266bad660d4b7bc87e7093c5b12f0cff1dc466f','validation/custom-app-production-recovery-plan-contract-v0.1.0/custom-app-production-recovery-plan.ps1','ae49409973164052d5830b981d804707f9d62b6c'),
+            @('ffb5aad4a605691ee7b80392498b0cb6fa4e4052','validation/custom-app-production-recovery-preflight-v0.1.0/custom-app-production-recovery-preflight.ps1','b1816a24849a559b4da2537aa1b2436124fbee50'),
+            @('ffb5aad4a605691ee7b80392498b0cb6fa4e4052','validation/custom-app-production-recovery-execution-admission-v0.1.0/custom-app-production-recovery-execution-admission.ps1','e8804a7c53ad0d3e5420e037d468d9c397e52529'))
+          foreach($p in $pins){$b=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($b -cne $p[2]){throw "pin drift $($p[1]) $b != $($p[2])"}}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_HOUSEKEEPING_RESUME_PINS_PASS'
+
+      - name: Parse and audit zero-authority crash-resume boundary
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-housekeeping-resume-v0.1.0';$files=@(
+            "$d/custom-app-production-recovery-housekeeping-resume-contract.ps1",
+            "$d/custom-app-production-recovery-housekeeping-resume-store.ps1",
+            "$d/custom-app-production-recovery-housekeeping-resume-writer.ps1",
+            "$d/custom-app-production-recovery-housekeeping-resume-gate.ps1",
+            "$d/test_custom_app_production_recovery_housekeeping_resume.ps1")
+          foreach($f in $files){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|ForEach-Object{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $contract=Get-Content "$d/custom-app-production-recovery-housekeeping-resume-contract.ps1" -Raw
+          $store=Get-Content "$d/custom-app-production-recovery-housekeeping-resume-store.ps1" -Raw
+          $writer=Get-Content "$d/custom-app-production-recovery-housekeeping-resume-writer.ps1" -Raw
+          $gate=Get-Content "$d/custom-app-production-recovery-housekeeping-resume-gate.ps1" -Raw
+          foreach($m in @('resume_is_authority=$false','cleanup_authorized=$false','execution_authorized=$false','production_execution_authorized=$false','production_mutation_authorized=$false','housekeeping-resume-decision-expired')){if($contract.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "contract marker missing $m"}}
+          foreach($m in @('[IO.FileMode]::CreateNew','[IO.FileShare]::None','Flush($true)','housekeeping-resume-envelope-already-exists-replay-denied','read_after_write_verified=$true')){if($store.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "store durability marker missing $m"}}
+          foreach($m in @('Resolve-CustomAppProductionRecoveryEvidenceAdmissionIntegrationV010','Test-CustomAppProductionPostApplyAppBackupCleanupArtifactV010','Test-CustomAppProductionPostApplyPersistenceCleanupArtifactV010','Get-CustomAppAtomicGitSnapshotV010','housekeeping-resume-live-not-applied-stage-tree')){if($writer.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "writer marker missing $m"}}
+          foreach($m in @('cleanup-starting','source_journal_revision','source_journal_entry_sha256','ConvertFrom-CustomAppProductionCrashJournalFileV010','housekeeping-resume-source-journal-anchor-missing','already-absent','present-verified','protected-persistence-drift','git-tree-drift','stage-tree-drift')){if($gate.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "gate marker missing $m"}}
+          foreach($f in @($contract,$gate)){foreach($x in @('[IO.Directory]::Delete','[IO.Directory]::Move','[IO.File]::Copy','[IO.File]::Write','Remove-Item','Move-Item','Copy-Item','Set-Content','Add-Content','Out-File','Invoke-WebRequest','Invoke-RestMethod','Start-Process','ProcessStartInfo','Invoke-CustomAppProductionExactSpicetifyApplyProcessV010','Restore-SpotifyPersistenceBackup')){if($f.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "read-only contract/gate gained forbidden side effect $x"}}}
+          foreach($f in @($contract,$store,$writer,$gate)){if($f -match 'resume_is_authority\s*=\s*\$true|cleanup_authorized\s*=\s*\$true|execution_authorized\s*=\s*\$true|production_execution_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'resume authority escaped'}}
+          $test=Get-Content "$d/test_custom_app_production_recovery_housekeeping_resume.ps1" -Raw;foreach($m in @('partial cleanup without durable resume envelope accepted','live drift accepted','git drift accepted','protected persistence drift accepted','retained stage drift accepted','app backup drift accepted','persistence backup drift accepted','rehash envelope identity tamper accepted','rehash source journal anchor tamper accepted','corrupt resume JSON accepted','resume lock contention accepted','authority-tampered resume decision accepted','expired resume decision accepted')){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "resume coverage missing $m"}}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_HOUSEKEEPING_RESUME_PARSE_AUDIT_PASS'
+
+      - name: Materialize exact sibling recovery dependencies
+        shell: powershell
+        run: |
+          $deps=@(
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/test_custom_app_production_recovery_evidence.ps1','de37d029e175dbec899445dbe983e506a14a1b0a'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/probe_custom_app_production_recovery_evidence.ps1','84f73605526373652a4499b7f472537c8e2b5c03'),
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+            @('574fe182168271fa3497d58e269e9af1f60d9033','validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1','e91fa6a125f77352907c1119f6d9f47be9682550'),
+            @('67458cbb96b5d1ed92e26c2b81debd6894044749','validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1','3b14280d727287252f71611e4424d78e5705c2f1'))
+          foreach($d in $deps){$path=$d[1];New-Item -ItemType Directory -Force -Path (Split-Path $path -Parent)|Out-Null;$env:HR_SPEC="$($d[0])`:$path";$env:HR_OUT=$path;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['HR_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['HR_SPEC']]))";if($LASTEXITCODE){throw "materialize failed $path"};$actual=(git hash-object $path).Trim();if($actual -cne $d[2]){throw "materialized blob drift $path $actual != $($d[2])"}}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_HOUSEKEEPING_RESUME_MATERIALIZATION_PASS'
+
+      - name: Run recovery housekeeping resume matrix twice
+        shell: powershell
+        run: |
+          $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
+          1..2|ForEach-Object{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/test_custom_app_production_recovery_housekeeping_resume.ps1';if($LASTEXITCODE){throw "housekeeping resume matrix failed pass $_"}}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_HOUSEKEEPING_RESUME_MATRIX_REPEAT_PASS'
+
+      - name: Replay exact recovery integration parent matrix
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-evidence-admission-integration-v0.1.0/test_custom_app_production_recovery_evidence_admission_integration.ps1';if($LASTEXITCODE){throw 'recovery integration parent regression failed'}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_HOUSEKEEPING_RESUME_PARENT_PASS'
+
+      - name: Rebuild journal-integrated candidate and run Addon Manager SelfTest
+        shell: powershell
+        run: |
+          python 'validation/custom-app-production-full-chain-journal-integration-v0.1.0/build_candidate.py';if($LASTEXITCODE){throw 'journal-integrated parent build failed'}
+          $a='validation/custom-app-production-full-chain-journal-integration-v0.1.0/out/bin/addon-manager.ps1';$m='validation/custom-app-production-full-chain-journal-integration-v0.1.0/out/bin/spotify-control.ps1';$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();if((Get-Item $a).Length -ne 973527 -or $ah -cne '3eac8cf4bfdcbbc38e7d4c01186a583fd13f96a27a98d8f6903147a4341da823'){throw 'journal-integrated addon parent drift'};if($mh -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'main candidate drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'recovery-housekeeping-resume-selftest';$env:LOCALAPPDATA=Join-Path $s 'Local';$env:APPDATA=Join-Path $s 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'SelfTest failed'}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_HOUSEKEEPING_RESUME_SELFTEST_PASS'
+
+      - name: Prove protected surfaces immutable and write evidence
+        shell: powershell
+        run: |
+          $p='5232e5adeb13e6942acb210b3cd13058e1eaaf05';$expected=@('.github/workflows/validate-custom-app-production-recovery-housekeeping-resume-v010.yml','validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/custom-app-production-recovery-housekeeping-resume-contract.ps1','validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/custom-app-production-recovery-housekeeping-resume-store.ps1','validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/custom-app-production-recovery-housekeeping-resume-writer.ps1','validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/custom-app-production-recovery-housekeeping-resume-gate.ps1','validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/test_custom_app_production_recovery_housekeeping_resume.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "unexpected changed surface $($bad -join ', ')"}
+          foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-recovery-evidence-admission-integration-v0.1.0/custom-app-production-recovery-evidence-admission-integration.ps1','validation/custom-app-production-full-chain-journal-integration-v0.1.0/build_candidate.py')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
+          $d='validation/custom-app-production-recovery-housekeeping-resume-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_integration_parent=$p;validated_cleanup_sibling='67458cbb96b5d1ed92e26c2b81debd6894044749';durable_resume_envelope=$true;journal_history_anchor=$true;partial_cleanup_retry_safe=$true;live_git_persistence_revalidated=$true;short_decision_window_seconds=10;resume_authority=$false;cleanup_authority=$false;execution_authority=$false;production_mutation_authority=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'CUSTOM_APP_PRODUCTION_RECOVERY_HOUSEKEEPING_RESUME_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-recovery-housekeeping-resume-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/custom-app-production-recovery-housekeeping-resume-contract.ps1
+            validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/custom-app-production-recovery-housekeeping-resume-store.ps1
+            validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/custom-app-production-recovery-housekeeping-resume-writer.ps1
+            validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/custom-app-production-recovery-housekeeping-resume-gate.ps1
+            validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/test_custom_app_production_recovery_housekeeping_resume.ps1
+            validation/custom-app-production-recovery-housekeeping-resume-v0.1.0/ci-evidence.json
+          if-no-files-found: error
