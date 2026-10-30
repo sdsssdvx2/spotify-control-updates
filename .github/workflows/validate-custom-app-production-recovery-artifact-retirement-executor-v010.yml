@@ -65,9 +65,11 @@ jobs:
           $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP;$t='validation/custom-app-production-recovery-artifact-retirement-executor-v0.1.0/test_custom_app_production_recovery_artifact_retirement_executor.ps1';1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $t;if($LASTEXITCODE){throw "retirement executor matrix failed pass $_"}}
           'CUSTOM_APP_PRODUCTION_RECOVERY_ARTIFACT_RETIREMENT_EXECUTOR_MATRIX_REPEAT_PASS'
 
-      - name: Replay exact retirement admission parent matrix
+      - name: Replay exact retirement admission parent matrix in clean fixture root
         shell: powershell
         run: |
+          $clean=Join-Path $env:RUNNER_TEMP ('retirement-admission-parent-regression-'+[Guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Force -Path $clean|Out-Null
+          $env:RUNNER_TEMP=$clean;$env:TEMP=$clean;$env:TMP=$clean
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-artifact-retirement-admission-v0.1.0/test_custom_app_production_recovery_artifact_retirement_admission_v011.ps1';if($LASTEXITCODE){throw 'retirement admission parent regression failed'}
           'CUSTOM_APP_PRODUCTION_RECOVERY_ARTIFACT_RETIREMENT_EXECUTOR_PARENT_PASS'
 
