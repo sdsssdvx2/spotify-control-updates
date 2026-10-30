@@ -53,6 +53,7 @@ jobs:
           foreach($x in @('[IO.Directory]::Move','[IO.Directory]::Delete','Move-Item','Copy-Item','Remove-Item','Invoke-WebRequest','Invoke-RestMethod','Start-Process','ProcessStartInfo','spicetify apply','spicetify config','spicetify restore','Restore-CustomAppProductionAtomicLiveSwapV010','Invoke-CustomAppProductionExactSpicetifyApplyProcessV010')){if($core.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge 0){throw "journal gained forbidden side-effect primitive $x"}}
           if($core -match 'journal_is_authority\s*=\s*\$true|production_execution_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'journal reusable authority escaped'}
           $test=Get-Content "$d/test_custom_app_production_crash_recovery_journal.ps1" -Raw;foreach($m in @('full-chain','rollback-chain','illegal-skip','duplicate-phase','stale revision','stale head','future-time','reverse-time','duplicate-init','identity path escape','lock contention','current-tamper','history-tamper','current-rollback','history-current-crash','missing-final','missing-apply','missing-cleanup','authority-tamper','identity-drift','terminal','wrong transaction id','separate-process restart probe')){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "journal coverage missing $m"}}
+          if(([regex]::Matches($test,[regex]::Escape('[AllowNull()][DateTimeOffset]$At=$null'))).Count -ne 1){throw 'expected exactly one PS5.1 nullable-time fixture declaration'}
           'CUSTOM_APP_PRODUCTION_CRASH_RECOVERY_JOURNAL_PARSE_AUDIT_PASS'
 
       - name: Materialize exact sibling dependencies for parent cleanup replay
@@ -64,16 +65,22 @@ jobs:
           foreach($d in $deps){$path=$d[1];New-Item -ItemType Directory -Force -Path (Split-Path $path -Parent)|Out-Null;$env:CRASH_GIT_SPEC="$($d[0])`:$path";$env:CRASH_GIT_OUT=$path;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['CRASH_GIT_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['CRASH_GIT_SPEC']]))";if($LASTEXITCODE){throw "materialize failed $path"};$actual=(git hash-object $path).Trim();if($actual -cne $d[2]){throw "materialized blob drift $path $actual != $($d[2])"}}
           'CUSTOM_APP_PRODUCTION_CRASH_RECOVERY_JOURNAL_MATERIALIZATION_PASS'
 
+      - name: Prepare PS5.1 nullable-time journal acceptance harness
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-crash-recovery-journal-v0.1.0';$src=Join-Path $d 'test_custom_app_production_crash_recovery_journal.ps1';$runtime=Join-Path $d 'test_custom_app_production_crash_recovery_journal.runtime.ps1';$text=Get-Content -LiteralPath $src -Raw;$needle='[AllowNull()][DateTimeOffset]$At=$null';if(([regex]::Matches($text,[regex]::Escape($needle))).Count -ne 1){throw 'nullable-time patch marker drifted'};$patched=$text.Replace($needle,'[AllowNull()]$At=$null');[IO.File]::WriteAllText($runtime,$patched,[Text.UTF8Encoding]::new($false));$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $runtime),[ref]$t,[ref]$er)|Out-Null;if($er.Count){throw 'runtime journal harness parse failed'}
+          'CUSTOM_APP_PRODUCTION_CRASH_RECOVERY_JOURNAL_HARNESS_PASS'
+
       - name: Run durable crash/restart journal matrix twice
         shell: powershell
         run: |
-          1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-crash-recovery-journal-v0.1.0/test_custom_app_production_crash_recovery_journal.ps1';if($LASTEXITCODE){throw "crash journal matrix failed pass $_"}}
+          1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-crash-recovery-journal-v0.1.0/test_custom_app_production_crash_recovery_journal.runtime.ps1';if($LASTEXITCODE){throw "crash journal matrix failed pass $_"}}
           'CUSTOM_APP_PRODUCTION_CRASH_RECOVERY_JOURNAL_MATRIX_REPEAT_PASS'
 
       - name: Replay exact post-apply cleanup parent contract once
         shell: powershell
         run: |
-          $d='validation/custom-app-production-post-apply-commit-cleanup-v0.1.0';$src=Join-Path $d 'test_custom_app_production_post_apply_commit_cleanup.ps1';$runtime=Join-Path $env:RUNNER_TEMP 'parent-cleanup-runtime.ps1';$text=Get-Content -LiteralPath $src -Raw;$needle=". (Join-Path `$PSScriptRoot 'custom-app-production-post-apply-commit-cleanup.ps1')";$overlay=(Resolve-Path (Join-Path $d 'custom-app-production-post-apply-commit-cleanup-finalization-receipt-v011.ps1')).Path.Replace("'","''");$replacement=$needle+"`r`n. '$overlay'";if(([regex]::Matches($text,[regex]::Escape($needle))).Count -ne 1){throw 'parent cleanup source marker drifted'};$patched=$text.Replace($needle,$replacement);$patched=$patched.Replace('$PSScriptRoot',(Resolve-Path $d).Path.Replace("'","''")|%{"'$_'"});[IO.File]::WriteAllText($runtime,$patched,[Text.UTF8Encoding]::new($false));& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runtime;if($LASTEXITCODE){throw 'post-apply cleanup parent regression'}
+          $d='validation/custom-app-production-post-apply-commit-cleanup-v0.1.0';$src=Join-Path $d 'test_custom_app_production_post_apply_commit_cleanup.ps1';$runtime=Join-Path $d 'test_custom_app_production_post_apply_commit_cleanup.runtime.ps1';$text=Get-Content -LiteralPath $src -Raw;$needle=". (Join-Path `$PSScriptRoot 'custom-app-production-post-apply-commit-cleanup.ps1')";$replacement=$needle+"`r`n. (Join-Path `$PSScriptRoot 'custom-app-production-post-apply-commit-cleanup-finalization-receipt-v011.ps1')";if(([regex]::Matches($text,[regex]::Escape($needle))).Count -ne 1){throw 'parent cleanup source marker drifted'};$patched=$text.Replace($needle,$replacement);[IO.File]::WriteAllText($runtime,$patched,[Text.UTF8Encoding]::new($false));& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runtime;if($LASTEXITCODE){throw 'post-apply cleanup parent regression'}
           'CUSTOM_APP_PRODUCTION_CRASH_RECOVERY_JOURNAL_PARENT_PASS'
 
       - name: Rebuild exact candidate and run Addon Manager SelfTest
