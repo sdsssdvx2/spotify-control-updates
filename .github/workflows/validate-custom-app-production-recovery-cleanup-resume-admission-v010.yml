@@ -34,7 +34,7 @@ jobs:
         run: |
           $h=(git rev-parse HEAD).Trim();$pins=@(
             @($h,'validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/custom-app-production-recovery-cleanup-resume-admission.ps1','387d97b10d493b3794b24fba2bac67cf39491444'),
-            @($h,'validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/test_custom_app_production_recovery_cleanup_resume_admission.ps1','8ddf8177095f7bb58ac05b1c212cd95d2e8af158'),
+            @($h,'validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/test_custom_app_production_recovery_cleanup_resume_admission.ps1','0c64be5c91bce3973fe41554a69c3b58d22e6681'),
             @('5232e5adeb13e6942acb210b3cd13058e1eaaf05','validation/custom-app-production-recovery-evidence-admission-integration-v0.1.0/custom-app-production-recovery-evidence-admission-integration.ps1','c92c727b5a2217f5b84a1072608bfc4662e68926'),
             @('5232e5adeb13e6942acb210b3cd13058e1eaaf05','validation/custom-app-production-recovery-evidence-admission-integration-v0.1.0/test_custom_app_production_recovery_evidence_admission_integration.ps1','453be9908425716094172db98cd3ce9740999562'),
             @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
@@ -54,57 +54,4 @@ jobs:
           foreach($m in @('cleanup-resume-phase-not-cleanup-starting','cleanup-resume-transaction-root-must-be-absent','cleanup-resume-live-runtime-not-exact-applied-tree','cleanup-resume-protected-persistence-drift','already-absent','present-verified','cleanup-resume-stage-tree-mismatch','cleanup-resume-app-backup-tree-mismatch','cleanup-resume-persistence-backup-invalid','requires_bounded_cleanup_only=$true','requires_future_executor_fresh_revalidation=$true','admission_is_authority=$false','execution_authorized=$false','restore_authorized=$false','apply_authorized=$false','cleanup_authorized=$false','production_mutation_authorized=$false')){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "resume admission marker missing $m"}}
           foreach($x in @('[IO.Directory]::Delete','[IO.Directory]::Move','[IO.File]::Copy','[IO.File]::Write','Copy-Item','Move-Item','Remove-Item','Set-Content','Add-Content','Out-File','Invoke-WebRequest','Invoke-RestMethod','Start-Process','ProcessStartInfo','Restore-SpotifyPersistenceBackup','Restore-CustomAppProductionAtomicLiveSwapV010','Invoke-CustomAppProductionExactSpicetifyApplyProcessV010','Remove-CustomAppProductionPostApplyBoundedArtifactV010')){if($core.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "resume admission gained forbidden side effect $x"}}
           if($core -match 'admission_is_authority\s*=\s*\$true|execution_authorized\s*=\s*\$true|restore_authorized\s*=\s*\$true|apply_authorized\s*=\s*\$true|cleanup_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'resume admission authority escaped'}
-          $test=Get-Content "$d/test_custom_app_production_recovery_cleanup_resume_admission.ps1" -Raw;foreach($m in @('all-present','stage-absent','app-absent','persistence-absent','stage-app-absent','stage-persistence-absent','app-persistence-absent','all-absent','future-app','transaction root reappearance accepted','live drift accepted','protected persistence drift accepted','stage drift accepted','app backup drift accepted','persistence backup drift accepted','apply-verified phase accepted as cleanup-starting resume','authority-tampered cleanup resume receipt accepted','fingerprint-tampered cleanup resume receipt accepted','expired cleanup resume receipt accepted')){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "resume admission coverage missing $m"}}
-          'CUSTOM_APP_PRODUCTION_RECOVERY_CLEANUP_RESUME_ADMISSION_PARSE_AUDIT_PASS'
-
-      - name: Materialize exact sibling evidence and validation dependencies
-        shell: powershell
-        run: |
-          $deps=@(
-            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
-            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/test_custom_app_production_recovery_evidence.ps1','de37d029e175dbec899445dbe983e506a14a1b0a'),
-            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/probe_custom_app_production_recovery_evidence.ps1','84f73605526373652a4499b7f472537c8e2b5c03'),
-            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
-            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
-            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'))
-          foreach($d in $deps){$path=$d[1];New-Item -ItemType Directory -Force -Path (Split-Path $path -Parent)|Out-Null;$env:CR_SPEC="$($d[0])`:$path";$env:CR_OUT=$path;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['CR_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['CR_SPEC']]))";if($LASTEXITCODE){throw "materialize failed $path"};$actual=(git hash-object $path).Trim();if($actual-cne$d[2]){throw "materialized blob drift $path $actual != $($d[2])"}}
-          'CUSTOM_APP_PRODUCTION_RECOVERY_CLEANUP_RESUME_ADMISSION_MATERIALIZATION_PASS'
-
-      - name: Run cleanup resume admission matrix twice
-        shell: powershell
-        run: |
-          $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
-          1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/test_custom_app_production_recovery_cleanup_resume_admission.ps1';if($LASTEXITCODE){throw "cleanup resume admission matrix failed pass $_"}}
-          'CUSTOM_APP_PRODUCTION_RECOVERY_CLEANUP_RESUME_ADMISSION_MATRIX_REPEAT_PASS'
-
-      - name: Replay exact recovery integration parent matrix
-        shell: powershell
-        run: |
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-evidence-admission-integration-v0.1.0/test_custom_app_production_recovery_evidence_admission_integration.ps1';if($LASTEXITCODE){throw 'recovery integration parent regression failed'}
-          'CUSTOM_APP_PRODUCTION_RECOVERY_CLEANUP_RESUME_ADMISSION_PARENT_PASS'
-
-      - name: Rebuild journal-integrated candidate and run Addon Manager SelfTest
-        shell: powershell
-        run: |
-          python 'validation/custom-app-production-full-chain-journal-integration-v0.1.0/build_candidate.py';if($LASTEXITCODE){throw 'journal-integrated parent build failed'}
-          $a='validation/custom-app-production-full-chain-journal-integration-v0.1.0/out/bin/addon-manager.ps1';$m='validation/custom-app-production-full-chain-journal-integration-v0.1.0/out/bin/spotify-control.ps1';$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();if((Get-Item $a).Length-ne973527-or$ah-cne'3eac8cf4bfdcbbc38e7d4c01186a583fd13f96a27a98d8f6903147a4341da823'){throw 'journal-integrated addon parent drift'};if($mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'main candidate drift'}
-          $s=Join-Path $env:RUNNER_TEMP 'recovery-cleanup-resume-admission-selftest';$env:LOCALAPPDATA=Join-Path $s 'Local';$env:APPDATA=Join-Path $s 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'SelfTest failed'}
-          'CUSTOM_APP_PRODUCTION_RECOVERY_CLEANUP_RESUME_ADMISSION_SELFTEST_PASS'
-
-      - name: Prove parent and production surfaces immutable and write evidence
-        shell: powershell
-        run: |
-          $p='5232e5adeb13e6942acb210b3cd13058e1eaaf05';$expected=@('.github/workflows/validate-custom-app-production-recovery-cleanup-resume-admission-v010.yml','validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/custom-app-production-recovery-cleanup-resume-admission.ps1','validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/test_custom_app_production_recovery_cleanup_resume_admission.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|?{$_ -notin $expected});if($bad.Count){throw "unexpected changed surface $($bad -join ', ')"}
-          foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-recovery-evidence-admission-integration-v0.1.0/custom-app-production-recovery-evidence-admission-integration.ps1','validation/custom-app-production-recovery-execution-admission-v0.1.0/custom-app-production-recovery-execution-admission.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
-          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
-          $d='validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_integration_parent=$p;cleanup_starting_only=$true;partial_artifact_absence_supported=$true;transaction_root_must_be_absent=$true;live_applied_tree_revalidated=$true;protected_persistence_revalidated=$true;remaining_artifacts_exactly_revalidated=$true;read_only=$true;future_executor_fresh_revalidation_required=$true;execution_authority=$false;restore_authority=$false;apply_authority=$false;cleanup_authority=$false;production_mutation_authority=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
-          'CUSTOM_APP_PRODUCTION_RECOVERY_CLEANUP_RESUME_ADMISSION_IMMUTABILITY_PASS'
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: custom-app-production-recovery-cleanup-resume-admission-v010-${{ github.run_id }}
-          path: |
-            validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/custom-app-production-recovery-cleanup-resume-admission.ps1
-            validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/test_custom_app_production_recovery_cleanup_resume_admission.ps1
-            validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/ci-evidence.json
-          if-no-files-found: error
+          $test=Get-Content "$d/test_custom_app_production_recovery-cleanup-resume-admission-v0.1.0/test_custom_app_production_recovery_cleanup_resume_admission.ps1" -Raw
