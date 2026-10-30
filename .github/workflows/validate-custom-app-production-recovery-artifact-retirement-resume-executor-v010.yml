@@ -30,7 +30,7 @@ jobs:
           $pins=@(
             @($h,'validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/custom-app-production-recovery-artifact-retirement-resume-executor.ps1','2acd062e04ec125e8f44edf31def175a4eb73510'),
             @($h,'validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/probe_custom_app_production_recovery_artifact_retirement_resume_executor.ps1','9ceba2fdccf2b6b1578a946e973d1e5ff5d6d451'),
-            @($h,'validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/test_custom_app_production_recovery_artifact_retirement_resume_executor.ps1','d9a6409881832f511a517d101f499183435134a2'),
+            @($h,'validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/test_custom_app_production_recovery_artifact_retirement_resume_executor.ps1','0e1f0f940ce467171cc54e6d0f00df08b55a3592'),
             @($p,'validation/custom-app-production-recovery-completion-retirement-admission-integration-v0.1.0/custom-app-production-recovery-completion-retirement-admission-integration.ps1','92f2b13f49b0ef6bb6ded173e4e992f53bfdf7b1'),
             @($p,'validation/custom-app-production-recovery-completion-retirement-admission-integration-v0.1.0/probe_custom_app_production_recovery_completion_retirement_admission_integration.ps1','5f6bec042d33c31535e3d7c8a299cabef5128a3f'),
             @($p,'validation/custom-app-production-recovery-completion-retirement-admission-integration-v0.1.0/test_custom_app_production_recovery_completion_retirement_admission_integration.ps1','40c3096137ac5b11a09b80f74c6282d0912c8dd4'),
