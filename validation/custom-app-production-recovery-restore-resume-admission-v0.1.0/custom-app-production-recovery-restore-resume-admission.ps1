@@ -363,7 +363,7 @@ function Test-CustomAppProductionRecoveryRestoreResumeAdmissionReceiptV010 {
             return [pscustomobject]@{ok=$false;reason='restore-resume-receipt-pre-apply-mapping-invalid'}
         }
     } else {
-        if([string]$Receipt.classification -cne 'rollback-and-recovery-apply-required' -or -not [bool]$Receipt.requires_recovery_apply -or -not (Test-CustomAppProductionRecoveryRestoreResumeAdmissionSha256V010 ([string]$Receipt.spicetify_executable_sha256)){
+        if([string]$Receipt.classification -cne 'rollback-and-recovery-apply-required' -or -not [bool]$Receipt.requires_recovery_apply -or -not (Test-CustomAppProductionRecoveryRestoreResumeAdmissionSha256V010 ([string]$Receipt.spicetify_executable_sha256))){
             return [pscustomobject]@{ok=$false;reason='restore-resume-receipt-apply-mapping-invalid'}
         }
     }
