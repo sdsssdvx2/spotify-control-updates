@@ -4,6 +4,9 @@ on:
   push:
     branches: [validate/custom-app-production-recovery-completion-evidence-v0.1.0]
     paths: ['validation/custom-app-production-recovery-completion-evidence-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-completion-evidence-v011.yml']
+  pull_request:
+    branches: [validate/custom-app-production-recovery-restore-executor-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-completion-evidence-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-completion-evidence-v011.yml']
   workflow_dispatch:
 permissions: {contents: read}
 
@@ -15,12 +18,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.sha }}
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
 
       - name: Prove exact scope lineage pins frozen production and test-only reason fix
         shell: powershell
         run: |
-          $h=(git rev-parse HEAD).Trim();if($h-cne'${{ github.sha }}'){throw 'head mismatch'}
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h-cne$e){throw "head mismatch $h != $e"}
           $p='c3e1f960447ba84d2410af9c37a22a384f2a5436';if((git merge-base $p HEAD).Trim()-cne$p){throw 'lineage mismatch'}
           if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
           $allowed=@('.github/workflows/validate-custom-app-production-recovery-completion-evidence-v010.yml','.github/workflows/validate-custom-app-production-recovery-completion-evidence-v011.yml','validation/custom-app-production-recovery-completion-evidence-v0.1.0/custom-app-production-recovery-completion-evidence.ps1','validation/custom-app-production-recovery-completion-evidence-v0.1.0/test_custom_app_production_recovery_completion_evidence.ps1','validation/custom-app-production-recovery-completion-evidence-v0.1.0/test_custom_app_production_recovery_completion_evidence_v011.ps1','validation/custom-app-production-recovery-completion-evidence-v0.1.0/probe_custom_app_production_recovery_completion_evidence.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|?{$_-notin$allowed});if($bad.Count){throw "scope escaped: $($bad-join', ')"};foreach($x in $allowed){if($x-notin$changed){throw "missing $x"}}
