@@ -2,8 +2,22 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
-# Exact validated completion harness establishes the full rollback-complete fixture chain.
-. (Join-Path $root 'validation/custom-app-production-recovery-completion-evidence-v0.1.0/test_custom_app_production_recovery_completion_evidence.ps1')
+# Load the exact validated completion harness with the v0.1.1 test-only reason-contract correction.
+$ceSource=Join-Path $root 'validation/custom-app-production-recovery-completion-evidence-v0.1.0/test_custom_app_production_recovery_completion_evidence.ps1'
+$ceText=[IO.File]::ReadAllText($ceSource,[Text.UTF8Encoding]::new($false))
+$ceOld="Assert-CETrue ([string]`$r.reason -like 'recovery-completion-evidence-journal-*') ('journal corruption reason drifted: '+[string]`$r.reason)"
+$ceNew="Assert-CETrue ([string]`$r.reason -like 'recovery-completion-evidence-read-failed:*journal JSON invalid*') ('journal corruption reason drifted: '+[string]`$r.reason)"
+$ceFirst=$ceText.IndexOf($ceOld,[StringComparison]::Ordinal)
+if($ceFirst-lt0){throw 'completion v011 expected journal assertion not found'}
+if($ceText.IndexOf($ceOld,$ceFirst+$ceOld.Length,[StringComparison]::Ordinal)-ge0){throw 'completion v011 journal assertion replacement not unique'}
+$cePatched=$ceText.Replace($ceOld,$ceNew)
+$ceTemp=Join-Path (Split-Path $ceSource -Parent) ('test_custom_app_production_recovery_completion_evidence_bridge_generated_'+[Guid]::NewGuid().ToString('N')+'.ps1')
+try{
+    [IO.File]::WriteAllText($ceTemp,$cePatched,[Text.UTF8Encoding]::new($false))
+    . $ceTemp
+}finally{
+    if(Test-Path -LiteralPath $ceTemp){[IO.File]::Delete($ceTemp)}
+}
 . (Join-Path $root 'validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1')
 . (Join-Path $root 'validation/custom-app-production-recovery-artifact-retirement-admission-v0.1.0/custom-app-production-recovery-artifact-retirement-admission.ps1')
 . (Join-Path $root 'validation/custom-app-production-recovery-artifact-retirement-executor-v0.1.0/custom-app-production-recovery-artifact-retirement-executor.ps1')
