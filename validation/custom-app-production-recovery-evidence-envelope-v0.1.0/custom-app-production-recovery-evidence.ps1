@@ -39,7 +39,9 @@ function Test-CustomAppProductionRecoveryEvidencePreparedAnchorV010 {
         if($p[0]-like'*_path'){
             try{$a=[IO.Path]::GetFullPath([string]$PreparedResult.($p[0])).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar);$b=[IO.Path]::GetFullPath([string]$p[1]).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)}catch{return [pscustomobject]@{ok=$false;reason=('prepared-journal-path-invalid-'+$p[0])}}
             if(-not$a.Equals($b,[StringComparison]::OrdinalIgnoreCase)){return [pscustomobject]@{ok=$false;reason=('prepared-journal-mismatch-'+$p[0])}}
-        } elseif(([string]$PreparedResult.($p[0])).Trim().ToLowerInvariant()-cne([string]$p[1]).Trim().ToLowerInvariant()){return [pscustomobject]@{ok=$false;reason=('prepared-journal-mismatch-'+$p[0])}}
+            continue
+        }
+        if(([string]$PreparedResult.($p[0])).Trim().ToLowerInvariant()-cne([string]$p[1]).Trim().ToLowerInvariant()){return [pscustomobject]@{ok=$false;reason=('prepared-journal-mismatch-'+$p[0])}}
     }
     return [pscustomobject]@{ok=$true;reason='prepared-result-anchored-to-durable-journal';prepared_material_sha256=$materialSha}
 }
@@ -92,8 +94,11 @@ function Test-CustomAppProductionRecoveryEvidenceEnvelopeV010 {
         if($f -ceq 'app_backup_path'){$journalValue=[string]$JournalEntry.app_backup_path}
         if($f -ceq 'persistence_backup_path'){$journalValue=[string]$JournalEntry.persistence_backup_path}
         if($f-like'*_path'){
-            try{$a=[IO.Path]::GetFullPath([string]$Envelope.$f).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar);$b=[IO.Path]::GetFullPath($journalValue).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)}catch{return[pscustomobject]@{ok=$false;reason=('recovery-evidence-journal-path-invalid-'+$f)}};if(-not$a.Equals($b,[StringComparison]::OrdinalIgnoreCase)){return[pscustomobject]@{ok=$false;reason=('recovery-evidence-journal-mismatch-'+$f)}}
-        }elseif(([string]$Envelope.$f).Trim().ToLowerInvariant()-cne$journalValue.Trim().ToLowerInvariant()){return[pscustomobject]@{ok=$false;reason=('recovery-evidence-journal-mismatch-'+$f)}}
+            try{$a=[IO.Path]::GetFullPath([string]$Envelope.$f).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar);$b=[IO.Path]::GetFullPath($journalValue).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)}catch{return[pscustomobject]@{ok=$false;reason=('recovery-evidence-journal-path-invalid-'+$f)}}
+            if(-not$a.Equals($b,[StringComparison]::OrdinalIgnoreCase)){return[pscustomobject]@{ok=$false;reason=('recovery-evidence-journal-mismatch-'+$f)}}
+            continue
+        }
+        if(([string]$Envelope.$f).Trim().ToLowerInvariant()-cne$journalValue.Trim().ToLowerInvariant()){return[pscustomobject]@{ok=$false;reason=('recovery-evidence-journal-mismatch-'+$f)}}
     }
     if(([string]$Envelope.prepared_result_material_sha256).Trim().ToLowerInvariant()-cne([string]$anchor.prepared_material_sha256){return[pscustomobject]@{ok=$false;reason='recovery-evidence-prepared-material-sha-mismatch'}}
     foreach($f in @('app_backup_tree_sha256','persistence_fingerprint','stage_tree_sha256','live_tree_sha256')){if(([string]$Envelope.$f).Trim().ToLowerInvariant()-cne([string]$Envelope.prepared_result.$f).Trim().ToLowerInvariant()){return[pscustomobject]@{ok=$false;reason=('recovery-evidence-prepared-mismatch-'+$f)}}}
