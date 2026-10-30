@@ -1,0 +1,128 @@
+name: Validate Custom App Production Full-Chain Journal Integration v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-full-chain-journal-integration-v0.1.0]
+    paths: ['validation/custom-app-production-full-chain-journal-integration-v0.1.0/**','.github/workflows/validate-custom-app-production-full-chain-journal-integration-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-full-chain-integration-v0.1.0]
+    paths: ['validation/custom-app-production-full-chain-journal-integration-v0.1.0/**','.github/workflows/validate-custom-app-production-full-chain-journal-integration-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope lineage and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h -cne $e){throw "head mismatch $h != $e"}
+          $p='9ef429542774ddaf0bd0a6d03d81acebb487a62c';if((git merge-base $p HEAD).Trim() -cne $p){throw 'not descended from exact validated hard-disabled full-chain head'}
+          $allowed=@('.github/workflows/validate-custom-app-production-full-chain-journal-integration-v010.yml','validation/custom-app-production-full-chain-journal-integration-v0.1.0/build_candidate.py');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|?{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x -notin $changed){throw "missing $x"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          'CUSTOM_APP_PRODUCTION_FULL_CHAIN_JOURNAL_INTEGRATION_SCOPE_PASS'
+
+      - name: Prove exact integration and journal pins
+        shell: powershell
+        run: |
+          $builder='validation/custom-app-production-full-chain-journal-integration-v0.1.0/build_candidate.py';$b=(git hash-object $builder).Trim();if($b -cne '4fc3599a0a886089526f14ad0b0a044c78068e5a'){throw "journal integration builder drift $b"}
+          if((git rev-parse '9ef429542774ddaf0bd0a6d03d81acebb487a62c:validation/custom-app-production-full-chain-integration-v0.1.0/build_candidate_v011.py').Trim() -cne 'bd2f2073837f570fe9d142480f1713f39a36f0a6'){throw 'full-chain parent builder pin drift'}
+          if((git rev-parse '7e26187e2360089024e9d72d0701be6f1577a1ef:validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1').Trim() -cne 'a3df7e5d89c594083c10e240e13029ca5640b8ae'){throw 'journal core pin drift'}
+          if((git rev-parse '7e26187e2360089024e9d72d0701be6f1577a1ef:validation/custom-app-production-crash-recovery-journal-v0.1.0/test_custom_app_production_crash_recovery_journal.ps1').Trim() -cne '6ff49f21d30511e4eb99300debb0bd0696f74204'){throw 'journal test pin drift'}
+          if((git rev-parse '7e26187e2360089024e9d72d0701be6f1577a1ef:validation/custom-app-production-crash-recovery-journal-v0.1.0/probe_custom_app_production_crash_recovery_journal.ps1').Trim() -cne '95db3e56a3a301f334710b96d391d35a32a969c9'){throw 'journal restart probe pin drift'}
+          python -m py_compile $builder;if($LASTEXITCODE){throw 'journal integration builder compile failed'}
+          'CUSTOM_APP_PRODUCTION_FULL_CHAIN_JOURNAL_INTEGRATION_PINS_PASS'
+
+      - name: Build journal-integrated candidate twice and prove determinism
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-full-chain-journal-integration-v0.1.0';$builder=Join-Path $d 'build_candidate.py';python $builder;if($LASTEXITCODE){throw 'first journal-integrated build failed'}
+          $a=Join-Path $d 'out/bin/addon-manager.ps1';$m=Join-Path $d 'out/bin/spotify-control.ps1';$c=Join-Path $d 'out/bin/Collect-Marketplace-Records.ps1';$r=Join-Path $d 'out/bin/LevelDbReadOnly.cs';$report=Join-Path $d 'candidate-validation.json'
+          $first=[ordered]@{addon=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();main=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();collector=(Get-FileHash $c -Algorithm SHA256).Hash.ToLowerInvariant();reader=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();report=(Get-FileHash $report -Algorithm SHA256).Hash.ToLowerInvariant();addon_size=(Get-Item $a).Length}
+          python $builder;if($LASTEXITCODE){throw 'second journal-integrated build failed'}
+          $second=[ordered]@{addon=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();main=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();collector=(Get-FileHash $c -Algorithm SHA256).Hash.ToLowerInvariant();reader=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();report=(Get-FileHash $report -Algorithm SHA256).Hash.ToLowerInvariant();addon_size=(Get-Item $a).Length}
+          foreach($k in $first.Keys){if([string]$first[$k] -cne [string]$second[$k]){throw "non-deterministic $k $($first[$k]) != $($second[$k])"}}
+          if($second.main -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control bytes changed'}
+          $json=Get-Content $report -Raw|ConvertFrom-Json;if([bool]$json.pipeline_enabled -or [bool]$json.pipeline_enablement_implemented -or [bool]$json.generic_auto_authority_expanded){throw 'journal integration safety contract drift'}
+          if(@($json.journal_collisions).Count -ne 0 -or @($json.normal_path_leaks).Count -ne 0){throw 'journal integration collision/leak detected'}
+          "CUSTOM_APP_PRODUCTION_FULL_CHAIN_JOURNAL_INTEGRATION_DETERMINISTIC_PASS addon_size=$($second.addon_size) addon_sha=$($second.addon) journal_functions=$($json.journal_function_count)"
+
+      - name: Parse candidate and audit hard-disabled zero-authority coexistence
+        shell: powershell
+        run: |
+          $a='validation/custom-app-production-full-chain-journal-integration-v0.1.0/out/bin/addon-manager.ps1';$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $a),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|%{Write-Error ("candidate line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw 'journal-integrated candidate PS5.1 parse failed'}
+          $text=Get-Content $a -Raw
+          foreach($m in @('$script:CustomAppProductionPipelineEnabled = $false','Custom App production full-chain execution is intentionally unavailable in integration-only candidate.','CUSTOM_APP_PRODUCTION_CRASH_JOURNAL_INTEGRATED_SELFTEST_V010_PASS','journal_is_authority=$false','production_execution_authorized=$false','production_mutation_authorized=$false','requires_journal_phase_before_side_effect=$true')){if($text.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "candidate marker missing $m"}}
+          $orch=[regex]::Match($text,'(?ms)^function Invoke-CustomAppProductionFullChainV010 \{.*?(?=^function )').Value;if([string]::IsNullOrWhiteSpace($orch)){throw 'hard-disabled orchestrator missing'}
+          foreach($m in @('CrashJournal','Initialize-CustomAppProductionCrashJournalV010','Append-CustomAppProductionCrashJournalPhaseV010','Read-CustomAppProductionCrashJournalV010')){if($orch.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-ge 0){throw "hard-disabled orchestrator gained journal dependency $m"}}
+          foreach($x in @('[IO.Directory]::Move','[IO.Directory]::Delete','Move-Item','Copy-Item','Remove-Item','Invoke-WebRequest','Invoke-RestMethod','Start-Process','ProcessStartInfo','spicetify apply','spicetify config','spicetify restore','Restore-CustomAppProductionAtomicLiveSwapV010','Invoke-CustomAppProductionExactSpicetifyApplyProcessV010')){$journal=[regex]::Match($text,'(?ms)^\$CustomAppProductionCrashRecoveryJournalSchema = 1.*?(?=^function Invoke-CustomAppProductionCrashJournalIntegratedSelfTestV010)').Value;if($journal.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge 0){throw "integrated journal gained forbidden primitive $x"}}
+          'CUSTOM_APP_PRODUCTION_FULL_CHAIN_JOURNAL_INTEGRATION_PARSE_AUDIT_PASS'
+
+      - name: Run full journal-integrated Addon Manager SelfTest
+        shell: powershell
+        run: |
+          $a='validation/custom-app-production-full-chain-journal-integration-v0.1.0/out/bin/addon-manager.ps1';$s=Join-Path $env:RUNNER_TEMP 'full-chain-journal-integration-selftest';$env:LOCALAPPDATA=Join-Path $s 'Local';$env:APPDATA=Join-Path $s 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'journal-integrated Addon Manager SelfTest failed'}
+          'CUSTOM_APP_PRODUCTION_FULL_CHAIN_JOURNAL_INTEGRATION_SELFTEST_PASS'
+
+      - name: Materialize exact crash journal acceptance suite
+        shell: powershell
+        run: |
+          $dir='validation/custom-app-production-crash-recovery-journal-v0.1.0';New-Item -ItemType Directory -Force -Path $dir|Out-Null
+          $deps=@(
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef',"$dir/custom-app-production-crash-recovery-journal.ps1",'a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef',"$dir/test_custom_app_production_crash_recovery_journal.ps1",'6ff49f21d30511e4eb99300debb0bd0696f74204'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef',"$dir/probe_custom_app_production_crash_recovery_journal.ps1",'95db3e56a3a301f334710b96d391d35a32a969c9'))
+          foreach($d in $deps){$path=$d[1];$env:JGI_SPEC="$($d[0])`:$path";$env:JGI_OUT=$path;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['JGI_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['JGI_SPEC']]))";if($LASTEXITCODE){throw "materialize failed $path"};$actual=(git hash-object $path).Trim();if($actual -cne $d[2]){throw "materialized blob drift $path $actual != $($d[2])"}}
+          $src=Join-Path $dir 'test_custom_app_production_crash_recovery_journal.ps1';$runtime=Join-Path $dir 'test_custom_app_production_crash_recovery_journal.runtime.ps1';$text=Get-Content -LiteralPath $src -Raw;$needle='[AllowNull()][DateTimeOffset]$At=$null';if(([regex]::Matches($text,[regex]::Escape($needle))).Count -ne 1){throw 'nullable-time patch marker drifted'};[IO.File]::WriteAllText($runtime,$text.Replace($needle,'[AllowNull()]$At=$null'),[Text.UTF8Encoding]::new($false))
+          'CUSTOM_APP_PRODUCTION_FULL_CHAIN_JOURNAL_INTEGRATION_JOURNAL_MATERIALIZATION_PASS'
+
+      - name: Replay durable crash restart journal matrix twice
+        shell: powershell
+        run: |
+          1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-crash-recovery-journal-v0.1.0/test_custom_app_production_crash_recovery_journal.runtime.ps1';if($LASTEXITCODE){throw "integrated crash journal matrix failed pass $_"}}
+          'CUSTOM_APP_PRODUCTION_FULL_CHAIN_JOURNAL_INTEGRATION_JOURNAL_MATRIX_REPEAT_PASS'
+
+      - name: Materialize exact sibling dependencies for cleanup regression
+        shell: powershell
+        run: |
+          $deps=@(
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'))
+          foreach($d in $deps){$path=$d[1];New-Item -ItemType Directory -Force -Path (Split-Path $path -Parent)|Out-Null;$env:JGI_SPEC="$($d[0])`:$path";$env:JGI_OUT=$path;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['JGI_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['JGI_SPEC']]))";if($LASTEXITCODE){throw "materialize failed $path"};$actual=(git hash-object $path).Trim();if($actual -cne $d[2]){throw "materialized blob drift $path $actual != $($d[2])"}}
+          'CUSTOM_APP_PRODUCTION_FULL_CHAIN_JOURNAL_INTEGRATION_CLEANUP_DEPS_PASS'
+
+      - name: Replay latest receipt hardened cleanup chain once
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-post-apply-commit-cleanup-v0.1.0';$src=Join-Path $d 'test_custom_app_production_post_apply_commit_cleanup.ps1';$runtime=Join-Path $d 'test_custom_app_production_post_apply_commit_cleanup.runtime.ps1';$text=Get-Content -LiteralPath $src -Raw;$needle=". (Join-Path `$PSScriptRoot 'custom-app-production-post-apply-commit-cleanup.ps1')";$replacement=$needle+"`r`n. (Join-Path `$PSScriptRoot 'custom-app-production-post-apply-commit-cleanup-finalization-receipt-v011.ps1')";if(([regex]::Matches($text,[regex]::Escape($needle))).Count -ne 1){throw 'cleanup source marker drift'};[IO.File]::WriteAllText($runtime,$text.Replace($needle,$replacement),[Text.UTF8Encoding]::new($false));& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runtime;if($LASTEXITCODE){throw 'latest cleanup chain regression failed'}
+          'CUSTOM_APP_PRODUCTION_FULL_CHAIN_JOURNAL_INTEGRATION_CLEANUP_PARENT_PASS'
+
+      - name: Prove production and both validated parents immutable
+        shell: powershell
+        run: |
+          $p='9ef429542774ddaf0bd0a6d03d81acebb487a62c';$expected=@('.github/workflows/validate-custom-app-production-full-chain-journal-integration-v010.yml','validation/custom-app-production-full-chain-journal-integration-v0.1.0/build_candidate.py');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|?{$_ -notin $expected});if($bad.Count){throw "unexpected changed surface $($bad -join ', ')"}
+          foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-full-chain-integration-v0.1.0/build_candidate.py','validation/custom-app-production-full-chain-integration-v0.1.0/build_candidate_v011.py','validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $d='validation/custom-app-production-full-chain-journal-integration-v0.1.0';$report=Get-Content (Join-Path $d 'candidate-validation.json') -Raw|ConvertFrom-Json;[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_full_chain_parent=$p;validated_crash_journal='7e26187e2360089024e9d72d0701be6f1577a1ef';journal_function_count=[int]$report.journal_function_count;journal_collision_count=@($report.journal_collisions).Count;normal_path_leak_count=@($report.normal_path_leaks).Count;pipeline_enabled=$false;pipeline_enablement_implemented=$false;journal_is_authority=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content (Join-Path $d 'ci-evidence.json') -Encoding UTF8
+          'CUSTOM_APP_PRODUCTION_FULL_CHAIN_JOURNAL_INTEGRATION_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-full-chain-journal-integration-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-full-chain-journal-integration-v0.1.0/build_candidate.py
+            validation/custom-app-production-full-chain-journal-integration-v0.1.0/candidate-validation.json
+            validation/custom-app-production-full-chain-journal-integration-v0.1.0/ci-evidence.json
+            validation/custom-app-production-full-chain-journal-integration-v0.1.0/out/bin/addon-manager.ps1
+            validation/custom-app-production-full-chain-journal-integration-v0.1.0/out/bin/spotify-control.ps1
+            validation/custom-app-production-full-chain-journal-integration-v0.1.0/out/bin/Collect-Marketplace-Records.ps1
+            validation/custom-app-production-full-chain-journal-integration-v0.1.0/out/bin/LevelDbReadOnly.cs
+          if-no-files-found: error
