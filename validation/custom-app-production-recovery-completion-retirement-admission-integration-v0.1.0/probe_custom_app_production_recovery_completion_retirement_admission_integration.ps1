@@ -29,6 +29,7 @@ $load=@(
     'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1',
     'validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1',
     'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1',
+    'validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1',
     'validation/custom-app-production-stage-executor-v0.1.0/custom-app-production-stage-executor.ps1',
     'validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1',
     'validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1',
