@@ -128,7 +128,7 @@ function Write-CustomAppProductionRecoveryEvidenceV010 {
         try{$read=Read-CustomAppProductionCrashJournalUnlockedV010 -Paths $paths}catch{return & $deny('recovery-evidence-journal-read-denied:'+[string]$_.Exception.Message)}
         if(-not[bool]$read.ok){return & $deny('recovery-evidence-journal-not-ready:'+[string]$read.reason)}
         if([int64]$read.revision-ne0-or[string]$read.entry.phase-cne'prepared'){return & $deny('recovery-evidence-must-be-created-at-prepared-revision-zero')}
-        $path=Get-CustomAppProductionRecoveryEvidencePathV010 -JournalPaths $paths;if(Test-Path -LiteralPath $path){return & $deny'recovery-evidence-already-exists-replay-denied'}
+        $path=Get-CustomAppProductionRecoveryEvidencePathV010 -JournalPaths $paths;if(Test-Path -LiteralPath $path){return & $deny 'recovery-evidence-already-exists-replay-denied'}
         try{$envelope=New-CustomAppProductionRecoveryEvidenceEnvelopeV010 -PreparedResult $PreparedResult -JournalEntry $read.entry -Now $Now}catch{return & $deny([string]$_.Exception.Message)}
         $check=Test-CustomAppProductionRecoveryEvidenceEnvelopeV010 -Envelope $envelope -JournalEntry $read.entry -AllowedRoot $AllowedRoot;if(-not[bool]$check.ok){return & $deny('recovery-evidence-prewrite-invalid:'+[string]$check.reason)}
         $json=$envelope|ConvertTo-Json -Depth 40 -Compress;try{Write-CustomAppProductionCrashJournalDurableFileV010 -Path $path -Text $json -Mode ([IO.FileMode]::CreateNew)}catch{return & $deny('recovery-evidence-durable-write-failed:'+[string]$_.Exception.Message)}
@@ -141,14 +141,14 @@ function Write-CustomAppProductionRecoveryEvidenceV010 {
 function Read-CustomAppProductionRecoveryEvidenceV010 {
     param([Parameter(Mandatory=$true)][string]$AllowedRoot,[Parameter(Mandatory=$true)][string]$StoreDirectory,[Parameter(Mandatory=$true)][string]$ExpectedTransactionId)
     $deny={param([string]$Reason)[pscustomobject]@{ok=$false;reason=$Reason;reloaded_from_persistent_store=$false;evidence_is_authority=$false;execution_authorized=$false;restore_authorized=$false;apply_authorized=$false;cleanup_authorized=$false;production_mutation_authorized=$false}}
-    if(-not(Test-CustomAppProductionRecoveryEvidenceSha256V010 $ExpectedTransactionId)){return & $deny'recovery-evidence-expected-transaction-invalid'}
+    if(-not(Test-CustomAppProductionRecoveryEvidenceSha256V010 $ExpectedTransactionId)){return & $deny 'recovery-evidence-expected-transaction-invalid'}
     try{$paths=Get-CustomAppProductionCrashJournalPathsV010 -AllowedRoot $AllowedRoot -StoreDirectory $StoreDirectory}catch{return & $deny('recovery-evidence-store-path-denied:'+[string]$_.Exception.Message)};$lock=$null
     try{
         try{$lock=Open-CustomAppProductionCrashJournalLockV010 $paths}catch{return & $deny([string]$_.Exception.Message)}
         try{$read=Read-CustomAppProductionCrashJournalUnlockedV010 -Paths $paths}catch{return & $deny('recovery-evidence-journal-read-denied:'+[string]$_.Exception.Message)}
         if(-not[bool]$read.ok){return & $deny('recovery-evidence-journal-not-ready:'+[string]$read.reason)}
-        if(([string]$read.transaction_id).Trim().ToLowerInvariant()-cne$ExpectedTransactionId.Trim().ToLowerInvariant()){return & $deny'recovery-evidence-transaction-mismatch'}
-        $path=Get-CustomAppProductionRecoveryEvidencePathV010 -JournalPaths $paths;if(-not(Test-Path -LiteralPath $path -PathType Leaf)){return & $deny'recovery-evidence-file-missing'}
+        if(([string]$read.transaction_id).Trim().ToLowerInvariant()-cne$ExpectedTransactionId.Trim().ToLowerInvariant()){return & $deny 'recovery-evidence-transaction-mismatch'}
+        $path=Get-CustomAppProductionRecoveryEvidencePathV010 -JournalPaths $paths;if(-not(Test-Path -LiteralPath $path -PathType Leaf)){return & $deny 'recovery-evidence-file-missing'}
         try{$e=ConvertFrom-CustomAppProductionRecoveryEvidenceFileV010 -Path $path}catch{return & $deny([string]$_.Exception.Message)}
         $check=Test-CustomAppProductionRecoveryEvidenceEnvelopeV010 -Envelope $e -JournalEntry $read.entry -AllowedRoot $AllowedRoot;if(-not[bool]$check.ok){return & $deny('recovery-evidence-invalid:'+[string]$check.reason)}
         return [pscustomobject]@{ok=$true;reason='recovery-evidence-reloaded-journal-anchored-zero-authority';reloaded_from_persistent_store=$true;path=$path;transaction_id=[string]$check.transaction_id;preparation_fingerprint=[string]$check.preparation_fingerprint;evidence_fingerprint=[string]$check.evidence_fingerprint;envelope=$e;journal_phase=[string]$read.entry.phase;journal_revision=[int64]$read.revision;evidence_is_authority=$false;execution_authorized=$false;restore_authorized=$false;apply_authorized=$false;cleanup_authorized=$false;production_mutation_authorized=$false}
