@@ -1,0 +1,65 @@
+$ErrorActionPreference='Stop'
+Set-StrictMode -Version 2.0
+$root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+
+# Exact validated completion harness establishes the full rollback-complete fixture chain.
+. (Join-Path $root 'validation/custom-app-production-recovery-completion-evidence-v0.1.0/test_custom_app_production_recovery_completion_evidence.ps1')
+. (Join-Path $root 'validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1')
+. (Join-Path $root 'validation/custom-app-production-recovery-artifact-retirement-admission-v0.1.0/custom-app-production-recovery-artifact-retirement-admission.ps1')
+. (Join-Path $root 'validation/custom-app-production-recovery-artifact-retirement-executor-v0.1.0/custom-app-production-recovery-artifact-retirement-executor.ps1')
+. (Join-Path $PSScriptRoot 'custom-app-production-recovery-completion-retirement-admission-integration.ps1')
+
+function Assert-CRTrue([bool]$v,[string]$m){if(-not$v){throw $m}}
+function Assert-CRFalse([bool]$v,[string]$m){if($v){throw $m}}
+function Assert-CREq($a,$b,[string]$m){if([string]$a-cne[string]$b){throw "$m actual=<$a> expected=<$b>"}}
+function Copy-CR($x){return (($x|ConvertTo-Json -Depth 80)|ConvertFrom-Json)}
+function Assert-CRZeroAuthority($R,[string]$Label){$x=if($R.PSObject.Properties['receipt']){$R.receipt}else{$R};foreach($f in @('integration_is_authority','execution_authorized','restore_authorized','apply_authorized','cleanup_authorized','production_mutation_authorized')){Assert-CRFalse ([bool]$x.$f) "$Label authority escaped $f"}}
+
+function New-CRFixtureV010 {
+    param([Parameter(Mandatory=$true)][string]$Label,[string]$Name='tagify',[string]$Source='alexk218/tagify',[string]$Manifest='Tagify',[string]$Nonce=('4'*32),[bool]$WriteCompletion=$true)
+    $ce=New-CECompletedFixtureV010 -Label ('bridge-'+$Label) -Phase 'live-moved-to-old' -State 'live-moved-before-candidate' -Name $Name -Source $Source -Manifest $Manifest -Nonce $Nonce
+    $write=$null
+    if($WriteCompletion){$write=Invoke-CEWriteV010 -F $ce -At ([DateTimeOffset]::UtcNow);if(-not[bool]$write.ok){throw ('bridge completion write failed: '+[string]$write.reason)}}
+    return [pscustomobject]@{ce=$ce;write=$write}
+}
+function Invoke-CRBridgeV010 {
+    param([Parameter(Mandatory=$true)]$F,[AllowNull()][string]$Tx=$null,[DateTimeOffset]$At=[DateTimeOffset]::UtcNow)
+    if([string]::IsNullOrWhiteSpace($Tx)){$Tx=[string]$F.ce.q.f.f.identity.transaction_id}
+    return Resolve-CustomAppProductionRecoveryCompletionRetirementAdmissionIntegrationV010 -AllowedRoot $F.ce.q.f.f.allowed -StoreDirectory $F.ce.q.f.f.store -ExpectedTransactionId $Tx -LocalAppDataRoot $F.ce.q.f.f.q.persistence.local -AppDataRoot $F.ce.q.f.f.q.persistence.roaming -Now $At
+}
+function Invoke-CRProbeV010 {
+    param([Parameter(Mandatory=$true)]$F)
+    $probe=Join-Path $PSScriptRoot 'probe_custom_app_production_recovery_completion_retirement_admission_integration.ps1'
+    $raw=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probe -AllowedRoot $F.ce.q.f.f.allowed -StoreDirectory $F.ce.q.f.f.store -ExpectedTransactionId $F.ce.q.f.f.identity.transaction_id -LocalAppDataRoot $F.ce.q.f.f.q.persistence.local -AppDataRoot $F.ce.q.f.f.q.persistence.roaming)
+    if($LASTEXITCODE){throw 'completion-retirement bridge separate-process probe failed'}
+    return (($raw|Select-Object -Last 1)|ConvertFrom-Json)
+}
+function Get-CRAdmissionV010($F){return Resolve-CustomAppProductionRecoveryArtifactRetirementAdmissionV010 -AllowedRoot $F.ce.q.f.f.allowed -StoreDirectory $F.ce.q.f.f.store -ExpectedTransactionId $F.ce.q.f.f.identity.transaction_id -RestoreExecutorResult $F.ce.executor -LocalAppDataRoot $F.ce.q.f.f.q.persistence.local -AppDataRoot $F.ce.q.f.f.q.persistence.roaming -Now ([DateTimeOffset]::UtcNow)}
+
+$count=0
+$valid=New-CRFixtureV010 -Label 'valid' -Nonce ('1'*32);$at=[DateTimeOffset]::UtcNow;$r=Invoke-CRBridgeV010 -F $valid -At $at;Assert-CRTrue ([bool]$r.ok) ('valid bridge denied: '+[string]$r.reason);Assert-CRZeroAuthority $r 'valid';$ck=Test-CustomAppProductionRecoveryCompletionRetirementAdmissionIntegrationReceiptV010 -Receipt $r.receipt -Now $at.AddSeconds(1);Assert-CRTrue ([bool]$ck.ok) ('valid bridge receipt invalid: '+[string]$ck.reason);Assert-CREq $r.receipt.completion_fingerprint $valid.write.completion_fingerprint 'completion fingerprint';Assert-CREq $r.receipt.executor_result_fingerprint $valid.ce.executor.result_fingerprint 'embedded executor fingerprint';Assert-CRTrue ([bool]$r.receipt.durable_completion_reloaded) 'durable reload flag missing';Assert-CRTrue ([bool]$r.receipt.embedded_restore_result_revalidated) 'embedded restore revalidation missing';Assert-CRTrue ([bool]$r.receipt.fresh_retirement_admission_revalidated) 'fresh retirement admission revalidation missing';Assert-CRTrue ([bool]$r.receipt.requires_new_update_permit) 'new update permit contract missing';$count++
+
+$probe=Invoke-CRProbeV010 $valid;Assert-CRTrue ([bool]$probe.ok) 'separate-process bridge probe denied';Assert-CRTrue ([bool]$probe.durable_completion_reloaded) 'separate-process bridge did not reload durable completion';Assert-CREq $probe.completion_fingerprint $valid.write.completion_fingerprint 'separate-process completion fingerprint';Assert-CREq $probe.executor_result_fingerprint $valid.ce.executor.result_fingerprint 'separate-process embedded restore fingerprint';foreach($f in @('integration_is_authority','execution_authorized','restore_authorized','apply_authorized','cleanup_authorized','production_mutation_authorized')){Assert-CRFalse ([bool]$probe.$f) "separate-process authority escaped $f"};$count++
+
+$future=New-CRFixtureV010 -Label 'future' -Name 'future-app' -Source 'owner/future-app' -Manifest 'Future App' -Nonce ('2'*32);$r=Invoke-CRBridgeV010 $future;Assert-CRTrue ([bool]$r.ok) ('future app bridge denied: '+[string]$r.reason);Assert-CREq $r.receipt.name 'future-app' 'future app identity';$count++
+
+$missing=New-CRFixtureV010 -Label 'missing-completion' -Nonce ('3'*32) -WriteCompletion:$false;$r=Invoke-CRBridgeV010 $missing;Assert-CRFalse ([bool]$r.ok) 'missing durable completion accepted';Assert-CRTrue ([string]$r.reason-like'recovery-completion-retirement-integration-completion-read-denied:*file-missing*') ('missing completion reason '+[string]$r.reason);$count++
+$r=Invoke-CRBridgeV010 -F $valid -Tx ('9'*64);Assert-CRFalse ([bool]$r.ok) 'wrong transaction accepted';Assert-CRTrue ([string]$r.reason-like'*completion-read-denied:*transaction-mismatch*' -or [string]$r.reason-like'*completion-read-denied:*journal-anchor-mismatch*') ('wrong transaction reason '+[string]$r.reason);$count++
+
+$liveDrift=New-CRFixtureV010 -Label 'live-drift' -Nonce ('4'*32);[IO.File]::AppendAllText((Join-Path $liveDrift.ce.q.f.f.q.x.live 'index.js'),"// bridge live drift`n",[Text.UTF8Encoding]::new($false));$r=Invoke-CRBridgeV010 $liveDrift;Assert-CRFalse ([bool]$r.ok) 'live drift after completion write accepted';Assert-CRTrue ([string]$r.reason-like'*fresh-admission-denied:*live-*') ('live drift reason '+[string]$r.reason);$count++
+
+$persistDrift=New-CRFixtureV010 -Label 'persistence-drift' -Nonce ('5'*32);[IO.File]::AppendAllText((Join-Path $persistDrift.ce.q.f.f.q.persistence.roaming 'spicetify\config-xpui.ini'),"# bridge persistence drift`n",[Text.UTF8Encoding]::new($false));$r=Invoke-CRBridgeV010 $persistDrift;Assert-CRFalse ([bool]$r.ok) 'protected persistence drift after completion write accepted';Assert-CRTrue ([string]$r.reason-like'*fresh-admission-denied:*persistence*') ('persistence drift reason '+[string]$r.reason);$count++
+
+$lockCase=New-CRFixtureV010 -Label 'lock' -Nonce ('6'*32);$held=Open-CustomAppProductionRecoveryCompletionEvidenceLockV010 -AllowedRoot $lockCase.ce.q.f.f.allowed -StoreDirectory $lockCase.ce.q.f.f.store;try{$r=Invoke-CRBridgeV010 $lockCase}finally{$held.Dispose()};Assert-CRFalse ([bool]$r.ok) 'completion evidence lock contention accepted';Assert-CRTrue ([string]$r.reason-like'*completion-read-denied:*lock-busy*') ('lock reason '+[string]$r.reason);$count++
+
+$tamper=New-CRFixtureV010 -Label 'completion-tamper' -Nonce ('7'*32);$paths=Get-CustomAppProductionRecoveryCompletionEvidencePathsV010 -AllowedRoot $tamper.ce.q.f.f.allowed -StoreDirectory $tamper.ce.q.f.f.store;$o=[IO.File]::ReadAllText([string]$paths.file,[Text.UTF8Encoding]::new($false))|ConvertFrom-Json;$o.executor_result.result_fingerprint=('0'*64);$o.completion_fingerprint=Get-CustomAppProductionRecoveryCompletionEvidenceSha256V010 (Get-CustomAppProductionRecoveryCompletionEvidenceMaterialV010 -Envelope $o);[IO.File]::WriteAllText([string]$paths.file,($o|ConvertTo-Json -Depth 80 -Compress),[Text.UTF8Encoding]::new($false));$r=Invoke-CRBridgeV010 $tamper;Assert-CRFalse ([bool]$r.ok) 'completion embedded restore tamper+rehash accepted';Assert-CRTrue ([string]$r.reason-like'*completion-read-denied:*executor-result-invalid*') ('completion tamper reason '+[string]$r.reason);$count++
+
+$partial=New-CRFixtureV010 -Label 'partial-retirement' -Nonce ('8'*32);$ad=Get-CRAdmissionV010 $partial;Assert-CRTrue ([bool]$ad.ok) ('partial setup admission failed: '+[string]$ad.reason);$txn=$ad.artifacts.transaction;Assert-CREq $txn.status 'present-verified' 'partial setup transaction not present';$action=Remove-CustomAppProductionPostApplyBoundedArtifactV010 -Path ([string]$txn.path) -ExpectedRoot ([string]$txn.root) -ExpectedNamePattern '^\.spotify-control-txn-[0-9a-fA-F]{32}$' -Label 'bridge-partial-transaction';Assert-CREq $action 'deleted-now' 'partial transaction delete action';$probe=Invoke-CRProbeV010 $partial;Assert-CRTrue ([bool]$probe.ok) 'separate-process partial-retirement bridge denied';Assert-CREq $probe.transaction_status 'already-absent' 'partial bridge transaction status';Assert-CREq $probe.stage_status 'present-verified' 'partial bridge stage status';Assert-CREq $probe.app_backup_status 'present-verified' 'partial bridge app backup status';Assert-CREq $probe.persistence_backup_status 'present-verified' 'partial bridge persistence backup status';Assert-CRTrue ([bool]$probe.retirement_needed) 'partial bridge lost retirement needed';$count++
+
+$full=New-CRFixtureV010 -Label 'full-retirement' -Nonce ('a'*32);$exec=Invoke-CustomAppProductionRecoveryArtifactRetirementExecutorV010 -AllowedRoot $full.ce.q.f.f.allowed -StoreDirectory $full.ce.q.f.f.store -ExpectedTransactionId $full.ce.q.f.f.identity.transaction_id -RestoreExecutorResult $full.ce.executor -LocalAppDataRoot $full.ce.q.f.f.q.persistence.local -AppDataRoot $full.ce.q.f.f.q.persistence.roaming -Now ([DateTimeOffset]::UtcNow);Assert-CRTrue ([bool]$exec.ok) ('full retirement setup executor failed: '+[string]$exec.reason);$ec=Test-CustomAppProductionRecoveryArtifactRetirementExecutorResultV010 -Result $exec.result;Assert-CRTrue ([bool]$ec.ok) ('full retirement result invalid: '+[string]$ec.reason);$probe=Invoke-CRProbeV010 $full;Assert-CRTrue ([bool]$probe.ok) 'separate-process fully retired bridge denied';Assert-CRFalse ([bool]$probe.retirement_needed) 'fully retired bridge still needs retirement';Assert-CRFalse ([bool]$probe.retirement_eligible) 'fully retired bridge still eligible';Assert-CRTrue ([bool]$probe.retirement_already_complete) 'fully retired bridge did not report complete';foreach($f in @('transaction_status','stage_status','app_backup_status','persistence_backup_status')){Assert-CREq $probe.$f 'already-absent' "fully retired $f"};$count++
+
+$receiptTamper=New-CRFixtureV010 -Label 'receipt-tamper' -Nonce ('b'*32);$at=[DateTimeOffset]::UtcNow;$good=Invoke-CRBridgeV010 -F $receiptTamper -At $at;Assert-CRTrue ([bool]$good.ok) 'receipt tamper setup failed';$bad=Copy-CR $good.receipt;$bad.cleanup_authorized=$true;$bad.integration_fingerprint=Get-CustomAppProductionRecoveryCompletionRetirementAdmissionIntegrationSha256V010 (Get-CustomAppProductionRecoveryCompletionRetirementAdmissionIntegrationMaterialV010 -Receipt $bad);$ck=Test-CustomAppProductionRecoveryCompletionRetirementAdmissionIntegrationReceiptV010 -Receipt $bad -Now $at.AddSeconds(1);Assert-CRFalse ([bool]$ck.ok) 'authority-tampered bridge receipt accepted';Assert-CRTrue ([string]$ck.reason-like'*authority-escaped-cleanup_authorized*') ('authority tamper reason '+[string]$ck.reason);$count++
+$bad=Copy-CR $good.receipt;$bad.integration_fingerprint=('0'*64);$ck=Test-CustomAppProductionRecoveryCompletionRetirementAdmissionIntegrationReceiptV010 -Receipt $bad -Now $at.AddSeconds(1);Assert-CRFalse ([bool]$ck.ok) 'fingerprint-tampered bridge receipt accepted';Assert-CREq $ck.reason 'recovery-completion-retirement-integration-fingerprint-mismatch' 'fingerprint tamper reason';$count++
+$ck=Test-CustomAppProductionRecoveryCompletionRetirementAdmissionIntegrationReceiptV010 -Receipt $good.receipt -Now $at.AddSeconds(11);Assert-CRFalse ([bool]$ck.ok) 'expired bridge receipt accepted';Assert-CREq $ck.reason 'recovery-completion-retirement-integration-expired' 'expiry reason';$count++
+
+Write-Host "CUSTOM_APP_PRODUCTION_RECOVERY_COMPLETION_RETIREMENT_ADMISSION_INTEGRATION_MATRIX_PASS total=$count"
