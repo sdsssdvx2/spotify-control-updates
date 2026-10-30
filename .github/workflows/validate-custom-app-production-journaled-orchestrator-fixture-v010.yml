@@ -1,0 +1,106 @@
+name: Validate Custom App Production Journaled Orchestrator Fixture v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-journaled-orchestrator-fixture-v0.1.0]
+    paths: ['validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0/**','.github/workflows/validate-custom-app-production-journaled-orchestrator-fixture-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-full-chain-journal-integration-v0.1.0]
+    paths: ['validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0/**','.github/workflows/validate-custom-app-production-journaled-orchestrator-fixture-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope lineage and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h -cne $e){throw "head mismatch $h != $e"}
+          $p='f870ee7df375284a98af5870fe4a51cf1b4ed69c';if((git merge-base $p HEAD).Trim() -cne $p){throw 'not descended from exact validated full-chain journal-integration head'}
+          $allowed=@('.github/workflows/validate-custom-app-production-journaled-orchestrator-fixture-v010.yml','validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0/custom-app-production-journaled-orchestrator-fixture.ps1','validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0/test_custom_app_production_journaled_orchestrator_fixture.ps1','validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0/probe_custom_app_production_journaled_orchestrator_fixture.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|?{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x -notin $changed){throw "missing $x"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          'CUSTOM_APP_PRODUCTION_JOURNALED_ORCHESTRATOR_FIXTURE_SCOPE_PASS'
+
+      - name: Prove exact fixture and journal pins
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$pins=@(
+            @($h,'validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0/custom-app-production-journaled-orchestrator-fixture.ps1','c30a47885becc0ec38eb01072e07dc742a4c0f65'),
+            @($h,'validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0/test_custom_app_production_journaled_orchestrator_fixture.ps1','f83039739048ca0774ff6ce78cc21c6440e968a1'),
+            @($h,'validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0/probe_custom_app_production_journaled_orchestrator_fixture.ps1','c6bce2fafbb2d280b306e23321c76c82308b89b1'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/test_custom_app_production_crash_recovery_journal.ps1','6ff49f21d30511e4eb99300debb0bd0696f74204'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/probe_custom_app_production_crash_recovery_journal.ps1','95db3e56a3a301f334710b96d391d35a32a969c9'))
+          foreach($p in $pins){$b=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($b -cne $p[2]){throw "pin drift $($p[1]) $b != $($p[2])"}}
+          'CUSTOM_APP_PRODUCTION_JOURNALED_ORCHESTRATOR_FIXTURE_PINS_PASS'
+
+      - name: Parse and audit fixture-only callback confinement
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0';foreach($f in @("$d/custom-app-production-journaled-orchestrator-fixture.ps1","$d/test_custom_app_production_journaled_orchestrator_fixture.ps1","$d/probe_custom_app_production_journaled_orchestrator_fixture.ps1")){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|%{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $core=Get-Content "$d/custom-app-production-journaled-orchestrator-fixture.ps1" -Raw
+          foreach($m in @('durable_phase_reloaded_before_each_callback=$true','callbacks_are_dependency_injected=$true','Read-CustomAppProductionCrashJournalV010','Append-CustomAppProductionCrashJournalPhaseV010','Resolve-CustomAppProductionCrashRecoveryClassificationV010','fixture-journaled-orchestration-committed-clean','orchestrator_is_authority=$false','production_execution_authorized=$false','production_mutation_authorized=$false')){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "fixture orchestrator marker missing $m"}}
+          foreach($m in @('MoveLiveToOldCallback','MoveCandidateLiveCallback','FinalizeTransactionCallback','ApplyCallback','VerifyApplyCallback','CleanupCallback')){if($core.IndexOf($m,[StringComparison]::Ordinal)-lt 0){throw "dependency-injected callback missing $m"}}
+          foreach($x in @('Invoke-CustomAppProductionStageExecutorV010','Invoke-CustomAppProductionPreApplyPreparationV010','Invoke-CustomAppProductionAtomicLiveSwapV010','Invoke-CustomAppProductionTransactionFinalizationV010','Resolve-CustomAppProductionPostSwapApplyAdmissionV010','Invoke-CustomAppProductionSpicetifyApplyExecutorV010','Invoke-CustomAppProductionPostApplyCommitCleanupV010','Invoke-CustomAppProductionExactSpicetifyApplyProcessV010','[IO.Directory]::Move','[IO.Directory]::Delete','[IO.File]::Copy','Move-Item','Copy-Item','Remove-Item','Invoke-WebRequest','Invoke-RestMethod','Start-Process','ProcessStartInfo')){if($core.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge 0){throw "fixture orchestrator gained forbidden production primitive $x"}}
+          if($core -match 'orchestrator_is_authority\s*=\s*\$true|result_is_authority\s*=\s*\$true|production_execution_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'fixture orchestrator authority escaped'}
+          $test=Get-Content "$d/test_custom_app_production_journaled_orchestrator_fixture.ps1" -Raw;foreach($m in @('after-live-move-before-journal','after-candidate-before-journal','after-finalize-before-journal','after-apply-before-returned','after-verify-before-verified','after-cleanup-before-committed','durable-reread-tamper','authority-callback','invalid-final','failed-apply','invalid-verify','invalid-cleanup','wrong-transaction','lock-contention','separate-process restart probe failed')){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "fixture coverage missing $m"}}
+          'CUSTOM_APP_PRODUCTION_JOURNALED_ORCHESTRATOR_FIXTURE_PARSE_AUDIT_PASS'
+
+      - name: Materialize exact crash journal dependency and acceptance suite
+        shell: powershell
+        run: |
+          $dir='validation/custom-app-production-crash-recovery-journal-v0.1.0';New-Item -ItemType Directory -Force -Path $dir|Out-Null
+          $deps=@(
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef',"$dir/custom-app-production-crash-recovery-journal.ps1",'a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef',"$dir/test_custom_app_production_crash_recovery_journal.ps1",'6ff49f21d30511e4eb99300debb0bd0696f74204'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef',"$dir/probe_custom_app_production_crash_recovery_journal.ps1",'95db3e56a3a301f334710b96d391d35a32a969c9'))
+          foreach($d in $deps){$path=$d[1];$env:JOF_SPEC="$($d[0])`:$path";$env:JOF_OUT=$path;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['JOF_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['JOF_SPEC']]))";if($LASTEXITCODE){throw "materialize failed $path"};$actual=(git hash-object $path).Trim();if($actual -cne $d[2]){throw "materialized blob drift $path $actual != $($d[2])"}}
+          $src=Join-Path $dir 'test_custom_app_production_crash_recovery_journal.ps1';$runtime=Join-Path $dir 'test_custom_app_production_crash_recovery_journal.runtime.ps1';$text=Get-Content -LiteralPath $src -Raw;$needle='[AllowNull()][DateTimeOffset]$At=$null';if(([regex]::Matches($text,[regex]::Escape($needle))).Count -ne 1){throw 'nullable-time patch marker drifted'};[IO.File]::WriteAllText($runtime,$text.Replace($needle,'[AllowNull()]$At=$null'),[Text.UTF8Encoding]::new($false))
+          'CUSTOM_APP_PRODUCTION_JOURNALED_ORCHESTRATOR_FIXTURE_MATERIALIZATION_PASS'
+
+      - name: Run journaled orchestrator fixture matrix twice
+        shell: powershell
+        run: |
+          1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0/test_custom_app_production_journaled_orchestrator_fixture.ps1';if($LASTEXITCODE){throw "journaled orchestrator fixture matrix failed pass $_"}}
+          'CUSTOM_APP_PRODUCTION_JOURNALED_ORCHESTRATOR_FIXTURE_MATRIX_REPEAT_PASS'
+
+      - name: Replay exact durable crash journal matrix once
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-crash-recovery-journal-v0.1.0/test_custom_app_production_crash_recovery_journal.runtime.ps1';if($LASTEXITCODE){throw 'crash journal parent regression failed'}
+          'CUSTOM_APP_PRODUCTION_JOURNALED_ORCHESTRATOR_FIXTURE_JOURNAL_PARENT_PASS'
+
+      - name: Rebuild journal-integrated candidate and run Addon Manager SelfTest
+        shell: powershell
+        run: |
+          python 'validation/custom-app-production-full-chain-journal-integration-v0.1.0/build_candidate.py';if($LASTEXITCODE){throw 'journal-integrated parent build failed'}
+          $a='validation/custom-app-production-full-chain-journal-integration-v0.1.0/out/bin/addon-manager.ps1';$m='validation/custom-app-production-full-chain-journal-integration-v0.1.0/out/bin/spotify-control.ps1';$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();if((Get-Item $a).Length -ne 973527 -or $ah -cne '3eac8cf4bfdcbbc38e7d4c01186a583fd13f96a27a98d8f6903147a4341da823'){throw "journal-integrated addon parent drift size=$((Get-Item $a).Length) sha=$ah"};if($mh -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control parent drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'journaled-orchestrator-parent-selftest';$env:LOCALAPPDATA=Join-Path $s 'Local';$env:APPDATA=Join-Path $s 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'journal-integrated Addon Manager SelfTest failed'}
+          'CUSTOM_APP_PRODUCTION_JOURNALED_ORCHESTRATOR_FIXTURE_PARENT_SELFTEST_PASS'
+
+      - name: Prove validated parent and production surfaces immutable
+        shell: powershell
+        run: |
+          $p='f870ee7df375284a98af5870fe4a51cf1b4ed69c';$expected=@('.github/workflows/validate-custom-app-production-journaled-orchestrator-fixture-v010.yml','validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0/custom-app-production-journaled-orchestrator-fixture.ps1','validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0/test_custom_app_production_journaled_orchestrator_fixture.ps1','validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0/probe_custom_app_production_journaled_orchestrator_fixture.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|?{$_ -notin $expected});if($bad.Count){throw "unexpected changed surface $($bad -join ', ')"}
+          foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-full-chain-journal-integration-v0.1.0/build_candidate.py','validation/custom-app-production-full-chain-integration-v0.1.0/build_candidate_v011.py')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $d='validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_journal_integration_parent=$p;fixture_only=$true;dependency_injected_callbacks=6;real_production_executor_calls=0;crash_windows=14;separate_process_restart_probes=$true;durable_phase_reread_before_callback=$true;orchestrator_is_authority=$false;production_execution_authority=$false;production_mutation_authority=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content (Join-Path $d 'ci-evidence.json') -Encoding UTF8
+          'CUSTOM_APP_PRODUCTION_JOURNALED_ORCHESTRATOR_FIXTURE_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-journaled-orchestrator-fixture-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0/custom-app-production-journaled-orchestrator-fixture.ps1
+            validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0/test_custom_app_production_journaled_orchestrator_fixture.ps1
+            validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0/probe_custom_app_production_journaled_orchestrator_fixture.ps1
+            validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0/ci-evidence.json
+          if-no-files-found: error
