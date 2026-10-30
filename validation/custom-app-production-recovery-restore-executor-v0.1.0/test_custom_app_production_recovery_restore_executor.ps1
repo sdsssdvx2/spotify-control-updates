@@ -51,11 +51,11 @@ function Invoke-CustomAppProductionRecoveryRestoreExecutorValidationHookV010 {
             }
         }
         'throw-after-barrier' {if($Checkpoint -ceq 'after-rollback-required-barrier'){throw 'fixture-crash-after-rollback-required-barrier'}}
-        'stage-drift-after-barrier' {if($Checkpoint -ceq 'after-rollback-required-barrier'){[IO.File]::AppendAllText((Join-Path ([string]$script:RXFixture.f.prepared.stage_path) 'index.js'),"// fixture-stage-drift-after-barrier`n",[Text.UTF8Encoding]::new($false))}}
+        'stage-drift-after-barrier' {if($Checkpoint -ceq 'after-rollback-required-barrier'){[IO.File]::AppendAllText((Join-Path ([string]$script:RXFixture.f.f.prepared.stage_path) 'index.js'),"// fixture-stage-drift-after-barrier`n",[Text.UTF8Encoding]::new($false))}}
         'throw-after-restore' {if($Checkpoint -ceq 'after-exact-restore-before-apply-admission'){throw 'fixture-crash-after-exact-restore'}}
-        'persistence-drift-after-restore' {if($Checkpoint -ceq 'after-exact-restore-before-apply-admission'){[IO.File]::AppendAllText((Join-Path ([string]$script:RXFixture.f.q.persistence.roaming) 'spicetify\config-xpui.ini'),"# fixture-persistence-drift-after-restore`n",[Text.UTF8Encoding]::new($false))}}
+        'persistence-drift-after-restore' {if($Checkpoint -ceq 'after-exact-restore-before-apply-admission'){[IO.File]::AppendAllText((Join-Path ([string]$script:RXFixture.f.f.q.persistence.roaming) 'spicetify\config-xpui.ini'),"# fixture-persistence-drift-after-restore`n",[Text.UTF8Encoding]::new($false))}}
         'throw-after-apply' {if($Checkpoint -ceq 'after-recovery-apply-before-postcheck'){throw 'fixture-crash-after-recovery-apply'}}
-        'live-drift-after-apply' {if($Checkpoint -ceq 'after-recovery-apply-before-postcheck'){[IO.File]::AppendAllText((Join-Path ([string]$script:RXFixture.f.q.x.live) 'index.js'),"// fixture-live-drift-after-apply`n",[Text.UTF8Encoding]::new($false))}}
+        'live-drift-after-apply' {if($Checkpoint -ceq 'after-recovery-apply-before-postcheck'){[IO.File]::AppendAllText((Join-Path ([string]$script:RXFixture.f.f.q.x.live) 'index.js'),"// fixture-live-drift-after-apply`n",[Text.UTF8Encoding]::new($false))}}
         'throw-before-complete' {if($Checkpoint -ceq 'before-rollback-complete-append'){throw 'fixture-crash-before-rollback-complete'}}
     }
 }
