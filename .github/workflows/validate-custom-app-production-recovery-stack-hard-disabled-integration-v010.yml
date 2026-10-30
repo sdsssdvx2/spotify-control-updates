@@ -1,0 +1,80 @@
+name: Validate Custom App Production Recovery Stack Hard-Disabled Integration v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-stack-hard-disabled-integration-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-stack-hard-disabled-integration-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope lineage and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h-cne$e){throw "head mismatch $h != $e"}
+          $p='2ad528b8a969fd45e88168d22ea787984f5e2714';if((git merge-base $p HEAD).Trim()-cne$p){throw 'not descended from exact retirement-resume executor head'}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $allowed=@('.github/workflows/validate-custom-app-production-recovery-stack-hard-disabled-integration-v010.yml','validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0/build_candidate.py');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_-notin$allowed});if($bad.Count){throw "scope escaped: $($bad-join', ')"};foreach($x in $allowed){if($x-notin$changed){throw "missing $x"}}
+          $blob=(git rev-parse "HEAD:validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0/build_candidate.py").Trim();if($blob-cne'38796022a9e7f8be5af6a5430d843dcd2664f97c'){throw "builder pin drift $blob"}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_STACK_HARD_DISABLED_SCOPE_PASS'
+
+      - name: Build hard-disabled recovery stack candidate first pass
+        shell: powershell
+        run: |
+          python 'validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0/build_candidate.py';if($LASTEXITCODE){throw 'recovery stack candidate build failed'}
+          $d='validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0';$a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json"
+          $ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant()
+          if((Get-Item $m).Length-ne284327-or$mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate changed'}
+          "ADDON_HASH=$ah"|Out-File $env:GITHUB_ENV -Append -Encoding utf8;"ADDON_SIZE=$((Get-Item $a).Length)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8;"REPORT_HASH=$rh"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "RECOVERY_STACK_FIRST_BUILD addon_size=$((Get-Item $a).Length) addon_sha256=$ah report_sha256=$rh"
+
+      - name: Parse candidate with Windows PowerShell 5.1 and audit hard-disabled wiring
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0';$a="$d/out/bin/addon-manager.ps1";$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $a),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|%{Write-Error ("candidate line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw 'integrated candidate PS5.1 parse failed'}
+          $raw=Get-Content $a -Raw
+          foreach($m in @('$script:CustomAppProductionPipelineEnabled = $false','CUSTOM_APP_PRODUCTION_RECOVERY_STACK_HARD_DISABLED_SELFTEST_V010_PASS','Invoke-CustomAppProductionRecoveryRestoreExecutorV010','Invoke-CustomAppProductionRecoveryArtifactRetirementExecutorV010','Invoke-CustomAppProductionRecoveryArtifactRetirementResumeExecutorV010','Custom App production full-chain execution is intentionally unavailable in integration-only candidate.')){if($raw.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "candidate marker missing $m"}}
+          if($raw-match'CustomAppProductionPipelineEnabled\s*=\s*\$true'){throw 'production pipeline enabled in recovery integration'}
+          $report=Get-Content "$d/candidate-validation.json" -Raw|ConvertFrom-Json;if([bool]$report.production_main_changed-or[bool]$report.pipeline_enabled-or[bool]$report.pipeline_enablement_implemented-or[bool]$report.recovery_normal_path_wiring_added-or[bool]$report.generic_auto_authority_expanded){throw 'candidate report gained production authority'};if([int]$report.module_count-ne13){throw 'recovery module count drift'};if(@($report.preexisting_functions_changed).Count-ne0){throw 'preexisting parent function changed'}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_STACK_HARD_DISABLED_PARSE_AUDIT_PASS'
+
+      - name: Run Addon Manager SelfTest in isolated profile
+        shell: powershell
+        run: |
+          $a='validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0/out/bin/addon-manager.ps1';$s=Join-Path $env:RUNNER_TEMP 'recovery-stack-hard-disabled-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'Addon Manager SelfTest failed'}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_STACK_HARD_DISABLED_SELFTEST_PASS'
+
+      - name: Rebuild deterministically and compare exact output
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'second deterministic build failed'};$a="$d/out/bin/addon-manager.ps1";$r="$d/candidate-validation.json";$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();if($ah-cne$env:ADDON_HASH-or(Get-Item $a).Length-ne[int64]$env:ADDON_SIZE){throw 'candidate addon deterministic rebuild drift'};if($rh-cne$env:REPORT_HASH){throw 'candidate report deterministic rebuild drift'}
+          Write-Host "CUSTOM_APP_PRODUCTION_RECOVERY_STACK_HARD_DISABLED_DETERMINISTIC_PASS addon_size=$env:ADDON_SIZE addon_sha256=$env:ADDON_HASH report_sha256=$env:REPORT_HASH"
+
+      - name: Prove protected surfaces immutable and write CI evidence
+        shell: powershell
+        run: |
+          $p='2ad528b8a969fd45e88168d22ea787984f5e2714';foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','bin/addon-manager.ps1','bin/spotify-control.ps1','validation/custom-app-production-full-chain-journal-integration-v0.1.0/build_candidate.py','validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/custom-app-production-recovery-artifact-retirement-resume-executor.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}};if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
+          $d='validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_recovery_tip=$p;candidate_addon_size=[int64]$env:ADDON_SIZE;candidate_addon_sha256=$env:ADDON_HASH;candidate_report_sha256=$env:REPORT_HASH;recovery_module_count=13;preexisting_parent_functions_changed=0;addon_selftest_passed=$true;pipeline_enabled=$false;pipeline_enablement_implemented=$false;normal_path_recovery_wiring_added=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'CUSTOM_APP_PRODUCTION_RECOVERY_STACK_HARD_DISABLED_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-recovery-stack-hard-disabled-integration-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0/build_candidate.py
+            validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0/candidate-validation.json
+            validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0/ci-evidence.json
+          if-no-files-found: error
