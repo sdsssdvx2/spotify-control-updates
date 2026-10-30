@@ -37,6 +37,7 @@ jobs:
           $d='validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0';$a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json"
           $ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant()
           if((Get-Item $m).Length-ne284327-or$mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate changed'}
+          if((Get-Item $a).Length-ne1249412-or$ah-cne'8a08020c430bba55e5c839dd62cc286a62301d7c570380108168844b25a58f3c'){throw "recovery stack candidate exact output drift size=$((Get-Item $a).Length) sha256=$ah"}
           "ADDON_HASH=$ah"|Out-File $env:GITHUB_ENV -Append -Encoding utf8;"ADDON_SIZE=$((Get-Item $a).Length)"|Out-File $env:GITHUB_ENV -Append -Encoding utf8;"REPORT_HASH=$rh"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "RECOVERY_STACK_FIRST_BUILD addon_size=$((Get-Item $a).Length) addon_sha256=$ah report_sha256=$rh"
 
@@ -60,7 +61,7 @@ jobs:
       - name: Rebuild deterministically and compare exact output
         shell: powershell
         run: |
-          $d='validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'second deterministic build failed'};$a="$d/out/bin/addon-manager.ps1";$r="$d/candidate-validation.json";$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();if($ah-cne$env:ADDON_HASH-or(Get-Item $a).Length-ne[int64]$env:ADDON_SIZE){throw 'candidate addon deterministic rebuild drift'};if($rh-cne$env:REPORT_HASH){throw 'candidate report deterministic rebuild drift'}
+          $d='validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'second deterministic build failed'};$a="$d/out/bin/addon-manager.ps1";$r="$d/candidate-validation.json";$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();if($ah-cne$env:ADDON_HASH-or(Get-Item $a).Length-ne[int64]$env:ADDON_SIZE){throw 'candidate addon deterministic rebuild drift'};if((Get-Item $a).Length-ne1249412-or$ah-cne'8a08020c430bba55e5c839dd62cc286a62301d7c570380108168844b25a58f3c'){throw 'candidate exact hard pin drift on rebuild'};if($rh-cne$env:REPORT_HASH){throw 'candidate report deterministic rebuild drift'}
           Write-Host "CUSTOM_APP_PRODUCTION_RECOVERY_STACK_HARD_DISABLED_DETERMINISTIC_PASS addon_size=$env:ADDON_SIZE addon_sha256=$env:ADDON_HASH report_sha256=$env:REPORT_HASH"
 
       - name: Prove protected surfaces immutable and write CI evidence
