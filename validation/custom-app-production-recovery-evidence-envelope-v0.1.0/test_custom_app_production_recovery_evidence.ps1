@@ -22,7 +22,7 @@ function New-RecoveryEvidenceFixtureV010 {
     $id=New-CustomAppProductionCrashJournalIdentityV010 -Name ([string]$prepared.name) -ConsumptionId ([string]$prepared.consumption_id) -SourceIdentity ([string]$prepared.source_identity) -RemoteCommitSha ([string]$prepared.remote_commit_sha) -StageResultFingerprint ([string]$prepared.stage_result_fingerprint) -PreparationFingerprint ([string]$prepared.preparation_fingerprint) -AllowedRoot $allowed -LivePath $q.x.live -TransactionRoot $txn -StageWorkspacePath ([string]$prepared.stage_workspace_path) -AppBackupPath ([string]$prepared.app_backup_path) -PersistenceBackupPath ([string]$prepared.persistence_backup_path)
     $init=Initialize-CustomAppProductionCrashJournalV010 -AllowedRoot $allowed -StoreDirectory $store -Identity $id -Now ([DateTimeOffset]::UtcNow.AddMinutes(-1))
     if(-not[bool]$init.ok){throw('evidence fixture journal init failed: '+[string]$init.reason)}
-    return[pscustomobject]@{q=$q;prep=$prep;prepared=$prepared;allowed=$allowed;txn=$txn;store=$store;identity=$id;init=$init}
+    return [pscustomobject]@{q=$q;prep=$prep;prepared=$prepared;allowed=$allowed;txn=$txn;store=$store;identity=$id;init=$init}
 }
 function Write-REFixtureV010($f){return Write-CustomAppProductionRecoveryEvidenceV010 -AllowedRoot $f.allowed -StoreDirectory $f.store -PreparedResult $f.prepared -Now ([DateTimeOffset]::UtcNow.AddMinutes(-1).AddSeconds(1))}
 function Read-REFixtureV010($f,[string]$Tx=$null){if([string]::IsNullOrWhiteSpace($Tx)){$Tx=[string]$f.identity.transaction_id};return Read-CustomAppProductionRecoveryEvidenceV010 -AllowedRoot $f.allowed -StoreDirectory $f.store -ExpectedTransactionId $Tx}
