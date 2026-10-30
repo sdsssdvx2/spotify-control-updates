@@ -126,7 +126,7 @@ function Resolve-CustomAppProductionRecoveryCleanupResumeAdmissionV010 {
         @('name',[string]$journal.entry.name),@('source_identity',[string]$journal.entry.source_identity),@('remote_commit_sha',[string]$journal.entry.remote_commit_sha),@('consumption_id',[string]$journal.entry.consumption_id),@('stage_result_fingerprint',[string]$journal.entry.stage_result_fingerprint),@('preparation_fingerprint',[string]$journal.entry.preparation_fingerprint)
     )
     foreach($p in $pairs){if(([string]$e.($p[0])).Trim().ToLowerInvariant()-cne([string]$p[1]).Trim().ToLowerInvariant()){return & $deny ('cleanup-resume-evidence-journal-mismatch-'+$p[0])}}
-    foreach($f in @('live_path','transaction_root','stage_workspace_path','app_backup_path','persistence_backup_path')){if(-not(Test-CustomAppProductionRecoveryCleanupResumeAdmissionPathEqualV010 -A ([string]$e.$f) -B ([string]$journal.entry.$f)){return & $deny ('cleanup-resume-evidence-journal-path-mismatch-'+$f)}}
+    foreach($f in @('live_path','transaction_root','stage_workspace_path','app_backup_path','persistence_backup_path')){if(-not(Test-CustomAppProductionRecoveryCleanupResumeAdmissionPathEqualV010 -A ([string]$e.$f) -B ([string]$journal.entry.$f))){return & $deny ('cleanup-resume-evidence-journal-path-mismatch-'+$f)}}
 
     try{$txn=Assert-CustomAppProductionCrashJournalPathV010 -AllowedRoot $AllowedRoot -Path ([string]$e.transaction_root) -Label 'cleanup-resume transaction root'}catch{return & $deny ('cleanup-resume-transaction-root-path-invalid:'+[string]$_.Exception.Message)}
     if(Test-Path -LiteralPath $txn){return & $deny 'cleanup-resume-transaction-root-must-be-absent'}
