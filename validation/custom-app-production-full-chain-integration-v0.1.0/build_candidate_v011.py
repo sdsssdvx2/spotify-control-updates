@@ -61,6 +61,24 @@ def patched_source() -> str:
         "    return bom+text.encode('utf-8'), {'modules':module_report,'base_function_count':len(base_function_names),'intentional_override_count':len(actual_overrides),'intentional_overrides':sorted(actual_overrides),'normal_path_leaks':leaks}",
         'override report',
     )
+    old_selftest = """    $r=Invoke-CustomAppProductionFullChainV010
+    if($null -eq $r -or [bool]$r.enabled -or [bool]$r.result_is_authority -or [bool]$r.spicetify_apply_authorized -or [bool]$r.production_execution_authorized -or [bool]$r.production_mutation_authorized){ throw 'Integration-only pipeline gate escaped deny mode.' }
+    Write-Host 'CUSTOM_APP_PRODUCTION_FULL_CHAIN_INTEGRATED_SELFTEST_V010_PASS hard-disabled zero-authority'
+"""
+    new_selftest = """    $r=Invoke-CustomAppProductionFullChainV010
+    if($null -eq $r -or [bool]$r.enabled -or [bool]$r.result_is_authority -or [bool]$r.spicetify_apply_authorized -or [bool]$r.production_execution_authorized -or [bool]$r.production_mutation_authorized){ throw 'Integration-only pipeline gate escaped deny mode.' }
+    $script:CustomAppProductionPipelineEnabled=$true
+    $forcedDenied=$false
+    try { [void](Invoke-CustomAppProductionFullChainV010) }
+    catch {
+        if([string]$_.Exception.Message -cne 'Custom App production full-chain execution is intentionally unavailable in integration-only candidate.'){ throw }
+        $forcedDenied=$true
+    }
+    finally { $script:CustomAppProductionPipelineEnabled=$false }
+    if(-not $forcedDenied){ throw 'Forced integration pipeline enablement was not denied.' }
+    Write-Host 'CUSTOM_APP_PRODUCTION_FULL_CHAIN_INTEGRATED_SELFTEST_V010_PASS hard-disabled zero-authority forced-enable-denied'
+"""
+    text = replace_once(text, old_selftest, new_selftest, 'forced-enable selftest')
     return text
 
 
