@@ -74,11 +74,11 @@ SELFTEST=r'''function Invoke-CustomAppProductionRecoveryStackHardDisabledSelfTes
 def sha(b:bytes)->str:return hashlib.sha256(b).hexdigest()
 def git_blob(commit:str,path:str)->str:return subprocess.check_output(['git','rev-parse',f'{commit}:{path}'],cwd=ROOT,text=True).strip()
 def git_object_bytes(blob:str)->bytes:return subprocess.check_output(['git','cat-file','blob',blob],cwd=ROOT)
-def functions(text:str)->list[str]:return re.findall(r'(?im)^\s*function\s+([A-Za-z0-9_-]+)\s*\{',text)
+def functions(text:str)->list[str]:return re.findall(r'(?im)^[ \t]*function\s+([A-Za-z0-9_-]+)\s*\{',text)
 def function_bounds(text:str,name:str)->tuple[int,int]:
-    m=re.search(rf'(?im)^\s*function\s+{re.escape(name)}\s*\{{',text)
+    m=re.search(rf'(?im)^[ \t]*function\s+{re.escape(name)}\s*\{{',text)
     if not m:raise RuntimeError(f'missing function {name}')
-    n=re.search(r'(?im)^\s*function\s+[A-Za-z0-9_-]+\s*\{',text[m.end():])
+    n=re.search(r'(?im)^[ \t]*function\s+[A-Za-z0-9_-]+\s*\{',text[m.end():])
     return m.start(),(m.end()+n.start() if n else len(text))
 def function_block(text:str,name:str)->str:
     a,b=function_bounds(text,name);return text[a:b]
@@ -120,7 +120,7 @@ def integrate(addon:bytes)->tuple[bytes,dict]:
     missing_recovery=[x for x in REQUIRED_RECOVERY if x not in seen]
     if missing_recovery:raise RuntimeError(f'recovery required export(s) missing: {missing_recovery}')
 
-    first=re.search(r'(?im)^\s*function\s+[A-Za-z0-9_-]+\s*\{',parent)
+    first=re.search(r'(?im)^[ \t]*function\s+[A-Za-z0-9_-]+\s*\{',parent)
     if not first:raise RuntimeError('parent first function not found')
     payload='\n\n'.join(module_text)+'\n\n'+SELFTEST.rstrip()+'\n\n'
     text=parent[:first.start()]+payload+parent[first.start():]
