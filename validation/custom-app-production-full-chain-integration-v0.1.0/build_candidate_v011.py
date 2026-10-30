@@ -68,21 +68,13 @@ def patched_source() -> str:
         "    return bom+text.encode('utf-8'), {'modules':module_report,'base_function_count':len(base_function_names),'intentional_override_count':len(actual_overrides),'intentional_overrides':sorted(actual_overrides),'normal_path_leaks':leaks}",
         'override report',
     )
-    # Bind the integration contract to the exact exported names from the validated cores.
-    text = replace_exact_count(
-        text,
-        "'Reserve-CustomAppProductionPermitV010'",
-        "'Invoke-CustomAppProductionPermitReservationV010'",
-        2,
-        'reservation exported name',
-    )
-    text = replace_exact_count(
-        text,
-        "'Consume-CustomAppProductionPermitReservationV010'",
-        "'Invoke-CustomAppProductionExecutorConsumptionV010'",
-        2,
-        'consumption exported name',
-    )
+    # Bind the integration contract to exact exported names from validated cores.
+    for old, new, label in (
+        ("'Reserve-CustomAppProductionPermitV010'", "'Invoke-CustomAppProductionPermitReservationV010'", 'reservation exported name'),
+        ("'Consume-CustomAppProductionPermitReservationV010'", "'Invoke-CustomAppProductionExecutorConsumptionV010'", 'consumption exported name'),
+        ("'Resolve-CustomAppProductionExecutorStartV010'", "'Resolve-CustomAppProductionExecutorStartGateV010'", 'executor-start exported name'),
+    ):
+        text = replace_exact_count(text, old, new, 2, label)
     old_selftest = """    $r=Invoke-CustomAppProductionFullChainV010
     if($null -eq $r -or [bool]$r.enabled -or [bool]$r.result_is_authority -or [bool]$r.spicetify_apply_authorized -or [bool]$r.production_execution_authorized -or [bool]$r.production_mutation_authorized){ throw 'Integration-only pipeline gate escaped deny mode.' }
     Write-Host 'CUSTOM_APP_PRODUCTION_FULL_CHAIN_INTEGRATED_SELFTEST_V010_PASS hard-disabled zero-authority'
