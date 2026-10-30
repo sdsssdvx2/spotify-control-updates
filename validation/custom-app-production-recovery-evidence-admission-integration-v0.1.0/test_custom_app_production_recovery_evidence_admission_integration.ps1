@@ -55,7 +55,7 @@ function Invoke-IntegrationFixtureV010 {
     if($null-eq$Plan){$Plan=$Q.plan};if($null-eq$Preflight){$Preflight=$Q.pre.receipt};if([string]::IsNullOrWhiteSpace($ExeSha)){$ExeSha=$Q.exeSha}
     return Resolve-CustomAppProductionRecoveryEvidenceAdmissionIntegrationV010 -AllowedRoot $Q.f.allowed -StoreDirectory $Q.f.store -ExpectedTransactionId ([string]$Q.f.identity.transaction_id) -Plan $Plan -PreflightReceipt $Preflight -SpicetifyAllowedRoot $Q.f.allowed -SpicetifyPath $Q.exe -ExpectedSpicetifySha256 $ExeSha -Now $At
 }
-function Assert-IZero($R,[string]$label){$x=if($R.PSObject.Properties['receipt']){$R.receipt}else{$R};foreach($p in@('integration_is_authority','execution_authorized','restore_authorized','apply_authorized','cleanup_authorized','production_mutation_authorized')){Assert-IFalse ([bool]$x.$p) "$label authority escaped $p"}}
+function Assert-IZero($R,[string]$label){$x=if($R.PSObject.Properties['receipt']){$R.receipt}else{$R};foreach($p in @('integration_is_authority','execution_authorized','restore_authorized','apply_authorized','cleanup_authorized','production_mutation_authorized')){Assert-IFalse ([bool]$x.$p) "$label authority escaped $p"}}
 
 $count=0
 $cases=@(
@@ -81,7 +81,7 @@ $appDrift=New-IntegrationFixtureV010 'app-backup-drift' 'candidate-live' -Nonce 
 
 $persistDrift=New-IntegrationFixtureV010 'persistence-backup-drift' 'rollback-required' -Nonce ('f'*32);$manifest=Join-Path $persistDrift.f.prepared.persistence_backup_path 'guard-manifest.json';[IO.File]::AppendAllText($manifest," `n",[Text.UTF8Encoding]::new($false));$r=Invoke-IntegrationFixtureV010 $persistDrift;Assert-IFalse ([bool]$r.ok) 'persistence backup drift accepted';Assert-ITrue ([string]$r.reason-like'recovery-integration-persistence-backup-invalid:*') 'persistence backup drift reason';$count++
 
-$house=New-IntegrationFixtureV010 'housekeeping-retired-backups' 'apply-verified' -Nonce ('1'*32);foreach($p in@($house.f.prepared.app_backup_path,$house.f.prepared.persistence_backup_path)){if(Test-Path $p){[IO.Directory]::Delete($p,$true)}};$r=Invoke-IntegrationFixtureV010 $house;Assert-ITrue ([bool]$r.ok) ('housekeeping incorrectly required retired backups: '+[string]$r.reason);Assert-IFalse ([bool]$r.receipt.backup_integrity_required) 'housekeeping backup proof required';$count++
+$house=New-IntegrationFixtureV010 'housekeeping-retired-backups' 'apply-verified' -Nonce ('1'*32);foreach($p in @($house.f.prepared.app_backup_path,$house.f.prepared.persistence_backup_path)){if(Test-Path $p){[IO.Directory]::Delete($p,$true)}};$r=Invoke-IntegrationFixtureV010 $house;Assert-ITrue ([bool]$r.ok) ('housekeeping incorrectly required retired backups: '+[string]$r.reason);Assert-IFalse ([bool]$r.receipt.backup_integrity_required) 'housekeeping backup proof required';$count++
 
 $eTamper=New-IntegrationFixtureV010 'evidence-tamper' 'candidate-live' -Nonce ('3'*32);$er=Read-REFixtureV010 $eTamper.f;$obj=[IO.File]::ReadAllText([string]$er.path,[Text.UTF8Encoding]::new($false))|ConvertFrom-Json;$obj.persistence_fingerprint=('0'*64);$obj.evidence_fingerprint=Get-CustomAppProductionRecoveryEvidenceSha256V010 (Get-CustomAppProductionRecoveryEvidenceMaterialV010 $obj);[IO.File]::WriteAllText([string]$er.path,($obj|ConvertTo-Json -Depth 50 -Compress),[Text.UTF8Encoding]::new($false));$r=Invoke-IntegrationFixtureV010 $eTamper;Assert-IFalse ([bool]$r.ok) 'evidence tamper+rehash accepted';Assert-ITrue ([string]$r.reason-like'recovery-integration-evidence-read-denied:*') 'evidence tamper reason';$count++
 
