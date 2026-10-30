@@ -15,6 +15,7 @@ PARENT_ADDON=(973527,'3eac8cf4bfdcbbc38e7d4c01186a583fd13f96a27a98d8f6903147a434
 PARENT_MAIN=(284327,'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99')
 RECOVERY_TIP='2ad528b8a969fd45e88168d22ea787984f5e2714'
 EXPECTED_AUTO=['better-local-files','eternal-jukebox','ivLyrics','playlist-maker','tagify']
+PIPELINE_TRUE_RE=r'(?im)^[ \t]*\$script:CustomAppProductionPipelineEnabled[ \t]*=[ \t]*\$true[ \t]*$'
 
 MODULES=[
  ('plan','b266bad660d4b7bc87e7093c5b12f0cff1dc466f','validation/custom-app-production-recovery-plan-contract-v0.1.0/custom-app-production-recovery-plan.ps1','ae49409973164052d5830b981d804707f9d62b6c'),
@@ -105,6 +106,11 @@ def integrate(addon:bytes)->tuple[bytes,dict]:
     missing_base=[x for x in REQUIRED_BASE if x not in parent_set]
     if missing_base:raise RuntimeError(f'journal-integrated parent missing recovery dependency functions: {missing_base}')
     if '$script:CustomAppProductionPipelineEnabled = $false' not in parent:raise RuntimeError('parent production pipeline hard-disable missing')
+    parent_true_count=len(re.findall(PIPELINE_TRUE_RE,parent))
+    if parent_true_count!=1:raise RuntimeError(f'parent forced-enable assignment count drift: {parent_true_count} != 1')
+    parent_forced_selftest=function_block(parent,'Invoke-CustomAppProductionFullChainIntegratedSelfTestV010')
+    if len(re.findall(PIPELINE_TRUE_RE,parent_forced_selftest))!=1 or 'finally { $script:CustomAppProductionPipelineEnabled=$false }' not in parent_forced_selftest:
+        raise RuntimeError('parent forced-enable assignment escaped validated full-chain selftest')
 
     module_text=[];module_functions=[];seen=set(parent_set);meta=[]
     for label,commit,path,blob in MODULES:
@@ -147,7 +153,12 @@ def integrate(addon:bytes)->tuple[bytes,dict]:
     for entry in REQUIRED_RECOVERY:
         if entry in orch:raise RuntimeError(f'hard-disabled full-chain orchestrator gained recovery call: {entry}')
     if '$script:CustomAppProductionPipelineEnabled = $false' not in text:raise RuntimeError('recovery integration enabled production pipeline')
-    return bom+text.encode('utf-8'),{'module_count':len(MODULES),'module_function_count':len(module_functions),'preexisting_functions_changed':changed,'modules':meta}
+    candidate_true_count=len(re.findall(PIPELINE_TRUE_RE,text))
+    if candidate_true_count!=parent_true_count:raise RuntimeError(f'candidate forced-enable assignment count drift: {candidate_true_count} != {parent_true_count}')
+    candidate_forced_selftest=function_block(text,'Invoke-CustomAppProductionFullChainIntegratedSelfTestV010')
+    if candidate_forced_selftest!=parent_forced_selftest or len(re.findall(PIPELINE_TRUE_RE,candidate_forced_selftest))!=1:
+        raise RuntimeError('candidate forced-enable assignment moved outside inherited selftest')
+    return bom+text.encode('utf-8'),{'module_count':len(MODULES),'module_function_count':len(module_functions),'preexisting_functions_changed':changed,'pipeline_true_assignment_count':candidate_true_count,'pipeline_true_assignment_inherited_selftest_only':True,'modules':meta}
 
 def validate(main:bytes,addon:bytes,meta:dict)->dict:
     if (len(main),sha(main))!=PARENT_MAIN:raise RuntimeError('recovery stack integration changed Spotify Control')
