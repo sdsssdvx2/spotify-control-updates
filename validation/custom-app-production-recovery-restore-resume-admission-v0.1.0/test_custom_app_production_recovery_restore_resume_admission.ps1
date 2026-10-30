@@ -50,7 +50,7 @@ function New-RRFixtureV010 {
 
 function Invoke-RRFixtureV010 {
     param([Parameter(Mandatory=$true)]$Q,[AllowNull()][string]$ExeSha=$null,[bool]$OmitPin=$false,[DateTimeOffset]$At=[DateTimeOffset]::UtcNow)
-    if($null -eq $ExeSha){$ExeSha=[string]$Q.exeSha}
+    if([string]::IsNullOrWhiteSpace($ExeSha)){$ExeSha=[string]$Q.exeSha}
     if($OmitPin){
         return Resolve-CustomAppProductionRecoveryRestoreResumeAdmissionV010 -AllowedRoot $Q.f.allowed -StoreDirectory $Q.f.store -ExpectedTransactionId ([string]$Q.f.identity.transaction_id) -LocalAppDataRoot $Q.f.q.persistence.local -AppDataRoot $Q.f.q.persistence.roaming -Now $At
     }
