@@ -1,7 +1,8 @@
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-. (Join-Path $root 'validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/test_custom_app_production_recovery_cleanup_resume_admission.ps1')
+. (Join-Path $root 'validation/custom-app-production-recovery-evidence-admission-integration-v0.1.0/test_custom_app_production_recovery_evidence_admission_integration.ps1')
+. (Join-Path $root 'validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/custom-app-production-recovery-cleanup-resume-admission.ps1')
 . (Join-Path $PSScriptRoot 'custom-app-production-recovery-restore-resume-admission.ps1')
 
 function Assert-RRTrue([bool]$v,[string]$m){if(-not$v){throw $m}}
