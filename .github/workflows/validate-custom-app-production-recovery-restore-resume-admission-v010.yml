@@ -33,7 +33,7 @@ jobs:
         shell: powershell
         run: |
           $h=(git rev-parse HEAD).Trim(); $pins=@(
-            @($h,'validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','38be0187e2402df8c20a0377eb3e9e2c94ffc5d0'),
+            @($h,'validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','56e02211ec6286d6579f1c91a536ef96fdd995ed'),
             @($h,'validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/test_custom_app_production_recovery_restore_resume_admission.ps1','f644027db541245eb9dcbf11b6bebdd1455bc6ce'),
             @('d3969a746ed1736fe93586bd025116c2526fbff5','validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/custom-app-production-recovery-cleanup-resume-admission.ps1','387d97b10d493b3794b24fba2bac67cf39491444'),
             @('d3969a746ed1736fe93586bd025116c2526fbff5','validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/test_custom_app_production_recovery_cleanup_resume_admission.ps1','0c64be5c91bce3973fe41554a69c3b58d22e6681'),
