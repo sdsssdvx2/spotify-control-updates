@@ -87,10 +87,10 @@ function Test-CustomAppProductionRecoveryEvidenceEnvelopeV010 {
     try{foreach($f in @('live_path','transaction_root','stage_workspace_path','app_backup_path','persistence_backup_path')){[void](Assert-CustomAppProductionCrashJournalPathV010 -AllowedRoot $AllowedRoot -Path ([string]$Envelope.$f) -Label ('recovery evidence '+$f))}}catch{return[pscustomobject]@{ok=$false;reason=('recovery-evidence-path-invalid:'+[string]$_.Exception.Message)}}
     $anchor=Test-CustomAppProductionRecoveryEvidencePreparedAnchorV010 -PreparedResult $Envelope.prepared_result -JournalEntry $JournalEntry;if(-not[bool]$anchor.ok){return[pscustomobject]@{ok=$false;reason=('recovery-evidence-anchor-invalid:'+[string]$anchor.reason)}}
     foreach($f in @('transaction_id','name','source_identity','remote_commit_sha','consumption_id','stage_result_fingerprint','preparation_fingerprint','live_path','transaction_root','stage_workspace_path','app_backup_path','persistence_backup_path')){
+        $journalValue=[string]$JournalEntry.$f
         if($f -ceq 'stage_workspace_path'){$journalValue=[string]$JournalEntry.stage_workspace_path}
-        elseif($f -ceq 'app_backup_path'){$journalValue=[string]$JournalEntry.app_backup_path}
-        elseif($f -ceq 'persistence_backup_path'){$journalValue=[string]$JournalEntry.persistence_backup_path}
-        else{$journalValue=[string]$JournalEntry.$f}
+        if($f -ceq 'app_backup_path'){$journalValue=[string]$JournalEntry.app_backup_path}
+        if($f -ceq 'persistence_backup_path'){$journalValue=[string]$JournalEntry.persistence_backup_path}
         if($f-like'*_path'){
             try{$a=[IO.Path]::GetFullPath([string]$Envelope.$f).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar);$b=[IO.Path]::GetFullPath($journalValue).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)}catch{return[pscustomobject]@{ok=$false;reason=('recovery-evidence-journal-path-invalid-'+$f)}};if(-not$a.Equals($b,[StringComparison]::OrdinalIgnoreCase)){return[pscustomobject]@{ok=$false;reason=('recovery-evidence-journal-mismatch-'+$f)}}
         }elseif(([string]$Envelope.$f).Trim().ToLowerInvariant()-cne$journalValue.Trim().ToLowerInvariant()){return[pscustomobject]@{ok=$false;reason=('recovery-evidence-journal-mismatch-'+$f)}}
