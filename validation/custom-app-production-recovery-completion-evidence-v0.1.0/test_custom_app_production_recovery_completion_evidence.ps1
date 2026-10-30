@@ -35,7 +35,7 @@ function Invoke-CEReadV010 {
 }
 function Restore-CEOldStateV010($F){
     $p=$F.q.f.f.prepared
-    $r=Restore-CustomAppProductionAtomicLiveSwapV010 -LivePath ([string]$p.live_path) -AppBackupPath ([string]$p.app_backup_path) -ExpectedAppBackupTreeSha256 ([string]$p.app_backup_tree_sha256) -PersistenceBackupPath ([string]$p.persistence_backup_path) -ExpectedPersistenceFingerprint ([string]$p.persistence_fingerprint) -LocalAppDataRoot $F.q.f.f.q.persistence.local -AppDataRoot $F.q.f.f.q.persistence.roaming
+    $r=Restore-CustomAppProductionAtomicLiveSwapV010 -LivePath ([string]$F.q.f.f.q.x.live) -AppBackupPath ([string]$p.app_backup_path) -ExpectedAppBackupTreeSha256 ([string]$p.app_backup_tree_sha256) -PersistenceBackupPath ([string]$p.persistence_backup_path) -ExpectedPersistenceFingerprint ([string]$p.persistence_fingerprint) -LocalAppDataRoot $F.q.f.f.q.persistence.local -AppDataRoot $F.q.f.f.q.persistence.roaming
     Assert-CETrue ([bool]$r.ok) ('fixture old-state restore failed: '+[string]$r.reason)
 }
 function Assert-CERetainedV010($F,[string]$Label){
