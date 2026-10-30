@@ -25,7 +25,7 @@ jobs:
         run: |
           $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h -cne $e){throw "head mismatch $h != $e"}
           $p='fe07d410531ea13c8fca379b01405631a3763e84';if((git merge-base $p HEAD).Trim() -cne $p){throw 'not descended from exact validated Spicetify apply-executor head'}
-          $a=@('.github/workflows/validate-custom-app-production-post-apply-commit-cleanup-v010.yml','validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1','validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/test_custom_app_production_post_apply_commit_cleanup.ps1');$c=@(git diff --name-only "$p...HEAD");$b=@($c|?{$_ -notin $a});if($b.Count){throw "scope escaped: $($b -join ', ')"};foreach($x in $a){if($x -notin $c){throw "missing $x"}}
+          $a=@('.github/workflows/validate-custom-app-production-post-apply-commit-cleanup-v010.yml','validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1','validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup-finalization-receipt-v011.ps1','validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/test_custom_app_production_post_apply_commit_cleanup.ps1');$c=@(git diff --name-only "$p...HEAD");$b=@($c|?{$_ -notin $a});if($b.Count){throw "scope escaped: $($b -join ', ')"};foreach($x in $a){if($x -notin $c){throw "missing $x"}}
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
           'CUSTOM_APP_PRODUCTION_POST_APPLY_COMMIT_CLEANUP_SCOPE_PASS'
 
@@ -34,6 +34,7 @@ jobs:
         run: |
           $h=(git rev-parse HEAD).Trim();$pins=@(
             @($h,'validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1','3b14280d727287252f71611e4424d78e5705c2f1'),
+            @($h,'validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup-finalization-receipt-v011.ps1','31da8fa6253679f22edc07a6b5c00a47eb26c64d'),
             @($h,'validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/test_custom_app_production_post_apply_commit_cleanup.ps1','70a2a1c0661557b14065307ca30140105f68338d'),
             @('fe07d410531ea13c8fca379b01405631a3763e84','validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1','f7372b069fbfe6a0f8d8a0aad45312ffd33d9f0a'),
             @('fe07d410531ea13c8fca379b01405631a3763e84','validation/custom-app-production-spicetify-apply-executor-v0.1.0/test_custom_app_production_spicetify_apply_executor.ps1','4b17793e8a151d16089897bdf7f3545453b1833d'),
@@ -45,12 +46,16 @@ jobs:
       - name: Parse and audit idempotent bounded cleanup contract
         shell: powershell
         run: |
-          $d='validation/custom-app-production-post-apply-commit-cleanup-v0.1.0';foreach($f in @("$d/custom-app-production-post-apply-commit-cleanup.ps1","$d/test_custom_app_production_post_apply_commit_cleanup.ps1")){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|%{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $d='validation/custom-app-production-post-apply-commit-cleanup-v0.1.0';foreach($f in @("$d/custom-app-production-post-apply-commit-cleanup.ps1","$d/custom-app-production-post-apply-commit-cleanup-finalization-receipt-v011.ps1","$d/test_custom_app_production_post_apply_commit_cleanup.ps1")){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|%{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
           $core=Get-Content "$d/custom-app-production-post-apply-commit-cleanup.ps1" -Raw
           foreach($m in @('permit-cryptographically-valid-for-non-authoritative-cleanup','prepared-receipt-integrity-valid-without-artifact-presence','stage-receipt-integrity-valid-without-artifact-presence','post-apply-current-state-valid-for-housekeeping-only','binding-repo-id-mismatch','stage-workspace-unexpected-entry','app-backup-container-contents-not-exact-app-code-only','persistence-backup-top-level-contents-unexpected','persistence-backup-surface-set-unexpected','already-absent','Remove-CustomAppProductionPostApplyBoundedArtifactV010','after-stage-cleanup','after-app-backup-cleanup','after-persistence-backup-cleanup','requires_new_permit_for_future_update=$true','result_is_authority=$false','spicetify_apply_authorized=$false','production_mutation_authorized=$false')){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "cleanup marker missing $m"}}
           if(([regex]::Matches($core,'\[IO\.Directory\]::Delete\(')).Count -ne 1){throw 'cleanup raw directory-delete primitive count drifted'}
           foreach($x in @('ProcessStartInfo','Invoke-CustomAppProductionExactSpicetifyApplyProcessV010','Restore-CustomAppProductionAtomicLiveSwapV010','Invoke-WebRequest','Invoke-RestMethod','Start-Process','spicetify config','spicetify restore','Move-Item','Copy-Item','Remove-Item','DownloadFile','DownloadString')){if($core.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge 0){throw "cleanup gained forbidden primitive $x"}}
           if($core -match 'result_is_authority\s*=\s*\$true|spicetify_apply_authorized\s*=\s*\$true|additional_mutation_authorized\s*=\s*\$true|production_execution_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'cleanup reusable authority escaped'}
+          $receipt=Get-Content "$d/custom-app-production-post-apply-commit-cleanup-finalization-receipt-v011.ps1" -Raw
+          foreach($m in @('finalization-receipt-integrity-valid-without-preserved-artifact-presence','finalization-result-transaction-root-still-exists','finalization-result-live-path-missing','finalization-result-preservation-contract-invalid','finalization-result-fingerprint-mismatch')){if($receipt.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "receipt hardening marker missing $m"}}
+          foreach($x in @('[IO.Directory]::Delete','Remove-Item','Move-Item','Copy-Item','ProcessStartInfo','Invoke-WebRequest','Invoke-RestMethod','Start-Process','spicetify apply','spicetify config','Restore-CustomAppProductionAtomicLiveSwapV010')){if($receipt.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge 0){throw "receipt hardening gained forbidden primitive $x"}}
+          if(([regex]::Matches($receipt,'function Test-CustomAppProductionTransactionFinalizationResultV010')).Count -ne 1){throw 'receipt hardening override count drifted'}
           $test=Get-Content "$d/test_custom_app_production_post_apply_commit_cleanup.ps1" -Raw;foreach($m in @('future-app','expired-permit','wrong-key','apply-tamper','store-corrupt','user-removed','binding-drift','live-drift','git-drift','persistence-drift','stage-extra','app-extra','persistence-extra','fault-after-stage','fault-after-app','fault-after-persistence','already-absent','cleanup launched another apply process','authority-tampered cleanup receipt','fingerprint-tampered cleanup receipt')){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "cleanup coverage missing $m"}}
           'CUSTOM_APP_PRODUCTION_POST_APPLY_COMMIT_CLEANUP_PARSE_AUDIT_PASS'
 
@@ -63,10 +68,25 @@ jobs:
           foreach($d in $deps){$path=$d[1];New-Item -ItemType Directory -Force -Path (Split-Path $path -Parent)|Out-Null;$env:CLEANUP_GIT_SPEC="$($d[0])`:$path";$env:CLEANUP_GIT_OUT=$path;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['CLEANUP_GIT_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['CLEANUP_GIT_SPEC']]))";if($LASTEXITCODE){throw "materialize failed $path"};$actual=(git hash-object $path).Trim();if($actual -cne $d[2]){throw "materialized blob drift $path $actual != $($d[2])"}}
           'CUSTOM_APP_PRODUCTION_POST_APPLY_COMMIT_CLEANUP_MATERIALIZATION_PASS'
 
+      - name: Prepare receipt-hardened cleanup acceptance harness
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-post-apply-commit-cleanup-v0.1.0'
+          $src=Join-Path $d 'test_custom_app_production_post_apply_commit_cleanup.ps1'
+          $runtime=Join-Path $d 'test_custom_app_production_post_apply_commit_cleanup.runtime.ps1'
+          $text=Get-Content -LiteralPath $src -Raw
+          $needle=". (Join-Path `$PSScriptRoot 'custom-app-production-post-apply-commit-cleanup.ps1')"
+          $replacement=$needle+"`r`n. (Join-Path `$PSScriptRoot 'custom-app-production-post-apply-commit-cleanup-finalization-receipt-v011.ps1')"
+          if(([regex]::Matches($text,[regex]::Escape($needle))).Count -ne 1){throw 'cleanup core source marker count drifted'}
+          $patched=$text.Replace($needle,$replacement)
+          [IO.File]::WriteAllText((Resolve-Path $d).Path+'\test_custom_app_production_post_apply_commit_cleanup.runtime.ps1',$patched,[Text.UTF8Encoding]::new($false))
+          $t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $runtime),[ref]$t,[ref]$er)|Out-Null;if($er.Count){throw 'runtime receipt-hardened harness parse failed'}
+          'CUSTOM_APP_PRODUCTION_POST_APPLY_COMMIT_CLEANUP_HARNESS_PASS'
+
       - name: Run post-apply commit-cleanup matrix twice
         shell: powershell
         run: |
-          1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/test_custom_app_production_post_apply_commit_cleanup.ps1';if($LASTEXITCODE){throw "post-apply commit-cleanup matrix failed pass $_"}}
+          1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/test_custom_app_production_post_apply_commit_cleanup.runtime.ps1';if($LASTEXITCODE){throw "post-apply commit-cleanup matrix failed pass $_"}}
           'CUSTOM_APP_PRODUCTION_POST_APPLY_COMMIT_CLEANUP_MATRIX_REPEAT_PASS'
 
       - name: Replay exact Spicetify apply-executor parent contract
@@ -86,8 +106,8 @@ jobs:
       - name: Prove protected-surface immutability and write evidence
         shell: powershell
         run: |
-          $p='fe07d410531ea13c8fca379b01405631a3763e84';$e=@('.github/workflows/validate-custom-app-production-post-apply-commit-cleanup-v010.yml','validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1','validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/test_custom_app_production_post_apply_commit_cleanup.ps1');$c=@(git diff --name-only "$p...HEAD");$b=@($c|?{$_ -notin $e});if($b.Count){throw "unexpected surface $($b -join ', ')"};foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1','validation/custom-app-production-post-swap-apply-admission-v0.1.0/custom-app-production-post-swap-apply-admission.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
-          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'};$d='validation/custom-app-production-post-apply-commit-cleanup-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_apply_executor_parent=$p;cleanup_only=$true;idempotent_retry=$true;all_artifacts_prevalidated_before_first_delete=$true;stage_workspace_bounded=$true;app_backup_container_bounded=$true;persistence_backup_container_bounded=$true;cleanup_failure_does_not_rollback_applied_state=$true;cleanup_executes_spicetify_apply=$false;expired_original_permit_does_not_block_housekeeping=$true;future_update_requires_new_permit=$true;receipt_authority=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          $p='fe07d410531ea13c8fca379b01405631a3763e84';$e=@('.github/workflows/validate-custom-app-production-post-apply-commit-cleanup-v010.yml','validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1','validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup-finalization-receipt-v011.ps1','validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/test_custom_app_production_post_apply_commit_cleanup.ps1');$c=@(git diff --name-only "$p...HEAD");$b=@($c|?{$_ -notin $e});if($b.Count){throw "unexpected surface $($b -join ', ')"};foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1','validation/custom-app-production-post-swap-apply-admission-v0.1.0/custom-app-production-post-swap-apply-admission.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'};$d='validation/custom-app-production-post-apply-commit-cleanup-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_apply_executor_parent=$p;cleanup_only=$true;idempotent_retry=$true;finalization_receipt_integrity_decoupled_from_cleaned_artifact_presence=$true;all_artifacts_prevalidated_before_first_delete=$true;stage_workspace_bounded=$true;app_backup_container_bounded=$true;persistence_backup_container_bounded=$true;cleanup_failure_does_not_rollback_applied_state=$true;cleanup_executes_spicetify_apply=$false;expired_original_permit_does_not_block_housekeeping=$true;future_update_requires_new_permit=$true;receipt_authority=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
           'CUSTOM_APP_PRODUCTION_POST_APPLY_COMMIT_CLEANUP_IMMUTABILITY_PASS'
 
       - uses: actions/upload-artifact@v4
@@ -95,6 +115,7 @@ jobs:
           name: custom-app-production-post-apply-commit-cleanup-v010-${{ github.run_id }}
           path: |
             validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1
+            validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup-finalization-receipt-v011.ps1
             validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/test_custom_app_production_post_apply_commit_cleanup.ps1
             validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/ci-evidence.json
           if-no-files-found: error
