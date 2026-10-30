@@ -33,7 +33,7 @@ jobs:
         shell: powershell
         run: |
           $h=(git rev-parse HEAD).Trim();$pins=@(
-            @($h,'validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','6221ea3133433606085b428928b6a28a89808675'),
+            @($h,'validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','f610aada399e12d12c160f06a82d8406099beb6d'),
             @($h,'validation/custom-app-production-recovery-evidence-envelope-v0.1.0/test_custom_app_production_recovery_evidence.ps1','996432acf5936204afe6dd64f526cdf73e6f3275'),
             @($h,'validation/custom-app-production-recovery-evidence-envelope-v0.1.0/probe_custom_app_production_recovery_evidence.ps1','84f73605526373652a4499b7f472537c8e2b5c03'),
             @('b266bad660d4b7bc87e7093c5b12f0cff1dc466f','validation/custom-app-production-recovery-plan-contract-v0.1.0/custom-app-production-recovery-plan.ps1','ae49409973164052d5830b981d804707f9d62b6c'),
