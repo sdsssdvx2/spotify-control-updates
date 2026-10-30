@@ -1,0 +1,97 @@
+name: Validate Custom App Production Recovery-Aware New Permit Readiness v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-aware-new-permit-readiness-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-aware-new-permit-readiness-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 420
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope lineage pins and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h-cne$e){throw "head mismatch $h != $e"}
+          $p='66a840510df64ed684e7547e4f3151d77a670971';if((git merge-base $p HEAD).Trim()-cne$p){throw 'not descended from exact validated hard-disabled recovery stack head'}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $allowed=@('.github/workflows/validate-custom-app-production-recovery-aware-new-permit-readiness-v010.yml','validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/custom-app-production-recovery-aware-new-permit-readiness.ps1','validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/test_custom_app_production_recovery_aware_new_permit_readiness.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_-notin$allowed});if($bad.Count){throw "scope escaped: $($bad-join', ')"};foreach($x in $allowed){if($x-notin$changed){throw "missing $x"}}
+          $pins=@(
+            @($h,'validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/custom-app-production-recovery-aware-new-permit-readiness.ps1','845e623f700239c9e3d59433e1d06d20deb21f59'),
+            @($h,'validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/test_custom_app_production_recovery_aware_new_permit_readiness.ps1','1e5ec0b20ac1c19c18393a984019d981a1fd6092'),
+            @('6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c','validation/custom-app-production-promotion-gate-v0.1.0/custom-app-production-promotion-gate.ps1','70d9a7dbe1131d826eb0eccd281f31d192e98855'),
+            @('2ad528b8a969fd45e88168d22ea787984f5e2714','validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/custom-app-production-recovery-artifact-retirement-resume-executor.ps1','2acd062e04ec125e8f44edf31def175a4eb73510'),
+            @('894c5013df0a2f1c17483425a31f49d0f9eaa99d','validation/custom-app-production-recovery-completion-retirement-admission-integration-v0.1.0/custom-app-production-recovery-completion-retirement-admission-integration.ps1','92f2b13f49b0ef6bb6ded173e4e992f53bfdf7b1'),
+            @($p,'validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0/build_candidate.py','a6f5eb0e5063f69e1736f80ba6620a851e99d55b'))
+          foreach($q in $pins){$b=(git rev-parse "$($q[0])`:$($q[1])").Trim();if($b-cne$q[2]){throw "pin drift $($q[1]) $b != $($q[2])"}}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_NEW_PERMIT_READINESS_SCOPE_PINS_PASS'
+
+      - name: Parse and audit zero-authority permit-readiness only
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0';foreach($f in @("$d/custom-app-production-recovery-aware-new-permit-readiness.ps1","$d/test_custom_app_production_recovery_aware_new_permit_readiness.ps1")){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|ForEach-Object{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $core=Get-Content "$d/custom-app-production-recovery-aware-new-permit-readiness.ps1" -Raw
+          foreach($m in @('Test-CustomAppProductionRecoveryArtifactRetirementResumeExecutorResultV010','Resolve-CustomAppProductionRecoveryCompletionRetirementAdmissionIntegrationV010','Resolve-CustomAppProductionPromotionEligibilityV010','current-remote-observation-not-fresh','current-local-tree-does-not-match-stable-recovery','current-persistence-does-not-match-stable-recovery','eligible_to_request_new_update_permit=$true','requires_new_update_permit=$true','readiness_is_authority=$false','promotion_token_issued=$false','permit_issued=$false','execution_authorized=$false','restore_authorized=$false','apply_authorized=$false','cleanup_authorized=$false','production_mutation_authorized=$false')){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "readiness marker missing $m"}}
+          foreach($x in @('[IO.Directory]::Delete','[IO.Directory]::Move','[IO.File]::Copy','[IO.File]::Write','Remove-Item','Move-Item','Copy-Item','Set-Content','Add-Content','Out-File','Invoke-WebRequest','Invoke-RestMethod','Start-Process','ProcessStartInfo','New-CustomAppProductionPermitV010','Reserve-CustomAppProductionPermitV010','Consume-CustomAppProductionPermitV010')){if($core.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "readiness gate gained forbidden side effect/permit primitive $x"}}
+          if($core-match'readiness_is_authority\s*=\s*\$true|promotion_token_issued\s*=\s*\$true|permit_issued\s*=\s*\$true|execution_authorized\s*=\s*\$true|restore_authorized\s*=\s*\$true|apply_authorized\s*=\s*\$true|cleanup_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'readiness authority escaped'}
+          $test=Get-Content "$d/test_custom_app_production_recovery_aware_new_permit_readiness.ps1" -Raw;foreach($m in @('newer remote commit incorrectly denied','future app readiness denied','user removed','stable local continuity drift','stable persistence continuity drift','stable source continuity drift','stale remote observation','resume authority tamper','retired artifact reappeared','live drift after recovery','protected persistence drift after recovery','recovery continuity tamper','wrong transaction','permit-issued tampered receipt accepted','expired readiness receipt accepted')){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "readiness coverage missing $m"}}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_NEW_PERMIT_READINESS_PARSE_AUDIT_PASS'
+
+      - name: Materialize exact sibling durable recovery dependencies
+        shell: powershell
+        run: |
+          $deps=@(
+            @('b53bcf39f715f1c35c7d1f99e157cdecb0a2a572','validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1','f8c91f5a566b24c82257742942bdc6fecfe68eb2'),
+            @('c420a1df6f306c7ba74772b91241cb14abd04738','validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','e2f2fc656235883d2a82b106289973f6ded409a5'),
+            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/custom-app-production-recovery-completion-evidence.ps1','3795f900cbf8ded834f721f7db7b126aa264b0e8'),
+            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/test_custom_app_production_recovery_completion_evidence.ps1','1451ce0aeb046fe36a1660b12647534b514cd738'),
+            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/probe_custom_app_production_recovery_completion_evidence.ps1','8abbcb7eded67420d2e2b6e8bed3f9636ae9833d'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/test_custom_app_production_recovery_evidence.ps1','de37d029e175dbec899445dbe983e506a14a1b0a'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/probe_custom_app_production_recovery_evidence.ps1','84f73605526373652a4499b7f472537c8e2b5c03'),
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'))
+          foreach($q in $deps){$path=$q[1];New-Item -ItemType Directory -Force -Path (Split-Path $path -Parent)|Out-Null;$env:S="$($q[0])`:$path";$env:O=$path;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['S']]))";if($LASTEXITCODE){throw "materialize failed $path"};$actual=(git hash-object $path).Trim();if($actual-cne$q[2]){throw "materialized blob drift $path $actual != $($q[2])"}}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_NEW_PERMIT_READINESS_MATERIALIZATION_PASS'
+
+      - name: Run exact parent matrices plus recovery-aware readiness matrix
+        shell: powershell
+        run: |
+          $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/test_custom_app_production_recovery_aware_new_permit_readiness.ps1';if($LASTEXITCODE){throw 'recovery-aware readiness matrix failed'}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_NEW_PERMIT_READINESS_MATRIX_PASS'
+
+      - name: Rebuild exact hard-disabled recovery stack and run Addon Manager SelfTest
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'hard-disabled recovery stack rebuild failed'};$a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();if((Get-Item $a).Length-ne1249412-or$ah-cne'8a08020c2c7a5fac090bc5061233f1acb7332e07f3f10539e343d54f88958f3c'){throw 'hard-disabled recovery stack candidate drift'};if((Get-Item $m).Length-ne284327-or$mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'recovery-aware-readiness-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'Addon Manager SelfTest failed'}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_NEW_PERMIT_READINESS_SELFTEST_PASS'
+
+      - name: Prove protected surfaces immutable and write evidence
+        shell: powershell
+        run: |
+          $p='66a840510df64ed684e7547e4f3151d77a670971';foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','bin/addon-manager.ps1','bin/spotify-control.ps1','validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0/build_candidate.py')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}};if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
+          $d='validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_hard_disabled_stack_parent=$p;fresh_terminal_recovery_reload=$true;fresh_current_promotion_rerun=$true;stable_state_continuity_required=$true;remote_observation_freshness_minutes=10;readiness_window_seconds=10;new_permit_issued=$false;promotion_token_issued=$false;production_mutation_authority=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_NEW_PERMIT_READINESS_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-recovery-aware-new-permit-readiness-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/custom-app-production-recovery-aware-new-permit-readiness.ps1
+            validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/test_custom_app_production_recovery_aware_new_permit_readiness.ps1
+            validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/ci-evidence.json
+          if-no-files-found: error
