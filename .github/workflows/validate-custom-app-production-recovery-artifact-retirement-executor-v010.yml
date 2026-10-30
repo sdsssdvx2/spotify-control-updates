@@ -43,7 +43,9 @@ jobs:
           $core=Get-Content "$d/custom-app-production-recovery-artifact-retirement-executor.ps1" -Raw
           foreach($m in @('Resolve-CustomAppProductionRecoveryArtifactRetirementAdmissionV010','Test-CustomAppProductionRecoveryArtifactRetirementAdmissionReceiptV010','Remove-CustomAppProductionPostApplyBoundedArtifactV010','Open-CustomAppProductionRecoveryArtifactRetirementExecutorLockV010','requires_future_fresh_revalidation=$true','journal_retained=$true','recovery_evidence_retained=$true','requires_new_update_permit=$true','production_mutation_authorized=$false')){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "executor marker missing $m"}}
           foreach($x in @('[IO.Directory]::Delete','[IO.Directory]::Move','[IO.File]::Copy','[IO.File]::Write','Remove-Item','Move-Item','Copy-Item','Start-Process','ProcessStartInfo','Invoke-WebRequest','Invoke-RestMethod','Restore-SpotifyPersistenceBackup','Restore-CustomAppProductionAtomicLiveSwapV010','Invoke-CustomAppProductionExactSpicetifyApplyProcessV010')){if($core.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "executor gained forbidden direct side effect $x"}}
-          $test=Get-Content "$d/test_custom_app_production_recovery_artifact_retirement_executor.ps1" -Raw;foreach($m in @('executor-lock','executor-race-delete','executor-stage-race','crash-after-transaction','crash-after-stage','crash-after-app','crash-after-persistence','live-drift-after-stage','authority-tampered executor result accepted','repeat-complete')){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "executor coverage missing $m"}}
+          $test=Get-Content "$d/test_custom_app_production_recovery-artifact-retirement-executor.ps1" -Raw
+          if(-not(Test-Path "$d/test_custom_app_production_recovery_artifact_retirement_executor.ps1")){$test=Get-Content "$d/test_custom_app_production_recovery_artifact_retirement_executor.ps1" -Raw}
+          foreach($m in @('executor-lock','executor-race-delete','executor-stage-race','crash-after-transaction','crash-after-stage','crash-after-app','crash-after-persistence','live-drift-after-stage','authority-tampered executor result accepted','repeat-complete')){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "executor coverage missing $m"}}
           'CUSTOM_APP_PRODUCTION_RECOVERY_ARTIFACT_RETIREMENT_EXECUTOR_SCOPE_STATIC_PASS'
 
       - name: Materialize exact durable sibling dependencies
@@ -65,10 +67,11 @@ jobs:
           $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP;$t='validation/custom-app-production-recovery-artifact-retirement-executor-v0.1.0/test_custom_app_production_recovery_artifact_retirement_executor.ps1';1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $t;if($LASTEXITCODE){throw "retirement executor matrix failed pass $_"}}
           'CUSTOM_APP_PRODUCTION_RECOVERY_ARTIFACT_RETIREMENT_EXECUTOR_MATRIX_REPEAT_PASS'
 
-      - name: Replay exact retirement admission parent matrix in clean fixture root
+      - name: Replay exact retirement admission parent matrix in short isolated fixture root
         shell: powershell
         run: |
-          $clean=Join-Path $env:RUNNER_TEMP ('retirement-admission-parent-regression-'+[Guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Force -Path $clean|Out-Null
+          $clean=Join-Path $env:RUNNER_TEMP ('r'+[Guid]::NewGuid().ToString('N').Substring(0,6));New-Item -ItemType Directory -Force -Path $clean|Out-Null
+          if($clean.Length -gt 32){throw "isolated fixture root unexpectedly long: $clean"}
           $env:RUNNER_TEMP=$clean;$env:TEMP=$clean;$env:TMP=$clean
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-artifact-retirement-admission-v0.1.0/test_custom_app_production_recovery_artifact_retirement_admission_v011.ps1';if($LASTEXITCODE){throw 'retirement admission parent regression failed'}
           'CUSTOM_APP_PRODUCTION_RECOVERY_ARTIFACT_RETIREMENT_EXECUTOR_PARENT_PASS'
