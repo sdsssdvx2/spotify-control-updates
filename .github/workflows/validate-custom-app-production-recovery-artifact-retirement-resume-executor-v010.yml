@@ -1,0 +1,116 @@
+name: Validate Custom App Production Recovery Artifact Retirement Resume Executor v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-artifact-retirement-resume-executor-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-recovery-completion-retirement-admission-integration-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-artifact-retirement-resume-executor-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 420
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope lineage pins and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h-cne$e){throw "head mismatch $h != $e"}
+          $p='894c5013df0a2f1c17483425a31f49d0f9eaa99d';if((git merge-base $p HEAD).Trim()-cne$p){throw 'not descended from exact validated completion-retirement bridge head'}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $allowed=@('.github/workflows/validate-custom-app-production-recovery-artifact-retirement-resume-executor-v010.yml','validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/custom-app-production-recovery-artifact-retirement-resume-executor.ps1','validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/probe_custom_app_production_recovery_artifact_retirement_resume_executor.ps1','validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/test_custom_app_production_recovery_artifact_retirement_resume_executor.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_-notin$allowed});if($bad.Count){throw "scope escaped: $($bad-join', ')"};foreach($x in $allowed){if($x-notin$changed){throw "missing $x"}}
+          $pins=@(
+            @($h,'validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/custom-app-production-recovery-artifact-retirement-resume-executor.ps1','2acd062e04ec125e8f44edf31def175a4eb73510'),
+            @($h,'validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/probe_custom_app_production_recovery_artifact_retirement_resume_executor.ps1','9ceba2fdccf2b6b1578a946e973d1e5ff5d6d451'),
+            @($h,'validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/test_custom_app_production_recovery_artifact_retirement_resume_executor.ps1','d9a6409881832f511a517d101f499183435134a2'),
+            @($p,'validation/custom-app-production-recovery-completion-retirement-admission-integration-v0.1.0/custom-app-production-recovery-completion-retirement-admission-integration.ps1','92f2b13f49b0ef6bb6ded173e4e992f53bfdf7b1'),
+            @($p,'validation/custom-app-production-recovery-completion-retirement-admission-integration-v0.1.0/probe_custom_app_production_recovery_completion_retirement_admission_integration.ps1','5f6bec042d33c31535e3d7c8a299cabef5128a3f'),
+            @($p,'validation/custom-app-production-recovery-completion-retirement-admission-integration-v0.1.0/test_custom_app_production_recovery_completion_retirement_admission_integration.ps1','40c3096137ac5b11a09b80f74c6282d0912c8dd4'),
+            @('3867ceeb56e5c21f0047946af87fb69f6601ef37','validation/custom-app-production-recovery-artifact-retirement-executor-v0.1.0/custom-app-production-recovery-artifact-retirement-executor.ps1','be4ae0b1d67339f80c71a47ecbff8cc9066fff61'),
+            @('3867ceeb56e5c21f0047946af87fb69f6601ef37','validation/custom-app-production-recovery-artifact-retirement-executor-v0.1.0/test_custom_app_production_recovery_artifact_retirement_executor.ps1','2733df3a6624041ecbb94eaf189c10df3eba2572'),
+            @('c420a1df6f306c7ba74772b91241cb14abd04738','validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','e2f2fc656235883d2a82b106289973f6ded409a5'),
+            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/custom-app-production-recovery-completion-evidence.ps1','3795f900cbf8ded834f721f7db7b126aa264b0e8'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'))
+          foreach($q in $pins){$b=(git rev-parse "$($q[0])`:$($q[1])").Trim();if($b-cne$q[2]){throw "pin drift $($q[1]) $b != $($q[2])"}}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_ARTIFACT_RETIREMENT_RESUME_EXECUTOR_SCOPE_PINS_PASS'
+
+      - name: Parse and audit bounded delegation only
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0';foreach($f in @("$d/custom-app-production-recovery-artifact-retirement-resume-executor.ps1","$d/probe_custom_app_production_recovery_artifact_retirement_resume_executor.ps1","$d/test_custom_app_production_recovery_artifact_retirement_resume_executor.ps1")){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|ForEach-Object{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $core=Get-Content "$d/custom-app-production-recovery-artifact-retirement-resume-executor.ps1" -Raw
+          foreach($m in @('Resolve-CustomAppProductionRecoveryCompletionRetirementAdmissionIntegrationV010','Test-CustomAppProductionRecoveryCompletionRetirementAdmissionIntegrationReceiptV010','Invoke-CustomAppProductionRecoveryArtifactRetirementExecutorV010','Test-CustomAppProductionRecoveryArtifactRetirementExecutorResultV010','recovery-artifact-retirement-resume-executor-final-bridge-not-complete','completion_evidence_retained=$true','requires_new_update_permit=$true','requires_future_fresh_revalidation=$true','result_is_authority=$false','execution_authorized=$false','restore_authorized=$false','apply_authorized=$false','cleanup_authorized=$false','production_mutation_authorized=$false')){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "resume executor marker missing $m"}}
+          if(([regex]::Matches($core,'Invoke-CustomAppProductionRecoveryArtifactRetirementExecutorV010',[Text.RegularExpressions.RegexOptions]::IgnoreCase)).Count-ne1){throw 'resume executor must delegate to exact retirement executor exactly once'}
+          foreach($x in @('[IO.Directory]::Delete','[IO.Directory]::Move','[IO.File]::Copy','[IO.File]::Write','Remove-Item','Move-Item','Copy-Item','Set-Content','Add-Content','Out-File','Invoke-WebRequest','Invoke-RestMethod','Start-Process','ProcessStartInfo','Remove-CustomAppProductionPostApplyBoundedArtifactV010','Restore-SpotifyPersistenceBackup','Restore-CustomAppProductionAtomicLiveSwapV010','Invoke-CustomAppProductionExactSpicetifyApplyProcessV010')){if($core.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "resume executor gained direct forbidden primitive $x"}}
+          if($core-match'result_is_authority\s*=\s*\$true|execution_authorized\s*=\s*\$true|restore_authorized\s*=\s*\$true|apply_authorized\s*=\s*\$true|cleanup_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'resume executor authority escaped'}
+          $probe=Get-Content "$d/probe_custom_app_production_recovery_artifact_retirement_resume_executor.ps1" -Raw;if($probe.IndexOf('RestoreExecutorResult',[StringComparison]::OrdinalIgnoreCase)-ge0){throw 'restart probe gained external RestoreExecutorResult input'};if($probe.IndexOf('Invoke-CustomAppProductionRecoveryArtifactRetirementResumeExecutorV010',[StringComparison]::OrdinalIgnoreCase)-lt0){throw 'restart probe missing resume executor call'}
+          $test=Get-Content "$d/test_custom_app_production_recovery_artifact_retirement_resume_executor.ps1" -Raw;foreach($m in @('separate-process resume probe denied','future app resume denied','already-complete resume mutated','fixture-simulated-crash-after-transaction-retirement','partial restart transaction status','partial restart resume denied','retirement executor lock contention accepted','missing durable completion accepted by resume executor','live drift accepted by resume executor','wrong transaction accepted by resume executor','authority-tampered resume result accepted','fingerprint-tampered resume result accepted')){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "resume executor coverage missing $m"}}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_ARTIFACT_RETIREMENT_RESUME_EXECUTOR_PARSE_AUDIT_PASS'
+
+      - name: Materialize exact sibling durable recovery dependencies
+        shell: powershell
+        run: |
+          $deps=@(
+            @('b53bcf39f715f1c35c7d1f99e157cdecb0a2a572','validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1','f8c91f5a566b24c82257742942bdc6fecfe68eb2'),
+            @('c420a1df6f306c7ba74772b91241cb14abd04738','validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','e2f2fc656235883d2a82b106289973f6ded409a5'),
+            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/custom-app-production-recovery-completion-evidence.ps1','3795f900cbf8ded834f721f7db7b126aa264b0e8'),
+            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/test_custom_app_production_recovery_completion_evidence.ps1','1451ce0aeb046fe36a1660b12647534b514cd738'),
+            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/probe_custom_app_production_recovery_completion_evidence.ps1','8abbcb7eded67420d2e2b6e8bed3f9636ae9833d'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/test_custom_app_production_recovery_evidence.ps1','de37d029e175dbec899445dbe983e506a14a1b0a'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/probe_custom_app_production_recovery_evidence.ps1','84f73605526373652a4499b7f472537c8e2b5c03'),
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'))
+          foreach($q in $deps){$path=$q[1];New-Item -ItemType Directory -Force -Path (Split-Path $path -Parent)|Out-Null;$env:S="$($q[0])`:$path";$env:O=$path;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['S']]))";if($LASTEXITCODE){throw "materialize failed $path"};$actual=(git hash-object $path).Trim();if($actual-cne$q[2]){throw "materialized blob drift $path $actual != $($q[2])"}}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_ARTIFACT_RETIREMENT_RESUME_EXECUTOR_MATERIALIZATION_PASS'
+
+      - name: Run durable retirement resume executor matrix twice
+        shell: powershell
+        run: |
+          $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP;$t='validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/test_custom_app_production_recovery_artifact_retirement_resume_executor.ps1';1..2|ForEach-Object{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $t;if($LASTEXITCODE){throw "retirement resume matrix failed pass $_"}}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_ARTIFACT_RETIREMENT_RESUME_EXECUTOR_MATRIX_REPEAT_PASS'
+
+      - name: Replay exact retirement executor parent matrix under short fixture root
+        shell: powershell
+        run: |
+          $clean=Join-Path $env:RUNNER_TEMP ('r'+[Guid]::NewGuid().ToString('N').Substring(0,6));New-Item -ItemType Directory -Force -Path $clean|Out-Null;if($clean.Length-gt32){throw "isolated fixture root unexpectedly long: $clean"};$env:RUNNER_TEMP=$clean;$env:TEMP=$clean;$env:TMP=$clean
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-artifact-retirement-executor-v0.1.0/test_custom_app_production_recovery_artifact_retirement_executor.ps1';if($LASTEXITCODE){throw 'retirement executor parent regression failed'}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_ARTIFACT_RETIREMENT_RESUME_EXECUTOR_PARENT_PASS'
+
+      - name: Rebuild journal-integrated candidate and run Addon Manager SelfTest
+        shell: powershell
+        run: |
+          python 'validation/custom-app-production-full-chain-journal-integration-v0.1.0/build_candidate.py';if($LASTEXITCODE){throw 'candidate build failed'}
+          $a='validation/custom-app-production-full-chain-journal-integration-v0.1.0/out/bin/addon-manager.ps1';$m='validation/custom-app-production-full-chain-journal-integration-v0.1.0/out/bin/spotify-control.ps1';if((Get-Item $a).Length-ne973527-or(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant()-cne'3eac8cf4bfdcbbc38e7d4c01186a583fd13f96a27a98d8f6903147a4341da823'){throw 'addon candidate drift'};if((Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant()-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'main candidate drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'retirement-resume-selftest';$env:LOCALAPPDATA=Join-Path $s 'Local';$env:APPDATA=Join-Path $s 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'SelfTest failed'}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_ARTIFACT_RETIREMENT_RESUME_EXECUTOR_SELFTEST_PASS'
+
+      - name: Prove protected surfaces immutable and write evidence
+        shell: powershell
+        run: |
+          $p='894c5013df0a2f1c17483425a31f49d0f9eaa99d';foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-recovery-completion-retirement-admission-integration-v0.1.0/custom-app-production-recovery-completion-retirement-admission-integration.ps1','validation/custom-app-production-recovery-artifact-retirement-executor-v0.1.0/custom-app-production-recovery-artifact-retirement-executor.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
+          $d='validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_bridge_parent=$p;validated_retirement_executor='3867ceeb56e5c21f0047946af87fb69f6601ef37';durable_completion_only_input=$true;external_restore_result_input=$false;side_effect_delegated_only_to_exact_retirement_executor=$true;separate_process_restart_probe=$true;crash_after_first_artifact_then_resume=$true;already_complete_noop=$true;future_app_fixture=$true;journal_retained=$true;recovery_evidence_retained=$true;completion_evidence_retained=$true;new_update_permit_required=$true;all_authority_false=$true;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'CUSTOM_APP_PRODUCTION_RECOVERY_ARTIFACT_RETIREMENT_RESUME_EXECUTOR_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-recovery-artifact-retirement-resume-executor-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/custom-app-production-recovery-artifact-retirement-resume-executor.ps1
+            validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/probe_custom_app_production_recovery_artifact_retirement_resume_executor.ps1
+            validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/test_custom_app_production_recovery_artifact_retirement_resume_executor.ps1
+            validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/ci-evidence.json
+          if-no-files-found: error
