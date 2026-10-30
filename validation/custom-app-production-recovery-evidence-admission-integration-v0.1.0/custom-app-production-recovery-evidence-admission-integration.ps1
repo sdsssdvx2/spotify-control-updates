@@ -62,7 +62,7 @@ function Resolve-CustomAppProductionRecoveryEvidenceAdmissionIntegrationV010 {
     }
 
     if([bool]$admission.decision.requires_recovery_apply){
-        if(-not(Test-CustomAppProductionRecoveryEvidenceAdmissionIntegrationSha256V010 ([string]$admission.decision.spicetify_executable_sha256)){return & $deny 'recovery-integration-spicetify-pin-missing'}
+        if(-not(Test-CustomAppProductionRecoveryEvidenceAdmissionIntegrationSha256V010 ([string]$admission.decision.spicetify_executable_sha256))){return & $deny 'recovery-integration-spicetify-pin-missing'}
     }
 
     $receipt=[pscustomobject]@{
