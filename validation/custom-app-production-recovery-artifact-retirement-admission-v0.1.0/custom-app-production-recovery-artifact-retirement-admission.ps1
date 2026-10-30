@@ -41,9 +41,12 @@ function Test-CustomAppProductionRecoveryArtifactRetirementAdmissionReceiptV010 
     if([string]$Receipt.phase -cne 'rollback-complete'){return [pscustomobject]@{ok=$false;reason='recovery-artifact-retirement-admission-phase-invalid'}}
     foreach($f in @('transaction_status','stage_status','app_backup_status','persistence_backup_status')){if([string]$Receipt.$f -notin @('present-verified','already-absent')){return [pscustomobject]@{ok=$false;reason=('recovery-artifact-retirement-admission-status-invalid-'+$f)}}}
     foreach($f in @('transaction_old_status','transaction_candidate_status')){if([string]$Receipt.$f -notin @('present-verified','absent')){return [pscustomobject]@{ok=$false;reason=('recovery-artifact-retirement-admission-status-invalid-'+$f)}}}
+    if([string]$Receipt.transaction_status -ceq 'already-absent' -and ([string]$Receipt.transaction_old_status -cne 'absent' -or [string]$Receipt.transaction_candidate_status -cne 'absent')){return [pscustomobject]@{ok=$false;reason='recovery-artifact-retirement-admission-transaction-child-status-drift'}}
     foreach($f in @('admission_is_authority','execution_authorized','restore_authorized','apply_authorized','cleanup_authorized','production_mutation_authorized')){if([bool]$Receipt.$f){return [pscustomobject]@{ok=$false;reason=('recovery-artifact-retirement-admission-authority-escaped-'+$f)}}}
     if(-not [bool]$Receipt.requires_future_executor_fresh_revalidation){return [pscustomobject]@{ok=$false;reason='recovery-artifact-retirement-admission-fresh-revalidation-contract-missing'}}
-    $needed=[bool]$Receipt.retirement_needed
+    $expectedNeeded=([string]$Receipt.transaction_status -ceq 'present-verified' -or [string]$Receipt.stage_status -ceq 'present-verified' -or [string]$Receipt.app_backup_status -ceq 'present-verified' -or [string]$Receipt.persistence_backup_status -ceq 'present-verified')
+    if([bool]$Receipt.retirement_needed -ne [bool]$expectedNeeded){return [pscustomobject]@{ok=$false;reason='recovery-artifact-retirement-admission-semantic-status-drift'}}
+    $needed=[bool]$expectedNeeded
     if($needed){if(-not[bool]$Receipt.retirement_eligible -or [bool]$Receipt.retirement_already_complete -or -not[bool]$Receipt.requires_bounded_artifact_retirement){return [pscustomobject]@{ok=$false;reason='recovery-artifact-retirement-admission-needed-semantics-invalid'}}}
     else{if([bool]$Receipt.retirement_eligible -or -not[bool]$Receipt.retirement_already_complete -or [bool]$Receipt.requires_bounded_artifact_retirement){return [pscustomobject]@{ok=$false;reason='recovery-artifact-retirement-admission-complete-semantics-invalid'}}}
     $start=[DateTimeOffset]::MinValue;$end=[DateTimeOffset]::MinValue
