@@ -16,6 +16,13 @@ function Test-CustomAppProductionRecoveryCompletionEvidenceSha256V010 {
     param([AllowNull()][string]$Value)
     return (-not [string]::IsNullOrWhiteSpace($Value) -and $Value -cmatch '^[0-9a-f]{64}$')
 }
+function Get-CustomAppProductionRecoveryCompletionEvidencePropertyValueV010 {
+    param([Parameter(Mandatory=$true)]$Object,[Parameter(Mandatory=$true)][string]$Name)
+    if($null -eq $Object){return $null}
+    $p=$Object.PSObject.Properties[$Name]
+    if($null -eq $p){return $null}
+    return $p.Value
+}
 
 function Get-CustomAppProductionRecoveryCompletionEvidencePathsV010 {
     param([Parameter(Mandatory=$true)][string]$AllowedRoot,[Parameter(Mandatory=$true)][string]$StoreDirectory)
@@ -53,7 +60,7 @@ function Get-CustomAppProductionRecoveryCompletionEvidenceMaterialV010 {
 }
 
 function Test-CustomAppProductionRecoveryCompletionEvidenceEnvelopeV010 {
-    param([AllowNull()]$Envelope)
+    param([AllowNull()]$Envelope,[DateTimeOffset]$Now=[DateTimeOffset]::UtcNow)
     if($null -eq $Envelope){return [pscustomobject]@{ok=$false;reason='recovery-completion-evidence-envelope-null'}}
     foreach($f in @('schema','managed_by','qualified_executor_head','qualified_evidence_head','qualified_journal_head','transaction_id','name','source_identity','remote_commit_sha','consumption_id','preparation_fingerprint','recovery_evidence_fingerprint','executor_result_fingerprint','rollback_complete_revision','rollback_complete_entry_sha256','live_path','transaction_root','stage_workspace_path','app_backup_path','persistence_backup_path','live_tree_sha256','app_backup_tree_sha256','app_backup_file_count','app_backup_total_bytes','persistence_fingerprint','stage_tree_sha256','transaction_status','transaction_old_status','transaction_candidate_status','spicetify_executable_sha256','apply_exit_code','apply_timed_out','apply_started_at','apply_finished_at','evidence_written_at','executor_result_embedded','current_old_state_verified','retained_stage_verified','retained_backups_verified','transaction_bounded_verified','retirement_admission_required','requires_future_fresh_revalidation','evidence_is_authority','execution_authorized','restore_authorized','apply_authorized','cleanup_authorized','production_mutation_authorized','executor_result','completion_fingerprint')){if(-not $Envelope.PSObject.Properties[$f]){return [pscustomobject]@{ok=$false;reason=('recovery-completion-evidence-field-missing-'+$f)}}}
     if([int]$Envelope.schema -ne $CustomAppProductionRecoveryCompletionEvidenceSchema -or [string]$Envelope.managed_by -cne $CustomAppProductionRecoveryCompletionEvidenceManagedBy -or [string]$Envelope.qualified_executor_head -cne $CustomAppProductionRecoveryCompletionEvidenceQualifiedExecutorHead -or [string]$Envelope.qualified_evidence_head -cne $CustomAppProductionRecoveryCompletionEvidenceQualifiedEvidenceHead -or [string]$Envelope.qualified_journal_head -cne $CustomAppProductionRecoveryCompletionEvidenceQualifiedJournalHead){return [pscustomobject]@{ok=$false;reason='recovery-completion-evidence-owner-schema-parent-invalid'}}
@@ -68,20 +75,24 @@ function Test-CustomAppProductionRecoveryCompletionEvidenceEnvelopeV010 {
     foreach($f in @('executor_result_embedded','current_old_state_verified','retained_stage_verified','retained_backups_verified','transaction_bounded_verified','retirement_admission_required','requires_future_fresh_revalidation')){if(-not [bool]$Envelope.$f){return [pscustomobject]@{ok=$false;reason=('recovery-completion-evidence-required-flag-false-'+$f)}}}
     foreach($f in @('evidence_is_authority','execution_authorized','restore_authorized','apply_authorized','cleanup_authorized','production_mutation_authorized')){if([bool]$Envelope.$f){return [pscustomobject]@{ok=$false;reason=('recovery-completion-evidence-authority-escaped-'+$f)}}}
     $start=[DateTimeOffset]::MinValue;$finish=[DateTimeOffset]::MinValue;$written=[DateTimeOffset]::MinValue
-    if(-not[DateTimeOffset]::TryParse([string]$Envelope.apply_started_at,[ref]$start) -or -not[DateTimeOffset]::TryParse([string]$Envelope.apply_finished_at,[ref]$finish) -or -not[DateTimeOffset]::TryParse([string]$Envelope.evidence_written_at,[ref]$written) -or $finish -lt $start -or $written -lt $finish.AddMinutes(-5)){return [pscustomobject]@{ok=$false;reason='recovery-completion-evidence-time-invalid'}}
+    if(-not[DateTimeOffset]::TryParse([string]$Envelope.apply_started_at,[ref]$start) -or -not[DateTimeOffset]::TryParse([string]$Envelope.apply_finished_at,[ref]$finish) -or -not[DateTimeOffset]::TryParse([string]$Envelope.evidence_written_at,[ref]$written) -or $finish -lt $start -or $written -lt $finish -or $written -gt $Now.AddSeconds(5)){return [pscustomobject]@{ok=$false;reason='recovery-completion-evidence-time-invalid'}}
     $rc=Test-CustomAppProductionRecoveryRestoreExecutorResultV010 -Result $Envelope.executor_result
     if(-not [bool]$rc.ok){return [pscustomobject]@{ok=$false;reason=('recovery-completion-evidence-executor-result-invalid:'+[string]$rc.reason)}}
     $r=$Envelope.executor_result
     foreach($pair in @(
         @('transaction_id','transaction_id'),@('name','name'),@('source_identity','source_identity'),@('remote_commit_sha','remote_commit_sha'),@('consumption_id','consumption_id'),@('preparation_fingerprint','preparation_fingerprint'),@('recovery_evidence_fingerprint','evidence_fingerprint'),@('executor_result_fingerprint','result_fingerprint'),@('rollback_complete_revision','rollback_complete_revision'),@('rollback_complete_entry_sha256','rollback_complete_entry_sha256'),@('live_path','live_path'),@('transaction_root','transaction_root'),@('stage_workspace_path','stage_workspace_path'),@('app_backup_path','app_backup_path'),@('persistence_backup_path','persistence_backup_path'),@('live_tree_sha256','app_tree_sha256'),@('persistence_fingerprint','persistence_fingerprint'),@('spicetify_executable_sha256','spicetify_executable_sha256'),@('apply_exit_code','apply_exit_code'),@('apply_timed_out','apply_timed_out'),@('apply_started_at','apply_started_at'),@('apply_finished_at','apply_finished_at')
-    )){if(([string]$Envelope.($pair[0])).Trim().ToLowerInvariant() -cne ([string]$r.($pair[1])).Trim().ToLowerInvariant()){return [pscustomobject]@{ok=$false;reason=('recovery-completion-evidence-executor-continuity-mismatch-'+$pair[0])}}}
+    )){
+        $left=Get-CustomAppProductionRecoveryCompletionEvidencePropertyValueV010 -Object $Envelope -Name ([string]$pair[0])
+        $right=Get-CustomAppProductionRecoveryCompletionEvidencePropertyValueV010 -Object $r -Name ([string]$pair[1])
+        if(([string]$left).Trim().ToLowerInvariant() -cne ([string]$right).Trim().ToLowerInvariant()){return [pscustomobject]@{ok=$false;reason=('recovery-completion-evidence-executor-continuity-mismatch-'+$pair[0])}}
+    }
     $expected=Get-CustomAppProductionRecoveryCompletionEvidenceSha256V010 (Get-CustomAppProductionRecoveryCompletionEvidenceMaterialV010 -Envelope $Envelope)
     if(([string]$Envelope.completion_fingerprint).Trim().ToLowerInvariant() -cne $expected){return [pscustomobject]@{ok=$false;reason='recovery-completion-evidence-fingerprint-mismatch'}}
     return [pscustomobject]@{ok=$true;reason='recovery-completion-evidence-envelope-valid-zero-authority';transaction_id=([string]$Envelope.transaction_id).Trim().ToLowerInvariant();completion_fingerprint=$expected}
 }
 
 function Read-CustomAppProductionRecoveryCompletionEvidenceV010 {
-    param([Parameter(Mandatory=$true)][string]$AllowedRoot,[Parameter(Mandatory=$true)][string]$StoreDirectory,[Parameter(Mandatory=$true)][string]$ExpectedTransactionId)
+    param([Parameter(Mandatory=$true)][string]$AllowedRoot,[Parameter(Mandatory=$true)][string]$StoreDirectory,[Parameter(Mandatory=$true)][string]$ExpectedTransactionId,[DateTimeOffset]$Now=[DateTimeOffset]::UtcNow)
     $deny={param([string]$Reason)[pscustomobject]@{ok=$false;reason=$Reason;evidence_is_authority=$false;execution_authorized=$false;restore_authorized=$false;apply_authorized=$false;cleanup_authorized=$false;production_mutation_authorized=$false}}
     $tx=$ExpectedTransactionId.Trim().ToLowerInvariant();if(-not(Test-CustomAppProductionRecoveryCompletionEvidenceSha256V010 $tx)){return & $deny 'recovery-completion-evidence-transaction-id-invalid'}
     $lock=$null
@@ -93,7 +104,7 @@ function Read-CustomAppProductionRecoveryCompletionEvidenceV010 {
         if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint)-ne 0){return & $deny 'recovery-completion-evidence-file-reparse-point'}
         if([int64]$item.Length -gt $CustomAppProductionRecoveryCompletionEvidenceMaxBytes){return & $deny 'recovery-completion-evidence-file-exceeds-4-MiB'}
         try{$obj=[IO.File]::ReadAllText([string]$p.file,[Text.UTF8Encoding]::new($false))|ConvertFrom-Json}catch{return & $deny 'recovery-completion-evidence-JSON-invalid'}
-        $ck=Test-CustomAppProductionRecoveryCompletionEvidenceEnvelopeV010 -Envelope $obj;if(-not[bool]$ck.ok){return & $deny ([string]$ck.reason)}
+        $ck=Test-CustomAppProductionRecoveryCompletionEvidenceEnvelopeV010 -Envelope $obj -Now $Now;if(-not[bool]$ck.ok){return & $deny ([string]$ck.reason)}
         if(([string]$obj.transaction_id).Trim().ToLowerInvariant() -cne $tx){return & $deny 'recovery-completion-evidence-transaction-mismatch'}
         $j=Read-CustomAppProductionCrashJournalV010 -AllowedRoot $AllowedRoot -StoreDirectory $StoreDirectory
         if($null-eq$j -or -not[bool]$j.ok -or $null-eq$j.entry){return & $deny 'recovery-completion-evidence-journal-read-invalid'}
@@ -128,7 +139,11 @@ function Write-CustomAppProductionRecoveryCompletionEvidenceV010 {
         $re=Read-CustomAppProductionRecoveryEvidenceV010 -AllowedRoot $AllowedRoot -StoreDirectory $StoreDirectory -ExpectedTransactionId $tx
         if($null-eq$re -or -not[bool]$re.ok){return & $deny ('recovery-completion-evidence-recovery-evidence-read-denied:'+[string]$re.reason)}
         $e=$re.envelope
-        foreach($pair in @(@('name','name'),@('source_identity','source_identity'),@('remote_commit_sha','remote_commit_sha'),@('consumption_id','consumption_id'),@('preparation_fingerprint','preparation_fingerprint'),@('evidence_fingerprint','evidence_fingerprint'),@('live_path','live_path'),@('transaction_root','transaction_root'),@('stage_workspace_path','stage_workspace_path'),@('app_backup_path','app_backup_path'),@('persistence_backup_path','persistence_backup_path'),@('persistence_fingerprint','persistence_fingerprint'))){if(([string]$ExecutorResult.($pair[0])).Trim().ToLowerInvariant() -cne ([string]$e.($pair[1])).Trim().ToLowerInvariant()){return & $deny ('recovery-completion-evidence-durable-continuity-mismatch-'+$pair[0])}}
+        foreach($pair in @(@('name','name'),@('source_identity','source_identity'),@('remote_commit_sha','remote_commit_sha'),@('consumption_id','consumption_id'),@('preparation_fingerprint','preparation_fingerprint'),@('evidence_fingerprint','evidence_fingerprint'),@('live_path','live_path'),@('transaction_root','transaction_root'),@('stage_workspace_path','stage_workspace_path'),@('app_backup_path','app_backup_path'),@('persistence_backup_path','persistence_backup_path'),@('persistence_fingerprint','persistence_fingerprint'))){
+            $left=Get-CustomAppProductionRecoveryCompletionEvidencePropertyValueV010 -Object $ExecutorResult -Name ([string]$pair[0])
+            $right=Get-CustomAppProductionRecoveryCompletionEvidencePropertyValueV010 -Object $e -Name ([string]$pair[1])
+            if(([string]$left).Trim().ToLowerInvariant() -cne ([string]$right).Trim().ToLowerInvariant()){return & $deny ('recovery-completion-evidence-durable-continuity-mismatch-'+$pair[0])}
+        }
         if(([string]$ExecutorResult.app_tree_sha256).Trim().ToLowerInvariant() -cne ([string]$e.app_backup_tree_sha256).Trim().ToLowerInvariant()){return & $deny 'recovery-completion-evidence-restored-app-tree-not-durable-old-tree'}
 
         $stage=Test-CustomAppProductionRecoveryRestoreResumeStageV010 -Envelope $e -AllowedRoot $AllowedRoot;if(-not[bool]$stage.ok){return & $deny ('recovery-completion-evidence-stage-invalid:'+[string]$stage.reason)}
@@ -140,9 +155,13 @@ function Write-CustomAppProductionRecoveryCompletionEvidenceV010 {
         if([string]$live.tree_sha256 -cne [string]$e.app_backup_tree_sha256 -or [int]$live.file_count -ne [int]$e.app_backup_file_count -or [int64]$live.total_bytes -ne [int64]$e.app_backup_total_bytes){return & $deny 'recovery-completion-evidence-current-live-not-exact-old-state'}
         if([string]$persist.fingerprint -cne [string]$e.persistence_fingerprint){return & $deny 'recovery-completion-evidence-current-persistence-not-exact-old-state'}
 
-        $exe=$null
-        try{$exe=Open-CustomAppProductionSpicetifyExecutableV010 -ExecutablePath $SpicetifyPath -ExpectedSha256 $ExpectedSpicetifySha256;if(([string]$exe.sha256).Trim().ToLowerInvariant() -cne ([string]$ExecutorResult.spicetify_executable_sha256).Trim().ToLowerInvariant()){return & $deny 'recovery-completion-evidence-spicetify-result-pin-mismatch'}}
-        catch{return & $deny ('recovery-completion-evidence-spicetify-recheck-denied:'+[string]$_.Exception.Message)}
+        $exe=$null;$boundedExe=$null
+        try{
+            $boundedExe=Assert-CustomAppProductionCrashJournalPathV010 -AllowedRoot $SpicetifyAllowedRoot -Path $SpicetifyPath -Label 'recovery completion spicetify executable' -RequireExisting:$true
+            if(-not(Test-Path -LiteralPath $boundedExe -PathType Leaf)){throw 'recovery completion spicetify executable is not a file'}
+            $exe=Open-CustomAppProductionSpicetifyExecutableV010 -ExecutablePath $boundedExe -ExpectedSha256 $ExpectedSpicetifySha256
+            if(([string]$exe.sha256).Trim().ToLowerInvariant() -cne ([string]$ExecutorResult.spicetify_executable_sha256).Trim().ToLowerInvariant()){return & $deny 'recovery-completion-evidence-spicetify-result-pin-mismatch'}
+        } catch{return & $deny ('recovery-completion-evidence-spicetify-recheck-denied:'+[string]$_.Exception.Message)}
         finally{if($null-ne$exe -and $null-ne$exe.stream){$exe.stream.Dispose()}}
 
         $embedded=(($ExecutorResult|ConvertTo-Json -Depth 60)|ConvertFrom-Json)
@@ -156,7 +175,7 @@ function Write-CustomAppProductionRecoveryCompletionEvidenceV010 {
             evidence_is_authority=$false;execution_authorized=$false;restore_authorized=$false;apply_authorized=$false;cleanup_authorized=$false;production_mutation_authorized=$false;executor_result=$embedded;completion_fingerprint=$null
         }
         $envelope.completion_fingerprint=Get-CustomAppProductionRecoveryCompletionEvidenceSha256V010 (Get-CustomAppProductionRecoveryCompletionEvidenceMaterialV010 -Envelope $envelope)
-        $ec=Test-CustomAppProductionRecoveryCompletionEvidenceEnvelopeV010 -Envelope $envelope;if(-not[bool]$ec.ok){return & $deny ('recovery-completion-evidence-self-validation-failed:'+[string]$ec.reason)}
+        $ec=Test-CustomAppProductionRecoveryCompletionEvidenceEnvelopeV010 -Envelope $envelope -Now $Now;if(-not[bool]$ec.ok){return & $deny ('recovery-completion-evidence-self-validation-failed:'+[string]$ec.reason)}
         $json=$envelope|ConvertTo-Json -Depth 60 -Compress;$bytes=[Text.UTF8Encoding]::new($false).GetBytes($json)
         if($bytes.Length -gt $CustomAppProductionRecoveryCompletionEvidenceMaxBytes){return & $deny 'recovery-completion-evidence-serialized-exceeds-4-MiB'}
         $tmp=Join-Path ([string]$p.store) ('.recovery-completion-evidence-'+[Guid]::NewGuid().ToString('N')+'.tmp')
@@ -167,7 +186,7 @@ function Write-CustomAppProductionRecoveryCompletionEvidenceV010 {
     } catch {return & $deny ('recovery-completion-evidence-write-failed:'+[string]$_.Exception.Message)}
     finally{if($null-ne$lock){$lock.Dispose()}}
     if(-not$written){return & $deny 'recovery-completion-evidence-not-written'}
-    $read=Read-CustomAppProductionRecoveryCompletionEvidenceV010 -AllowedRoot $AllowedRoot -StoreDirectory $StoreDirectory -ExpectedTransactionId $tx
+    $read=Read-CustomAppProductionRecoveryCompletionEvidenceV010 -AllowedRoot $AllowedRoot -StoreDirectory $StoreDirectory -ExpectedTransactionId $tx -Now $Now
     if($null-eq$read -or -not[bool]$read.ok -or ([string]$read.completion_fingerprint).Trim().ToLowerInvariant() -cne ([string]$envelope.completion_fingerprint).Trim().ToLowerInvariant()){return & $deny ('recovery-completion-evidence-read-after-write-failed:'+[string]$read.reason)}
     return [pscustomobject]@{ok=$true;reason='recovery-completion-evidence-persisted-readback-verified';path=$path;envelope=$read.envelope;completion_fingerprint=[string]$read.completion_fingerprint;persisted=$true;read_after_write_verified=$true;evidence_is_authority=$false;execution_authorized=$false;restore_authorized=$false;apply_authorized=$false;cleanup_authorized=$false;production_mutation_authorized=$false}
 }
