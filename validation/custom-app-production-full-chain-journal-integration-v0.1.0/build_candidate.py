@@ -23,16 +23,21 @@ REQUIRED_JOURNAL_FUNCTIONS=[
     'New-CustomAppProductionCrashJournalEntryV010',
     'Test-CustomAppProductionCrashJournalEntryV010',
     'Test-CustomAppProductionCrashJournalTransitionV010',
+    'Get-CustomAppProductionCrashJournalPathsV010',
+    'Open-CustomAppProductionCrashJournalLockV010',
+    'Write-CustomAppProductionCrashJournalDurableFileV010',
+    'Read-CustomAppProductionCrashJournalUnlockedV010',
     'Read-CustomAppProductionCrashJournalV010',
     'Initialize-CustomAppProductionCrashJournalV010',
     'Append-CustomAppProductionCrashJournalPhaseV010',
-    'Assert-CustomAppProductionCrashJournalPhaseBeforeSideEffectV010',
-    'Resolve-CustomAppProductionCrashRecoveryDispositionV010',
+    'Resolve-CustomAppProductionCrashRecoveryClassificationV010',
 ]
 FORBIDDEN_JOURNAL_MARKERS=[
-    '[IO.Directory]::Move','Remove-CustomAppAtomicDirectoryV010','Remove-Item','Move-Item','Copy-Item',
-    'Invoke-WebRequest','Invoke-RestMethod','Start-Process','spicetify apply','spicetify config',
-    'Restore-CustomAppProductionAtomicLiveSwapV010','Restore-SpotifyPersistenceBackup'
+    '[IO.Directory]::Move','[IO.Directory]::Delete','Move-Item','Copy-Item','Remove-Item',
+    'Invoke-WebRequest','Invoke-RestMethod','Start-Process','ProcessStartInfo',
+    'spicetify apply','spicetify config','spicetify restore',
+    'Restore-CustomAppProductionAtomicLiveSwapV010','Restore-SpotifyPersistenceBackup',
+    'Invoke-CustomAppProductionExactSpicetifyApplyProcessV010'
 ]
 DANGEROUS_ENTRYPOINTS={
     'Invoke-CustomAppProductionStageExecutorV010','Invoke-CustomAppProductionPreApplyPreparationV010',
@@ -47,9 +52,11 @@ SELFTEST=r'''function Invoke-CustomAppProductionCrashJournalIntegratedSelfTestV0
     $required=@(
         'New-CustomAppProductionCrashJournalIdentityV010','Test-CustomAppProductionCrashJournalIdentityV010',
         'New-CustomAppProductionCrashJournalEntryV010','Test-CustomAppProductionCrashJournalEntryV010',
-        'Test-CustomAppProductionCrashJournalTransitionV010','Read-CustomAppProductionCrashJournalV010',
+        'Test-CustomAppProductionCrashJournalTransitionV010','Get-CustomAppProductionCrashJournalPathsV010',
+        'Open-CustomAppProductionCrashJournalLockV010','Write-CustomAppProductionCrashJournalDurableFileV010',
+        'Read-CustomAppProductionCrashJournalUnlockedV010','Read-CustomAppProductionCrashJournalV010',
         'Initialize-CustomAppProductionCrashJournalV010','Append-CustomAppProductionCrashJournalPhaseV010',
-        'Assert-CustomAppProductionCrashJournalPhaseBeforeSideEffectV010','Resolve-CustomAppProductionCrashRecoveryDispositionV010'
+        'Resolve-CustomAppProductionCrashRecoveryClassificationV010'
     )
     foreach($name in $required){ if(-not (Get-Command $name -CommandType Function -ErrorAction SilentlyContinue)){ throw ('Integrated crash journal function missing: '+$name) } }
     if(-not (Test-CustomAppProductionCrashJournalTransitionV010 -From 'prepared' -To 'atomic-mutation-starting')){ throw 'Crash journal legal transition rejected.' }
@@ -57,6 +64,12 @@ SELFTEST=r'''function Invoke-CustomAppProductionCrashJournalIntegratedSelfTestV0
     foreach($phase in @('prepared','atomic-mutation-starting','live-moved-to-old','candidate-live','transaction-finalized','apply-starting','apply-returned-success-pending-verification','apply-verified','cleanup-starting','committed-clean','rollback-required','rollback-complete')){
         if($phase -notin $CustomAppProductionCrashRecoveryJournalPhases){ throw ('Crash journal phase missing: '+$phase) }
     }
+    $zero=$CustomAppProductionCrashRecoveryJournalZeroHash
+    if([string]$zero -cne ('0'*64)){ throw 'Crash journal zero-hash sentinel drift.' }
+    $prepared=[pscustomobject]@{ok=$true;reloaded_from_persistent_store=$true;entry=[pscustomobject]@{phase='prepared';transaction_id=('a'*64)}}
+    $class=Resolve-CustomAppProductionCrashRecoveryClassificationV010 -StoreRead $prepared -ExpectedTransactionId ('a'*64)
+    if(-not [bool]$class.ok -or -not [bool]$class.no_action -or [bool]$class.production_execution_authorized -or [bool]$class.production_mutation_authorized -or [bool]$class.journal_is_authority){ throw 'Crash journal recovery classification authority separation drift.' }
+    if([string]$class.classification -cne 'safe-abandon-or-restart-only-after-fresh-admission'){ throw 'Crash journal prepared recovery classification drift.' }
     if([bool]$script:CustomAppProductionPipelineEnabled){ throw 'Crash journal integration observed enabled production pipeline.' }
     Write-Host 'CUSTOM_APP_PRODUCTION_CRASH_JOURNAL_INTEGRATED_SELFTEST_V010_PASS zero-authority hard-disabled coexistence'
 }
@@ -83,7 +96,6 @@ def replace_once(text:str,old:str,new:str,label:str)->str:
 
 def build_parent()->tuple[bytes,bytes,bytes,bytes]:
     if git_blob(FULL_CHAIN_HEAD,FULL_CHAIN_BUILDER)!=FULL_CHAIN_BUILDER_BLOB:raise RuntimeError('full-chain builder pin drift')
-    # Execute exact parent builder from the current stacked branch; its own source/pins are self-verifying.
     subprocess.check_call(['python',str(ROOT/FULL_CHAIN_BUILDER)],cwd=ROOT)
     d=ROOT/'validation/custom-app-production-full-chain-integration-v0.1.0/out/bin'
     main=(d/'spotify-control.ps1').read_bytes();addon=(d/'addon-manager.ps1').read_bytes();collector=(d/'Collect-Marketplace-Records.ps1').read_bytes();reader=(d/'LevelDbReadOnly.cs').read_bytes()
@@ -115,15 +127,12 @@ def integrate(addon:bytes)->tuple[bytes,dict]:
     selftest=replace_once(selftest,hook,replacement,'journal SelfTest hook')
     text=replace_function(text,'Invoke-AddonSelfTest',selftest)
 
-    # Existing production orchestrator remains structurally hard-disabled and cannot call journal I/O.
     orch=function_block(text,'Invoke-CustomAppProductionFullChainV010')
     for name in journal_funcs:
         if name in orch:raise RuntimeError(f'hard-disabled full-chain orchestrator gained journal call: {name}')
     if 'Custom App production full-chain execution is intentionally unavailable in integration-only candidate.' not in orch:raise RuntimeError('full-chain hard-disable throw drift')
 
-    # No pre-existing Addon Manager function may gain a production mutation entrypoint call.
-    parent_funcs=set(existing)
-    leaks=[]
+    parent_funcs=set(existing);leaks=[]
     for name in sorted(parent_funcs):
         if name in {'Invoke-CustomAppProductionFullChainIntegratedSelfTestV010','Invoke-AddonSelfTest'}:continue
         block=function_block(text,name)
