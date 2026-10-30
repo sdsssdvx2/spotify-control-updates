@@ -5,23 +5,23 @@ $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $root 'validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1')
 . (Join-Path $PSScriptRoot 'custom-app-production-recovery-evidence.ps1')
 
-function Assert-RETrue([bool]$v,[string]$m){if(-not$v){throw$m}}
-function Assert-REFalse([bool]$v,[string]$m){if($v){throw$m}}
-function Assert-REEq($a,$b,[string]$m){if([string]$a-cne[string]$b){throw"$m actual=<$a> expected=<$b>"}}
+function Assert-RETrue([bool]$v,[string]$m){if(-not$v){throw $m}}
+function Assert-REFalse([bool]$v,[string]$m){if($v){throw $m}}
+function Assert-REEq($a,$b,[string]$m){if([string]$a-cne[string]$b){throw "$m actual=<$a> expected=<$b>"}}
 function Copy-RE($x){return(($x|ConvertTo-Json -Depth 40)|ConvertFrom-Json)}
 
 function New-RecoveryEvidenceFixtureV010 {
     param([string]$Label,[string]$Name='tagify',[string]$Source='alexk218/tagify',[string]$Manifest='Tagify',[string]$Nonce='12121212121212121212121212121212',[AllowNull()]$PreparedOverride=$null)
     $q=New-PreApplyFixtureV010 -Label ('recovery-evidence-'+$Label) -Name $Name -Source $Source -Manifest $Manifest -Nonce $Nonce
     $prep=Invoke-PreApplyFixtureV010 -Q $q
-    if(-not[bool]$prep.ok){throw('evidence fixture pre-apply failed: '+[string]$prep.reason)}
+    if(-not[bool]$prep.ok){throw ('evidence fixture pre-apply failed: '+[string]$prep.reason)}
     $prepared=$(if($null-ne$PreparedOverride){$PreparedOverride}else{$prep.result})
     $allowed=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
     $txn=Join-Path $q.x.base ('.spotify-control-txn-'+[Guid]::NewGuid().ToString('N'))
     $store=Join-Path $q.x.base 'recovery-journal'
     $id=New-CustomAppProductionCrashJournalIdentityV010 -Name ([string]$prepared.name) -ConsumptionId ([string]$prepared.consumption_id) -SourceIdentity ([string]$prepared.source_identity) -RemoteCommitSha ([string]$prepared.remote_commit_sha) -StageResultFingerprint ([string]$prepared.stage_result_fingerprint) -PreparationFingerprint ([string]$prepared.preparation_fingerprint) -AllowedRoot $allowed -LivePath $q.x.live -TransactionRoot $txn -StageWorkspacePath ([string]$prepared.stage_workspace_path) -AppBackupPath ([string]$prepared.app_backup_path) -PersistenceBackupPath ([string]$prepared.persistence_backup_path)
     $init=Initialize-CustomAppProductionCrashJournalV010 -AllowedRoot $allowed -StoreDirectory $store -Identity $id -Now ([DateTimeOffset]::UtcNow.AddMinutes(-1))
-    if(-not[bool]$init.ok){throw('evidence fixture journal init failed: '+[string]$init.reason)}
+    if(-not[bool]$init.ok){throw ('evidence fixture journal init failed: '+[string]$init.reason)}
     return [pscustomobject]@{q=$q;prep=$prep;prepared=$prepared;allowed=$allowed;txn=$txn;store=$store;identity=$id;init=$init}
 }
 function Write-REFixtureV010($f){return Write-CustomAppProductionRecoveryEvidenceV010 -AllowedRoot $f.allowed -StoreDirectory $f.store -PreparedResult $f.prepared -Now ([DateTimeOffset]::UtcNow.AddMinutes(-1).AddSeconds(1))}
@@ -41,7 +41,7 @@ $advRead=New-RecoveryEvidenceFixtureV010 'advanced-read' -Nonce ('5'*32);$arw=Wr
 
 $tamper=New-RecoveryEvidenceFixtureV010 'prepared-tamper' -Nonce ('6'*32);$bad=Copy-RE $tamper.prepared;$bad.app_backup_tree_sha256=('0'*64);$bad.preparation_fingerprint=Get-CustomAppProductionPreApplySha256V010 -Text (Get-CustomAppProductionPreApplyResultMaterialV010 -Result $bad);$tw=Write-CustomAppProductionRecoveryEvidenceV010 -AllowedRoot $tamper.allowed -StoreDirectory $tamper.store -PreparedResult $bad;Assert-REFalse ([bool]$tw.ok) 'prepared rehash tamper accepted against journal anchor';Assert-RETrue ([string]$tw.reason -like '*prepared-journal-mismatch-preparation_fingerprint*') ('prepared rehash reason drifted: '+[string]$tw.reason);$count++
 
-$authorityQ=New-PreApplyFixtureV010 -Label 'recovery-evidence-authority' -Nonce ('7'*32);$authorityPrep=Invoke-PreApplyFixtureV010 -Q $authorityQ;if(-not[bool]$authorityPrep.ok){throw'authority fixture preapply failed'};$badAuth=Copy-RE $authorityPrep.result;$badAuth.apply_authorized=$true;$badAuth.preparation_fingerprint=Get-CustomAppProductionPreApplySha256V010 -Text (Get-CustomAppProductionPreApplyResultMaterialV010 -Result $badAuth)
+$authorityQ=New-PreApplyFixtureV010 -Label 'recovery-evidence-authority' -Nonce ('7'*32);$authorityPrep=Invoke-PreApplyFixtureV010 -Q $authorityQ;if(-not[bool]$authorityPrep.ok){throw 'authority fixture preapply failed'};$badAuth=Copy-RE $authorityPrep.result;$badAuth.apply_authorized=$true;$badAuth.preparation_fingerprint=Get-CustomAppProductionPreApplySha256V010 -Text (Get-CustomAppProductionPreApplyResultMaterialV010 -Result $badAuth)
 $allowed=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar);$txn=Join-Path $authorityQ.x.base ('.spotify-control-txn-'+[Guid]::NewGuid().ToString('N'));$store=Join-Path $authorityQ.x.base 'authority-journal';$id=New-CustomAppProductionCrashJournalIdentityV010 -Name $badAuth.name -ConsumptionId $badAuth.consumption_id -SourceIdentity $badAuth.source_identity -RemoteCommitSha $badAuth.remote_commit_sha -StageResultFingerprint $badAuth.stage_result_fingerprint -PreparationFingerprint $badAuth.preparation_fingerprint -AllowedRoot $allowed -LivePath $authorityQ.x.live -TransactionRoot $txn -StageWorkspacePath $badAuth.stage_workspace_path -AppBackupPath $badAuth.app_backup_path -PersistenceBackupPath $badAuth.persistence_backup_path;$init=Initialize-CustomAppProductionCrashJournalV010 -AllowedRoot $allowed -StoreDirectory $store -Identity $id -Now ([DateTimeOffset]::UtcNow.AddMinutes(-1));Assert-RETrue ([bool]$init.ok) 'authority journal init failed';$authw=Write-CustomAppProductionRecoveryEvidenceV010 -AllowedRoot $allowed -StoreDirectory $store -PreparedResult $badAuth;Assert-REFalse ([bool]$authw.ok) 'authority-polluted prepared result accepted';Assert-RETrue ([string]$authw.reason -like '*prepared-result-authority-escaped-apply_authorized*') ('authority reason drifted: '+[string]$authw.reason);$count++
 
 $pathMismatch=New-RecoveryEvidenceFixtureV010 'path-mismatch' -Nonce ('8'*32);$badPath=Copy-RE $pathMismatch.prepared;$badPath.stage_workspace_path=Join-Path $pathMismatch.q.x.base 'different-workspace';$badPath.preparation_fingerprint=Get-CustomAppProductionPreApplySha256V010 -Text (Get-CustomAppProductionPreApplyResultMaterialV010 -Result $badPath);$pw=Write-CustomAppProductionRecoveryEvidenceV010 -AllowedRoot $pathMismatch.allowed -StoreDirectory $pathMismatch.store -PreparedResult $badPath;Assert-REFalse ([bool]$pw.ok) 'prepared path mismatch accepted';$count++
@@ -60,6 +60,6 @@ $lock=New-RecoveryEvidenceFixtureV010 'lock' -Nonce ('e'*32);$lw=Write-REFixture
 
 $oversize=New-RecoveryEvidenceFixtureV010 'oversize' -Nonce ('f'*32);$ow=Write-REFixtureV010 $oversize;Assert-RETrue ([bool]$ow.ok) 'oversize setup failed';$blob='x'*(4194305);[IO.File]::WriteAllText([string]$ow.path,$blob,[Text.UTF8Encoding]::new($false));$or=Read-REFixtureV010 $oversize;Assert-REFalse ([bool]$or.ok) 'oversize evidence accepted';Assert-REEq $or.reason 'recovery-evidence-file-exceeds-4-MiB' 'oversize reason';$count++
 
-$probeFixture=New-RecoveryEvidenceFixtureV010 'probe' -Nonce ('1'*32);$probeWrite=Write-REFixtureV010 $probeFixture;Assert-RETrue ([bool]$probeWrite.ok) 'probe setup failed';$probe=Join-Path $PSScriptRoot 'probe_custom_app_production_recovery_evidence.ps1';$raw=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probe -AllowedRoot $probeFixture.allowed -StoreDirectory $probeFixture.store -ExpectedTransactionId ([string]$probeFixture.identity.transaction_id);if($LASTEXITCODE){throw'separate-process recovery evidence probe failed'};$pj=($raw|Select-Object -Last 1)|ConvertFrom-Json;Assert-RETrue ([bool]$pj.ok) ('probe read failed: '+[string]$pj.reason);Assert-REEq $pj.transaction_id $probeFixture.identity.transaction_id 'probe transaction';Assert-REFalse ([bool]$pj.production_mutation_authorized) 'probe authority escaped';$count++
+$probeFixture=New-RecoveryEvidenceFixtureV010 'probe' -Nonce ('1'*32);$probeWrite=Write-REFixtureV010 $probeFixture;Assert-RETrue ([bool]$probeWrite.ok) 'probe setup failed';$probe=Join-Path $PSScriptRoot 'probe_custom_app_production_recovery_evidence.ps1';$raw=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probe -AllowedRoot $probeFixture.allowed -StoreDirectory $probeFixture.store -ExpectedTransactionId ([string]$probeFixture.identity.transaction_id);if($LASTEXITCODE){throw 'separate-process recovery evidence probe failed'};$pj=($raw|Select-Object -Last 1)|ConvertFrom-Json;Assert-RETrue ([bool]$pj.ok) ('probe read failed: '+[string]$pj.reason);Assert-REEq $pj.transaction_id $probeFixture.identity.transaction_id 'probe transaction';Assert-REFalse ([bool]$pj.production_mutation_authorized) 'probe authority escaped';$count++
 
 Write-Host "CUSTOM_APP_PRODUCTION_RECOVERY_EVIDENCE_MATRIX_PASS total=$count"
