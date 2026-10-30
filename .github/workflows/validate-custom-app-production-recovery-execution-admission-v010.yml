@@ -57,8 +57,9 @@ jobs:
         shell: powershell
         run: |
           $dir='validation/custom-app-production-crash-recovery-journal-v0.1.0';New-Item -ItemType Directory -Force -Path $dir|Out-Null
-          $deps=@(@('7e26187e2360089024e9d72d0701be6f1577a1ef',"$dir/custom-app-production-crash-recovery-journal.ps1",'a3df7e5d89c594083c10e240e13029ca5640b8ae'))
-          foreach($d in $deps){$path=$d[1];$env:RA_SPEC="$($d[0])`:$path";$env:RA_OUT=$path;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['RA_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['RA_SPEC']]))";if($LASTEXITCODE){throw "materialize failed $path"};$actual=(git hash-object $path).Trim();if($actual -cne $d[2]){throw "materialized blob drift $path $actual != $($d[2])"}}
+          $path="$dir/custom-app-production-crash-recovery-journal.ps1";$env:RA_SPEC="7e26187e2360089024e9d72d0701be6f1577a1ef`:$path";$env:RA_OUT=$path
+          python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['RA_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['RA_SPEC']]))";if($LASTEXITCODE){throw "materialize failed $path"}
+          $actual=(git hash-object $path).Trim();if($actual -cne 'a3df7e5d89c594083c10e240e13029ca5640b8ae'){throw "materialized blob drift $path $actual"}
           'CUSTOM_APP_PRODUCTION_RECOVERY_EXECUTION_ADMISSION_MATERIALIZATION_PASS'
 
       - name: Run recovery-execution admission matrix twice
