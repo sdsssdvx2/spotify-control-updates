@@ -33,7 +33,7 @@ jobs:
             @($h,'validation/custom-app-production-recovery-completion-retirement-admission-integration-v0.1.0/test_custom_app_production_recovery_completion_retirement_admission_integration.ps1','067c57fdb48479995ce39587f7797df9aa8e3319'),
             @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/custom-app-production-recovery-completion-evidence.ps1','3795f900cbf8ded834f721f7db7b126aa264b0e8'),
             @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/test_custom_app_production_recovery_completion_evidence.ps1','1451ce0aeb046fe36a1660b12647534b514cd738'),
-            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/probe_custom_app_production_recovery_completion_evidence.ps1','8abb0d926a648fd9a36fe596dd08399cbe36187e'),
+            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/probe_custom_app_production_recovery_completion_evidence.ps1','8abbcb7eded67420d2e2b6e8bed3f9636ae9833d'),
             @('16cac85b7bde1b652be67e8d657136409ec7f8b9','validation/custom-app-production-recovery-artifact-retirement-admission-v0.1.0/custom-app-production-recovery-artifact-retirement-admission.ps1','ec8aec5393f30923226f48df9850fded26ca11c6'),
             @($p,'validation/custom-app-production-recovery-artifact-retirement-executor-v0.1.0/custom-app-production-recovery-artifact-retirement-executor.ps1','be4ae0b1d67339f80c71a47ecbff8cc9066fff61'),
             @('d3969a746ed1736fe93586bd025116c2526fbff5','validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/custom-app-production-recovery-cleanup-resume-admission.ps1','387d97b10d493b3794b24fba2bac67cf39491444'),
@@ -65,7 +65,7 @@ jobs:
           $deps=@(
             @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/custom-app-production-recovery-completion-evidence.ps1','3795f900cbf8ded834f721f7db7b126aa264b0e8'),
             @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/test_custom_app_production_recovery_completion_evidence.ps1','1451ce0aeb046fe36a1660b12647534b514cd738'),
-            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/probe_custom_app_production_recovery_completion_evidence.ps1','8abb0d926a648fd9a36fe596dd08399cbe36187e'),
+            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/probe_custom_app_production_recovery_completion_evidence.ps1','8abbcb7eded67420d2e2b6e8bed3f9636ae9833d'),
             @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
             @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/test_custom_app_production_recovery_evidence.ps1','de37d029e175dbec899445dbe983e506a14a1b0a'),
             @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/probe_custom_app_production_recovery_evidence.ps1','84f73605526373652a4499b7f472537c8e2b5c03'),
