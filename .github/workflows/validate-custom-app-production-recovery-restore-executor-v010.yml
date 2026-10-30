@@ -34,7 +34,7 @@ jobs:
         run: |
           $h=(git rev-parse HEAD).Trim();$pins=@(
             @($h,'validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1','5fec613c460619da5dbfe88fca5c7334e9e93f76'),
-            @($h,'validation/custom-app-production-recovery-restore-executor-v0.1.0/test_custom_app_production_recovery_restore_executor.ps1','cab39a8167ee875d3b33546bd15a5f3f9e4905ee'),
+            @($h,'validation/custom-app-production-recovery-restore-executor-v0.1.0/test_custom_app_production_recovery_restore_executor.ps1','5f925d804a3561167f7d8b388a79239eee61fa3d'),
             @('d9a1face71511bdaeeef4e8c761415ef9ec95fc0','validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','0273d7e28a56759b1d0ec9cbf037483b04d98d63'),
             @('d9a1face71511bdaeeef4e8c761415ef9ec95fc0','validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/test_custom_app_production_recovery_restore_resume_admission.ps1','aa05cb19d796cbad3b21b11950af2f638a2b8b52'),
             @('574fe182168271fa3497d58e269e9af1f60d9033','validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1','e91fa6a125f77352907c1119f6d9f47be9682550'),
