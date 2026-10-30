@@ -73,7 +73,7 @@ SELFTEST=r'''function Invoke-CustomAppProductionRecoveryStackHardDisabledSelfTes
 
 def sha(b:bytes)->str:return hashlib.sha256(b).hexdigest()
 def git_blob(commit:str,path:str)->str:return subprocess.check_output(['git','rev-parse',f'{commit}:{path}'],cwd=ROOT,text=True).strip()
-def git_bytes(commit:str,path:str)->bytes:return subprocess.check_output(['git','show',f'{commit}:{path}'],cwd=ROOT)
+def git_object_bytes(blob:str)->bytes:return subprocess.check_output(['git','cat-file','blob',blob],cwd=ROOT)
 def functions(text:str)->list[str]:return re.findall(r'(?im)^\s*function\s+([A-Za-z0-9_-]+)\s*\{',text)
 def function_bounds(text:str,name:str)->tuple[int,int]:
     m=re.search(rf'(?im)^\s*function\s+{re.escape(name)}\s*\{{',text)
@@ -110,7 +110,7 @@ def integrate(addon:bytes)->tuple[bytes,dict]:
     for label,commit,path,blob in MODULES:
         actual=git_blob(commit,path)
         if actual!=blob:raise RuntimeError(f'{label} blob pin drift {actual} != {blob}')
-        text=git_bytes(commit,path).decode('utf-8-sig').replace('\r\n','\n').strip()
+        text=git_object_bytes(actual).decode('utf-8-sig').replace('\r\n','\n').strip()
         funcs=functions(text)
         if not funcs:raise RuntimeError(f'{label} contains no functions')
         collisions=sorted(seen & set(funcs))
