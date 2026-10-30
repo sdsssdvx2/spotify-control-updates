@@ -266,7 +266,7 @@ function Resolve-CustomAppProductionRecoveryRestoreResumeAdmissionV010 {
 
     try{$persistNow=Get-SpotifyPersistenceSnapshot -LocalAppDataRoot $LocalAppDataRoot -AppDataRoot $AppDataRoot}
     catch{return & $deny ('restore-resume-current-persistence-read-failed:'+[string]$_.Exception.Message)}
-    if(-not (Test-CustomAppProductionRecoveryRestoreResumeAdmissionSha256V010 ([string]$persistNow.fingerprint)){return & $deny 'restore-resume-current-persistence-fingerprint-invalid'}
+    if(-not (Test-CustomAppProductionRecoveryRestoreResumeAdmissionSha256V010 ([string]$persistNow.fingerprint))){return & $deny 'restore-resume-current-persistence-fingerprint-invalid'}
 
     $exeSha=''
     if([bool]$plan.requires_recovery_apply){
