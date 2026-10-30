@@ -71,10 +71,13 @@ jobs:
           1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-plan-contract-v0.1.0/test_custom_app_production_recovery_plan.ps1';if($LASTEXITCODE){throw "recovery-plan matrix failed pass $_"}}
           'CUSTOM_APP_PRODUCTION_RECOVERY_PLAN_MATRIX_REPEAT_PASS'
 
-      - name: Replay exact journaled orchestrator parent contract
+      - name: Replay exact journaled orchestrator parent contract with deterministic fixture clock
         shell: powershell
         run: |
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0/test_custom_app_production_journaled_orchestrator_fixture_v011.ps1';if($LASTEXITCODE){throw 'journaled orchestrator parent regression failed'}
+          $dir='validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0';$src=Join-Path $dir 'test_custom_app_production_journaled_orchestrator_fixture_v011.ps1';$runtime=Join-Path $dir 'test_custom_app_production_journaled_orchestrator_fixture_v011.recovery-plan-runtime.ps1';$text=Get-Content -LiteralPath $src -Raw
+          $anchor='$text=Get-Content -LiteralPath $src -Raw';$inject='$text=Get-Content -LiteralPath $src -Raw' + "`n" + '$clockOld=''$baseNow=[DateTimeOffset]::UtcNow.AddMinutes(-3)'';$clockNew=''$baseNow=[DateTimeOffset]::UtcNow.AddMinutes(-10)'';if(([regex]::Matches($text,[regex]::Escape($clockOld))).Count -ne 1){throw ''fixture clock patch anchor drifted''};$text=$text.Replace($clockOld,$clockNew)'
+          if(([regex]::Matches($text,[regex]::Escape($anchor))).Count -ne 1){throw 'v011 wrapper anchor drifted'};$text=$text.Replace($anchor,$inject);[IO.File]::WriteAllText($runtime,$text,[Text.UTF8Encoding]::new($false))
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runtime;if($LASTEXITCODE){throw 'journaled orchestrator parent regression failed'}
           'CUSTOM_APP_PRODUCTION_RECOVERY_PLAN_PARENT_PASS'
 
       - name: Rebuild journal-integrated candidate and run Addon Manager SelfTest
@@ -91,7 +94,7 @@ jobs:
           $p='547a0ef8fb119f9a8a9d4ed5bbc1182bc3d9a12b';$expected=@('.github/workflows/validate-custom-app-production-recovery-plan-contract-v010.yml','validation/custom-app-production-recovery-plan-contract-v0.1.0/custom-app-production-recovery-plan.ps1','validation/custom-app-production-recovery-plan-contract-v0.1.0/test_custom_app_production_recovery_plan.ps1','validation/custom-app-production-recovery-plan-contract-v0.1.0/probe_custom_app_production_recovery_plan.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|?{$_ -notin $expected});if($bad.Count){throw "unexpected changed surface $($bad -join ', ')"}
           foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-journaled-orchestrator-fixture-v0.1.0/custom-app-production-journaled-orchestrator-fixture.ps1','validation/custom-app-production-full-chain-journal-integration-v0.1.0/build_candidate.py')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
-          $d='validation/custom-app-production-recovery-plan-contract-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_orchestrator_parent=$p;read_only_planning=$true;all_journal_phases_mapped=$true;fail_closed_mapping=$true;separate_process_reload_probe=$true;restore_executed=$false;spicetify_apply_executed=$false;cleanup_executed=$false;production_mutation_authority=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          $d='validation/custom-app-production-recovery-plan-contract-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_orchestrator_parent=$p;read_only_planning=$true;all_journal_phases_mapped=$true;fail_closed_mapping=$true;separate_process_reload_probe=$true;deterministic_parent_fixture_clock=$true;restore_executed=$false;spicetify_apply_executed=$false;cleanup_executed=$false;production_mutation_authority=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
           'CUSTOM_APP_PRODUCTION_RECOVERY_PLAN_IMMUTABILITY_PASS'
 
       - uses: actions/upload-artifact@v4
