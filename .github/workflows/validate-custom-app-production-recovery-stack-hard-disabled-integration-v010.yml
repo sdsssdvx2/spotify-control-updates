@@ -27,7 +27,7 @@ jobs:
           $p='2ad528b8a969fd45e88168d22ea787984f5e2714';if((git merge-base $p HEAD).Trim()-cne$p){throw 'not descended from exact retirement-resume executor head'}
           if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
           $allowed=@('.github/workflows/validate-custom-app-production-recovery-stack-hard-disabled-integration-v010.yml','validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0/build_candidate.py');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_-notin$allowed});if($bad.Count){throw "scope escaped: $($bad-join', ')"};foreach($x in $allowed){if($x-notin$changed){throw "missing $x"}}
-          $blob=(git rev-parse "HEAD:validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0/build_candidate.py").Trim();if($blob-cne'38796022a9e7f8be5af6a5430d843dcd2664f97c'){throw "builder pin drift $blob"}
+          $blob=(git rev-parse "HEAD:validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0/build_candidate.py").Trim();if($blob-cne'4ab26195af424257ac62bfdfc6e6a98e74ed0a6f'){throw "builder pin drift $blob"}
           'CUSTOM_APP_PRODUCTION_RECOVERY_STACK_HARD_DISABLED_SCOPE_PASS'
 
       - name: Build hard-disabled recovery stack candidate first pass
