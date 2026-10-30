@@ -1,0 +1,101 @@
+name: Validate Custom App Production Crash Recovery Journal v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-crash-recovery-journal-v0.1.0]
+    paths: ['validation/custom-app-production-crash-recovery-journal-v0.1.0/**','.github/workflows/validate-custom-app-production-crash-recovery-journal-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-post-apply-commit-cleanup-v0.1.0]
+    paths: ['validation/custom-app-production-crash-recovery-journal-v0.1.0/**','.github/workflows/validate-custom-app-production-crash-recovery-journal-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope lineage and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h -cne $e){throw "head mismatch $h != $e"}
+          $p='67458cbb96b5d1ed92e26c2b81debd6894044749';if((git merge-base $p HEAD).Trim() -cne $p){throw 'not descended from exact validated post-apply cleanup head'}
+          $a=@('.github/workflows/validate-custom-app-production-crash-recovery-journal-v010.yml','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','validation/custom-app-production-crash-recovery-journal-v0.1.0/test_custom_app_production_crash_recovery_journal.ps1','validation/custom-app-production-crash-recovery-journal-v0.1.0/probe_custom_app_production_crash_recovery_journal.ps1');$c=@(git diff --name-only "$p...HEAD");$b=@($c|?{$_ -notin $a});if($b.Count){throw "scope escaped: $($b -join ', ')"};foreach($x in $a){if($x -notin $c){throw "missing $x"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          'CUSTOM_APP_PRODUCTION_CRASH_RECOVERY_JOURNAL_SCOPE_PASS'
+
+      - name: Prove exact immutable dependency pins
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$pins=@(
+            @($h,'validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+            @($h,'validation/custom-app-production-crash-recovery-journal-v0.1.0/test_custom_app_production_crash_recovery_journal.ps1','6ff49f21d30511e4eb99300debb0bd0696f74204'),
+            @($h,'validation/custom-app-production-crash-recovery-journal-v0.1.0/probe_custom_app_production_crash_recovery_journal.ps1','95db3e56a3a301f334710b96d391d35a32a969c9'),
+            @('67458cbb96b5d1ed92e26c2b81debd6894044749','validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1','3b14280d727287252f71611e4424d78e5705c2f1'),
+            @('67458cbb96b5d1ed92e26c2b81debd6894044749','validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup-finalization-receipt-v011.ps1','31da8fa6253679f22edc07a6b5c00a47eb26c64d'),
+            @('67458cbb96b5d1ed92e26c2b81debd6894044749','validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/test_custom_app_production_post_apply_commit_cleanup.ps1','70a2a1c0661557b14065307ca30140105f68338d'),
+            @('1b680f0fc637b393aa7571690c8aa40adda59800','validation/custom-app-production-consumption-persistence-v0.1.0/custom-app-production-consumption-persistence.ps1','d5b70c943d0880e98ee907ae52d4c02ad8720f73'),
+            @('1b680f0fc637b393aa7571690c8aa40adda59800','validation/custom-app-production-consumption-persistence-v0.1.0/custom-app-production-consumption-persistence-contract-v011.ps1','07de3a6d3aec00636d8b1c7bd20dcbc72d1b7ada'))
+          foreach($p in $pins){$b=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($b -cne $p[2]){throw "pin drift $($p[1]) $b != $($p[2])"}}
+          'CUSTOM_APP_PRODUCTION_CRASH_RECOVERY_JOURNAL_PINS_PASS'
+
+      - name: Parse and audit durable non-authoritative journal contract
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-crash-recovery-journal-v0.1.0';foreach($f in @("$d/custom-app-production-crash-recovery-journal.ps1","$d/test_custom_app_production_crash_recovery_journal.ps1","$d/probe_custom_app_production_crash_recovery_journal.ps1")){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|%{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $core=Get-Content "$d/custom-app-production-crash-recovery-journal.ps1" -Raw
+          foreach($m in @('FileShare]::None','Flush($true)','[IO.File]::Replace','append_only=$true','requires_journal_phase_before_side_effect=$true','journal_is_authority=$false','production_execution_authorized=$false','production_mutation_authorized=$false','journal-current-history-mismatch','journal history hash chain invalid','journal-illegal-phase-transition','journal-revision-conflict','journal-head-sha256-conflict','simulated-crash-after-history-before-current','filesystem-recovery-inspection-required','exact-app-and-persistence-recovery-required','rollback-and-recovery-apply-required','fresh-revalidate-then-idempotent-housekeeping-only','no-action-new-permit-required-for-future-update')){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "journal marker missing $m"}}
+          foreach($x in @('[IO.Directory]::Move','[IO.Directory]::Delete','Move-Item','Copy-Item','Remove-Item','Invoke-WebRequest','Invoke-RestMethod','Start-Process','ProcessStartInfo','spicetify apply','spicetify config','spicetify restore','Restore-CustomAppProductionAtomicLiveSwapV010','Invoke-CustomAppProductionExactSpicetifyApplyProcessV010')){if($core.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge 0){throw "journal gained forbidden side-effect primitive $x"}}
+          if($core -match 'journal_is_authority\s*=\s*\$true|production_execution_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'journal reusable authority escaped'}
+          $test=Get-Content "$d/test_custom_app_production_crash_recovery_journal.ps1" -Raw;foreach($m in @('full-chain','rollback-chain','illegal-skip','duplicate-phase','stale revision','stale head','future-time','reverse-time','duplicate-init','identity path escape','lock contention','current-tamper','history-tamper','current-rollback','history-current-crash','missing-final','missing-apply','missing-cleanup','authority-tamper','identity-drift','terminal','wrong transaction id','separate-process restart probe')){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt 0){throw "journal coverage missing $m"}}
+          'CUSTOM_APP_PRODUCTION_CRASH_RECOVERY_JOURNAL_PARSE_AUDIT_PASS'
+
+      - name: Materialize exact sibling dependencies for parent cleanup replay
+        shell: powershell
+        run: |
+          $deps=@(
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'))
+          foreach($d in $deps){$path=$d[1];New-Item -ItemType Directory -Force -Path (Split-Path $path -Parent)|Out-Null;$env:CRASH_GIT_SPEC="$($d[0])`:$path";$env:CRASH_GIT_OUT=$path;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['CRASH_GIT_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['CRASH_GIT_SPEC']]))";if($LASTEXITCODE){throw "materialize failed $path"};$actual=(git hash-object $path).Trim();if($actual -cne $d[2]){throw "materialized blob drift $path $actual != $($d[2])"}}
+          'CUSTOM_APP_PRODUCTION_CRASH_RECOVERY_JOURNAL_MATERIALIZATION_PASS'
+
+      - name: Run durable crash/restart journal matrix twice
+        shell: powershell
+        run: |
+          1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-crash-recovery-journal-v0.1.0/test_custom_app_production_crash_recovery_journal.ps1';if($LASTEXITCODE){throw "crash journal matrix failed pass $_"}}
+          'CUSTOM_APP_PRODUCTION_CRASH_RECOVERY_JOURNAL_MATRIX_REPEAT_PASS'
+
+      - name: Replay exact post-apply cleanup parent contract once
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-post-apply-commit-cleanup-v0.1.0';$src=Join-Path $d 'test_custom_app_production_post_apply_commit_cleanup.ps1';$runtime=Join-Path $env:RUNNER_TEMP 'parent-cleanup-runtime.ps1';$text=Get-Content -LiteralPath $src -Raw;$needle=". (Join-Path `$PSScriptRoot 'custom-app-production-post-apply-commit-cleanup.ps1')";$overlay=(Resolve-Path (Join-Path $d 'custom-app-production-post-apply-commit-cleanup-finalization-receipt-v011.ps1')).Path.Replace("'","''");$replacement=$needle+"`r`n. '$overlay'";if(([regex]::Matches($text,[regex]::Escape($needle))).Count -ne 1){throw 'parent cleanup source marker drifted'};$patched=$text.Replace($needle,$replacement);$patched=$patched.Replace('$PSScriptRoot',(Resolve-Path $d).Path.Replace("'","''")|%{"'$_'"});[IO.File]::WriteAllText($runtime,$patched,[Text.UTF8Encoding]::new($false));& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runtime;if($LASTEXITCODE){throw 'post-apply cleanup parent regression'}
+          'CUSTOM_APP_PRODUCTION_CRASH_RECOVERY_JOURNAL_PARENT_PASS'
+
+      - name: Rebuild exact candidate and run Addon Manager SelfTest
+        shell: powershell
+        run: |
+          python 'validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py' --build;if($LASTEXITCODE){throw 'build failed'};$a='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/addon-manager.ps1';$m='validation/custom-app-remote-binding-observer-v0.4.0/out/bin/spotify-control.ps1';$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();if((Get-Item $a).Length-ne 523216 -or $ah-cne'b2cec989ef399aed4a8763105121b21181ffb493ed9e3e884baa1d62a634f94b'){throw 'addon drift'};if($mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'main drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'crash-recovery-journal-selftest';$env:LOCALAPPDATA=Join-Path $s 'Local';$env:APPDATA=Join-Path $s 'Roaming';New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'SelfTest failed'}
+          'CUSTOM_APP_PRODUCTION_CRASH_RECOVERY_JOURNAL_SELFTEST_PASS'
+
+      - name: Prove protected-surface immutability and write evidence
+        shell: powershell
+        run: |
+          $p='67458cbb96b5d1ed92e26c2b81debd6894044749';$e=@('.github/workflows/validate-custom-app-production-crash-recovery-journal-v010.yml','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','validation/custom-app-production-crash-recovery-journal-v0.1.0/test_custom_app_production_crash_recovery_journal.ps1','validation/custom-app-production-crash-recovery-journal-v0.1.0/probe_custom_app_production_crash_recovery_journal.ps1');$c=@(git diff --name-only "$p...HEAD");$b=@($c|?{$_ -notin $e});if($b.Count){throw "unexpected surface $($b -join ', ')"};foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1','validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim() -cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'};$d='validation/custom-app-production-crash-recovery-journal-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_cleanup_parent=$p;durable_append_only_history=$true;exclusive_lock=$true;flush_to_disk=$true;atomic_current_replace=$true;revision_cas=$true;hash_chain=$true;restart_reload_probe=$true;side_effect_phase_must_be_persisted_first=$true;ambiguous_apply_crash_never_assumed_success=$true;journal_authority=$false;recovery_executor_implemented=$false;spicetify_apply_executed=$false;live_app_mutated=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'CUSTOM_APP_PRODUCTION_CRASH_RECOVERY_JOURNAL_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-crash-recovery-journal-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1
+            validation/custom-app-production-crash-recovery-journal-v0.1.0/test_custom_app_production_crash_recovery_journal.ps1
+            validation/custom-app-production-crash-recovery-journal-v0.1.0/probe_custom_app_production_crash_recovery_journal.ps1
+            validation/custom-app-production-crash-recovery-journal-v0.1.0/ci-evidence.json
+          if-no-files-found: error
