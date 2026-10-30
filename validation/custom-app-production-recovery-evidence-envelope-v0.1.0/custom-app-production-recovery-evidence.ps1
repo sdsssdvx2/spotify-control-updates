@@ -100,7 +100,7 @@ function Test-CustomAppProductionRecoveryEvidenceEnvelopeV010 {
         }
         if(([string]$Envelope.$f).Trim().ToLowerInvariant()-cne$journalValue.Trim().ToLowerInvariant()){return[pscustomobject]@{ok=$false;reason=('recovery-evidence-journal-mismatch-'+$f)}}
     }
-    if(([string]$Envelope.prepared_result_material_sha256).Trim().ToLowerInvariant()-cne([string]$anchor.prepared_material_sha256){return[pscustomobject]@{ok=$false;reason='recovery-evidence-prepared-material-sha-mismatch'}}
+    if(([string]$Envelope.prepared_result_material_sha256).Trim().ToLowerInvariant()-cne([string]$anchor.prepared_material_sha256)){return[pscustomobject]@{ok=$false;reason='recovery-evidence-prepared-material-sha-mismatch'}}
     foreach($f in @('app_backup_tree_sha256','persistence_fingerprint','stage_tree_sha256','live_tree_sha256')){if(([string]$Envelope.$f).Trim().ToLowerInvariant()-cne([string]$Envelope.prepared_result.$f).Trim().ToLowerInvariant()){return[pscustomobject]@{ok=$false;reason=('recovery-evidence-prepared-mismatch-'+$f)}}}
     try{if([int]$Envelope.app_backup_file_count-ne[int]$Envelope.prepared_result.app_backup_file_count-or[int64]$Envelope.app_backup_total_bytes-ne[int64]$Envelope.prepared_result.app_backup_total_bytes){return[pscustomobject]@{ok=$false;reason='recovery-evidence-backup-count-mismatch'}}}catch{return[pscustomobject]@{ok=$false;reason='recovery-evidence-backup-count-invalid'}}
     if(([string]$Envelope.captured_journal_entry_sha256).Trim().ToLowerInvariant()-cne([string]$JournalEntry.PSObject.Properties['entry_sha256'].Value).Trim().ToLowerInvariant()-and[int64]$JournalEntry.revision-eq0){return[pscustomobject]@{ok=$false;reason='recovery-evidence-captured-entry-mismatch'}}
