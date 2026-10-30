@@ -115,8 +115,8 @@ function Get-CustomAppProductionRecoveryEvidencePathV010 {
 
 function ConvertFrom-CustomAppProductionRecoveryEvidenceFileV010 {
     param([Parameter(Mandatory=$true)][string]$Path)
-    $item=Get-Item -LiteralPath $Path -Force -ErrorAction Stop;if(($item.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne0){throw'recovery-evidence-file-reparse-point'};if($item.Length-gt4194304){throw'recovery-evidence-file-exceeds-4-MiB'}
-    $raw=[IO.File]::ReadAllText($Path,(New-Object Text.UTF8Encoding($false)));try{return $raw|ConvertFrom-Json}catch{throw'recovery-evidence-JSON-invalid'}
+    $item=Get-Item -LiteralPath $Path -Force -ErrorAction Stop;if(($item.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne0){throw 'recovery-evidence-file-reparse-point'};if($item.Length-gt4194304){throw 'recovery-evidence-file-exceeds-4-MiB'}
+    $raw=[IO.File]::ReadAllText($Path,(New-Object Text.UTF8Encoding($false)));try{return $raw|ConvertFrom-Json}catch{throw 'recovery-evidence-JSON-invalid'}
 }
 
 function Write-CustomAppProductionRecoveryEvidenceV010 {
