@@ -34,7 +34,7 @@ jobs:
         run: |
           $h=(git rev-parse HEAD).Trim();$pins=@(
             @($h,'validation/custom-app-production-recovery-completion-evidence-v0.1.0/custom-app-production-recovery-completion-evidence.ps1','3795f900cbf8ded834f721f7db7b126aa264b0e8'),
-            @($h,'validation/custom-app-production-recovery-completion-evidence-v0.1.0/test_custom_app_production_recovery_completion_evidence.ps1','a873d3d1a826a62347beefbbe9abcd581e1bef57'),
+            @($h,'validation/custom-app-production-recovery-completion-evidence-v0.1.0/test_custom_app_production_recovery_completion_evidence.ps1','547877a9ad243ba78ba64fe8f9cc49b1e0a89e93'),
             @($h,'validation/custom-app-production-recovery-completion-evidence-v0.1.0/probe_custom_app_production_recovery_completion_evidence.ps1','8abbcb7eded67420d2e2b6e8bed3f9636ae9833d'),
             @('c3e1f960447ba84d2410af9c37a22a384f2a5436','validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1','5fec613c460619da5dbfe88fca5c7334e9e93f76'),
             @('c3e1f960447ba84d2410af9c37a22a384f2a5436','validation/custom-app-production-recovery-restore-executor-v0.1.0/test_custom_app_production_recovery_restore_executor.ps1','5f925d804a3561167f7d8b388a79239eee61fa3d'),
