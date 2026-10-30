@@ -11,6 +11,7 @@ $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
 # Core-only load: no parent test harness and no external restore-result input.
 $load=@(
+    'validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1',
     'validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1',
     'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1',
     'validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1',
