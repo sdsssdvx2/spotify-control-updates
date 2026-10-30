@@ -6,7 +6,7 @@ $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $root 'validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1')
 . (Join-Path $PSScriptRoot 'custom-app-production-recovery-restore-executor.ps1')
 
-function Assert-RXTrue([bool]$v,[string]$m){if(-not$v){throw $m}}
+function Assert-RXTrue([bool]$v,[string]$m){if(-not $v){throw $m}}
 function Assert-RXFalse([bool]$v,[string]$m){if($v){throw $m}}
 function Assert-RXEq($a,$b,[string]$m){if([string]$a -cne [string]$b){throw "$m actual=<$a> expected=<$b>"}}
 function Copy-RX($x){return (($x|ConvertTo-Json -Depth 60)|ConvertFrom-Json)}
@@ -25,10 +25,9 @@ public static class RecoveryFakeSpicetify {
         if(args==null || args.Length!=1 || args[0]!="apply") return 64;
         string count=E("SC_RX_COUNT"), live=E("SC_RX_LIVE"), applied=E("SC_RX_APPLIED"), mode=E("SC_RX_MODE");
         if(String.IsNullOrEmpty(count)||String.IsNullOrEmpty(live)||String.IsNullOrEmpty(applied)) return 65;
-        int n=Next(count);
-        string current=File.Exists(live)?File.ReadAllText(live):"";
-        File.WriteAllText(applied,current);
-        if(mode=="timeout" ){Thread.Sleep(4000);return 0;}
+        Next(count);
+        File.WriteAllText(applied,File.Exists(live)?File.ReadAllText(live):"");
+        if(mode=="timeout"){Thread.Sleep(4000);return 0;}
         if(mode=="fail"){return 7;}
         return 0;
     }
@@ -48,7 +47,7 @@ function Invoke-CustomAppProductionRecoveryRestoreExecutorValidationHookV010 {
             if($Checkpoint -ceq 'before-rollback-required-append'){
                 $r=$Context.receipt
                 $x=Append-CustomAppProductionCrashJournalPhaseV010 -AllowedRoot ([string]$Context.allowed_root) -StoreDirectory ([string]$Context.store_directory) -ExpectedRevision ([int64]$r.journal_revision) -ExpectedEntrySha256 ([string]$r.journal_entry_sha256) -Phase 'rollback-required' -Now $script:RXNow.AddMilliseconds(0.5)
-                if(-not[bool]$x.ok){throw ('race fixture failed to win barrier: '+[string]$x.reason)}
+                if(-not [bool]$x.ok){throw ('race fixture failed to win barrier: '+[string]$x.reason)}
             }
         }
         'throw-after-barrier' {if($Checkpoint -ceq 'after-rollback-required-barrier'){throw 'fixture-crash-after-rollback-required-barrier'}}
@@ -78,19 +77,18 @@ function Clear-RXEnvironmentV010 {
     foreach($n in @('SC_RX_COUNT','SC_RX_LIVE','SC_RX_APPLIED','SC_RX_MODE')){[Environment]::SetEnvironmentVariable($n,$null,'Process')}
     $script:RXFault='none';$script:RXFixture=$null
 }
-function Get-RXCountV010($Q){if(-not(Test-Path -LiteralPath ([string]$Q.count))){return 0};return [int]([IO.File]::ReadAllText([string]$Q.count).Trim())}
-function Get-RXPhaseV010($Q){$r=Read-CustomAppProductionCrashJournalV010 -AllowedRoot $Q.f.f.allowed -StoreDirectory $Q.f.f.store;if(-not[bool]$r.ok){throw ('journal read failed: '+[string]$r.reason)};return [string]$r.entry.phase}
+function Get-RXCountV010($Q){if(-not (Test-Path -LiteralPath ([string]$Q.count))){return 0};return [int]([IO.File]::ReadAllText([string]$Q.count).Trim())}
+function Get-RXPhaseV010($Q){$r=Read-CustomAppProductionCrashJournalV010 -AllowedRoot $Q.f.f.allowed -StoreDirectory $Q.f.f.store;if(-not [bool]$r.ok){throw ('journal read failed: '+[string]$r.reason)};return [string]$r.entry.phase}
 function Invoke-RXFixtureV010 {
     param($Q,[string]$Mode='success',[string]$Exe=$fakeExe,[string]$Sha=$fakeSha,[int]$Timeout=10,[string]$Fault='none',[DateTimeOffset]$At=[DateTimeOffset]::UtcNow)
     $script:RXFault=$Fault;$script:RXFixture=$Q;$script:RXNow=$At
     Set-RXEnvironmentV010 -Q $Q -Mode $Mode
-    try{
-        return Invoke-CustomAppProductionRecoveryRestoreExecutorV010 -AllowedRoot $Q.f.f.allowed -StoreDirectory $Q.f.f.store -ExpectedTransactionId ([string]$Q.f.f.identity.transaction_id) -LocalAppDataRoot $Q.f.f.q.persistence.local -AppDataRoot $Q.f.f.q.persistence.roaming -SpicetifyAllowedRoot $Q.f.f.allowed -SpicetifyPath $Exe -ExpectedSpicetifySha256 $Sha -Now $At -TimeoutSeconds $Timeout
-    }finally{Clear-RXEnvironmentV010}
+    try{return Invoke-CustomAppProductionRecoveryRestoreExecutorV010 -AllowedRoot $Q.f.f.allowed -StoreDirectory $Q.f.f.store -ExpectedTransactionId ([string]$Q.f.f.identity.transaction_id) -LocalAppDataRoot $Q.f.f.q.persistence.local -AppDataRoot $Q.f.f.q.persistence.roaming -SpicetifyAllowedRoot $Q.f.f.allowed -SpicetifyPath $Exe -ExpectedSpicetifySha256 $Sha -Now $At -TimeoutSeconds $Timeout}
+    finally{Clear-RXEnvironmentV010}
 }
 function Assert-RXNoAuthorityV010($R,[string]$Label){$x=if($R.PSObject.Properties['result']){$R.result}else{$R};foreach($f in @('result_is_authority','execution_authorized','restore_authorized','apply_authorized','cleanup_authorized','production_mutation_authorized')){Assert-RXFalse ([bool]$x.$f) "$Label authority escaped $f"}}
 function Assert-RXArtifactsRetainedV010($Q,[string]$Label){
-    Assert-RXTrue (Test-Path -LiteralPath ([string]$Q.f.f.prepared.stage_workspace_path -PathType Container) "$Label stage workspace missing"
+    Assert-RXTrue (Test-Path -LiteralPath ([string]$Q.f.f.prepared.stage_workspace_path) -PathType Container) "$Label stage workspace missing"
     Assert-RXTrue (Test-Path -LiteralPath ([string]$Q.f.f.prepared.app_backup_path) -PathType Container) "$Label app backup missing"
     Assert-RXTrue (Test-Path -LiteralPath ([string]$Q.f.f.prepared.persistence_backup_path) -PathType Container) "$Label persistence backup missing"
 }
@@ -103,26 +101,17 @@ function Assert-RXOldStateV010($Q,[string]$Label,[bool]$RequireApplied=$false){
     Assert-RXEq $p.fingerprint $Q.f.f.prepared.persistence_fingerprint "$Label persistence"
     Assert-RXArtifactsRetainedV010 $Q $Label
     if($RequireApplied){
-        Assert-RXTrue (Test-Path -LiteralPath ([string]$Q.applied -PathType Leaf) "$Label fake applied state missing"
+        Assert-RXTrue (Test-Path -LiteralPath ([string]$Q.applied) -PathType Leaf) "$Label fake applied state missing"
         $old=[IO.File]::ReadAllText((Join-Path ([string]$Q.f.f.prepared.app_backup_path) 'index.js'))
-        $applied=[IO.File]::ReadAllText([string]$Q.applied)
-        Assert-RXTrue ($applied -ceq $old) "$Label recovery apply did not target restored old state"
+        Assert-RXTrue ([IO.File]::ReadAllText([string]$Q.applied) -ceq $old) "$Label recovery apply did not target restored old state"
     }
 }
 function Assert-RXSuccessV010($Q,$R,[string]$Started,[bool]$Barrier,[string]$Label){
-    Assert-RXTrue ([bool]$R.ok) "$Label denied: $([string]$R.reason)"
-    Assert-RXNoAuthorityV010 $R $Label
-    Assert-RXEq $R.result.started_phase $Started "$Label started phase"
-    Assert-RXTrue ([bool]$R.result.rollback_required_was_appended -eq $Barrier) "$Label barrier flag"
-    Assert-RXTrue ([bool]$R.result.restore_performed) "$Label restore missing"
-    Assert-RXTrue ([bool]$R.result.recovery_apply_executed) "$Label apply missing"
-    Assert-RXTrue ([bool]$R.result.rollback_complete_persisted) "$Label completion missing"
-    Assert-RXTrue ([bool]$R.result.requires_recovery_artifact_retirement) "$Label retirement requirement missing"
-    Assert-RXEq (Get-RXPhaseV010 $Q) 'rollback-complete' "$Label journal phase"
-    Assert-RXTrue ((Get-RXCountV010 $Q)-eq 1) "$Label apply count"
-    Assert-RXOldStateV010 $Q $Label $true
-    $c=Test-CustomAppProductionRecoveryRestoreExecutorResultV010 -Result $R.result
-    Assert-RXTrue ([bool]$c.ok) "$Label result invalid: $([string]$c.reason)"
+    Assert-RXTrue ([bool]$R.ok) "$Label denied: $([string]$R.reason)";Assert-RXNoAuthorityV010 $R $Label
+    Assert-RXEq $R.result.started_phase $Started "$Label started phase";Assert-RXTrue ([bool]$R.result.rollback_required_was_appended -eq $Barrier) "$Label barrier flag"
+    Assert-RXTrue ([bool]$R.result.restore_performed) "$Label restore missing";Assert-RXTrue ([bool]$R.result.recovery_apply_executed) "$Label apply missing";Assert-RXTrue ([bool]$R.result.rollback_complete_persisted) "$Label completion missing";Assert-RXTrue ([bool]$R.result.requires_recovery_artifact_retirement) "$Label retirement requirement missing"
+    Assert-RXEq (Get-RXPhaseV010 $Q) 'rollback-complete' "$Label journal phase";Assert-RXTrue ((Get-RXCountV010 $Q)-eq 1) "$Label apply count";Assert-RXOldStateV010 $Q $Label $true
+    $c=Test-CustomAppProductionRecoveryRestoreExecutorResultV010 -Result $R.result;Assert-RXTrue ([bool]$c.ok) "$Label result invalid: $([string]$c.reason)"
 }
 
 $count=0
@@ -137,7 +126,6 @@ $validCases=@(
     @('rollback-stage-no-txn','rollback-required','rollback-live-stage-no-txn','8')
 )
 foreach($c in $validCases){$q=New-RXFixtureV010 -Label $c[0] -Phase $c[1] -State $c[2] -Nonce (($c[3])*32);$r=Invoke-RXFixtureV010 $q;Assert-RXSuccessV010 $q $r $c[1] ($c[1]-cne'rollback-required') $c[0];$count++}
-
 $future=New-RXFixtureV010 -Label 'future' -Phase 'live-moved-to-old' -State 'live-moved-before-candidate' -Name 'future-app' -Source 'owner/future-app' -Manifest 'Future App' -Nonce ('9'*32);$r=Invoke-RXFixtureV010 $future;Assert-RXSuccessV010 $future $r 'live-moved-to-old' $true 'future-app';Assert-RXEq $r.result.name 'future-app' 'future identity';$count++
 
 $wrong=New-RXFixtureV010 -Label 'wrong-hash' -Nonce ('a'*32);$before=Get-RXPhaseV010 $wrong;$r=Invoke-RXFixtureV010 -Q $wrong -Sha ('0'*64);Assert-RXFalse ([bool]$r.ok) 'wrong executable hash accepted';Assert-RXTrue ([string]$r.reason -like 'recovery-restore-executor-executable-precheck-denied:*') 'wrong hash reason';Assert-RXEq (Get-RXPhaseV010 $wrong) $before 'wrong hash changed journal';Assert-RXTrue ((Get-RXCountV010 $wrong)-eq 0) 'wrong hash launched apply';Assert-RXNoAuthorityV010 $r 'wrong-hash';$count++
@@ -152,7 +140,7 @@ $stageDrift=New-RXFixtureV010 -Label 'stage-drift-after-barrier' -Nonce ('e'*32)
 
 $restoreCrash=New-RXFixtureV010 -Label 'crash-after-restore' -Nonce ('f'*32);$r=Invoke-RXFixtureV010 -Q $restoreCrash -Fault 'throw-after-restore';Assert-RXFalse ([bool]$r.ok) 'post-restore crash accepted';Assert-RXEq (Get-RXPhaseV010 $restoreCrash) 'rollback-required' 'post-restore crash phase';Assert-RXOldStateV010 $restoreCrash 'post-restore crash' $false;Assert-RXTrue ((Get-RXCountV010 $restoreCrash)-eq 0) 'post-restore crash launched apply';$r2=Invoke-RXFixtureV010 $restoreCrash;Assert-RXSuccessV010 $restoreCrash $r2 'rollback-required' $false 'post-restore restart';$count++
 
-$persistDrift=New-RXFixtureV010 -Label 'persistence-drift-after-restore' -Nonce ('1'*32);$r=Invoke-RXFixtureV010 -Q $persistDrift -Fault 'persistence-drift-after-restore';Assert-RXFalse ([bool]$r.ok) 'post-restore persistence drift accepted';Assert-RXTrue ([string]$r.reason -like 'recovery-restore-executor-post-restore-state-not-exact-old-state') 'post-restore persistence drift reason';Assert-RXEq (Get-RXPhaseV010 $persistDrift) 'rollback-required' 'post-restore persistence drift phase';Assert-RXTrue ((Get-RXCountV010 $persistDrift)-eq 0) 'persistence drift launched apply';$count++
+$persistDrift=New-RXFixtureV010 -Label 'persistence-drift-after-restore' -Nonce ('1'*32);$r=Invoke-RXFixtureV010 -Q $persistDrift -Fault 'persistence-drift-after-restore';Assert-RXFalse ([bool]$r.ok) 'post-restore persistence drift accepted';Assert-RXEq $r.reason 'recovery-restore-executor-post-restore-state-not-exact-old-state' 'post-restore persistence drift reason';Assert-RXEq (Get-RXPhaseV010 $persistDrift) 'rollback-required' 'post-restore persistence drift phase';Assert-RXTrue ((Get-RXCountV010 $persistDrift)-eq 0) 'persistence drift launched apply';$count++
 
 $fail=New-RXFixtureV010 -Label 'apply-fail' -Nonce ('2'*32);$r=Invoke-RXFixtureV010 -Q $fail -Mode 'fail';Assert-RXFalse ([bool]$r.ok) 'failed recovery apply accepted';Assert-RXTrue ([string]$r.reason -like 'recovery-restore-executor-recovery-apply-failed:*') 'apply fail reason';Assert-RXEq (Get-RXPhaseV010 $fail) 'rollback-required' 'apply fail phase';Assert-RXOldStateV010 $fail 'apply-fail' $true;Assert-RXTrue ((Get-RXCountV010 $fail)-eq 1) 'apply fail count';$r2=Invoke-RXFixtureV010 $fail;Assert-RXTrue ([bool]$r2.ok) 'apply fail restart denied';Assert-RXTrue ((Get-RXCountV010 $fail)-eq 2) 'apply fail restart count';$count++
 
@@ -164,6 +152,6 @@ $liveDrift=New-RXFixtureV010 -Label 'live-drift-after-apply' -Nonce ('5'*32);$r=
 
 $beforeComplete=New-RXFixtureV010 -Label 'crash-before-complete' -Nonce ('6'*32);$r=Invoke-RXFixtureV010 -Q $beforeComplete -Fault 'throw-before-complete';Assert-RXFalse ([bool]$r.ok) 'pre-complete crash accepted';Assert-RXEq (Get-RXPhaseV010 $beforeComplete) 'rollback-required' 'pre-complete crash phase';Assert-RXOldStateV010 $beforeComplete 'pre-complete crash' $true;$r2=Invoke-RXFixtureV010 $beforeComplete;Assert-RXTrue ([bool]$r2.ok) 'pre-complete restart denied';Assert-RXTrue ((Get-RXCountV010 $beforeComplete)-eq 2) 'pre-complete restart count';$count++
 
-$tamperQ=New-RXFixtureV010 -Label 'result-tamper' -Nonce ('7'*32);$good=Invoke-RXFixtureV010 $tamperQ;Assert-RXTrue ([bool]$good.ok) 'result tamper setup failed';$bad=Copy-RX $good.result;$bad.restore_authorized=$true;$bad.result_fingerprint=Get-CustomAppProductionRecoveryRestoreExecutorSha256V010 (Get-CustomAppProductionRecoveryRestoreExecutorResultMaterialV010 -Result $bad);$ck=Test-CustomAppProductionRecoveryRestoreExecutorResultV010 -Result $bad;Assert-RXFalse ([bool]$ck.ok) 'authority-tampered result accepted';Assert-RXTrue ([string]$ck.reason -like '*authority-escaped-restore_authorized') 'authority tamper reason';$bad=Copy-RX $good.result;$bad.result_fingerprint=('0'*64);$ck=Test-CustomAppProductionRecoveryRestoreExecutorResultV010 -Result $bad;Assert-RXFalse ([bool]$ck.ok) 'fingerprint-tampered result accepted';Assert-RXEq $ck.reason 'recovery-restore-executor-result-fingerprint-mismatch' 'fingerprint tamper reason';$before=(Get-RXCountV010 $tamperQ);$replay=Invoke-RXFixtureV010 $tamperQ;Assert-RXFalse ([bool]$replay.ok) 'rollback-complete replay accepted';Assert-RXTrue ([string]$replay.reason -like 'recovery-restore-executor-initial-admission-denied:*phase-not-auto-restorable') 'replay reason';Assert-RXTrue ((Get-RXCountV010 $tamperQ)-eq$before) 'replay launched apply';$count++
+$tamperQ=New-RXFixtureV010 -Label 'result-tamper' -Nonce ('7'*32);$good=Invoke-RXFixtureV010 $tamperQ;Assert-RXTrue ([bool]$good.ok) 'result tamper setup failed';$bad=Copy-RX $good.result;$bad.restore_authorized=$true;$bad.result_fingerprint=Get-CustomAppProductionRecoveryRestoreExecutorSha256V010 (Get-CustomAppProductionRecoveryRestoreExecutorResultMaterialV010 -Result $bad);$ck=Test-CustomAppProductionRecoveryRestoreExecutorResultV010 -Result $bad;Assert-RXFalse ([bool]$ck.ok) 'authority-tampered result accepted';Assert-RXTrue ([string]$ck.reason -like '*authority-escaped-restore_authorized') 'authority tamper reason';$bad=Copy-RX $good.result;$bad.result_fingerprint=('0'*64);$ck=Test-CustomAppProductionRecoveryRestoreExecutorResultV010 -Result $bad;Assert-RXFalse ([bool]$ck.ok) 'fingerprint-tampered result accepted';Assert-RXEq $ck.reason 'recovery-restore-executor-result-fingerprint-mismatch' 'fingerprint tamper reason';$before=(Get-RXCountV010 $tamperQ);$replay=Invoke-RXFixtureV010 $tamperQ;Assert-RXFalse ([bool]$replay.ok) 'rollback-complete replay accepted';Assert-RXTrue ([string]$replay.reason -like 'recovery-restore-executor-initial-admission-denied:*phase-not-auto-restorable') 'replay reason';Assert-RXTrue ((Get-RXCountV010 $tamperQ)-eq $before) 'replay launched apply';$count++
 
 Write-Host "CUSTOM_APP_PRODUCTION_RECOVERY_RESTORE_EXECUTOR_MATRIX_PASS total=$count"
