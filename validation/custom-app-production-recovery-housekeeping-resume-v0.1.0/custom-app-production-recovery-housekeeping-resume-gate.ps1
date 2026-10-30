@@ -9,12 +9,25 @@ function Resolve-CustomAppProductionRecoveryHousekeepingResumeGateV010 {
     $tx=$ExpectedTransactionId.Trim().ToLowerInvariant()
     if(-not(Test-CustomAppProductionRecoveryHousekeepingResumeSha256V010 $tx) -or ([string]$journal.transaction_id).Trim().ToLowerInvariant() -cne $tx){return & $deny 'housekeeping-resume-journal-transaction-mismatch'}
 
-    $ev=Read-CustomAppProductionRecoveryEvidenceV010 -AllowedRoot $AllowedRoot -StoreDirectory $StoreDirectory -ExpectedTransactionId $tx
+    try{$ev=Read-CustomAppProductionRecoveryEvidenceV010 -AllowedRoot $AllowedRoot -StoreDirectory $StoreDirectory -ExpectedTransactionId $tx}catch{return & $deny ('housekeeping-resume-evidence-read-failed:'+[string]$_.Exception.Message)}
     if($null-eq$ev -or -not[bool]$ev.ok){return & $deny ('housekeeping-resume-evidence-read-denied:'+[string]$ev.reason)}
     $e=$ev.envelope;$prepared=$e.prepared_result
-    $rr=Read-CustomAppProductionRecoveryHousekeepingResumeEnvelopeV010 -AllowedRoot $AllowedRoot -StoreDirectory $StoreDirectory
+    try{$rr=Read-CustomAppProductionRecoveryHousekeepingResumeEnvelopeV010 -AllowedRoot $AllowedRoot -StoreDirectory $StoreDirectory}catch{return & $deny ('housekeeping-resume-envelope-read-failed:'+[string]$_.Exception.Message)}
     if($null-eq$rr -or -not[bool]$rr.ok){return & $deny ('housekeeping-resume-envelope-read-denied:'+[string]$rr.reason)}
     $h=$rr.envelope
+
+    try{
+        if([int64]$h.source_journal_revision -gt [int64]$journal.revision){throw 'source journal revision is newer than current journal'}
+        $jp=Get-CustomAppProductionCrashJournalPathsV010 -AllowedRoot $AllowedRoot -StoreDirectory $StoreDirectory
+        $sourceSha=([string]$h.source_journal_entry_sha256).Trim().ToLowerInvariant()
+        $historyName=('{0:D20}-{1}.json' -f [int64]$h.source_journal_revision,$sourceSha)
+        $historyPath=Join-Path ([string]$jp.history) $historyName
+        if(-not(Test-Path -LiteralPath $historyPath -PathType Leaf)){return & $deny 'housekeeping-resume-source-journal-anchor-missing'}
+        $sourceRead=ConvertFrom-CustomAppProductionCrashJournalFileV010 -AllowedRoot $AllowedRoot -Path $historyPath
+        $source=$sourceRead.entry
+        if(([string]$source.entry_sha256).Trim().ToLowerInvariant() -cne $sourceSha -or [int64]$source.revision -ne [int64]$h.source_journal_revision){return & $deny 'housekeeping-resume-source-journal-anchor-identity-mismatch'}
+        if(([string]$source.transaction_id).Trim().ToLowerInvariant() -cne $tx -or [string]$source.phase -cne [string]$h.source_phase -or ([string]$source.name).Trim().ToLowerInvariant() -cne ([string]$h.name).Trim().ToLowerInvariant() -or ([string]$source.consumption_id).Trim().ToLowerInvariant() -cne ([string]$h.consumption_id).Trim().ToLowerInvariant() -or ([string]$source.preparation_fingerprint).Trim().ToLowerInvariant() -cne ([string]$h.preparation_fingerprint).Trim().ToLowerInvariant()){return & $deny 'housekeeping-resume-source-journal-anchor-mismatch'}
+    }catch{return & $deny ('housekeeping-resume-source-journal-anchor-invalid:'+[string]$_.Exception.Message)}
 
     $bindings=@(
         @('transaction_id',$tx),
