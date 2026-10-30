@@ -15,6 +15,37 @@ function Copy-I($x){return(($x|ConvertTo-Json -Depth 50)|ConvertFrom-Json)}
 $script:IFinal=('f'*64);$script:IApply=('a'*64);$script:ICleanup=('c'*64)
 $script:INormal=@('prepared','atomic-mutation-starting','live-moved-to-old','candidate-live','transaction-finalized','apply-starting','apply-returned-success-pending-verification','apply-verified','cleanup-starting','committed-clean')
 
+function Copy-IntegrationTreeV010 {
+    param([Parameter(Mandatory=$true)][string]$Source,[Parameter(Mandatory=$true)][string]$Destination)
+    $src=[IO.Path]::GetFullPath($Source).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    $dst=[IO.Path]::GetFullPath($Destination).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    if(-not(Test-Path -LiteralPath $src -PathType Container)){throw 'integration-copy-source-missing'}
+    if(Test-Path -LiteralPath $dst){throw 'integration-copy-destination-exists'}
+    $srcItem=Get-Item -LiteralPath $src -Force -ErrorAction Stop;if(($srcItem.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne0){throw 'integration-copy-source-reparse-point'}
+    [IO.Directory]::CreateDirectory($dst)|Out-Null
+    foreach($dir in @(Get-ChildItem -LiteralPath $src -Force -Directory -Recurse -ErrorAction Stop|Sort-Object FullName)){
+        if(($dir.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne0){throw 'integration-copy-source-contains-reparse-point'}
+        $rel=$dir.FullName.Substring($src.Length).TrimStart('\','/');if(-not[string]::IsNullOrWhiteSpace($rel)){[IO.Directory]::CreateDirectory((Join-Path $dst $rel))|Out-Null}
+    }
+    foreach($file in @(Get-ChildItem -LiteralPath $src -Force -File -Recurse -ErrorAction Stop|Sort-Object FullName)){
+        if(($file.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne0){throw 'integration-copy-source-contains-reparse-point'}
+        $rel=$file.FullName.Substring($src.Length).TrimStart('\','/');$target=Join-Path $dst $rel;$parent=[IO.Path]::GetDirectoryName($target);if(-not[string]::IsNullOrWhiteSpace($parent)){[IO.Directory]::CreateDirectory($parent)|Out-Null};[IO.File]::Copy($file.FullName,$target,$false)
+    }
+    $before=Get-CustomAppUpdateTreeSnapshotV010 -Root $src;$after=Get-CustomAppUpdateTreeSnapshotV010 -Root $dst
+    if([string]$after.tree_sha256-cne[string]$before.tree_sha256-or[int]$after.file_count-ne[int]$before.file_count-or[int64]$after.total_bytes-ne[int64]$before.total_bytes){throw 'integration-copy-tree-verification-failed'}
+    return $after
+}
+
+function Initialize-IntegrationCrashArtifactsV010 {
+    param([Parameter(Mandatory=$true)]$F)
+    if(Test-Path -LiteralPath $F.txn){throw 'integration-transaction-root-unexpectedly-exists'}
+    [IO.Directory]::CreateDirectory([string]$F.txn)|Out-Null
+    $txnItem=Get-Item -LiteralPath $F.txn -Force -ErrorAction Stop;if(($txnItem.Attributes-band[IO.FileAttributes]::ReparsePoint)-ne0){throw 'integration-transaction-root-reparse-point'}
+    $oldLive=Join-Path $F.txn 'old-live';$copied=Copy-IntegrationTreeV010 -Source ([string]$F.prepared.app_backup_path) -Destination $oldLive
+    if([string]$copied.tree_sha256-cne[string]$F.prepared.app_backup_tree_sha256-or[int]$copied.file_count-ne[int]$F.prepared.app_backup_file_count-or[int64]$copied.total_bytes-ne[int64]$F.prepared.app_backup_total_bytes){throw 'integration-old-live-not-exact-pre-swap-backup'}
+    return [pscustomobject]@{transaction_root=[string]$F.txn;old_live_path=$oldLive;tree_sha256=[string]$copied.tree_sha256;file_count=[int]$copied.file_count;total_bytes=[int64]$copied.total_bytes}
+}
+
 function Advance-IntegrationJournalV010 {
     param($F,[Parameter(Mandatory=$true)][string]$Target)
     $cur=Read-CustomAppProductionCrashJournalV010 -AllowedRoot $F.allowed -StoreDirectory $F.store
@@ -42,13 +73,14 @@ function New-IntegrationFixtureV010 {
     param([Parameter(Mandatory=$true)][string]$Label,[Parameter(Mandatory=$true)][string]$Phase,[string]$Name='tagify',[string]$Source='alexk218/tagify',[string]$Manifest='Tagify',[string]$Nonce=('2'*32))
     $f=New-RecoveryEvidenceFixtureV010 -Label ('integration-'+$Label) -Name $Name -Source $Source -Manifest $Manifest -Nonce $Nonce
     $ew=Write-REFixtureV010 $f;if(-not[bool]$ew.ok){throw ('integration evidence write failed: '+[string]$ew.reason)}
+    $crash=Initialize-IntegrationCrashArtifactsV010 -F $f
     $current=Advance-IntegrationJournalV010 -F $f -Target $Phase
     $plan=Resolve-CustomAppProductionRecoveryPlanV010 -AllowedRoot $f.allowed -StoreDirectory $f.store -ExpectedTransactionId ([string]$f.identity.transaction_id)
     $pc=Test-CustomAppProductionRecoveryPlanV010 $plan;if(-not[bool]$pc.ok){throw ('integration plan invalid: '+[string]$pc.reason)}
     $exeRoot=Join-Path $f.q.x.base 'integration-bin';[IO.Directory]::CreateDirectory($exeRoot)|Out-Null;$exe=Join-Path $exeRoot 'spicetify.exe';[IO.File]::WriteAllText($exe,'fake-spicetify-integration',[Text.UTF8Encoding]::new($false));$exeSha=Get-CustomAppProductionRecoveryPreflightFileSha256V010 $exe
     $pre=Resolve-CustomAppProductionRecoveryPreflightV010 -AllowedRoot $f.allowed -StoreDirectory $f.store -ExpectedTransactionId ([string]$f.identity.transaction_id) -Plan $plan -SpicetifyAllowedRoot $f.allowed -SpicetifyPath $exe -ExpectedSpicetifySha256 $exeSha
     if(-not[bool]$pre.ok){throw ('integration preflight failed: '+[string]$pre.reason)}
-    return [pscustomobject]@{f=$f;current=$current;plan=$plan;pre=$pre;exe=$exe;exeSha=$exeSha}
+    return [pscustomobject]@{f=$f;crash=$crash;current=$current;plan=$plan;pre=$pre;exe=$exe;exeSha=$exeSha}
 }
 
 function Invoke-IntegrationFixtureV010 {
