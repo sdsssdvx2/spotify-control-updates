@@ -25,30 +25,36 @@ jobs:
         run: |
           $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h -cne $e){throw "head mismatch $h != $e"}
           $p='67458cbb96b5d1ed92e26c2b81debd6894044749';if((git merge-base $p HEAD).Trim() -cne $p){throw 'not descended from exact validated post-apply cleanup head'}
-          $allowed=@('.github/workflows/validate-custom-app-production-full-chain-integration-v010.yml','validation/custom-app-production-full-chain-integration-v0.1.0/build_candidate.py');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|?{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x -notin $changed){throw "missing $x"}}
+          $allowed=@('.github/workflows/validate-custom-app-production-full-chain-integration-v010.yml','validation/custom-app-production-full-chain-integration-v0.1.0/build_candidate.py','validation/custom-app-production-full-chain-integration-v0.1.0/build_candidate_v011.py');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|?{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x -notin $changed){throw "missing $x"}}
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
           'CUSTOM_APP_PRODUCTION_FULL_CHAIN_INTEGRATION_SCOPE_PASS'
 
-      - name: Prove integration builder and immutable parent pins
+      - name: Prove integration builders and immutable parent pins
         shell: powershell
         run: |
-          $builder='validation/custom-app-production-full-chain-integration-v0.1.0/build_candidate.py';$b=(git hash-object $builder).Trim();if($b -cne '285708ed5d86be572cf40804f34d3e8dcbae6ade'){throw "builder blob drift $b"}
+          $base='validation/custom-app-production-full-chain-integration-v0.1.0/build_candidate.py';$bb=(git hash-object $base).Trim();if($bb -cne '285708ed5d86be572cf40804f34d3e8dcbae6ade'){throw "base integration builder blob drift $bb"}
+          $builder='validation/custom-app-production-full-chain-integration-v0.1.0/build_candidate_v011.py';$b=(git hash-object $builder).Trim();if($b -cne '5f1ee416cc39ec260f33463565b23595e8fcd928'){throw "hardened builder blob drift $b"}
           if((git rev-parse 'd92daa3006093a7d966083193302965ee01905f6:validation/custom-app-remote-binding-observer-v0.4.1/build_candidate_v041.py').Trim() -cne '92eb87048eac882483bee1ed97bde598cff57e7b'){throw 'v0.4.1 builder pin drift'}
+          if((git rev-parse '1b680f0fc637b393aa7571690c8aa40adda59800:validation/custom-app-production-consumption-persistence-v0.1.0/custom-app-production-consumption-persistence-contract-v011.ps1').Trim() -cne '07de3a6d3aec00636d8b1c7bd20dcbc72d1b7ada'){throw 'consumption persistence v0.1.1 overlay pin drift'}
           if((git rev-parse '67458cbb96b5d1ed92e26c2b81debd6894044749:validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1').Trim() -cne '3b14280d727287252f71611e4424d78e5705c2f1'){throw 'cleanup parent pin drift'}
-          python -m py_compile $builder;if($LASTEXITCODE){throw 'builder Python compile failed'}
+          if((git rev-parse '67458cbb96b5d1ed92e26c2b81debd6894044749:validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup-finalization-receipt-v011.ps1').Trim() -cne '31da8fa6253679f22edc07a6b5c00a47eb26c64d'){throw 'cleanup receipt overlay pin drift'}
+          python -m py_compile $base;if($LASTEXITCODE){throw 'base builder Python compile failed'}
+          python -m py_compile $builder;if($LASTEXITCODE){throw 'hardened builder Python compile failed'}
           'CUSTOM_APP_PRODUCTION_FULL_CHAIN_INTEGRATION_PINS_PASS'
 
       - name: Build integrated candidate twice and prove determinism
         shell: powershell
         run: |
-          $d='validation/custom-app-production-full-chain-integration-v0.1.0';$builder=Join-Path $d 'build_candidate.py';python $builder --build;if($LASTEXITCODE){throw 'first full-chain build failed'}
+          $d='validation/custom-app-production-full-chain-integration-v0.1.0';$builder=Join-Path $d 'build_candidate_v011.py';python $builder;if($LASTEXITCODE){throw 'first hardened full-chain build failed'}
           $a=Join-Path $d 'out/bin/addon-manager.ps1';$m=Join-Path $d 'out/bin/spotify-control.ps1';$c=Join-Path $d 'out/bin/Collect-Marketplace-Records.ps1';$r=Join-Path $d 'out/bin/LevelDbReadOnly.cs';$report=Join-Path $d 'candidate-validation.json'
           $first=[ordered]@{addon=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();main=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();collector=(Get-FileHash $c -Algorithm SHA256).Hash.ToLowerInvariant();reader=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();report=(Get-FileHash $report -Algorithm SHA256).Hash.ToLowerInvariant();addon_size=(Get-Item $a).Length}
-          python $builder --build;if($LASTEXITCODE){throw 'second full-chain build failed'}
+          python $builder;if($LASTEXITCODE){throw 'second hardened full-chain build failed'}
           $second=[ordered]@{addon=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();main=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();collector=(Get-FileHash $c -Algorithm SHA256).Hash.ToLowerInvariant();reader=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();report=(Get-FileHash $report -Algorithm SHA256).Hash.ToLowerInvariant();addon_size=(Get-Item $a).Length}
           foreach($k in $first.Keys){if([string]$first[$k] -cne [string]$second[$k]){throw "non-deterministic $k $($first[$k]) != $($second[$k])"}}
           if($second.main -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control bytes changed'}
           $json=Get-Content $report -Raw|ConvertFrom-Json;if([int]$json.full_chain_modules_integrated -ne 19 -or [bool]$json.pipeline_enabled_by_default -or [bool]$json.pipeline_enablement_implemented -or [bool]$json.generic_auto_authority_expanded){throw 'integration report safety contract drift'}
+          if([int]$json.intentional_override_count -ne 4){throw "intentional override count drift $($json.intentional_override_count)"}
+          $expected=@('Get-CustomAppProductionConsumptionEnvelopeMaterialV010','New-CustomAppProductionConsumptionEnvelopeV010','Test-CustomAppProductionConsumptionEnvelopeV010','Test-CustomAppProductionTransactionFinalizationResultV010')|Sort-Object;$actual=@($json.intentional_overrides|%{[string]$_})|Sort-Object;if(($expected -join '|') -cne ($actual -join '|')){throw "intentional override set drift $($actual -join ',')"}
           "CUSTOM_APP_PRODUCTION_FULL_CHAIN_INTEGRATION_DETERMINISTIC_PASS addon_size=$($second.addon_size) addon_sha=$($second.addon)"
 
       - name: Parse integrated candidate and audit hard-disable boundary
@@ -56,11 +62,13 @@ jobs:
         run: |
           $a='validation/custom-app-production-full-chain-integration-v0.1.0/out/bin/addon-manager.ps1';$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $a),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|%{Write-Error ("candidate line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw 'integrated candidate PS5.1 parse failed'}
           $text=Get-Content $a -Raw
-          foreach($m in @('$script:CustomAppProductionPipelineEnabled = $false','integration-only-hard-disabled','CUSTOM_APP_PRODUCTION_FULL_CHAIN_INTEGRATED_SELFTEST_V010_PASS','Invoke-CustomAppProductionSpicetifyApplyExecutorV010','Invoke-CustomAppProductionPostApplyCommitCleanupV010')){if($text.IndexOf($m,[StringComparison]::Ordinal)-lt 0){throw "candidate marker missing $m"}}
-          if($text -match '\$script:CustomAppProductionPipelineEnabled\s*=\s*\$true'){throw 'candidate contains pipeline enable assignment'}
+          foreach($m in @('$script:CustomAppProductionPipelineEnabled = $false','integration-only-hard-disabled','CUSTOM_APP_PRODUCTION_FULL_CHAIN_INTEGRATED_SELFTEST_V010_PASS','forced-enable-denied','Invoke-CustomAppProductionSpicetifyApplyExecutorV010','Invoke-CustomAppProductionPostApplyCommitCleanupV010')){if($text.IndexOf($m,[StringComparison]::Ordinal)-lt 0){throw "candidate marker missing $m"}}
           $orch=[regex]::Match($text,'(?ms)^function Invoke-CustomAppProductionFullChainV010 \{.*?(?=^function )').Value;if([string]::IsNullOrWhiteSpace($orch)){throw 'orchestrator block missing'}
           foreach($x in @('Invoke-CustomAppProductionStageExecutorV010','Invoke-CustomAppProductionPreApplyPreparationV010','Invoke-CustomAppProductionAtomicLiveSwapV010','Invoke-CustomAppProductionSpicetifyApplyExecutorV010','Invoke-CustomAppProductionPostApplyCommitCleanupV010')){if($orch.Contains($x)){throw "hard-disabled orchestrator gained mutation call $x"}}
           if(-not $orch.Contains("throw 'Custom App production full-chain execution is intentionally unavailable in integration-only candidate.'")){throw 'forced-enable throw missing'}
+          $self=[regex]::Match($text,'(?ms)^function Invoke-CustomAppProductionFullChainIntegratedSelfTestV010 \{.*?(?=^function )').Value;if([string]::IsNullOrWhiteSpace($self)){throw 'integrated selftest block missing'}
+          $trueCount=([regex]::Matches($text,'\$script:CustomAppProductionPipelineEnabled\s*=\s*\$true')).Count;if($trueCount -ne 1 -or $self -notmatch '\$script:CustomAppProductionPipelineEnabled\s*=\s*\$true'){throw "forced-enable assignment confinement drift $trueCount"}
+          if($self -notmatch 'finally\s*\{\s*\$script:CustomAppProductionPipelineEnabled\s*=\s*\$false\s*\}'){throw 'forced-enable selftest restoration missing'}
           'CUSTOM_APP_PRODUCTION_FULL_CHAIN_INTEGRATION_PARSE_AUDIT_PASS'
 
       - name: Run full integrated Addon Manager SelfTest
@@ -89,10 +97,10 @@ jobs:
       - name: Prove production and validated parent surfaces immutable
         shell: powershell
         run: |
-          $p='67458cbb96b5d1ed92e26c2b81debd6894044749';$expected=@('.github/workflows/validate-custom-app-production-full-chain-integration-v010.yml','validation/custom-app-production-full-chain-integration-v0.1.0/build_candidate.py');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|?{$_ -notin $expected});if($bad.Count){throw "unexpected changed surface $($bad -join ', ')"}
+          $p='67458cbb96b5d1ed92e26c2b81debd6894044749';$expected=@('.github/workflows/validate-custom-app-production-full-chain-integration-v010.yml','validation/custom-app-production-full-chain-integration-v0.1.0/build_candidate.py','validation/custom-app-production-full-chain-integration-v0.1.0/build_candidate_v011.py');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|?{$_ -notin $expected});if($bad.Count){throw "unexpected changed surface $($bad -join ', ')"}
           foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1','validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
-          $d='validation/custom-app-production-full-chain-integration-v0.1.0';$report=Get-Content (Join-Path $d 'candidate-validation.json') -Raw|ConvertFrom-Json;[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_cleanup_parent=$p;integrated_module_count=[int]$report.full_chain_modules_integrated;pipeline_enabled=$false;pipeline_enablement_implemented=$false;normal_path_leak_count=@($report.normal_path_leaks).Count;existing_auto_authority_preserved=$true;production_main_changed=$false}|ConvertTo-Json|Set-Content (Join-Path $d 'ci-evidence.json') -Encoding UTF8
+          $d='validation/custom-app-production-full-chain-integration-v0.1.0';$report=Get-Content (Join-Path $d 'candidate-validation.json') -Raw|ConvertFrom-Json;[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_cleanup_parent=$p;integrated_module_count=[int]$report.full_chain_modules_integrated;intentional_override_count=[int]$report.intentional_override_count;pipeline_enabled=$false;pipeline_enablement_implemented=$false;normal_path_leak_count=@($report.normal_path_leaks).Count;forced_enable_tested=$true;existing_auto_authority_preserved=$true;production_main_changed=$false}|ConvertTo-Json|Set-Content (Join-Path $d 'ci-evidence.json') -Encoding UTF8
           'CUSTOM_APP_PRODUCTION_FULL_CHAIN_INTEGRATION_IMMUTABILITY_PASS'
 
       - uses: actions/upload-artifact@v4
@@ -100,6 +108,7 @@ jobs:
           name: custom-app-production-full-chain-integration-v010-${{ github.run_id }}
           path: |
             validation/custom-app-production-full-chain-integration-v0.1.0/build_candidate.py
+            validation/custom-app-production-full-chain-integration-v0.1.0/build_candidate_v011.py
             validation/custom-app-production-full-chain-integration-v0.1.0/candidate-validation.json
             validation/custom-app-production-full-chain-integration-v0.1.0/ci-evidence.json
             validation/custom-app-production-full-chain-integration-v0.1.0/out/bin/addon-manager.ps1
