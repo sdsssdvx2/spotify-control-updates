@@ -9,7 +9,7 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
-# Core-only load: no parent test harness and no RestoreExecutorResult input.
+# Core-only load: no parent test harness and no external restore-result input.
 $load=@(
     'validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1',
     'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1',
