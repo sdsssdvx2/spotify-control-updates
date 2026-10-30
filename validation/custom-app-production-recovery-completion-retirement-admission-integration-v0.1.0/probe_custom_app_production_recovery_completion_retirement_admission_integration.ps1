@@ -9,6 +9,19 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
+# Exact stable v0.6.28 Addon Manager host primitive. Source Addon Manager SHA-256:
+# 5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285
+# Normalized function-block SHA-256: 1c3ed4d640291c22f1d182f8491263114248726311aa60efb86bf7173663ec6d
+function Test-PathSafe {
+    param([AllowNull()][AllowEmptyString()][string]$Path,[string]$Type="Any")
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    try {
+        if ($Type -eq "Leaf") { return [bool](Test-Path -LiteralPath $Path -PathType Leaf -ErrorAction SilentlyContinue) }
+        if ($Type -eq "Container") { return [bool](Test-Path -LiteralPath $Path -PathType Container -ErrorAction SilentlyContinue) }
+        return [bool](Test-Path -LiteralPath $Path -ErrorAction SilentlyContinue)
+    } catch { return $false }
+}
+
 # Core-only load: no parent test harness and no external restore-result input.
 $load=@(
     'validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1',
