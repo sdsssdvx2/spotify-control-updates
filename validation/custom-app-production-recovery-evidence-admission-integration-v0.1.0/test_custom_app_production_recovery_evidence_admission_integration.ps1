@@ -2,6 +2,7 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $root 'validation/custom-app-production-recovery-evidence-envelope-v0.1.0/test_custom_app_production_recovery_evidence.ps1')
+. (Join-Path $root 'validation/custom-app-production-recovery-plan-contract-v0.1.0/custom-app-production-recovery-plan.ps1')
 . (Join-Path $root 'validation/custom-app-production-recovery-preflight-v0.1.0/custom-app-production-recovery-preflight.ps1')
 . (Join-Path $root 'validation/custom-app-production-recovery-execution-admission-v0.1.0/custom-app-production-recovery-execution-admission.ps1')
 . (Join-Path $PSScriptRoot 'custom-app-production-recovery-evidence-admission-integration.ps1')
