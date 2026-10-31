@@ -66,10 +66,16 @@ jobs:
           $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP;1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-routing-admission-v0.1.0/test_custom_app_production_recovery_routing_admission.ps1';if($LASTEXITCODE){throw "routing matrix failed pass $_"}}
           'CUSTOM_APP_PRODUCTION_RECOVERY_ROUTING_ADMISSION_MATRIX_REPEAT_PASS'
 
-      - name: Replay exact crash-journal parent matrix
+      - name: Prepare exact parent PS5.1 nullable-time journal acceptance harness
         shell: powershell
         run: |
-          $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-crash-recovery-journal-v0.1.0/test_custom_app_production_crash_recovery_journal.ps1';if($LASTEXITCODE){throw 'crash-journal parent regression failed'}
+          $d='validation/custom-app-production-crash-recovery-journal-v0.1.0';$src=Join-Path $d 'test_custom_app_production_crash_recovery_journal.ps1';$runtime=Join-Path $d 'test_custom_app_production_crash_recovery_journal.runtime.ps1';$text=Get-Content -LiteralPath $src -Raw;$needle='[AllowNull()][DateTimeOffset]$At=$null';if(([regex]::Matches($text,[regex]::Escape($needle))).Count-ne1){throw 'parent nullable-time patch marker drifted'};$patched=$text.Replace($needle,'[AllowNull()]$At=$null');[IO.File]::WriteAllText($runtime,$patched,[Text.UTF8Encoding]::new($false));$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $runtime),[ref]$t,[ref]$er)|Out-Null;if($er.Count){throw 'runtime journal harness parse failed'}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_ROUTING_ADMISSION_PARENT_HARNESS_PASS'
+
+      - name: Replay exact crash-journal parent matrix through validated runtime harness
+        shell: powershell
+        run: |
+          $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-crash-recovery-journal-v0.1.0/test_custom_app_production_crash_recovery_journal.runtime.ps1';if($LASTEXITCODE){throw 'crash-journal parent regression failed'}
           'CUSTOM_APP_PRODUCTION_RECOVERY_ROUTING_ADMISSION_PARENT_PASS'
 
       - name: Rebuild exact hard-disabled bounded candidate and SelfTest
@@ -84,7 +90,7 @@ jobs:
         run: |
           $p='92a3e8ac83c8bbbe9e5d4b6f3f00469701250acc';$expected=@('.github/workflows/validate-custom-app-production-recovery-routing-admission-v010.yml','validation/custom-app-production-recovery-routing-admission-v0.1.0/custom-app-production-recovery-routing-admission.ps1','validation/custom-app-production-recovery-routing-admission-v0.1.0/test_custom_app_production_recovery_routing_admission.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_-notin$expected});if($bad.Count){throw "unexpected changed surface $($bad-join', ')"}
           foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','bin/addon-manager.ps1','bin/spotify-control.ps1','validation/custom-app-production-bounded-recovery-stack-hard-disabled-integration-v0.1.0/build_candidate.py')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}};if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
-          $d='validation/custom-app-production-recovery-routing-admission-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_parent=$p;qualified_journal_head='7e26187e2360089024e9d72d0701be6f1577a1ef';qualified_bounded_executor_head='5a2840d824f1e28e2920657d0e3a8e139d7e8b71';router_zero_authority=$true;prepared_auto_execution_blocked=$true;atomic_manual_inspection_preserved=$true;committed_clean_new_permit_policy_still_unwired=$true;bounded_executor_invoked_by_router=$false;future_fresh_revalidation_required=$true;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          $d='validation/custom-app-production-recovery-routing-admission-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_parent=$p;qualified_journal_head='7e26187e2360089024e9d72d0701be6f1577a1ef';qualified_bounded_executor_head='5a2840d824f1e28e2920657d0e3a8e139d7e8b71';router_zero_authority=$true;prepared_auto_execution_blocked=$true;atomic_manual_inspection_preserved=$true;committed_clean_new_permit_policy_still_unwired=$true;bounded_executor_invoked_by_router=$false;future_fresh_revalidation_required=$true;parent_nullable_time_harness_exactly_replayed=$true;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
           'CUSTOM_APP_PRODUCTION_RECOVERY_ROUTING_ADMISSION_IMMUTABILITY_PASS'
 
       - uses: actions/upload-artifact@v4
