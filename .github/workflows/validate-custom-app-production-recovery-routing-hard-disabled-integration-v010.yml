@@ -39,15 +39,17 @@ jobs:
           );foreach($p in $pins){$b=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($b-cne$p[2]){throw "pin drift $($p[1]) $b != $($p[2])"}}
           'CUSTOM_APP_PRODUCTION_RECOVERY_ROUTING_HARD_DISABLED_PINS_PASS'
 
-      - name: Build recovery routing hard-disabled candidate first pass
+      - name: Build exact recovery routing hard-disabled candidate
         shell: powershell
         run: |
           $d='validation/custom-app-production-recovery-routing-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'recovery routing candidate build failed'}
           $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json"
           $ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();$as=(Get-Item $a).Length
           if((Get-Item $m).Length-ne284327-or$mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate changed'}
+          if($as-ne1325619-or$ah-cne'e7f3ba6bc03cc4ff118f098778fe5ac7f308f1a99ecdc4149131ed2a8156579a'){throw "recovery routing candidate exact output drift size=$as sha256=$ah"}
+          if($rh-cne'04f27f865c5bc47065fad13a3b343a66ee595a8cf48f732ce916374181e3f142'){throw "candidate report exact output drift sha256=$rh"}
           "ADDON_HASH=$ah"|Out-File $env:GITHUB_ENV -Append -Encoding utf8;"ADDON_SIZE=$as"|Out-File $env:GITHUB_ENV -Append -Encoding utf8;"REPORT_HASH=$rh"|Out-File $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "RECOVERY_ROUTING_FIRST_BUILD addon_size=$as addon_sha256=$ah report_sha256=$rh"
+          Write-Host "RECOVERY_ROUTING_EXACT_BUILD addon_size=$as addon_sha256=$ah report_sha256=$rh"
 
       - name: Parse candidate and audit loaded-but-unreachable routing
         shell: powershell
@@ -74,14 +76,14 @@ jobs:
       - name: Rebuild deterministically and compare exact output
         shell: powershell
         run: |
-          $d='validation/custom-app-production-recovery-routing-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'second deterministic build failed'};$a="$d/out/bin/addon-manager.ps1";$r="$d/candidate-validation.json";$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();$as=(Get-Item $a).Length;if($ah-cne$env:ADDON_HASH-or$as-ne[int64]$env:ADDON_SIZE){throw 'candidate addon deterministic rebuild drift'};if($rh-cne$env:REPORT_HASH){throw 'candidate report deterministic rebuild drift'}
-          Write-Host "CUSTOM_APP_PRODUCTION_RECOVERY_ROUTING_HARD_DISABLED_DETERMINISTIC_PASS addon_size=$env:ADDON_SIZE addon_sha256=$env:ADDON_HASH report_sha256=$env:REPORT_HASH"
+          $d='validation/custom-app-production-recovery-routing-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'second deterministic build failed'};$a="$d/out/bin/addon-manager.ps1";$r="$d/candidate-validation.json";$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();$as=(Get-Item $a).Length;if($as-ne1325619-or$ah-cne'e7f3ba6bc03cc4ff118f098778fe5ac7f308f1a99ecdc4149131ed2a8156579a'){throw "candidate exact hard pin drift size=$as sha256=$ah"};if($rh-cne'04f27f865c5bc47065fad13a3b343a66ee595a8cf48f732ce916374181e3f142'){throw "candidate report hard pin drift sha256=$rh"};if($ah-cne$env:ADDON_HASH-or$as-ne[int64]$env:ADDON_SIZE-or$rh-cne$env:REPORT_HASH){throw 'candidate deterministic rebuild drift'}
+          Write-Host "CUSTOM_APP_PRODUCTION_RECOVERY_ROUTING_HARD_DISABLED_DETERMINISTIC_PASS addon_size=$as addon_sha256=$ah report_sha256=$rh"
 
       - name: Prove protected surfaces immutable and write evidence
         shell: powershell
         run: |
           $p='2f2f596bb8a86c0b074543992f7634be858821a4';foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','bin/addon-manager.ps1','bin/spotify-control.ps1','validation/custom-app-production-bounded-recovery-stack-hard-disabled-integration-v0.1.0/build_candidate.py','validation/custom-app-production-recovery-routing-admission-v0.1.0/custom-app-production-recovery-routing-admission.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}};if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
-          $d='validation/custom-app-production-recovery-routing-hard-disabled-integration-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_parent=$p;router_head='2f2f596bb8a86c0b074543992f7634be858821a4';router_blob='4225bb042aa8d240706e1f383e54f12894e74512';candidate_addon_size=[int64]$env:ADDON_SIZE;candidate_addon_sha256=$env:ADDON_HASH;candidate_report_sha256=$env:REPORT_HASH;preexisting_parent_functions_changed=0;router_preexisting_callers=0;candidate_reduces_exactly_to_parent=$true;pipeline_true_assignment_count=1;pipeline_true_assignment_inherited_selftest_only=$true;addon_selftest_passed=$true;pipeline_enabled=$false;pipeline_enablement_implemented=$false;routing_normal_path_wiring_added=$false;router_execution_added=$false;production_main_changed=$false;provisional_hash_discovery=$true}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          $d='validation/custom-app-production-recovery-routing-hard-disabled-integration-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_parent=$p;router_head='2f2f596bb8a86c0b074543992f7634be858821a4';router_blob='4225bb042aa8d240706e1f383e54f12894e74512';candidate_addon_size=1325619;candidate_addon_sha256='e7f3ba6bc03cc4ff118f098778fe5ac7f308f1a99ecdc4149131ed2a8156579a';candidate_report_sha256='04f27f865c5bc47065fad13a3b343a66ee595a8cf48f732ce916374181e3f142';preexisting_parent_functions_changed=0;router_preexisting_callers=0;candidate_reduces_exactly_to_parent=$true;pipeline_true_assignment_count=1;pipeline_true_assignment_inherited_selftest_only=$true;addon_selftest_passed=$true;pipeline_enabled=$false;pipeline_enablement_implemented=$false;routing_normal_path_wiring_added=$false;router_execution_added=$false;production_main_changed=$false;provisional_hash_discovery=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
           'CUSTOM_APP_PRODUCTION_RECOVERY_ROUTING_HARD_DISABLED_IMMUTABILITY_PASS'
 
       - uses: actions/upload-artifact@v4
