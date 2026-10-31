@@ -34,7 +34,7 @@ jobs:
         run: |
           $h=(git rev-parse HEAD).Trim();$pins=@(
             @($h,'validation/custom-app-production-recovery-routing-admission-v0.1.0/custom-app-production-recovery-routing-admission.ps1','4225bb042aa8d240706e1f383e54f12894e74512'),
-            @($h,'validation/custom-app-production-recovery-routing-admission-v0.1.0/test_custom_app_production_recovery_routing_admission.ps1','430e123d259103b1732c26050bd098dee93f5b97'),
+            @($h,'validation/custom-app-production-recovery-routing-admission-v0.1.0/test_custom_app_production_recovery_routing_admission.ps1','791b5df714509a42ab0ab53340f450d3f8fd7ca0'),
             @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
             @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/test_custom_app_production_crash_recovery_journal.ps1','6ff49f21d30511e4eb99300debb0bd0696f74204'),
             @('92a3e8ac83c8bbbe9e5d4b6f3f00469701250acc','validation/custom-app-production-bounded-recovery-stack-hard-disabled-integration-v0.1.0/build_candidate.py','1440d16fd55b268efbf1fdd4efe714cd80c35e39')
