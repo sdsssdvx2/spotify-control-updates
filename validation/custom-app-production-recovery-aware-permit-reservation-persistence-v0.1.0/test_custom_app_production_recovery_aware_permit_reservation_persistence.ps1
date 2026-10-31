@@ -28,14 +28,21 @@ function New-RAPRPFixtureV010 {
 }
 
 function Invoke-RAPRPFixtureV010 {
-    param([Parameter(Mandatory=$true)]$F,[AllowNull()]$Reservation=$null,[AllowNull()]$Bundle=$null,[AllowNull()][string]$PersistenceStore=$null,[DateTimeOffset]$At=[DateTimeOffset]::MinValue)
+    param(
+        [Parameter(Mandatory=$true)]$F,[AllowNull()]$Reservation=$null,[AllowNull()]$Bundle=$null,[AllowNull()][string]$PersistenceStore=$null,
+        [AllowNull()]$Baseline=$null,[AllowNull()]$ShadowQualification=$null,[AllowNull()]$LiveQualification=$null,
+        [DateTimeOffset]$At=[DateTimeOffset]::MinValue,[ValidateSet('none','after-history-before-current')][string]$FailurePoint='none'
+    )
     $Q=$F.r.ready
     if($null -eq $Reservation){$Reservation=$F.reservation}
     if($null -eq $Bundle){$Bundle=$Q.bundle}
     if([string]::IsNullOrWhiteSpace($PersistenceStore)){$PersistenceStore=[string]$F.store}
     if($At -eq [DateTimeOffset]::MinValue){$At=$Q.at}
     $ctx=New-RAIssueLiveContextV010 -Bundle $Bundle
-    return Invoke-CustomAppProductionRecoveryAwarePermitReservationPersistenceV010 -Name ([string]$Bundle.lifecycle.name) -LifecycleRow $Bundle.lifecycle -ProvenanceRow $Bundle.provenance -BindingRow $Bundle.binding -StageResult $Bundle.stage -ShadowResult $Bundle.shadow -RetirementResumeResult $Q.resume.result -CurrentBaseline $ctx.baseline -ShadowProtocolQualification $ctx.shadow -LiveAttestedQualification $ctx.live -AllowedRoot $Q.f.ce.q.f.f.allowed -RecoveryStoreDirectory $Q.f.ce.q.f.f.store -PersistenceStoreDirectory $PersistenceStore -ExpectedTransactionId ([string]$Q.f.ce.q.f.f.identity.transaction_id) -LocalAppDataRoot $Q.f.ce.q.f.f.q.persistence.local -AppDataRoot $Q.f.ce.q.f.f.q.persistence.roaming -ReservationResult $Reservation -Now $At
+    if($null -eq $Baseline){$Baseline=$ctx.baseline}
+    if($null -eq $ShadowQualification){$ShadowQualification=$ctx.shadow}
+    if($null -eq $LiveQualification){$LiveQualification=$ctx.live}
+    return Invoke-CustomAppProductionRecoveryAwarePermitReservationPersistenceV010 -Name ([string]$Bundle.lifecycle.name) -LifecycleRow $Bundle.lifecycle -ProvenanceRow $Bundle.provenance -BindingRow $Bundle.binding -StageResult $Bundle.stage -ShadowResult $Bundle.shadow -RetirementResumeResult $Q.resume.result -CurrentBaseline $Baseline -ShadowProtocolQualification $ShadowQualification -LiveAttestedQualification $LiveQualification -AllowedRoot $Q.f.ce.q.f.f.allowed -RecoveryStoreDirectory $Q.f.ce.q.f.f.store -PersistenceStoreDirectory $PersistenceStore -ExpectedTransactionId ([string]$Q.f.ce.q.f.f.identity.transaction_id) -LocalAppDataRoot $Q.f.ce.q.f.f.q.persistence.local -AppDataRoot $Q.f.ce.q.f.f.q.persistence.roaming -ReservationResult $Reservation -Now $At -FailurePoint $FailurePoint
 }
 
 function Assert-RAPRPNoAuthorityV010($Result,[string]$Label){
@@ -47,6 +54,11 @@ function Assert-RAPRPPersistedV010($Result,[string]$Label){
     Assert-RAPRPT ([bool]$Result.nonce_durably_reserved) "$Label nonce not durably reserved"
     Assert-RAPRPT ([bool]$Result.permit_durably_reserved) "$Label permit not durably reserved"
     Assert-RAPRPNoAuthorityV010 $Result $Label
+}
+function Assert-RAPRPReadFailsV010([string]$Root,[string]$Store,[string]$ExpectedLike,[string]$Label){
+    $failed=$false
+    try{[void](Read-CustomAppProductionRecoveryAwarePermitReservationStoreV010 -AllowedRoot $Root -PersistenceStoreDirectory $Store)}catch{$failed=$true;if([string]$_.Exception.Message -notlike $ExpectedLike){throw "$Label wrong failure: $($_.Exception.Message)"}}
+    Assert-RAPRPT $failed "$Label unexpectedly read successfully"
 }
 
 $count=0
@@ -157,6 +169,97 @@ $badEnvelope.envelope_sha256=Get-CustomAppProductionRecoveryAwarePermitReservati
 $badEnvelopeCheck=Test-CustomAppProductionRecoveryAwarePermitReservationPersistenceEnvelopeV010 -Envelope $badEnvelope
 Assert-RAPRPF ([bool]$badEnvelopeCheck.ok) 'rehashed consumed persistence envelope accepted'
 Assert-RAPRPT ([string]$badEnvelopeCheck.reason -like '*authority-escaped-permit_consumed*') ('bad envelope reason '+[string]$badEnvelopeCheck.reason)
+$count++
+
+# Persistence path must remain confined to the fixture's exact allowed root.
+$pathFx=New-RAPRPFixtureV010 -Label 'pathescape' -Nonce ('1'*32)
+$escapeRoot=Join-Path $env:RUNNER_TEMP ('raprp-path-escape-'+[Guid]::NewGuid().ToString('N'))
+$escapeStore=Join-Path $escapeRoot 'store'
+[void](New-Item -ItemType Directory -Force -Path $escapeStore)
+[void](New-Item -ItemType Directory -Force -Path (Join-Path $escapeStore 'history'))
+$pathDenied=Invoke-RAPRPFixtureV010 -F $pathFx -PersistenceStore $escapeStore
+Assert-RAPRPF ([bool]$pathDenied.ok) 'path escape unexpectedly persisted'
+Assert-RAPRPT ([string]$pathDenied.reason -like 'reservation-persistence-store-read-denied:*escaped allowed root*') ('path escape reason '+[string]$pathDenied.reason)
+Assert-RAPRPF ([bool]$pathDenied.reservation_persisted) 'path escape claimed durable persistence'
+Assert-RAPRPNoAuthorityV010 $pathDenied 'path escape'
+$count++
+
+# Exclusive store lock must fail closed before any durable write.
+$lockFx=New-RAPRPFixtureV010 -Label 'lock' -Nonce ('2'*32)
+$lockPaths=Get-CustomAppProductionRecoveryAwarePermitReservationPersistencePathsV010 -AllowedRoot $lockFx.r.ready.f.ce.q.f.f.allowed -PersistenceStoreDirectory $lockFx.store
+$held=Open-CustomAppProductionRecoveryAwarePermitReservationPersistenceLockV010 -Paths $lockPaths
+try{$lockDenied=Invoke-RAPRPFixtureV010 -F $lockFx}finally{$held.Dispose()}
+Assert-RAPRPF ([bool]$lockDenied.ok) 'lock contention unexpectedly persisted'
+Assert-RAPRPT ([string]$lockDenied.reason -like 'reservation-persistence-store-read-denied:*reservation-persistence-lock-busy*') ('lock reason '+[string]$lockDenied.reason)
+Assert-RAPRPF ([bool]$lockDenied.reservation_persisted) 'lock contention claimed persistence'
+Assert-RAPRPNoAuthorityV010 $lockDenied 'lock contention'
+$count++
+
+# Crash after append-only history durability but before current publication must be detectable on restart.
+$crashBase=New-RAPRPFixtureV010 -Label 'crashbase' -Nonce ('3'*32)
+$crashFirst=Invoke-RAPRPFixtureV010 -F $crashBase
+Assert-RAPRPT ([bool]$crashFirst.ok) 'crash setup first persistence failed'
+$crashNext=New-RAPRFixtureV010 -Label 'raprp-crashnext' -Name 'future-app' -Source 'owner/future-app' -Manifest 'Future App' -Nonce ('4'*32)
+$crashReservation=Invoke-RAPRFixtureV010 -F $crashNext -State $crashFirst.store.state -ExpectedRevision 1
+Assert-RAPRPT ([bool]$crashReservation.ok) ('crash setup reservation failed: '+[string]$crashReservation.reason)
+$crashF=[pscustomobject]@{r=$crashNext;reservation=$crashReservation;store=$crashBase.store}
+$crashSave=Invoke-RAPRPFixtureV010 -F $crashF -FailurePoint 'after-history-before-current'
+Assert-RAPRPF ([bool]$crashSave.ok) 'simulated crash unexpectedly succeeded'
+Assert-RAPRPT ([string]$crashSave.reason -like 'reservation-persistence-save-denied:simulated-crash-after-history-before-current') ('crash reason '+[string]$crashSave.reason)
+Assert-RAPRPNoAuthorityV010 $crashSave 'simulated crash'
+Assert-RAPRPReadFailsV010 $crashBase.r.ready.f.ce.q.f.f.allowed $crashBase.store '*current-history-mismatch*' 'crash-window'
+$count++
+
+# A valid but rolled-back current pointer must not be accepted against a newer append-only history tip.
+$rollbackBase=New-RAPRPFixtureV010 -Label 'rollbackbase' -Nonce ('5'*32)
+$rollbackFirst=Invoke-RAPRPFixtureV010 -F $rollbackBase
+Assert-RAPRPT ([bool]$rollbackFirst.ok) 'rollback setup first persistence failed'
+$rollbackNext=New-RAPRFixtureV010 -Label 'raprp-rollbacknext' -Name 'future-app' -Source 'owner/future-app' -Manifest 'Future App' -Nonce ('6'*32)
+$rollbackReservation=Invoke-RAPRFixtureV010 -F $rollbackNext -State $rollbackFirst.store.state -ExpectedRevision 1
+Assert-RAPRPT ([bool]$rollbackReservation.ok) ('rollback setup reservation failed: '+[string]$rollbackReservation.reason)
+$rollbackF=[pscustomobject]@{r=$rollbackNext;reservation=$rollbackReservation;store=$rollbackBase.store}
+$rollbackSecond=Invoke-RAPRPFixtureV010 -F $rollbackF
+Assert-RAPRPT ([bool]$rollbackSecond.ok) 'rollback setup second persistence failed'
+$rev1=Get-ChildItem -LiteralPath (Join-Path $rollbackBase.store 'history') -File -Filter '00000000000000000001-*.json'|Select-Object -First 1
+Copy-Item -LiteralPath $rev1.FullName -Destination (Join-Path $rollbackBase.store 'current.json') -Force
+Assert-RAPRPReadFailsV010 $rollbackBase.r.ready.f.ce.q.f.f.allowed $rollbackBase.store '*current-history-mismatch*' 'current rollback'
+$count++
+
+# Reservation can become ineligible between in-memory reservation and durable persistence.
+$removedFx=New-RAPRPFixtureV010 -Label 'removed' -Nonce ('7'*32)
+$removedBundle=Copy-RAPRP $removedFx.r.ready.bundle
+$removedBundle.lifecycle.user_removed=$true
+$removedBundle.lifecycle.present=$false
+$removedResult=Invoke-RAPRPFixtureV010 -F $removedFx -Bundle $removedBundle
+Assert-RAPRPF ([bool]$removedResult.ok) 'user removal after reservation unexpectedly persisted'
+Assert-RAPRPT ([string]$removedResult.reason -like 'reservation-persistence-pre-admission-denied:*') ('user removal reason '+[string]$removedResult.reason)
+Assert-RAPRPF ([bool]$removedResult.reservation_persisted) 'user removal claimed persistence'
+Assert-RAPRPNoAuthorityV010 $removedResult 'user removal'
+$count++
+
+$baselineFx=New-RAPRPFixtureV010 -Label 'baseline' -Nonce ('8'*32)
+$baselineCtx=New-RAIssueLiveContextV010 -Bundle $baselineFx.r.ready.bundle
+$driftBaseline=Copy-RAPRP $baselineCtx.baseline
+$driftBaseline.tree_sha256=('7'*64)
+$baselineResult=Invoke-RAPRPFixtureV010 -F $baselineFx -Baseline $driftBaseline
+Assert-RAPRPF ([bool]$baselineResult.ok) 'baseline drift after reservation unexpectedly persisted'
+Assert-RAPRPT ([string]$baselineResult.reason -like 'reservation-persistence-pre-admission-denied:*') ('baseline drift reason '+[string]$baselineResult.reason)
+Assert-RAPRPF ([bool]$baselineResult.reservation_persisted) 'baseline drift claimed persistence'
+Assert-RAPRPNoAuthorityV010 $baselineResult 'baseline drift'
+$count++
+
+$remoteFx=New-RAPRPFixtureV010 -Label 'remote' -Nonce ('9'*32)
+$remoteBundle=Copy-RAPRP $remoteFx.r.ready.bundle
+$remoteBundle.binding.last_remote_tree_sha256=('b'*64)
+$remoteBundle.binding.binding.last_verified_remote_tree_sha256=('b'*64)
+$remoteBundle.binding.last_remote_commit_sha=('c'*40)
+$remoteBundle.binding.binding.last_verified_commit_sha=('c'*40)
+[void](Sync-PromotionBundleFingerprints -Bundle $remoteBundle)
+$remoteResult=Invoke-RAPRPFixtureV010 -F $remoteFx -Bundle $remoteBundle
+Assert-RAPRPF ([bool]$remoteResult.ok) 'remote drift after reservation unexpectedly persisted'
+Assert-RAPRPT ([string]$remoteResult.reason -like 'reservation-persistence-continuity-current_remote_*mismatch') ('remote drift reason '+[string]$remoteResult.reason)
+Assert-RAPRPF ([bool]$remoteResult.reservation_persisted) 'remote drift claimed persistence'
+Assert-RAPRPNoAuthorityV010 $remoteResult 'remote drift'
 $count++
 
 Write-Host "CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_RESERVATION_PERSISTENCE_MATRIX_PASS total=$count"
