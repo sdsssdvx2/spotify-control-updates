@@ -33,13 +33,13 @@ REQUIRED_PROMOTION = [
     'New-CustomAppProductionPromotionDecisionV010',
     'Resolve-CustomAppProductionPromotionEligibilityV010',
 ]
-EXPECTED_REUSED_PROMOTION = [
+EXPECTED_EXACT_REUSED_PROMOTION = [
     'Test-CustomAppPromotionSha256V010',
     'Test-CustomAppPromotionCommitShaV010',
     'Get-CustomAppPromotionStringSha256V010',
-    'Test-CustomAppPromotionStrictDeniedAuthorityV010',
     'Get-CustomAppPromotionBindingFingerprintV010',
 ]
+EXPECTED_HARDENED_REUSED_PROMOTION = ['Test-CustomAppPromotionStrictDeniedAuthorityV010']
 EXPECTED_INJECTED_PROMOTION = [
     'New-CustomAppProductionPromotionDecisionV010',
     'Resolve-CustomAppProductionPromotionEligibilityV010',
@@ -48,6 +48,9 @@ PROMOTION_CONSTANTS = [
     ('$CustomAppProductionPromotionGateSchema', '$CustomAppProductionPromotionGateSchema = 1'),
     ('$CustomAppProductionPromotionGateManagedBy', "$CustomAppProductionPromotionGateManagedBy = 'custom-app-production-promotion-gate-v1'"),
 ]
+STRICT_DENY_CANARY_LINE = "    if($Object.PSObject.Properties['canary_execution_authorized'] -and [bool]$Object.canary_execution_authorized){return [pscustomobject]@{ok=$false;reason=($Label+'-canary-authority-true')}}"
+STRICT_DENY_SUCCESS_LINE = "    return [pscustomobject]@{ok=$true;reason=($Label+'-strict-denied-authority')}"
+
 REQUIRED_READINESS = [
     'Get-CustomAppProductionRecoveryAwarePermitReadinessSha256V010',
     'Test-CustomAppProductionRecoveryAwarePermitReadinessSha256V010',
@@ -221,20 +224,37 @@ def integrate(addon: bytes) -> tuple[bytes, dict]:
             reused_constants.append(variable)
         else:
             injected_constant_lines.append(exact_line)
+    if reused_constants:
+        raise RuntimeError(f'unexpected promotion constants already present in parent: {reused_constants}')
+    if [line.split('=', 1)[0].strip() for line in injected_constant_lines] != [x[0] for x in PROMOTION_CONSTANTS]:
+        raise RuntimeError('promotion constant injection surface drift')
 
-    reused_promotion: list[str] = []
+    exact_reused_promotion: list[str] = []
+    hardened_reused_promotion: list[str] = []
     injected_promotion: list[str] = []
     injected_promotion_blocks: list[str] = []
     for name in promotion_funcs:
+        source_block = normalized_function_block(promotion, name)
         if name in parent_set:
-            if normalized_function_block(parent, name) != normalized_function_block(promotion, name):
+            parent_block = normalized_function_block(parent, name)
+            if parent_block == source_block:
+                exact_reused_promotion.append(name)
+            elif name == 'Test-CustomAppPromotionStrictDeniedAuthorityV010':
+                if source_block.count(STRICT_DENY_SUCCESS_LINE) != 1:
+                    raise RuntimeError('promotion strict authority source success anchor drift')
+                expected_hardened = source_block.replace(STRICT_DENY_SUCCESS_LINE, STRICT_DENY_CANARY_LINE + '\n' + STRICT_DENY_SUCCESS_LINE, 1)
+                if parent_block != expected_hardened:
+                    raise RuntimeError('promotion strict authority parent drift is not the exact canary-deny hardening')
+                hardened_reused_promotion.append(name)
+            else:
                 raise RuntimeError(f'promotion collided function body drift: {name}')
-            reused_promotion.append(name)
         else:
             injected_promotion.append(name)
-            injected_promotion_blocks.append(normalized_function_block(promotion, name))
-    if reused_promotion != EXPECTED_REUSED_PROMOTION:
-        raise RuntimeError(f'unexpected promotion reused export set/order: {reused_promotion}')
+            injected_promotion_blocks.append(source_block)
+    if exact_reused_promotion != EXPECTED_EXACT_REUSED_PROMOTION:
+        raise RuntimeError(f'unexpected promotion exact-reused export set/order: {exact_reused_promotion}')
+    if hardened_reused_promotion != EXPECTED_HARDENED_REUSED_PROMOTION:
+        raise RuntimeError(f'unexpected promotion hardened-reused export set/order: {hardened_reused_promotion}')
     if injected_promotion != EXPECTED_INJECTED_PROMOTION:
         raise RuntimeError(f'unexpected promotion injected export set/order: {injected_promotion}')
 
@@ -252,9 +272,7 @@ def integrate(addon: bytes) -> tuple[bytes, dict]:
     first = re.search(r'(?im)^[ \t]*function\s+[A-Za-z0-9_-]+\s*\{', parent)
     if not first:
         raise RuntimeError('parent first function not found')
-    payload_parts: list[str] = []
-    if injected_constant_lines:
-        payload_parts.append('\n'.join(injected_constant_lines))
+    payload_parts: list[str] = ['\n'.join(injected_constant_lines)]
     payload_parts.extend(injected_promotion_blocks)
     payload_parts.append(readiness)
     payload_parts.append(SELFTEST.rstrip())
@@ -332,9 +350,10 @@ def integrate(addon: bytes) -> tuple[bytes, dict]:
         'promotion_head': PROMOTION_HEAD,
         'promotion_blob': PROMOTION_BLOB,
         'promotion_function_count': len(promotion_funcs),
-        'promotion_parent_exports_reused': reused_promotion,
+        'promotion_parent_exports_exact_reused': exact_reused_promotion,
+        'promotion_parent_exports_hardened_reused': hardened_reused_promotion,
+        'promotion_hardened_reuse_is_exact_canary_deny_superset': True,
         'promotion_missing_exports_injected': injected_promotion,
-        'promotion_reused_parent_export_bodies_exact': True,
         'promotion_parent_constants_reused': reused_constants,
         'promotion_missing_constants_injected': [line.split('=', 1)[0].strip() for line in injected_constant_lines],
         'promotion_dependency_loaded': True,
