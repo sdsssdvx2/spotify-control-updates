@@ -94,7 +94,7 @@ function Resolve-CustomAppProductionRecoveryAwarePermitReadinessV010 {
     if(([string]$pe.persistence_fingerprint).Trim().ToLowerInvariant()-cne([string]$tb.persistence_fingerprint).Trim().ToLowerInvariant()){return & $deny 'recovery-aware-readiness-current-persistence-does-not-match-stable-recovery'}
     $remoteAt=[DateTimeOffset]::MinValue;if(-not[DateTimeOffset]::TryParse([string]$pe.remote_observed_at,[ref]$remoteAt)){return & $deny 'recovery-aware-readiness-current-remote-time-invalid'}
     if($remoteAt-gt$Now.AddSeconds(5)-or$remoteAt-lt$Now.AddMinutes(-10)){return & $deny 'recovery-aware-readiness-current-remote-observation-not-fresh'}
-    foreach($f in @('remote_tree_sha256','binding_fingerprint','provenance_fingerprint')){if(-not(Test-CustomAppProductionRecoveryAwarePermitReadinessSha256V010 ([string]$pe.$f)){return & $deny ('recovery-aware-readiness-current-promotion-invalid-'+$f)}}
+    foreach($f in @('remote_tree_sha256','binding_fingerprint','provenance_fingerprint')){if(-not(Test-CustomAppProductionRecoveryAwarePermitReadinessSha256V010 ([string]$pe.$f))){return & $deny ('recovery-aware-readiness-current-promotion-invalid-'+$f)}}
     if(([string]$pe.remote_commit_sha)-notmatch'^[0-9a-f]{40}$'){return & $deny 'recovery-aware-readiness-current-promotion-remote-commit-invalid'}
 
     $receipt=[pscustomobject]@{
