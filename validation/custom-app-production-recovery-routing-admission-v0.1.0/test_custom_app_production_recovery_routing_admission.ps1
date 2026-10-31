@@ -22,7 +22,13 @@ function New-RFixture([string]$Label,[string]$Target){
         if($Target-ceq'rollback-complete'){$cur=Append-CustomAppProductionCrashJournalPhaseV010 -AllowedRoot $base -StoreDirectory $store -ExpectedRevision ([int64]$cur.revision) -ExpectedEntrySha256 ([string]$cur.entry.entry_sha256) -Phase 'rollback-complete' -Now $at.AddSeconds(2);if(-not[bool]$cur.ok){throw 'rollback-complete fixture advance failed'}}
     }elseif($Target-cne'prepared'){
         $idx=[array]::IndexOf($script:Normal,$Target);if($idx-lt1){throw ('unsupported target '+$Target)}
-        for($i=1;$i-le$idx;$i++){$cur=Append-CustomAppProductionCrashJournalPhaseV010 -AllowedRoot $base -StoreDirectory $store -ExpectedRevision ([int64]$cur.revision) -ExpectedEntrySha256 ([string]$cur.entry.entry_sha256) -Phase ([string]$script:Normal[$i]) -Now $at.AddSeconds($i);if(-not[bool]$cur.ok){throw ('fixture advance failed '+[string]$script:Normal[$i]+' '+[string]$cur.reason)}}
+        for($i=1;$i-le$idx;$i++){
+            $phase=[string]$script:Normal[$i];$args=@{AllowedRoot=$base;StoreDirectory=$store;ExpectedRevision=[int64]$cur.revision;ExpectedEntrySha256=[string]$cur.entry.entry_sha256;Phase=$phase;Now=$at.AddSeconds($i)}
+            if($phase-ceq'transaction-finalized'){$args.FinalizationFingerprint=N-R 'f'}
+            if($phase-ceq'apply-verified'){$args.ApplyResultFingerprint=N-R 'a'}
+            if($phase-ceq'committed-clean'){$args.CleanupResultFingerprint=N-R 'c'}
+            $cur=Append-CustomAppProductionCrashJournalPhaseV010 @args;if(-not[bool]$cur.ok){throw ('fixture advance failed '+$phase+' '+[string]$cur.reason)}
+        }
     }
     return [pscustomobject]@{root=$base;store=$store;id=$id;current=$cur}
 }
