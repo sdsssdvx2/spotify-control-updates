@@ -67,7 +67,7 @@ $resumeAuthority=New-RAReadyFixtureV010 -Label 'resume-authority' -Nonce ('9'*32
 $resumeFp=New-RAReadyFixtureV010 -Label 'resume-fingerprint' -Nonce ('a'*32);$bad=Copy-RAReady $resumeFp.resume.result;$bad.result_fingerprint=('0'*64);$r=Invoke-RAReadyV010 -Q $resumeFp -ResumeResult $bad;Assert-RAReadyDeniedV010 $r 'resume fingerprint tamper';$count++
 
 # A historically valid result is insufficient if a retired artifact reappears in durable state.
-$reappear=New-RAReadyFixtureV010 -Label 'artifact-reappears' -Nonce ('b'*32);[IO.Directory]::CreateDirectory([string]$reappear.resume.result.stage_workspace_path)|Out-Null;$r=Invoke-RAReadyV010 $reappear;Assert-RAReadyDeniedV010 $r 'retired artifact reappeared';Assert-RAReadyTrue ([string]$r.reason-like'*terminal-recovery-not-closed*'-or[string]$r.reason-like'*terminal-bridge-denied:*') 'artifact reappear reason';$count++
+$reappear=New-RAReadyFixtureV010 -Label 'artifact-reappears' -Nonce ('b'*32);[IO.Directory]::CreateDirectory([string]$reappear.f.ce.q.f.f.prepared.stage_workspace_path)|Out-Null;$r=Invoke-RAReadyV010 $reappear;Assert-RAReadyDeniedV010 $r 'retired artifact reappeared';Assert-RAReadyTrue ([string]$r.reason-like'*terminal-recovery-not-closed*'-or[string]$r.reason-like'*terminal-bridge-denied:*') 'artifact reappear reason';$count++
 
 $liveDrift=New-RAReadyFixtureV010 -Label 'live-drift' -Nonce ('c'*32);[IO.File]::AppendAllText((Join-Path $liveDrift.f.ce.q.f.f.q.x.live 'index.js'),"// readiness live drift`n",[Text.UTF8Encoding]::new($false));$r=Invoke-RAReadyV010 $liveDrift;Assert-RAReadyDeniedV010 $r 'live drift after recovery';Assert-RAReadyTrue ([string]$r.reason-like'*terminal-bridge-denied:*') 'live drift reason';$count++
 
