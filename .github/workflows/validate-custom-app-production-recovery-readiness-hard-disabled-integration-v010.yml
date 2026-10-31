@@ -44,17 +44,19 @@ jobs:
           python -m py_compile 'validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/build_candidate.py';if($LASTEXITCODE){throw 'builder py_compile failed'}
           'RECOVERY_READINESS_HARD_DISABLED_BUILDER_AUDIT_PASS'
 
-      - name: Build candidate deterministically twice and emit bootstrap pins
+      - name: Build candidate deterministically twice against exact hard pins
         shell: powershell
         run: |
           $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'first readiness candidate build failed'}
           $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json"
           $a1=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$m1=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$r1=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();$as1=(Get-Item $a).Length;$ms1=(Get-Item $m).Length
-          Copy-Item $a "$a.first";Copy-Item $m "$m.first";Copy-Item $r "$r.first"
           python "$d/build_candidate.py";if($LASTEXITCODE){throw 'second readiness candidate build failed'}
-          $a2=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$m2=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$r2=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();if($a1-cne$a2-or$m1-cne$m2-or$r1-cne$r2){throw 'readiness candidate rebuild nondeterministic'}
-          if($ms1-ne284327-or$m2-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control parent drift'}
-          Write-Host "RECOVERY_READINESS_BOOTSTRAP_PINS addon_size=$as1 addon_sha256=$a2 report_sha256=$r2 main_size=$ms1 main_sha256=$m2"
+          $a2=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$m2=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$r2=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();$as2=(Get-Item $a).Length;$ms2=(Get-Item $m).Length
+          if($a1-cne$a2-or$m1-cne$m2-or$r1-cne$r2-or$as1-ne$as2-or$ms1-ne$ms2){throw 'readiness candidate rebuild nondeterministic'}
+          if($as2-ne1382213-or$a2-cne'c2e5ffd4fe9b14b5c31dd53e7d093bd9b5db2a4ad49fa19449d299e3c14fac2f'){throw "Addon Manager exact candidate drift $as2 $a2"}
+          if($r2-cne'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw "candidate report exact hash drift $r2"}
+          if($ms2-ne284327-or$m2-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control parent drift'}
+          Write-Host "RECOVERY_READINESS_FINAL_PINS addon_size=$as2 addon_sha256=$a2 report_sha256=$r2 main_size=$ms2 main_sha256=$m2"
           'RECOVERY_READINESS_HARD_DISABLED_DETERMINISTIC_BUILD_PASS'
 
       - name: Audit candidate report and loaded-but-unreachable topology
@@ -85,21 +87,21 @@ jobs:
           $a='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/out/bin/addon-manager.ps1';$s=Join-Path $env:RUNNER_TEMP 'recovery-readiness-hard-disabled-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'Addon Manager SelfTest failed'}
           'RECOVERY_READINESS_HARD_DISABLED_SELFTEST_PASS'
 
-      - name: Prove protected surfaces immutable and write bootstrap evidence
+      - name: Prove protected surfaces immutable and write final evidence
         shell: powershell
         run: |
           $p='1ae80173bc70cce71dd8fb77595b64ca4463d7ad';foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-recovery-routing-dispatch-hard-disabled-integration-v0.1.0/build_candidate.py')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
           if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
-          $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';$a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json";[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();parent=$p;promotion_head='6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c';promotion_blob='1164c197405eac2295f789256e2886068611dd94';readiness_head='19bfe20681bc497ac45ee8face01d74436c38d1b';readiness_blob='0c73b5352c7b9bd29472d3a145a4fc4333d0574b';addon_size=(Get-Item $a).Length;addon_sha256=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();report_sha256=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();main_sha256=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();promotion_parent_strict_guard_is_exact_canary_deny_superset=$true;promotion_dependency_loaded=$true;promotion_dependency_reachable_from_normal_path=$false;readiness_loaded=$true;readiness_reachable_from_normal_path=$false;permit_issuance_added=$false;pipeline_enabled=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-bootstrap-evidence.json" -Encoding UTF8
+          $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';$a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json";[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();parent=$p;promotion_head='6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c';promotion_blob='1164c197405eac2295f789256e2886068611dd94';readiness_head='19bfe20681bc497ac45ee8face01d74436c38d1b';readiness_blob='0c73b5352c7b9bd29472d3a145a4fc4333d0574b';addon_size=(Get-Item $a).Length;addon_sha256=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();report_sha256=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();main_sha256=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();promotion_parent_strict_guard_is_exact_canary_deny_superset=$true;promotion_dependency_loaded=$true;promotion_dependency_reachable_from_normal_path=$false;readiness_loaded=$true;readiness_reachable_from_normal_path=$false;permit_issuance_added=$false;pipeline_enabled=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
           'RECOVERY_READINESS_HARD_DISABLED_IMMUTABILITY_PASS'
 
       - uses: actions/upload-artifact@v4
         with:
-          name: custom-app-production-recovery-readiness-hard-disabled-bootstrap-${{ github.run_id }}
+          name: custom-app-production-recovery-readiness-hard-disabled-v010-${{ github.run_id }}
           path: |
             validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/build_candidate.py
             validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/candidate-validation.json
-            validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/ci-bootstrap-evidence.json
+            validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/ci-evidence.json
             validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/out/bin/addon-manager.ps1
             validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/out/bin/spotify-control.ps1
           if-no-files-found: error
