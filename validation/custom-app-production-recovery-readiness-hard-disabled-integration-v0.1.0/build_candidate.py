@@ -13,14 +13,26 @@ PARENT_BUILDER = 'validation/custom-app-production-recovery-routing-dispatch-har
 PARENT_BUILDER_BLOB = 'c21290958ad5e9ddeebb08b2edfe9a53081a49e1'
 PARENT_ADDON = (1344160, '8ca2b97ec9460d5d95d695d8205b1186e654ebcd5c8de6e3085b15b78b734644')
 PARENT_MAIN = (284327, '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99')
+
+PROMOTION_HEAD = '6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c'
+PROMOTION_PATH = 'validation/custom-app-production-promotion-gate-v0.1.0/custom-app-production-promotion-gate.ps1'
+PROMOTION_BLOB = '1164c197405eac2295f789256e2886068611dd94'
 READINESS_HEAD = '19bfe20681bc497ac45ee8face01d74436c38d1b'
 READINESS_PATH = 'validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/custom-app-production-recovery-aware-new-permit-readiness.ps1'
 READINESS_BLOB = '0c73b5352c7b9bd29472d3a145a4fc4333d0574b'
-PROMOTION_HEAD = '6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c'
 RECOVERY_RESUME_HEAD = '2ad528b8a969fd45e88168d22ea787984f5e2714'
 TERMINAL_BRIDGE_HEAD = '894c5013df0a2f1c17483425a31f49d0f9eaa99d'
 PIPELINE_TRUE_RE = r'(?im)^[ \t]*\$script:CustomAppProductionPipelineEnabled[ \t]*=[ \t]*\$true[ \t]*$'
 
+REQUIRED_PROMOTION = [
+    'Test-CustomAppPromotionSha256V010',
+    'Test-CustomAppPromotionCommitShaV010',
+    'Get-CustomAppPromotionStringSha256V010',
+    'Test-CustomAppPromotionStrictDeniedAuthorityV010',
+    'Get-CustomAppPromotionBindingFingerprintV010',
+    'New-CustomAppProductionPromotionDecisionV010',
+    'Resolve-CustomAppProductionPromotionEligibilityV010',
+]
 REQUIRED_READINESS = [
     'Get-CustomAppProductionRecoveryAwarePermitReadinessSha256V010',
     'Test-CustomAppProductionRecoveryAwarePermitReadinessSha256V010',
@@ -33,9 +45,8 @@ REQUIRED_PARENT_DEPS = [
     'Test-CustomAppProductionRecoveryArtifactRetirementResumeExecutorResultV010',
     'Resolve-CustomAppProductionRecoveryCompletionRetirementAdmissionIntegrationV010',
     'Test-CustomAppProductionRecoveryCompletionRetirementAdmissionIntegrationReceiptV010',
-    'Resolve-CustomAppProductionPromotionEligibilityV010',
 ]
-FORBIDDEN_READINESS_PRIMITIVES = [
+FORBIDDEN_DECISION_PRIMITIVES = [
     '[IO.Directory]::Delete', '[IO.Directory]::Move', '[IO.File]::Copy', '[IO.File]::Write',
     'Remove-Item', 'Move-Item', 'Copy-Item', 'Set-Content', 'Add-Content', 'Out-File',
     'Invoke-WebRequest', 'Invoke-RestMethod', 'Start-Process', 'ProcessStartInfo',
@@ -46,6 +57,13 @@ FORBIDDEN_READINESS_PRIMITIVES = [
 SELFTEST = r'''function Invoke-CustomAppProductionRecoveryReadinessHardDisabledSelfTestV010 {
     if([bool]$script:CustomAppProductionPipelineEnabled){throw 'Recovery readiness integration observed enabled production pipeline.'}
     foreach($name in @(
+        'Test-CustomAppPromotionSha256V010',
+        'Test-CustomAppPromotionCommitShaV010',
+        'Get-CustomAppPromotionStringSha256V010',
+        'Test-CustomAppPromotionStrictDeniedAuthorityV010',
+        'Get-CustomAppPromotionBindingFingerprintV010',
+        'New-CustomAppProductionPromotionDecisionV010',
+        'Resolve-CustomAppProductionPromotionEligibilityV010',
         'Get-CustomAppProductionRecoveryAwarePermitReadinessSha256V010',
         'Test-CustomAppProductionRecoveryAwarePermitReadinessSha256V010',
         'Get-CustomAppProductionRecoveryAwarePermitReadinessMaterialV010',
@@ -53,13 +71,14 @@ SELFTEST = r'''function Invoke-CustomAppProductionRecoveryReadinessHardDisabledS
         'Test-CustomAppProductionRecoveryAwarePermitReadinessReceiptV010',
         'Resolve-CustomAppProductionRecoveryAwarePermitReadinessV010'
     )){
-        if(-not(Get-Command $name -CommandType Function -ErrorAction SilentlyContinue)){throw ('Integrated recovery readiness function missing: '+$name)}
+        if(-not(Get-Command $name -CommandType Function -ErrorAction SilentlyContinue)){throw ('Integrated promotion/readiness function missing: '+$name)}
     }
+    if([string]$CustomAppProductionPromotionGateManagedBy -cne 'custom-app-production-promotion-gate-v1'){throw 'Promotion dependency owner drift.'}
     if([string]$CustomAppProductionRecoveryAwarePermitReadinessManagedBy -cne 'custom-app-production-recovery-aware-new-permit-readiness-v1'){throw 'Recovery readiness owner drift.'}
     if([string]$CustomAppProductionRecoveryAwarePermitReadinessQualifiedPromotionHead -cne '6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c'){throw 'Recovery readiness promotion parent drift.'}
     if([string]$CustomAppProductionRecoveryAwarePermitReadinessQualifiedRecoveryResumeHead -cne '2ad528b8a969fd45e88168d22ea787984f5e2714'){throw 'Recovery readiness resume parent drift.'}
     if([string]$CustomAppProductionRecoveryAwarePermitReadinessQualifiedTerminalBridgeHead -cne '894c5013df0a2f1c17483425a31f49d0f9eaa99d'){throw 'Recovery readiness terminal bridge parent drift.'}
-    Write-Host 'CUSTOM_APP_PRODUCTION_RECOVERY_READINESS_HARD_DISABLED_SELFTEST_V010_PASS loaded-but-unreachable zero-authority'
+    Write-Host 'CUSTOM_APP_PRODUCTION_RECOVERY_READINESS_HARD_DISABLED_SELFTEST_V010_PASS promotion-and-readiness-loaded-but-unreachable zero-authority'
 }
 '''
 
@@ -105,6 +124,23 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def load_exact_module(head: str, path: str, blob: str, label: str) -> tuple[str, list[str]]:
+    actual = git_blob(head, path)
+    if actual != blob:
+        raise RuntimeError(f'{label} blob pin drift {actual} != {blob}')
+    text = git_object_bytes(actual).decode('utf-8-sig').replace('\r\n', '\n').strip()
+    names = functions(text)
+    if not names:
+        raise RuntimeError(f'{label} contains no functions')
+    return text, names
+
+
+def assert_zero_side_effect_source(text: str, label: str) -> None:
+    for primitive in FORBIDDEN_DECISION_PRIMITIVES:
+        if primitive.lower() in text.lower():
+            raise RuntimeError(f'{label} gained forbidden primitive: {primitive}')
+
+
 def build_parent() -> tuple[bytes, bytes, bytes, bytes, dict]:
     if git_blob(PARENT_HEAD, PARENT_BUILDER) != PARENT_BUILDER_BLOB:
         raise RuntimeError('parent routing-dispatch builder pin drift')
@@ -141,25 +177,24 @@ def integrate(addon: bytes) -> tuple[bytes, dict]:
     if missing_parent_deps:
         raise RuntimeError(f'parent readiness dependency export(s) missing: {missing_parent_deps}')
 
-    actual_blob = git_blob(READINESS_HEAD, READINESS_PATH)
-    if actual_blob != READINESS_BLOB:
-        raise RuntimeError(f'readiness core blob pin drift {actual_blob} != {READINESS_BLOB}')
-    readiness = git_object_bytes(actual_blob).decode('utf-8-sig').replace('\r\n', '\n').strip()
-    readiness_funcs = functions(readiness)
-    if not readiness_funcs:
-        raise RuntimeError('readiness core contains no functions')
-    collisions = sorted(parent_set & set(readiness_funcs))
-    if collisions:
-        raise RuntimeError(f'readiness function collision(s): {collisions}')
-    missing = [name for name in REQUIRED_READINESS if name not in readiness_funcs]
-    if missing:
-        raise RuntimeError(f'readiness required export(s) missing: {missing}')
-    extra = sorted(set(readiness_funcs) - set(REQUIRED_READINESS))
-    if extra:
-        raise RuntimeError(f'unexpected readiness export(s): {extra}')
-    for primitive in FORBIDDEN_READINESS_PRIMITIVES:
-        if primitive.lower() in readiness.lower():
-            raise RuntimeError(f'readiness core gained forbidden primitive: {primitive}')
+    promotion, promotion_funcs = load_exact_module(PROMOTION_HEAD, PROMOTION_PATH, PROMOTION_BLOB, 'promotion dependency')
+    if set(promotion_funcs) != set(REQUIRED_PROMOTION) or len(promotion_funcs) != len(REQUIRED_PROMOTION):
+        raise RuntimeError(f'promotion export surface drift: {promotion_funcs}')
+    promotion_collisions = sorted(parent_set & set(promotion_funcs))
+    if promotion_collisions:
+        raise RuntimeError(f'promotion function collision(s): {promotion_collisions}')
+    assert_zero_side_effect_source(promotion, 'promotion dependency')
+    for escaped in ('promotion_token_issued=$true','mutation_authorized=$true','auto_update_authorized=$true','auto_install_authorized=$true','production_mutation_authorized=$true'):
+        if re.search(re.escape(escaped).replace(r'\=', r'\s*=\s*'), promotion, re.IGNORECASE):
+            raise RuntimeError(f'promotion authority escaped in source: {escaped}')
+
+    readiness, readiness_funcs = load_exact_module(READINESS_HEAD, READINESS_PATH, READINESS_BLOB, 'readiness core')
+    if set(readiness_funcs) != set(REQUIRED_READINESS) or len(readiness_funcs) != len(REQUIRED_READINESS):
+        raise RuntimeError(f'readiness export surface drift: {readiness_funcs}')
+    readiness_collisions = sorted((parent_set | set(promotion_funcs)) & set(readiness_funcs))
+    if readiness_collisions:
+        raise RuntimeError(f'readiness function collision(s): {readiness_collisions}')
+    assert_zero_side_effect_source(readiness, 'readiness core')
     for escaped in ('readiness_is_authority=$true','promotion_token_issued=$true','permit_issued=$true','execution_authorized=$true','restore_authorized=$true','apply_authorized=$true','cleanup_authorized=$true','production_mutation_authorized=$true'):
         if re.search(re.escape(escaped).replace(r'\=', r'\s*=\s*'), readiness, re.IGNORECASE):
             raise RuntimeError(f'readiness authority escaped in source: {escaped}')
@@ -167,7 +202,7 @@ def integrate(addon: bytes) -> tuple[bytes, dict]:
     first = re.search(r'(?im)^[ \t]*function\s+[A-Za-z0-9_-]+\s*\{', parent)
     if not first:
         raise RuntimeError('parent first function not found')
-    payload = readiness + '\n\n' + SELFTEST.rstrip() + '\n\n'
+    payload = promotion + '\n\n' + readiness + '\n\n' + SELFTEST.rstrip() + '\n\n'
     text = parent[:first.start()] + payload + parent[first.start():]
 
     addon_selftest = function_block(text, 'Invoke-AddonSelfTest')
@@ -177,9 +212,9 @@ def integrate(addon: bytes) -> tuple[bytes, dict]:
     text = replace_function(text, 'Invoke-AddonSelfTest', addon_selftest)
 
     candidate_funcs = set(functions(text))
-    missing_after = [name for name in REQUIRED_READINESS if name not in candidate_funcs]
-    if missing_after:
-        raise RuntimeError(f'candidate readiness exports missing: {missing_after}')
+    for name in REQUIRED_PROMOTION + REQUIRED_READINESS:
+        if name not in candidate_funcs:
+            raise RuntimeError(f'candidate integrated export missing: {name}')
 
     changed = []
     for name in parent_funcs:
@@ -197,25 +232,35 @@ def integrate(addon: bytes) -> tuple[bytes, dict]:
     if '$script:CustomAppProductionPipelineEnabled = $false' not in text:
         raise RuntimeError('pipeline hard-disable lost')
 
+    promotion_call = 'Resolve-CustomAppProductionPromotionEligibilityV010'
     readiness_call = 'Resolve-CustomAppProductionRecoveryAwarePermitReadinessV010'
-    unexpected_callers = []
+    promotion_preexisting_callers = []
+    readiness_preexisting_callers = []
     for name in parent_funcs:
         if name == 'Invoke-AddonSelfTest':
             continue
-        if readiness_call in function_block(text, name):
-            unexpected_callers.append(name)
-    if unexpected_callers:
-        raise RuntimeError(f'readiness became reachable from pre-existing function(s): {unexpected_callers}')
+        block = function_block(text, name)
+        if promotion_call in block:
+            promotion_preexisting_callers.append(name)
+        if readiness_call in block:
+            readiness_preexisting_callers.append(name)
+    if promotion_preexisting_callers:
+        raise RuntimeError(f'promotion dependency became reachable from pre-existing function(s): {promotion_preexisting_callers}')
+    if readiness_preexisting_callers:
+        raise RuntimeError(f'readiness became reachable from pre-existing function(s): {readiness_preexisting_callers}')
 
+    readiness_resolver = function_block(text, 'Resolve-CustomAppProductionRecoveryAwarePermitReadinessV010')
+    if promotion_call not in readiness_resolver:
+        raise RuntimeError('readiness resolver no longer calls exact promotion eligibility dependency')
     selftest_block = function_block(text, 'Invoke-CustomAppProductionRecoveryReadinessHardDisabledSelfTestV010')
-    if re.search(r'(?im)^[ \t]*Resolve-CustomAppProductionRecoveryAwarePermitReadinessV010\b', selftest_block):
-        raise RuntimeError('readiness SelfTest invokes readiness resolver')
+    if re.search(r'(?im)^[ \t]*Resolve-CustomAppProductionPromotionEligibilityV010\b', selftest_block) or re.search(r'(?im)^[ \t]*Resolve-CustomAppProductionRecoveryAwarePermitReadinessV010\b', selftest_block):
+        raise RuntimeError('integration SelfTest executes promotion/readiness resolver')
 
     reduced = text
-    reduced = replace_once(reduced, payload, '', 'inserted recovery readiness payload')
+    reduced = replace_once(reduced, payload, '', 'inserted promotion + recovery readiness payload')
     reduced = replace_once(reduced, new_hook, old_hook, 'inserted recovery readiness SelfTest hook')
     if reduced != parent:
-        raise RuntimeError('candidate contains changes outside readiness module + SelfTest hook')
+        raise RuntimeError('candidate contains changes outside promotion/readiness modules + SelfTest hook')
 
     encoded = bom + text.replace('\n', '\r\n').encode('utf-8')
     report = {
@@ -224,15 +269,23 @@ def integrate(addon: bytes) -> tuple[bytes, dict]:
         'parent_head': PARENT_HEAD,
         'parent_addon_size': len(addon),
         'parent_addon_sha256': sha(addon),
+        'promotion_head': PROMOTION_HEAD,
+        'promotion_blob': PROMOTION_BLOB,
+        'promotion_function_count': len(promotion_funcs),
+        'promotion_dependency_loaded': True,
+        'promotion_preexisting_callers': promotion_preexisting_callers,
         'readiness_head': READINESS_HEAD,
         'readiness_blob': READINESS_BLOB,
         'readiness_promotion_head': PROMOTION_HEAD,
         'readiness_recovery_resume_head': RECOVERY_RESUME_HEAD,
         'readiness_terminal_bridge_head': TERMINAL_BRIDGE_HEAD,
         'readiness_function_count': len(readiness_funcs),
+        'readiness_loaded': True,
         'preexisting_parent_functions_changed': changed,
-        'readiness_preexisting_callers': unexpected_callers,
-        'readiness_selftest_executes_readiness': False,
+        'readiness_preexisting_callers': readiness_preexisting_callers,
+        'readiness_calls_exact_promotion_dependency': True,
+        'integration_selftest_executes_decision_resolvers': False,
+        'promotion_source_forbidden_primitive_count': 0,
         'readiness_source_forbidden_primitive_count': 0,
         'full_chain_function_unchanged': True,
         'candidate_reduces_exactly_to_parent': True,
@@ -244,6 +297,7 @@ def integrate(addon: bytes) -> tuple[bytes, dict]:
         'bounded_recovery_normal_path_wiring_added': False,
         'routing_normal_path_wiring_added': False,
         'dispatch_normal_path_wiring_added': False,
+        'promotion_dependency_normal_path_wiring_added': False,
         'readiness_normal_path_wiring_added': False,
         'readiness_execution_added': False,
         'permit_issuance_added': False,
