@@ -1,0 +1,85 @@
+name: Validate Custom App Production Recovery Routing Dispatch Hard Disabled Integration v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-recovery-routing-dispatch-hard-disabled-integration-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-routing-dispatch-hard-disabled-integration-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-routing-dispatch-hard-disabled-integration-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-recovery-routing-fixture-dispatch-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-routing-dispatch-hard-disabled-integration-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-routing-dispatch-hard-disabled-integration-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 420
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact bootstrap scope lineage and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h-cne$e){throw "head mismatch $h != $e"}
+          $p='93d4bdb0dfde63e5a643e5ab44023a8b0e5652c1';if((git merge-base $p HEAD).Trim()-cne$p){throw 'not descended from exact validated routing fixture dispatch head'}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $allowed=@('.github/workflows/validate-custom-app-production-recovery-routing-dispatch-hard-disabled-integration-v010.yml','validation/custom-app-production-recovery-routing-dispatch-hard-disabled-integration-v0.1.0/build_candidate.py');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_-notin$allowed});if($bad.Count){throw "bootstrap scope escaped: $($bad-join', ')"};foreach($x in $allowed){if($x-notin$changed){throw "missing $x"}}
+          'RECOVERY_ROUTING_DISPATCH_HARD_DISABLED_BOOTSTRAP_SCOPE_PASS'
+
+      - name: Prove exact immutable source pins
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$pins=@(
+            @($h,'validation/custom-app-production-recovery-routing-dispatch-hard-disabled-integration-v0.1.0/build_candidate.py','c21290958ad5e9ddeebb08b2edfe9a53081a49e1'),
+            @('165f820dff82a8c4e5edada443db595f545ddc03','validation/custom-app-production-recovery-routing-hard-disabled-integration-v0.1.0/build_candidate.py','977ee4a599952877a2eac316fa78ca406326b396'),
+            @('93d4bdb0dfde63e5a643e5ab44023a8b0e5652c1','validation/custom-app-production-recovery-routing-fixture-dispatch-v0.1.0/custom-app-production-recovery-routing-fixture-dispatch.ps1','0cfb42759a3284dd70b2a8395304f48588ccd1b8')
+          );foreach($p in $pins){$b=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($b-cne$p[2]){throw "pin drift $($p[1]) $b != $($p[2])"}}
+          'RECOVERY_ROUTING_DISPATCH_HARD_DISABLED_BOOTSTRAP_PINS_PASS'
+
+      - name: Build candidate deterministically twice
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-routing-dispatch-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'first candidate build failed'}
+          $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json"
+          $a1=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$m1=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$r1=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();$as1=(Get-Item $a).Length;$ms1=(Get-Item $m).Length
+          Copy-Item $a "$a.first";Copy-Item $m "$m.first";Copy-Item $r "$r.first"
+          python "$d/build_candidate.py";if($LASTEXITCODE){throw 'second candidate build failed'}
+          $a2=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$m2=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$r2=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();if($a1-cne$a2-or$m1-cne$m2-or$r1-cne$r2){throw 'candidate rebuild nondeterministic'}
+          if($m2-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'-or$ms1-ne284327){throw 'Spotify Control parent drift'}
+          Write-Host "DISPATCH_HARD_DISABLED_HASH addon_size=$as1 addon_sha256=$a2 report_sha256=$r2 main_size=$ms1 main_sha256=$m2"
+          'RECOVERY_ROUTING_DISPATCH_HARD_DISABLED_DETERMINISTIC_BUILD_PASS'
+
+      - name: Audit candidate report and PS5.1 parse
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-routing-dispatch-hard-disabled-integration-v0.1.0';$r=Get-Content "$d/candidate-validation.json" -Raw|ConvertFrom-Json
+          foreach($f in @('pipeline_enabled','pipeline_enablement_implemented','recovery_normal_path_wiring_added','bounded_recovery_normal_path_wiring_added','routing_normal_path_wiring_added','dispatch_normal_path_wiring_added','dispatch_execution_added','generic_auto_authority_expanded','production_main_changed')){if([bool]$r.$f){throw "candidate authority escaped $f"}}
+          if(-not[bool]$r.full_chain_function_unchanged-or-not[bool]$r.candidate_reduces_exactly_to_parent){throw 'candidate reduction/full-chain proof missing'}
+          if(@($r.preexisting_parent_functions_changed).Count-ne0-or@($r.dispatch_preexisting_callers).Count-ne0-or[bool]$r.dispatch_selftest_executes_dispatch){throw 'dispatch became reachable or parent function changed'}
+          if([int]$r.pipeline_true_assignment_count-ne1-or-not[bool]$r.pipeline_true_assignment_inherited_selftest_only){throw 'pipeline force-enable topology drift'}
+          $a="$d/out/bin/addon-manager.ps1";$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $a),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|%{Write-Error ("candidate line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw 'candidate PS5.1 parse failed'}
+          'RECOVERY_ROUTING_DISPATCH_HARD_DISABLED_REPORT_PARSE_PASS'
+
+      - name: Run candidate Addon Manager SelfTest in isolated profile
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-routing-dispatch-hard-disabled-integration-v0.1.0';$a="$d/out/bin/addon-manager.ps1";$s=Join-Path $env:RUNNER_TEMP 'routing-dispatch-hard-disabled-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'candidate SelfTest failed'}
+          'RECOVERY_ROUTING_DISPATCH_HARD_DISABLED_SELFTEST_PASS'
+
+      - name: Prove protected surfaces immutable
+        shell: powershell
+        run: |
+          $p='93d4bdb0dfde63e5a643e5ab44023a8b0e5652c1';foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','bin/addon-manager.ps1','bin/spotify-control.ps1','validation/custom-app-production-recovery-routing-fixture-dispatch-v0.1.0/custom-app-production-recovery-routing-fixture-dispatch.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}};if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
+          'RECOVERY_ROUTING_DISPATCH_HARD_DISABLED_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-recovery-routing-dispatch-hard-disabled-bootstrap-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-recovery-routing-dispatch-hard-disabled-integration-v0.1.0/build_candidate.py
+            validation/custom-app-production-recovery-routing-dispatch-hard-disabled-integration-v0.1.0/candidate-validation.json
+            validation/custom-app-production-recovery-routing-dispatch-hard-disabled-integration-v0.1.0/out/bin/addon-manager.ps1
+          if-no-files-found: error
