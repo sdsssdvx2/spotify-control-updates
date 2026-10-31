@@ -26,12 +26,13 @@ function New-RAReadyPromotionBundleV010 {
     return $b
 }
 function New-RAReadyFixtureV010 {
-    param([Parameter(Mandatory=$true)][string]$Label,[string]$Name='tagify',[string]$Source='alexk218/tagify',[string]$Manifest='Tagify',[string]$Nonce=('a'*32),[DateTimeOffset]$At=[DateTimeOffset]::UtcNow)
+    param([Parameter(Mandatory=$true)][string]$Label,[string]$Name='tagify',[string]$Source='alexk218/tagify',[string]$Manifest='Tagify',[string]$Nonce=('a'*32),[DateTimeOffset]$At=[DateTimeOffset]::MinValue)
     $f=New-CRFixtureV010 -Label ('ready-'+$Label) -Name $Name -Source $Source -Manifest $Manifest -Nonce $Nonce
-    $resume=Invoke-RRResumeV010 -F $f -At $At.AddSeconds(-1)
+    $effectiveAt=$(if($At-eq[DateTimeOffset]::MinValue){[DateTimeOffset]::UtcNow}else{$At})
+    $resume=Invoke-RRResumeV010 -F $f -At $effectiveAt
     Assert-RAReadyTrue ([bool]$resume.ok) ("$Label retirement resume denied: $([string]$resume.reason)")
-    $bundle=New-RAReadyPromotionBundleV010 -RecoveryResult $resume.result -At $At
-    return [pscustomobject]@{f=$f;resume=$resume;bundle=$bundle;at=$At}
+    $bundle=New-RAReadyPromotionBundleV010 -RecoveryResult $resume.result -At $effectiveAt
+    return [pscustomobject]@{f=$f;resume=$resume;bundle=$bundle;at=$effectiveAt}
 }
 function Invoke-RAReadyV010 {
     param([Parameter(Mandatory=$true)]$Q,[AllowNull()]$Bundle=$null,[AllowNull()]$ResumeResult=$null,[AllowNull()][string]$Tx=$null,[DateTimeOffset]$At=[DateTimeOffset]::MinValue)
