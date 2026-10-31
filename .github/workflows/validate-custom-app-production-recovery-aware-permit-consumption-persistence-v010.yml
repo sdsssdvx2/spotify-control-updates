@@ -1,0 +1,121 @@
+name: Validate Custom App Production Recovery-Aware Permit Consumption Persistence v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-recovery-aware-permit-consumption-persistence-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-aware-permit-consumption-persistence-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-aware-permit-consumption-persistence-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-recovery-aware-permit-consumption-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-aware-permit-consumption-persistence-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-aware-permit-consumption-persistence-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 540
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope lineage pins and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h -cne $e){throw "head mismatch $h != $e"}
+          $p='5e6644d94be2440222e4a23613edce0610ad3545';if((git merge-base $p HEAD).Trim() -cne $p){throw 'not descended from exact validated recovery-aware permit consumption head'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $allowed=@('.github/workflows/validate-custom-app-production-recovery-aware-permit-consumption-persistence-v010.yml','validation/custom-app-production-recovery-aware-permit-consumption-persistence-v0.1.0/custom-app-production-recovery-aware-permit-consumption-persistence.ps1','validation/custom-app-production-recovery-aware-permit-consumption-persistence-v0.1.0/test_custom_app_production_recovery_aware_permit_consumption_persistence.ps1')
+          $changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x -notin $changed){throw "missing $x"}}
+          $pins=@(
+            @($h,'validation/custom-app-production-recovery-aware-permit-consumption-persistence-v0.1.0/custom-app-production-recovery-aware-permit-consumption-persistence.ps1','5712edc5a5c8720d3254d9f3a9f151042e8c5187'),
+            @($h,'validation/custom-app-production-recovery-aware-permit-consumption-persistence-v0.1.0/test_custom_app_production_recovery_aware_permit_consumption_persistence.ps1','b41309cc39bdc4cb0f72880004dce341c82f1a14'),
+            @($p,'validation/custom-app-production-recovery-aware-permit-consumption-v0.1.0/custom-app-production-recovery-aware-permit-consumption.ps1','9945b980c6cf8e09e8d929820a7db13fdccda545'),
+            @($p,'validation/custom-app-production-recovery-aware-permit-consumption-v0.1.0/test_custom_app_production_recovery_aware_permit_consumption.ps1','cc8d7d4748b9db45913b8a109d7fc2431503f268'),
+            @('1b680f0fc637b393aa7571690c8aa40adda59800','validation/custom-app-production-consumption-persistence-v0.1.0/custom-app-production-consumption-persistence.ps1','d5b70c943d0880e98ee907ae52d4c02ad8720f73'),
+            @('1b680f0fc637b393aa7571690c8aa40adda59800','validation/custom-app-production-consumption-persistence-v0.1.0/custom-app-production-consumption-persistence-contract-v011.ps1','07de3a6d3aec00636d8b1c7bd20dcbc72d1b7ada'),
+            @('1b680f0fc637b393aa7571690c8aa40adda59800','validation/custom-app-production-consumption-persistence-v0.1.0/test_custom_app_production_consumption_persistence_v011.ps1','85f347144c5a5c5a323b61c0179d7da2aab6e1da'),
+            @('ed7fa27fc9bfaa78858e130743a2de508a3c0bf9','validation/custom-app-production-executor-consumption-v0.1.0/custom-app-production-executor-consumption.ps1','ac1459254ce060806a338a443c755bbc9f65c9a2'),
+            @('ed7fa27fc9bfaa78858e130743a2de508a3c0bf9','validation/custom-app-production-executor-consumption-v0.1.0/test_custom_app_production_executor_consumption.ps1','7811c3eb73b6ef6276d5f5ae05f50a9566a5cfad'),
+            @('bef6688559ab6b13be02f316464afb6f3b720e67','validation/custom-app-production-recovery-aware-permit-issuance-admission-v0.1.0/custom-app-production-recovery-aware-permit-issuance-admission.ps1','b8a3f9e2fcbb3d59cd10f92e988cc435e9cea660')
+          )
+          foreach($q in $pins){$b=(git rev-parse "$($q[0])`:$($q[1])").Trim();if($b -cne $q[2]){throw "pin drift $($q[1]) $b != $($q[2])"}}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_CONSUMPTION_PERSISTENCE_SCOPE_PINS_PASS'
+
+      - name: Parse and audit bounded persistence wrapper
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-aware-permit-consumption-persistence-v0.1.0'
+          foreach($f in @("$d/custom-app-production-recovery-aware-permit-consumption-persistence.ps1","$d/test_custom_app_production_recovery_aware_permit_consumption_persistence.ps1")){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|ForEach-Object{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $core=Get-Content "$d/custom-app-production-recovery-aware-permit-consumption-persistence.ps1" -Raw
+          foreach($m in @('Test-CustomAppProductionRecoveryAwarePermitConsumptionCandidateV010','Initialize-CustomAppProductionConsumptionStoreV010','Save-CustomAppProductionConsumptionStateV010','Test-CustomAppProductionConsumptionPersistedExecutorBarrierV011','Get-CustomAppProductionRecoveryAwarePermitConsumptionPersistedTargetV010','recovered_existing_persistence','write_performed','consumption_persisted=$true','read_after_write_verified=$true','persisted_consumption_barrier_attested=$true','recovery_aware_persistence_revalidated=$true','session_key_accepted=$false','session_key_persisted=$false','session_key_exposed=$false','requires_persisted_consumption_before_executor=$true','executor_may_start=$false','executor_may_stage=$false','executor_may_apply=$false','production_execution_authorized=$false','production_mutation_authorized=$false')){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "persistence wrapper marker missing $m"}}
+          foreach($x in @('Invoke-WebRequest','Invoke-RestMethod','Start-Process','ProcessStartInfo','[IO.File]::','[IO.Directory]::','Set-Content','Add-Content','Out-File','Remove-Item','Move-Item','Copy-Item','WriteAllText','WriteAllBytes','spicetify apply','spicetify config','Invoke-CustomAppProductionAtomicSwap')){if($core.IndexOf($x,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw "wrapper gained forbidden direct I/O/network/execution primitive $x"}}
+          if($core -match 'session_key_accepted\s*=\s*\$true|session_key_persisted\s*=\s*\$true|session_key_exposed\s*=\s*\$true|persistence_is_authority\s*=\s*\$true|executor_may_start\s*=\s*\$true|executor_may_stage\s*=\s*\$true|executor_may_apply\s*=\s*\$true|production_execution_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'persistence wrapper authority/session-key contract escaped'}
+          $test=Get-Content "$d/test_custom_app_production_recovery_aware_permit_consumption_persistence.ps1" -Raw
+          foreach($m in @('lost-response exact persistence recovery denied','future app consumption persistence denied','historical rev1 recovery denied after rev2 append','stale different candidate conflict','fingerprint-tampered consumption candidate','tampered candidate next state','authority-polluted consumption candidate','user removal before consumption persistence','baseline drift before consumption persistence','remote drift before consumption persistence','consumption persistence path escape','consumption persistence lock contention','simulated crash after history before current','post-persistence recovery admission drift','rehashed executor-authorized consumption persistence receipt accepted','fingerprint-tampered consumption persistence receipt accepted','persistence receipt with write+recovery both true accepted')){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase) -lt 0){throw "persistence coverage missing $m"}}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_CONSUMPTION_PERSISTENCE_PARSE_AUDIT_PASS'
+
+      - name: Materialize exact hardened sibling dependencies
+        shell: powershell
+        run: |
+          $deps=@(
+            @('1401103431e5a647002aef48394dc599c2db421f','validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/custom-app-production-recovery-aware-new-permit-readiness.ps1','0c73b5352c7b9bd29472d3a145a4fc4333d0574b'),
+            @('1401103431e5a647002aef48394dc599c2db421f','validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/test_custom_app_production_recovery_aware_new_permit_readiness.ps1','ac323f3b465475bf97b655344d989abe62731d48'),
+            @('6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c','validation/custom-app-production-promotion-gate-v0.1.0/custom-app-production-promotion-gate.ps1','1164c197405eac2295f789256e2886068611dd94'),
+            @('6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c','validation/custom-app-production-promotion-gate-v0.1.0/test_custom_app_production_promotion_gate.ps1','80b27015fa05951fe2c0f706eb60d212dac17d24'),
+            @('b53bcf39f715f1c35c7d1f99e157cdecb0a2a572','validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1','f8c91f5a566b24c82257742942bdc6fecfe68eb2'),
+            @('c420a1df6f306c7ba74772b91241cb14abd04738','validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','e2f2fc656235883d2a82b106289973f6ded409a5'),
+            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/custom-app-production-recovery-completion-evidence.ps1','3795f900cbf8ded834f721f7db7b126aa264b0e8'),
+            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/test_custom_app_production_recovery_completion_evidence.ps1','1451ce0aeb046fe36a1660b12647534b514cd738'),
+            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/probe_custom_app_production_recovery_completion_evidence.ps1','8abbcb7eded67420d2e2b6e8bed3f9636ae9833d'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/test_custom_app_production_recovery_evidence.ps1','de37d029e175dbec899445dbe983e506a14a1b0a'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/probe_custom_app_production_recovery_evidence.ps1','84f73605526373652a4499b7f472537c8e2b5c03'),
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae')
+          )
+          foreach($q in $deps){$path=$q[1];New-Item -ItemType Directory -Force -Path (Split-Path $path -Parent)|Out-Null;$env:S="$($q[0])`:$path";$env:O=$path;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['S']]))";if($LASTEXITCODE){throw "materialize failed $path"};$actual=(git hash-object $path).Trim();if($actual -cne $q[2]){throw "materialized blob drift $path $actual != $($q[2])"}}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_CONSUMPTION_PERSISTENCE_MATERIALIZATION_PASS'
+
+      - name: Replay exact hardened consumption persistence v0.1.1 matrix
+        shell: powershell
+        run: |
+          $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-consumption-persistence-v0.1.0/test_custom_app_production_consumption_persistence_v011.ps1';if($LASTEXITCODE){throw 'hardened consumption persistence v0.1.1 regression failed'}
+          'CUSTOM_APP_PRODUCTION_CONSUMPTION_PERSISTENCE_V011_PARENT_MATRIX_PASS'
+
+      - name: Run recovery-aware consumption persistence matrix
+        shell: powershell
+        run: |
+          $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-aware-permit-consumption-persistence-v0.1.0/test_custom_app_production_recovery_aware_permit_consumption_persistence.ps1';if($LASTEXITCODE){throw 'recovery-aware consumption persistence matrix failed'}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_CONSUMPTION_PERSISTENCE_MATRIX_STEP_PASS'
+
+      - name: Rebuild exact recovery-readiness hard-disabled candidate and run SelfTest
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'recovery-readiness hard-disabled candidate rebuild failed'}
+          $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json";$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant()
+          if((Get-Item $a).Length -ne 1382213 -or $ah -cne 'c2e5ffd4fe9b14b5c31dd53e7d093bd9b5db2a4ad49fa19449d299e3c14fac2f'){throw 'Addon Manager parent drift'};if($rh -cne 'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw 'candidate report drift'};if((Get-Item $m).Length -ne 284327 -or $mh -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control parent drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'recovery-aware-consumption-persistence-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'Addon Manager SelfTest failed'}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_CONSUMPTION_PERSISTENCE_SELFTEST_PASS'
+
+      - name: Prove protected surfaces immutable and write evidence
+        shell: powershell
+        run: |
+          $p='5e6644d94be2440222e4a23613edce0610ad3545'
+          foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','bin/addon-manager.ps1','bin/spotify-control.ps1','validation/custom-app-production-recovery-aware-permit-consumption-v0.1.0/custom-app-production-recovery-aware-permit-consumption.ps1','validation/custom-app-production-consumption-persistence-v0.1.0/custom-app-production-consumption-persistence.ps1','validation/custom-app-production-consumption-persistence-v0.1.0/custom-app-production-consumption-persistence-contract-v011.ps1','validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/build_candidate.py')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
+          $d='validation/custom-app-production-recovery-aware-permit-consumption-persistence-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_parent=$p;wrapper_core_blob='5712edc5a5c8720d3254d9f3a9f151042e8c5187';wrapper_test_blob='b41309cc39bdc4cb0f72880004dce341c82f1a14';consumption_core_blob='9945b980c6cf8e09e8d929820a7db13fdccda545';store_core_blob='d5b70c943d0880e98ee907ae52d4c02ad8720f73';store_contract_blob='07de3a6d3aec00636d8b1c7bd20dcbc72d1b7ada';hardened_store_v011_matrix_replayed=$true;candidate_receipt_next_state_exact_binding=$true;atomic_compare_and_swap_store_reused=$true;durable_flush_atomic_current_publication_reused=$true;read_after_write_verified=$true;lost_response_exact_recovery=$true;historical_target_recovery_after_later_append=$true;post_write_admission_drift_fails_closed=$true;persisted_consumption_barrier_attested=$true;session_key_accepted=$false;session_key_persisted=$false;session_key_exposed=$false;executor_may_start=$false;executor_may_stage=$false;executor_may_apply=$false;production_execution_authority=$false;production_mutation_authority=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_CONSUMPTION_PERSISTENCE_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-recovery-aware-permit-consumption-persistence-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-recovery-aware-permit-consumption-persistence-v0.1.0/custom-app-production-recovery-aware-permit-consumption-persistence.ps1
+            validation/custom-app-production-recovery-aware-permit-consumption-persistence-v0.1.0/test_custom_app_production_recovery_aware_permit_consumption_persistence.ps1
+            validation/custom-app-production-recovery-aware-permit-consumption-persistence-v0.1.0/ci-evidence.json
+          if-no-files-found: error
