@@ -35,11 +35,11 @@ function Test-CustomAppProductionRecoveryRoutingFixtureDispatchEnvironmentV010 {
     if([string]$env:GITHUB_ACTIONS-cne'true'){return & $deny 'fixture-dispatch-not-github-actions'}
     if([string]::IsNullOrWhiteSpace([string]$env:RUNNER_TEMP)){return & $deny 'fixture-dispatch-runner-temp-missing'}
     try{$runner=Get-CustomAppProductionRecoveryRoutingFixtureDispatchCanonicalPathV010 $env:RUNNER_TEMP;$allowed=Get-CustomAppProductionRecoveryRoutingFixtureDispatchCanonicalPathV010 $AllowedRoot;$store=Get-CustomAppProductionRecoveryRoutingFixtureDispatchCanonicalPathV010 $StoreDirectory;$local=Get-CustomAppProductionRecoveryRoutingFixtureDispatchCanonicalPathV010 $LocalAppDataRoot;$roaming=Get-CustomAppProductionRecoveryRoutingFixtureDispatchCanonicalPathV010 $AppDataRoot;$spRoot=Get-CustomAppProductionRecoveryRoutingFixtureDispatchCanonicalPathV010 $SpicetifyAllowedRoot;$sp=Get-CustomAppProductionRecoveryRoutingFixtureDispatchCanonicalPathV010 $SpicetifyPath}catch{return & $deny ('fixture-dispatch-path-canonicalization-failed:'+[string]$_.Exception.Message)}
-    if(-not(Test-Path-LiteralPath $runner -PathType Container)){return & $deny 'fixture-dispatch-runner-temp-not-directory'}
+    if(-not(Test-Path -LiteralPath $runner -PathType Container)){return & $deny 'fixture-dispatch-runner-temp-not-directory'}
     if(-not(Test-CustomAppProductionRecoveryRoutingFixtureDispatchPathWithinV010 -Root $runner -Path $allowed -AllowEqual)){return & $deny 'fixture-dispatch-allowed-root-outside-runner-temp'}
     foreach($spec in @(@('store',$store),@('localappdata',$local),@('appdata',$roaming),@('spicetify-root',$spRoot))){if(-not(Test-CustomAppProductionRecoveryRoutingFixtureDispatchPathWithinV010 -Root $allowed -Path ([string]$spec[1]) -AllowEqual)){return & $deny ('fixture-dispatch-'+[string]$spec[0]+'-outside-allowed-root')}}
     if(-not(Test-CustomAppProductionRecoveryRoutingFixtureDispatchPathWithinV010 -Root $spRoot -Path $sp)){return & $deny 'fixture-dispatch-spicetify-path-outside-spicetify-root'}
-    if(-not(Test-Path-LiteralPath $sp -PathType Leaf)){return & $deny 'fixture-dispatch-spicetify-path-missing'}
+    if(-not(Test-Path -LiteralPath $sp -PathType Leaf)){return & $deny 'fixture-dispatch-spicetify-path-missing'}
     return [pscustomobject]@{ok=$true;reason='fixture-dispatch-github-actions-runner-temp-verified';fixture_environment_verified=$true;runner_temp=$runner;allowed_root=$allowed;store_directory=$store;local_app_data_root=$local;app_data_root=$roaming;spicetify_allowed_root=$spRoot;spicetify_path=$sp}
 }
 function Get-CustomAppProductionRecoveryRoutingFixtureDispatchResultMaterialV010 {
