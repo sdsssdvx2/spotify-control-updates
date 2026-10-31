@@ -82,6 +82,7 @@ jobs:
       - name: Replay exact issuance-admission and production permit parent matrices
         shell: powershell
         run: |
+          $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-aware-permit-issuance-admission-v0.1.0/test_custom_app_production_recovery_aware_permit_issuance_admission.ps1';if($LASTEXITCODE){throw 'issuance-admission parent regression failed'}
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-permit-v0.1.0/test_custom_app_production_permit.ps1';if($LASTEXITCODE){throw 'production permit parent regression failed'}
           'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_ISSUER_PARENT_REGRESSIONS_PASS'
