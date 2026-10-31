@@ -84,7 +84,7 @@ function Get-CustomAppProductionRecoveryAwarePermitConsumptionPersistedReservati
         return [pscustomobject]@{
             ok=$true;reason='recovery-aware-consumption-durable-reservation-attested'
             persisted_revision=$revision;current_revision=[int64]$store.revision;reservation=$historicalRow;historical_envelope=$historical
-            state=$store.state;current_envelope=$store.envelope;history_count=[int]$store.history_count
+            state=$historical.state;current_state=$store.state;current_envelope=$store.envelope;history_count=[int]$store.history_count
             reservation_persistence_attested=$true;historical_reservation_envelope_attested=$true
             persistence_is_authority=$false;executor_may_start=$false;production_execution_authorized=$false;production_mutation_authorized=$false
         }
@@ -195,7 +195,7 @@ function Invoke-CustomAppProductionRecoveryAwarePermitConsumptionV010 {
     if(-not [bool]$permitCheck.ok){return & $deny ('recovery-aware-consumption-permit-invalid:'+[string]$permitCheck.reason)}
     $permitContinuity=Test-CustomAppProductionReservationPermitContinuityV010 -ReservationRow $reservation -Permit $Permit
     if(-not [bool]$permitContinuity.ok){return & $deny ('recovery-aware-consumption-'+[string]$permitContinuity.reason)}
-    $consumed=Invoke-CustomAppProductionExecutorConsumptionV010 -Permit $Permit -ReservationId ([string]$pr.reservation_id) -Name $nameKey -LifecycleRow $LifecycleRow -ProvenanceRow $ProvenanceRow -BindingRow $BindingRow -CurrentBaseline $CurrentBaseline -ShadowProtocolQualification $ShadowProtocolQualification -LiveAttestedQualification $LiveAttestedQualification -SessionKey $SessionKey -ReservationState $persisted.state -ExpectedReservationRevision ([int64]$persisted.current_revision) -ConsumptionState $ConsumptionState -ExpectedConsumptionRevision $ExpectedConsumptionRevision -Now $Now -MaxRemoteObservationAgeHours $MaxRemoteObservationAgeHours
+    $consumed=Invoke-CustomAppProductionExecutorConsumptionV010 -Permit $Permit -ReservationId ([string]$pr.reservation_id) -Name $nameKey -LifecycleRow $LifecycleRow -ProvenanceRow $ProvenanceRow -BindingRow $BindingRow -CurrentBaseline $CurrentBaseline -ShadowProtocolQualification $ShadowProtocolQualification -LiveAttestedQualification $LiveAttestedQualification -SessionKey $SessionKey -ReservationState $persisted.state -ExpectedReservationRevision ([int64]$persisted.persisted_revision) -ConsumptionState $ConsumptionState -ExpectedConsumptionRevision $ExpectedConsumptionRevision -Now $Now -MaxRemoteObservationAgeHours $MaxRemoteObservationAgeHours
     if($null -eq $consumed -or -not [bool]$consumed.ok){return & $deny ('recovery-aware-consumption-core-denied:'+[string]$consumed.reason)}
     $post=Resolve-CustomAppProductionRecoveryAwarePermitIssuanceAdmissionV010 -Name $nameKey -LifecycleRow $LifecycleRow -ProvenanceRow $ProvenanceRow -BindingRow $BindingRow -StageResult $StageResult -ShadowResult $ShadowResult -RetirementResumeResult $RetirementResumeResult -CurrentBaseline $CurrentBaseline -ShadowProtocolQualification $ShadowProtocolQualification -LiveAttestedQualification $LiveAttestedQualification -AllowedRoot $AllowedRoot -StoreDirectory $RecoveryStoreDirectory -ExpectedTransactionId $tx -LocalAppDataRoot $LocalAppDataRoot -AppDataRoot $AppDataRoot -Now $Now -MaxRemoteObservationAgeHours $MaxRemoteObservationAgeHours
     if($null -eq $post -or -not [bool]$post.ok){return & $deny ('recovery-aware-consumption-post-admission-denied:'+[string]$post.reason)}
