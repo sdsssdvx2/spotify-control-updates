@@ -33,6 +33,21 @@ REQUIRED_PROMOTION = [
     'New-CustomAppProductionPromotionDecisionV010',
     'Resolve-CustomAppProductionPromotionEligibilityV010',
 ]
+EXPECTED_REUSED_PROMOTION = [
+    'Test-CustomAppPromotionSha256V010',
+    'Test-CustomAppPromotionCommitShaV010',
+    'Get-CustomAppPromotionStringSha256V010',
+    'Test-CustomAppPromotionStrictDeniedAuthorityV010',
+    'Get-CustomAppPromotionBindingFingerprintV010',
+]
+EXPECTED_INJECTED_PROMOTION = [
+    'New-CustomAppProductionPromotionDecisionV010',
+    'Resolve-CustomAppProductionPromotionEligibilityV010',
+]
+PROMOTION_CONSTANTS = [
+    ('$CustomAppProductionPromotionGateSchema', '$CustomAppProductionPromotionGateSchema = 1'),
+    ('$CustomAppProductionPromotionGateManagedBy', "$CustomAppProductionPromotionGateManagedBy = 'custom-app-production-promotion-gate-v1'"),
+]
 REQUIRED_READINESS = [
     'Get-CustomAppProductionRecoveryAwarePermitReadinessSha256V010',
     'Test-CustomAppProductionRecoveryAwarePermitReadinessSha256V010',
@@ -73,6 +88,7 @@ SELFTEST = r'''function Invoke-CustomAppProductionRecoveryReadinessHardDisabledS
     )){
         if(-not(Get-Command $name -CommandType Function -ErrorAction SilentlyContinue)){throw ('Integrated promotion/readiness function missing: '+$name)}
     }
+    if([int]$CustomAppProductionPromotionGateSchema -ne 1){throw 'Promotion dependency schema drift.'}
     if([string]$CustomAppProductionPromotionGateManagedBy -cne 'custom-app-production-promotion-gate-v1'){throw 'Promotion dependency owner drift.'}
     if([string]$CustomAppProductionRecoveryAwarePermitReadinessManagedBy -cne 'custom-app-production-recovery-aware-new-permit-readiness-v1'){throw 'Recovery readiness owner drift.'}
     if([string]$CustomAppProductionRecoveryAwarePermitReadinessQualifiedPromotionHead -cne '6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c'){throw 'Recovery readiness promotion parent drift.'}
@@ -112,6 +128,10 @@ def function_block(text: str, name: str) -> str:
     return text[a:b]
 
 
+def normalized_function_block(text: str, name: str) -> str:
+    return function_block(text, name).rstrip()
+
+
 def replace_function(text: str, name: str, replacement: str) -> str:
     a, b = function_bounds(text, name)
     return text[:a] + replacement.rstrip() + '\n\n' + text[b:].lstrip('\n')
@@ -139,6 +159,10 @@ def assert_zero_side_effect_source(text: str, label: str) -> None:
     for primitive in FORBIDDEN_DECISION_PRIMITIVES:
         if primitive.lower() in text.lower():
             raise RuntimeError(f'{label} gained forbidden primitive: {primitive}')
+
+
+def exact_assignment_matches(text: str, variable: str) -> list[str]:
+    return re.findall(rf'(?im)^[ \t]*{re.escape(variable)}[ \t]*=[^\r\n]*$', text)
 
 
 def build_parent() -> tuple[bytes, bytes, bytes, bytes, dict]:
@@ -178,20 +202,46 @@ def integrate(addon: bytes) -> tuple[bytes, dict]:
         raise RuntimeError(f'parent readiness dependency export(s) missing: {missing_parent_deps}')
 
     promotion, promotion_funcs = load_exact_module(PROMOTION_HEAD, PROMOTION_PATH, PROMOTION_BLOB, 'promotion dependency')
-    if set(promotion_funcs) != set(REQUIRED_PROMOTION) or len(promotion_funcs) != len(REQUIRED_PROMOTION):
-        raise RuntimeError(f'promotion export surface drift: {promotion_funcs}')
-    promotion_collisions = sorted(parent_set & set(promotion_funcs))
-    if promotion_collisions:
-        raise RuntimeError(f'promotion function collision(s): {promotion_collisions}')
+    if promotion_funcs != REQUIRED_PROMOTION:
+        raise RuntimeError(f'promotion export order/surface drift: {promotion_funcs}')
     assert_zero_side_effect_source(promotion, 'promotion dependency')
     for escaped in ('promotion_token_issued=$true','mutation_authorized=$true','auto_update_authorized=$true','auto_install_authorized=$true','production_mutation_authorized=$true'):
         if re.search(re.escape(escaped).replace(r'\=', r'\s*=\s*'), promotion, re.IGNORECASE):
             raise RuntimeError(f'promotion authority escaped in source: {escaped}')
 
+    reused_constants: list[str] = []
+    injected_constant_lines: list[str] = []
+    for variable, exact_line in PROMOTION_CONSTANTS:
+        matches = exact_assignment_matches(parent, variable)
+        if len(matches) > 1:
+            raise RuntimeError(f'promotion constant duplicate in parent: {variable}')
+        if len(matches) == 1:
+            if matches[0].strip() != exact_line:
+                raise RuntimeError(f'promotion constant drift in parent: {matches[0]!r} != {exact_line!r}')
+            reused_constants.append(variable)
+        else:
+            injected_constant_lines.append(exact_line)
+
+    reused_promotion: list[str] = []
+    injected_promotion: list[str] = []
+    injected_promotion_blocks: list[str] = []
+    for name in promotion_funcs:
+        if name in parent_set:
+            if normalized_function_block(parent, name) != normalized_function_block(promotion, name):
+                raise RuntimeError(f'promotion collided function body drift: {name}')
+            reused_promotion.append(name)
+        else:
+            injected_promotion.append(name)
+            injected_promotion_blocks.append(normalized_function_block(promotion, name))
+    if reused_promotion != EXPECTED_REUSED_PROMOTION:
+        raise RuntimeError(f'unexpected promotion reused export set/order: {reused_promotion}')
+    if injected_promotion != EXPECTED_INJECTED_PROMOTION:
+        raise RuntimeError(f'unexpected promotion injected export set/order: {injected_promotion}')
+
     readiness, readiness_funcs = load_exact_module(READINESS_HEAD, READINESS_PATH, READINESS_BLOB, 'readiness core')
-    if set(readiness_funcs) != set(REQUIRED_READINESS) or len(readiness_funcs) != len(REQUIRED_READINESS):
-        raise RuntimeError(f'readiness export surface drift: {readiness_funcs}')
-    readiness_collisions = sorted((parent_set | set(promotion_funcs)) & set(readiness_funcs))
+    if readiness_funcs != REQUIRED_READINESS:
+        raise RuntimeError(f'readiness export order/surface drift: {readiness_funcs}')
+    readiness_collisions = sorted(parent_set & set(readiness_funcs))
     if readiness_collisions:
         raise RuntimeError(f'readiness function collision(s): {readiness_collisions}')
     assert_zero_side_effect_source(readiness, 'readiness core')
@@ -202,7 +252,13 @@ def integrate(addon: bytes) -> tuple[bytes, dict]:
     first = re.search(r'(?im)^[ \t]*function\s+[A-Za-z0-9_-]+\s*\{', parent)
     if not first:
         raise RuntimeError('parent first function not found')
-    payload = promotion + '\n\n' + readiness + '\n\n' + SELFTEST.rstrip() + '\n\n'
+    payload_parts: list[str] = []
+    if injected_constant_lines:
+        payload_parts.append('\n'.join(injected_constant_lines))
+    payload_parts.extend(injected_promotion_blocks)
+    payload_parts.append(readiness)
+    payload_parts.append(SELFTEST.rstrip())
+    payload = '\n\n'.join(payload_parts).rstrip() + '\n\n'
     text = parent[:first.start()] + payload + parent[first.start():]
 
     addon_selftest = function_block(text, 'Invoke-AddonSelfTest')
@@ -215,16 +271,20 @@ def integrate(addon: bytes) -> tuple[bytes, dict]:
     for name in REQUIRED_PROMOTION + REQUIRED_READINESS:
         if name not in candidate_funcs:
             raise RuntimeError(f'candidate integrated export missing: {name}')
+    for variable, exact_line in PROMOTION_CONSTANTS:
+        matches = exact_assignment_matches(text, variable)
+        if len(matches) != 1 or matches[0].strip() != exact_line:
+            raise RuntimeError(f'candidate promotion constant invalid: {variable}')
 
     changed = []
     for name in parent_funcs:
         if name == 'Invoke-AddonSelfTest':
             continue
-        if function_block(parent, name) != function_block(text, name):
+        if normalized_function_block(parent, name) != normalized_function_block(text, name):
             changed.append(name)
     if changed:
         raise RuntimeError(f'pre-existing parent function changed: {changed}')
-    if function_block(parent, 'Invoke-CustomAppProductionFullChainV010') != function_block(text, 'Invoke-CustomAppProductionFullChainV010'):
+    if normalized_function_block(parent, 'Invoke-CustomAppProductionFullChainV010') != normalized_function_block(text, 'Invoke-CustomAppProductionFullChainV010'):
         raise RuntimeError('full-chain execution function changed')
 
     if len(re.findall(PIPELINE_TRUE_RE, text)) != parent_true_count:
@@ -245,7 +305,7 @@ def integrate(addon: bytes) -> tuple[bytes, dict]:
         if readiness_call in block:
             readiness_preexisting_callers.append(name)
     if promotion_preexisting_callers:
-        raise RuntimeError(f'promotion dependency became reachable from pre-existing function(s): {promotion_preexisting_callers}')
+        raise RuntimeError(f'promotion resolver became reachable from pre-existing function(s): {promotion_preexisting_callers}')
     if readiness_preexisting_callers:
         raise RuntimeError(f'readiness became reachable from pre-existing function(s): {readiness_preexisting_callers}')
 
@@ -257,10 +317,10 @@ def integrate(addon: bytes) -> tuple[bytes, dict]:
         raise RuntimeError('integration SelfTest executes promotion/readiness resolver')
 
     reduced = text
-    reduced = replace_once(reduced, payload, '', 'inserted promotion + recovery readiness payload')
+    reduced = replace_once(reduced, payload, '', 'inserted missing-promotion + recovery readiness payload')
     reduced = replace_once(reduced, new_hook, old_hook, 'inserted recovery readiness SelfTest hook')
     if reduced != parent:
-        raise RuntimeError('candidate contains changes outside promotion/readiness modules + SelfTest hook')
+        raise RuntimeError('candidate contains changes outside exact missing promotion exports/readiness + SelfTest hook')
 
     encoded = bom + text.replace('\n', '\r\n').encode('utf-8')
     report = {
@@ -272,6 +332,11 @@ def integrate(addon: bytes) -> tuple[bytes, dict]:
         'promotion_head': PROMOTION_HEAD,
         'promotion_blob': PROMOTION_BLOB,
         'promotion_function_count': len(promotion_funcs),
+        'promotion_parent_exports_reused': reused_promotion,
+        'promotion_missing_exports_injected': injected_promotion,
+        'promotion_reused_parent_export_bodies_exact': True,
+        'promotion_parent_constants_reused': reused_constants,
+        'promotion_missing_constants_injected': [line.split('=', 1)[0].strip() for line in injected_constant_lines],
         'promotion_dependency_loaded': True,
         'promotion_preexisting_callers': promotion_preexisting_callers,
         'readiness_head': READINESS_HEAD,
