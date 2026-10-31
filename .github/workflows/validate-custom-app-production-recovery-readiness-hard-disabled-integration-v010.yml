@@ -1,0 +1,101 @@
+name: Validate Custom App Production Recovery Readiness Hard Disabled Integration v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-readiness-hard-disabled-integration-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-recovery-routing-dispatch-hard-disabled-integration-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-readiness-hard-disabled-integration-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 420
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope lineage source pins and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h-cne$e){throw "head mismatch $h != $e"}
+          $p='1ae80173bc70cce71dd8fb77595b64ca4463d7ad';if((git merge-base $p HEAD).Trim()-cne$p){throw 'not descended from exact validated routing-dispatch hard-disabled head'}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $allowed=@('.github/workflows/validate-custom-app-production-recovery-readiness-hard-disabled-integration-v010.yml','validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/build_candidate.py');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_-notin$allowed});if($bad.Count){throw "scope escaped: $($bad-join', ')"};foreach($x in $allowed){if($x-notin$changed){throw "missing $x"}}
+          $pins=@(
+            @($h,'validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/build_candidate.py','4e0258e1a5fb2342aa9dcb5c06c866676c8e8d1f'),
+            @($p,'validation/custom-app-production-recovery-routing-dispatch-hard-disabled-integration-v0.1.0/build_candidate.py','c21290958ad5e9ddeebb08b2edfe9a53081a49e1'),
+            @('19bfe20681bc497ac45ee8face01d74436c38d1b','validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/custom-app-production-recovery-aware-new-permit-readiness.ps1','0c73b5352c7b9bd29472d3a145a4fc4333d0574b'))
+          foreach($q in $pins){$b=(git rev-parse "$($q[0])`:$($q[1])").Trim();if($b-cne$q[2]){throw "pin drift $($q[1]) $b != $($q[2])"}}
+          'RECOVERY_READINESS_HARD_DISABLED_SCOPE_PINS_PASS'
+
+      - name: Audit builder zero-authority hard-disabled topology contract
+        shell: powershell
+        run: |
+          $b=Get-Content 'validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/build_candidate.py' -Raw
+          foreach($m in @(\"PARENT_HEAD = '1ae80173bc70cce71dd8fb77595b64ca4463d7ad'\",\"READINESS_HEAD = '19bfe20681bc497ac45ee8face01d74436c38d1b'\",\"READINESS_BLOB = '0c73b5352c7b9bd29472d3a145a4fc4333d0574b'\",'candidate_reduces_exactly_to_parent','readiness_preexisting_callers','readiness_selftest_executes_readiness','readiness_source_forbidden_primitive_count','readiness_normal_path_wiring_added','readiness_execution_added','permit_issuance_added','generic_auto_authority_expanded','production_main_changed')){if($b.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "builder contract marker missing $m"}}
+          foreach($m in @(\"'readiness_normal_path_wiring_added': False\",\"'readiness_execution_added': False\",\"'permit_issuance_added': False\",\"'generic_auto_authority_expanded': False\",\"'production_main_changed': False\")){if($b.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "builder hard-disable flag missing $m"}}
+          python -m py_compile 'validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/build_candidate.py';if($LASTEXITCODE){throw 'builder py_compile failed'}
+          'RECOVERY_READINESS_HARD_DISABLED_BUILDER_AUDIT_PASS'
+
+      - name: Build candidate deterministically twice and emit bootstrap pins
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'first readiness candidate build failed'}
+          $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json"
+          $a1=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$m1=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$r1=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();$as1=(Get-Item $a).Length;$ms1=(Get-Item $m).Length
+          Copy-Item $a "$a.first";Copy-Item $m "$m.first";Copy-Item $r "$r.first"
+          python "$d/build_candidate.py";if($LASTEXITCODE){throw 'second readiness candidate build failed'}
+          $a2=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$m2=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$r2=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();if($a1-cne$a2-or$m1-cne$m2-or$r1-cne$r2){throw 'readiness candidate rebuild nondeterministic'}
+          if($ms1-ne284327-or$m2-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control parent drift'}
+          Write-Host "RECOVERY_READINESS_BOOTSTRAP_PINS addon_size=$as1 addon_sha256=$a2 report_sha256=$r2 main_size=$ms1 main_sha256=$m2"
+          'RECOVERY_READINESS_HARD_DISABLED_DETERMINISTIC_BUILD_PASS'
+
+      - name: Audit candidate report and loaded-but-unreachable topology
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';$r=Get-Content "$d/candidate-validation.json" -Raw|ConvertFrom-Json
+          if([string]$r.production_main-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'-or[string]$r.parent_head-cne'1ae80173bc70cce71dd8fb77595b64ca4463d7ad'-or[string]$r.readiness_head-cne'19bfe20681bc497ac45ee8face01d74436c38d1b'-or[string]$r.readiness_blob-cne'0c73b5352c7b9bd29472d3a145a4fc4333d0574b'){throw 'candidate report lineage drift'}
+          if([int]$r.readiness_function_count-ne6){throw 'readiness export count drift'}
+          if(@($r.preexisting_parent_functions_changed).Count-ne0-or@($r.readiness_preexisting_callers).Count-ne0-or[bool]$r.readiness_selftest_executes_readiness-or[int]$r.readiness_source_forbidden_primitive_count-ne0){throw 'readiness hard-disabled topology proof failed'}
+          if(-not[bool]$r.full_chain_function_unchanged-or-not[bool]$r.candidate_reduces_exactly_to_parent){throw 'parent reduction/full-chain proof missing'}
+          foreach($f in @('pipeline_enabled','pipeline_enablement_implemented','recovery_normal_path_wiring_added','bounded_recovery_normal_path_wiring_added','routing_normal_path_wiring_added','dispatch_normal_path_wiring_added','readiness_normal_path_wiring_added','readiness_execution_added','permit_issuance_added','generic_auto_authority_expanded','production_main_changed')){if([bool]$r.$f){throw "candidate authority escaped $f"}}
+          'RECOVERY_READINESS_HARD_DISABLED_REPORT_PASS'
+
+      - name: Parse candidate and statically prove readiness unreachable
+        shell: powershell
+        run: |
+          $a='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/out/bin/addon-manager.ps1';$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $a),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|ForEach-Object{Write-Error ("line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw 'candidate PS5.1 parse failed'}
+          $x=Get-Content $a -Raw;foreach($m in @('Get-CustomAppProductionRecoveryAwarePermitReadinessSha256V010','Test-CustomAppProductionRecoveryAwarePermitReadinessReceiptV010','Resolve-CustomAppProductionRecoveryAwarePermitReadinessV010','CUSTOM_APP_PRODUCTION_RECOVERY_READINESS_HARD_DISABLED_SELFTEST_V010_PASS loaded-but-unreachable zero-authority','$script:CustomAppProductionPipelineEnabled = $false')){if($x.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "candidate marker missing $m"}}
+          if($x-match'(?im)^\s*\$script:CustomAppProductionPipelineEnabled\s*=\s*\$true\s*$'){if(([regex]::Matches($x,'(?im)^\s*\$script:CustomAppProductionPipelineEnabled\s*=\s*\$true\s*$')).Count-ne1){throw 'pipeline true assignment count expanded'}}else{throw 'expected inherited isolated SelfTest true assignment missing'}
+          'RECOVERY_READINESS_HARD_DISABLED_STATIC_PASS'
+
+      - name: Run candidate Addon Manager SelfTest in isolated profile
+        shell: powershell
+        run: |
+          $a='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/out/bin/addon-manager.ps1';$s=Join-Path $env:RUNNER_TEMP 'recovery-readiness-hard-disabled-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'Addon Manager SelfTest failed'}
+          'RECOVERY_READINESS_HARD_DISABLED_SELFTEST_PASS'
+
+      - name: Prove protected surfaces immutable and write bootstrap evidence
+        shell: powershell
+        run: |
+          $p='1ae80173bc70cce71dd8fb77595b64ca4463d7ad';foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-recovery-routing-dispatch-hard-disabled-integration-v0.1.0/build_candidate.py')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
+          $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';$a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json";[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();parent=$p;readiness_head='19bfe20681bc497ac45ee8face01d74436c38d1b';readiness_blob='0c73b5352c7b9bd29472d3a145a4fc4333d0574b';addon_size=(Get-Item $a).Length;addon_sha256=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();report_sha256=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();main_sha256=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();readiness_loaded=$true;readiness_reachable_from_normal_path=$false;permit_issuance_added=$false;pipeline_enabled=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-bootstrap-evidence.json" -Encoding UTF8
+          'RECOVERY_READINESS_HARD_DISABLED_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-recovery-readiness-hard-disabled-bootstrap-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/build_candidate.py
+            validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/candidate-validation.json
+            validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/ci-bootstrap-evidence.json
+            validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/out/bin/addon-manager.ps1
+            validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/out/bin/spotify-control.ps1
+          if-no-files-found: error
