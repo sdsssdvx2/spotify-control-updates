@@ -18,7 +18,7 @@ function New-RAReadyPromotionBundleV010 {
     $name=([string]$RecoveryResult.name).Trim().ToLowerInvariant();$source=([string]$RecoveryResult.source_identity).Trim().ToLowerInvariant();$manifest=$(if($name-ceq'tagify'){'tagify'}else{$name})
     $b.lifecycle.name=$name;$b.lifecycle.locations=@("C:\fixture\CustomApps\$name")
     $b.provenance.name=$name;$b.provenance.source_identity=$source;$b.provenance.last_proven_source=$source;$b.provenance.observed_source_candidate=$source
-    $b.binding.name=$name;$b.binding.source_identity=$source;$b.binding.binding.source_identity=$source;$b.binding.binding.manifest_name=$manifest
+    $b.binding.name=$name;$b.binding.source_identity=$source;$b.binding.binding.source_identity=$source;$b.binding.binding.manifest_name=$manifest;$b.binding.last_local_manifest_name=$manifest
     $b.binding.last_local_tree_sha256=[string]$RecoveryResult.live_tree_sha256;$b.binding.binding.last_verified_local_tree_sha256=[string]$RecoveryResult.live_tree_sha256
     $b.binding.last_remote_tree_sha256=$RemoteTree;$b.binding.binding.last_verified_remote_tree_sha256=$RemoteTree;$b.binding.last_remote_commit_sha=$RemoteCommit;$b.binding.binding.last_verified_commit_sha=$RemoteCommit;$b.binding.last_success=$At.AddMinutes(-1).ToUniversalTime().ToString('o')
     $b.stage.source_identity=$source;$b.shadow.name=$name;$b.shadow.pre_persistence_fingerprint=[string]$RecoveryResult.persistence_fingerprint;$b.shadow.post_persistence_fingerprint=[string]$RecoveryResult.persistence_fingerprint;$b.shadow.fresh_provenance_fingerprint=[string]$b.provenance.evidence_fingerprint
