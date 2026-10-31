@@ -1,0 +1,115 @@
+name: Validate Custom App Production Recovery-Aware Permit Issuance Admission v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-recovery-aware-permit-issuance-admission-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-aware-permit-issuance-admission-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-aware-permit-issuance-admission-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-aware-permit-issuance-admission-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-aware-permit-issuance-admission-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 420
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope lineage pins and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h-cne$e){throw "head mismatch $h != $e"}
+          $p='42dbdca7ef310772ed7e978e9a953c3319b05199';if((git merge-base $p HEAD).Trim()-cne$p){throw 'not descended from exact validated recovery-readiness hard-disabled head'}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $allowed=@('.github/workflows/validate-custom-app-production-recovery-aware-permit-issuance-admission-v010.yml','validation/custom-app-production-recovery-aware-permit-issuance-admission-v0.1.0/custom-app-production-recovery-aware-permit-issuance-admission.ps1','validation/custom-app-production-recovery-aware-permit-issuance-admission-v0.1.0/test_custom_app_production_recovery_aware_permit_issuance_admission.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_-notin$allowed});if($bad.Count){throw "scope escaped: $($bad-join', ')"};foreach($x in $allowed){if($x-notin$changed){throw "missing $x"}}
+          $pins=@(
+            @($h,'validation/custom-app-production-recovery-aware-permit-issuance-admission-v0.1.0/custom-app-production-recovery-aware-permit-issuance-admission.ps1','b8a3f9e2fcbb3d59cd10f92e988cc435e9cea660'),
+            @($h,'validation/custom-app-production-recovery-aware-permit-issuance-admission-v0.1.0/test_custom_app_production_recovery_aware_permit_issuance_admission.ps1','17a2bd24859cfee53376ccc485b9222bd1b1a874'),
+            @($p,'validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/build_candidate.py','18244f603b07d1c95c91ed1f1f2eb5828c4dc947'),
+            @('1401103431e5a647002aef48394dc599c2db421f','validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/custom-app-production-recovery-aware-new-permit-readiness.ps1','0c73b5352c7b9bd29472d3a145a4fc4333d0574b'),
+            @('1401103431e5a647002aef48394dc599c2db421f','validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/test_custom_app_production_recovery_aware_new_permit_readiness.ps1','ac323f3b465475bf97b655344d989abe62731d48'),
+            @('c128595c3ac7eab338f5d23d7041ae56a6822948','validation/custom-app-promotion-eligibility-gate-v0.1.0/custom-app-promotion-eligibility.ps1','94c1b0ba8f2454078252a723f89ccc0327cbc181'),
+            @('c128595c3ac7eab338f5d23d7041ae56a6822948','validation/custom-app-live-attested-production-admission-v0.1.0/custom-app-live-attested-production-admission.ps1','9bdcbf0a928539e5f3c4e28b7de1d68589e18525'),
+            @('c128595c3ac7eab338f5d23d7041ae56a6822948','validation/custom-app-live-attested-production-admission-v0.1.0/test_custom_app_live_attested_production_admission.ps1','3b2694e4786f470289ea0a64ad8d95da8810ebd2'),
+            @('d77f646d23652b0f066248230756d9e207a10fbd','validation/custom-app-production-permit-v0.1.0/custom-app-production-permit.ps1','2aff85ca092848ea254423bf5441b1a077dea5b7'),
+            @('d77f646d23652b0f066248230756d9e207a10fbd','validation/custom-app-production-permit-v0.1.0/test_custom_app_production_permit.ps1','49ee657d1b48b30eaa339d3790768fcf005fa59f'))
+          foreach($q in $pins){$b=(git rev-parse "$($q[0])`:$($q[1])").Trim();if($b-cne$q[2]){throw "pin drift $($q[1]) $b != $($q[2])"}}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_ISSUANCE_ADMISSION_SCOPE_PINS_PASS'
+
+      - name: Parse and audit zero-authority permit-issuance admission only
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-aware-permit-issuance-admission-v0.1.0';foreach($f in @("$d/custom-app-production-recovery-aware-permit-issuance-admission.ps1","$d/test_custom_app_production_recovery_aware_permit_issuance_admission.ps1")){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|ForEach-Object{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $core=Get-Content "$d/custom-app-production-recovery-aware-permit-issuance-admission.ps1" -Raw
+          foreach($m in @('Resolve-CustomAppProductionRecoveryAwarePermitReadinessV010','Test-CustomAppProductionRecoveryAwarePermitReadinessReceiptV010','Resolve-CustomAppLiveAttestedProductionAdmissionV010','Test-CustomAppProductionPermitAdmissionDecisionV010','continuity-name-mismatch','continuity-source-mismatch','continuity-current-tree-mismatch','continuity-remote-tree-mismatch','continuity-remote-commit-mismatch','continuity-binding-fingerprint-mismatch','continuity-provenance-fingerprint-mismatch','continuity-remote-observed-at-mismatch','permit_issuance_eligible=$true','requires_fresh_permit_creation_revalidation=$true','requires_single_use_permit=$true','requires_external_consumption_ledger=$true','issuance_admission_is_authority=$false','permit_issued=$false','session_key_accepted=$false','nonce_reserved=$false','execution_authorized=$false','restore_authorized=$false','apply_authorized=$false','cleanup_authorized=$false','production_mutation_authorized=$false')){if($core.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "issuance admission marker missing $m"}}
+          foreach($x in @('New-CustomAppProductionPermitV010','Get-CustomAppProductionPermitHmacV010','Reserve-CustomAppProductionPermitV010','Consume-CustomAppProductionPermitV010','[IO.Directory]::Delete','[IO.Directory]::Move','[IO.File]::Copy','[IO.File]::Write','Remove-Item','Move-Item','Copy-Item','Set-Content','Add-Content','Out-File','Invoke-WebRequest','Invoke-RestMethod','Start-Process','ProcessStartInfo')){if($core.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "issuance admission gained forbidden permit/side-effect primitive $x"}}
+          if($core-match'issuance_admission_is_authority\s*=\s*\$true|permit_issued\s*=\s*\$true|session_key_accepted\s*=\s*\$true|nonce_reserved\s*=\s*\$true|execution_authorized\s*=\s*\$true|restore_authorized\s*=\s*\$true|apply_authorized\s*=\s*\$true|cleanup_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'issuance admission authority escaped'}
+          $test=Get-Content "$d/test_custom_app_production_recovery_aware_permit_issuance_admission.ps1" -Raw;foreach($m in @('future app issuance admission denied','newer remote commit issuance admission denied','user removed','current baseline drift','live qualification authority corruption','shadow protocol drift','stale remote observation','forged live name continuity','forged live source continuity','forged live current tree continuity','forged live remote tree continuity','forged live remote commit continuity','binding continuity reason','provenance continuity reason','observed-at continuity reason','permit-issued receipt tamper accepted','session-key receipt tamper accepted','nonce-reserved receipt tamper accepted','single-use contract tamper accepted','fingerprint-tampered receipt accepted','expired issuance admission receipt accepted')){if($test.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "issuance admission coverage missing $m"}}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_ISSUANCE_ADMISSION_PARSE_AUDIT_PASS'
+
+      - name: Materialize exact hardened readiness sibling dependencies
+        shell: powershell
+        run: |
+          $deps=@(
+            @('1401103431e5a647002aef48394dc599c2db421f','validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/custom-app-production-recovery-aware-new-permit-readiness.ps1','0c73b5352c7b9bd29472d3a145a4fc4333d0574b'),
+            @('1401103431e5a647002aef48394dc599c2db421f','validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/test_custom_app_production_recovery_aware_new_permit_readiness.ps1','ac323f3b465475bf97b655344d989abe62731d48'),
+            @('6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c','validation/custom-app-production-promotion-gate-v0.1.0/custom-app-production-promotion-gate.ps1','1164c197405eac2295f789256e2886068611dd94'),
+            @('6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c','validation/custom-app-production-promotion-gate-v0.1.0/test_custom_app_production_promotion_gate.ps1','80b27015fa05951fe2c0f706eb60d212dac17d24'),
+            @('b53bcf39f715f1c35c7d1f99e157cdecb0a2a572','validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1','f8c91f5a566b24c82257742942bdc6fecfe68eb2'),
+            @('c420a1df6f306c7ba74772b91241cb14abd04738','validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','e2f2fc656235883d2a82b106289973f6ded409a5'),
+            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/custom-app-production-recovery-completion-evidence.ps1','3795f900cbf8ded834f721f7db7b126aa264b0e8'),
+            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/test_custom_app_production_recovery_completion_evidence.ps1','1451ce0aeb046fe36a1660b12647534b514cd738'),
+            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/probe_custom_app_production_recovery_completion_evidence.ps1','8abbcb7eded67420d2e2b6e8bed3f9636ae9833d'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/test_custom_app_production_recovery_evidence.ps1','de37d029e175dbec899445dbe983e506a14a1b0a'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/probe_custom_app_production_recovery_evidence.ps1','84f73605526373652a4499b7f472537c8e2b5c03'),
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'))
+          foreach($q in $deps){$path=$q[1];New-Item -ItemType Directory -Force -Path (Split-Path $path -Parent)|Out-Null;$env:S="$($q[0])`:$path";$env:O=$path;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['S']]))";if($LASTEXITCODE){throw "materialize failed $path"};$actual=(git hash-object $path).Trim();if($actual-cne$q[2]){throw "materialized blob drift $path $actual != $($q[2])"}}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_ISSUANCE_ADMISSION_MATERIALIZATION_PASS'
+
+      - name: Run recovery-aware permit issuance admission matrix
+        shell: powershell
+        run: |
+          $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-aware-permit-issuance-admission-v0.1.0/test_custom_app_production_recovery_aware_permit_issuance_admission.ps1';if($LASTEXITCODE){throw 'recovery-aware permit issuance admission matrix failed'}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_ISSUANCE_ADMISSION_MATRIX_STEP_PASS'
+
+      - name: Replay exact live admission and production permit parent matrices
+        shell: powershell
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-live-attested-production-admission-v0.1.0/test_custom_app_live_attested_production_admission.ps1';if($LASTEXITCODE){throw 'live admission parent regression failed'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-permit-v0.1.0/test_custom_app_production_permit.ps1';if($LASTEXITCODE){throw 'production permit parent regression failed'}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_ISSUANCE_ADMISSION_PARENT_REGRESSIONS_PASS'
+
+      - name: Rebuild exact recovery-readiness hard-disabled candidate and run SelfTest
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'recovery-readiness hard-disabled candidate rebuild failed'}
+          $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json";$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant()
+          if((Get-Item $a).Length-ne1382213-or$ah-cne'c2e5ffd4fe9b14b5c31dd53e7d093bd9b5db2a4ad49fa19449d299e3c14fac2f'){throw "Addon Manager parent drift $((Get-Item $a).Length) $ah"};if($rh-cne'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw "candidate report drift $rh"};if((Get-Item $m).Length-ne284327-or$mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control parent drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'recovery-aware-permit-issuance-admission-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'Addon Manager SelfTest failed'}
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_ISSUANCE_ADMISSION_SELFTEST_PASS'
+
+      - name: Prove protected surfaces immutable and write evidence
+        shell: powershell
+        run: |
+          $p='42dbdca7ef310772ed7e978e9a953c3319b05199';foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','bin/addon-manager.ps1','bin/spotify-control.ps1','validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/build_candidate.py')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
+          $d='validation/custom-app-production-recovery-aware-permit-issuance-admission-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_parent=$p;readiness_head='1401103431e5a647002aef48394dc599c2db421f';readiness_core_blob='0c73b5352c7b9bd29472d3a145a4fc4333d0574b';live_admission_head='c128595c3ac7eab338f5d23d7041ae56a6822948';permit_head='d77f646d23652b0f066248230756d9e207a10fbd';fresh_readiness_revalidation=$true;fresh_live_admission_revalidation=$true;continuity_verified=$true;permit_issuance_eligible_is_not_authority=$true;permit_created=$false;session_key_accepted=$false;nonce_reserved=$false;external_consumption_ledger_required=$true;production_mutation_authority=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_ISSUANCE_ADMISSION_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-recovery-aware-permit-issuance-admission-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-recovery-aware-permit-issuance-admission-v0.1.0/custom-app-production-recovery-aware-permit-issuance-admission.ps1
+            validation/custom-app-production-recovery-aware-permit-issuance-admission-v0.1.0/test_custom_app_production_recovery_aware_permit_issuance_admission.ps1
+            validation/custom-app-production-recovery-aware-permit-issuance-admission-v0.1.0/ci-evidence.json
+          if-no-files-found: error
