@@ -180,7 +180,7 @@ function Read-CustomAppProductionRecoveryAwarePermitReservationStoreUnlockedV010
 function Read-CustomAppProductionRecoveryAwarePermitReservationStoreV010 {
     param([Parameter(Mandatory=$true)][string]$AllowedRoot,[Parameter(Mandatory=$true)][string]$PersistenceStoreDirectory)
     $paths=Get-CustomAppProductionRecoveryAwarePermitReservationPersistencePathsV010 -AllowedRoot $AllowedRoot -PersistenceStoreDirectory $PersistenceStoreDirectory;$lock=$null
-    try { $lock=Open-CustomAppProductionRecoveryAwarePermitReservationPersistenceLockV010 -Paths $paths;$r=Read-CustomAppProductionRecoveryAwarePermitReservationStoreUnlockedV010 -Paths $paths;return [pscustomobject]@{ok=$true;reason=[string]$r.reason;revision=[int64]$r.revision;state=$r.state;envelope=$r.envelope;history_count=[int]$r.history_count;current_matches_history=[bool]$r.current_matches_history;reloaded_from_persistent_store=$true;persistence_is_authority=$false;executor_may_start=$false;production_execution_authorized=$false;production_mutation_authorized=$false} }
+    try { $lock=Open-CustomAppProductionRecoveryAwarePermitReservationPersistenceLockV010 -Paths $paths;$r=Read-CustomAppProductionRecoveryAwarePermitReservationStoreUnlockedV010 -Paths $paths;return [pscustomobject]@{ok=$true;reason=[string]$r.reason;revision=[int64]$r.revision;state=$r.state;envelope=$r.envelope;history_count=[int]$r.history_count;current_matches_history=[bool]$r.current_matches_history;reloaded_from_persistent_store=$true;session_key_persisted=$false;session_key_exposed=$false;permit_consumed=$false;persistence_is_authority=$false;executor_may_start=$false;production_execution_authorized=$false;production_mutation_authorized=$false} }
     finally { if ($null -ne $lock) { $lock.Dispose() } }
 }
 
