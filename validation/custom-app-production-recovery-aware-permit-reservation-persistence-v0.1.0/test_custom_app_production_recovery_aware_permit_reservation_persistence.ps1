@@ -173,7 +173,10 @@ $count++
 
 # Persistence path must remain confined to the fixture's exact allowed root.
 $pathFx=New-RAPRPFixtureV010 -Label 'pathescape' -Nonce ('1'*32)
-$escapeRoot=Join-Path $env:RUNNER_TEMP ('raprp-path-escape-'+[Guid]::NewGuid().ToString('N'))
+$pathAllowed=[IO.Path]::GetFullPath([string]$pathFx.r.ready.f.ce.q.f.f.allowed).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+$pathParent=[IO.Directory]::GetParent($pathAllowed)
+if($null -eq $pathParent){throw 'path escape fixture allowed root has no parent'}
+$escapeRoot=Join-Path $pathParent.FullName ('raprp-path-escape-'+[Guid]::NewGuid().ToString('N'))
 $escapeStore=Join-Path $escapeRoot 'store'
 [void](New-Item -ItemType Directory -Force -Path $escapeStore)
 [void](New-Item -ItemType Directory -Force -Path (Join-Path $escapeStore 'history'))
