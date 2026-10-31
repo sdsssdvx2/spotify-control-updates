@@ -31,7 +31,9 @@ jobs:
             @($h,'validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/custom-app-production-recovery-aware-new-permit-readiness.ps1','0c73b5352c7b9bd29472d3a145a4fc4333d0574b'),
             @($h,'validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/test_custom_app_production_recovery_aware_new_permit_readiness.ps1','1e5ec0b20ac1c19c18393a984019d981a1fd6092'),
             @('6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c','validation/custom-app-production-promotion-gate-v0.1.0/custom-app-production-promotion-gate.ps1','1164c197405eac2295f789256e2886068611dd94'),
+            @('6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c','validation/custom-app-production-promotion-gate-v0.1.0/test_custom_app_production_promotion_gate.ps1','80b27015fa05951fe2c0f706eb60d212dac17d24'),
             @('2ad528b8a969fd45e88168d22ea787984f5e2714','validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/custom-app-production-recovery-artifact-retirement-resume-executor.ps1','2acd062e04ec125e8f44edf31def175a4eb73510'),
+            @('2ad528b8a969fd45e88168d22ea787984f5e2714','validation/custom-app-production-recovery-artifact-retirement-resume-executor-v0.1.0/test_custom_app_production_recovery_artifact_retirement_resume_executor.ps1','0e1f0f940ce467171cc54e6d0f00df08b55a3592'),
             @('894c5013df0a2f1c17483425a31f49d0f9eaa99d','validation/custom-app-production-recovery-completion-retirement-admission-integration-v0.1.0/custom-app-production-recovery-completion-retirement-admission-integration.ps1','92f2b13f49b0ef6bb6ded173e4e992f53bfdf7b1'),
             @($p,'validation/custom-app-production-recovery-stack-hard-disabled-integration-v0.1.0/build_candidate.py','a6f5eb0e5063f69e1736f80ba6620a851e99d55b'))
           foreach($q in $pins){$b=(git rev-parse "$($q[0])`:$($q[1])").Trim();if($b-cne$q[2]){throw "pin drift $($q[1]) $b != $($q[2])"}}
@@ -52,6 +54,8 @@ jobs:
         shell: powershell
         run: |
           $deps=@(
+            @('6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c','validation/custom-app-production-promotion-gate-v0.1.0/custom-app-production-promotion-gate.ps1','1164c197405eac2295f789256e2886068611dd94'),
+            @('6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c','validation/custom-app-production-promotion-gate-v0.1.0/test_custom_app_production_promotion_gate.ps1','80b27015fa05951fe2c0f706eb60d212dac17d24'),
             @('b53bcf39f715f1c35c7d1f99e157cdecb0a2a572','validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1','f8c91f5a566b24c82257742942bdc6fecfe68eb2'),
             @('c420a1df6f306c7ba74772b91241cb14abd04738','validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','e2f2fc656235883d2a82b106289973f6ded409a5'),
             @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/custom-app-production-recovery-completion-evidence.ps1','3795f900cbf8ded834f721f7db7b126aa264b0e8'),
