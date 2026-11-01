@@ -18,192 +18,120 @@ function ConvertTo-RAALFixtureOnlyPrefixV010 {
     param([Parameter(Mandatory=$true)][string]$Text,[Parameter(Mandatory=$true)][string]$Label)
     $normalized=$Text.Replace("`r`n","`n")
     $matrix=[regex]::Match($normalized,'(?im)^\$(?:(?:count|casecount|testcount|total)|[A-Za-z_][A-Za-z0-9_]*count)\s*=\s*0\s*$')
-    if($matrix.Success){
-        $boundary=$matrix.Index
-    } else {
-        $tokens=$null;$errors=$null
-        $ast=[Management.Automation.Language.Parser]::ParseInput($normalized,[ref]$tokens,[ref]$errors)
+    if($matrix.Success){$boundary=$matrix.Index}else{
+        $tokens=$null;$errors=$null;$ast=[Management.Automation.Language.Parser]::ParseInput($normalized,[ref]$tokens,[ref]$errors)
         if($errors.Count){throw "fixture-only AST parse failed: $Label"}
-        $functions=@($ast.EndBlock.Statements | Where-Object{$_ -is [Management.Automation.Language.FunctionDefinitionAst]})
+        $functions=@($ast.EndBlock.Statements|Where-Object{$_ -is [Management.Automation.Language.FunctionDefinitionAst]})
         if($functions.Count -eq 0){throw "fixture-only matrix boundary missing and no helper functions: $Label"}
-        $boundary=0
-        foreach($fn in $functions){if([int]$fn.Extent.EndOffset -gt $boundary){$boundary=[int]$fn.Extent.EndOffset}}
+        $boundary=0;foreach($fn in $functions){if([int]$fn.Extent.EndOffset -gt $boundary){$boundary=[int]$fn.Extent.EndOffset}}
         if($boundary -le 0 -or $boundary -ge $normalized.Length -or [string]::IsNullOrWhiteSpace($normalized.Substring($boundary))){throw "fixture-only AST fallback found no matrix body: $Label"}
     }
-    $prefix=$normalized.Substring(0,$boundary)
-    $lines=@($prefix -split "`n")
+    $prefix=$normalized.Substring(0,$boundary);$lines=@($prefix -split "`n")
     $importPattern='^\s*\.\s*\(Join-Path\s+\$root\s+''(?<rel>validation/[^'']+/test_[^'']+\.ps1)''\)\s*$'
     for($i=0;$i -lt $lines.Count;$i++){
-        if($lines[$i] -match $importPattern){
-            $parentRel=([string]$Matches['rel']).Replace('\','/')
-            $fixtureRel=New-RAALFixtureOnlyCopyV010 -RelativePath $parentRel
-            $lines[$i]=$lines[$i].Replace($parentRel,$fixtureRel)
-        }
+        if($lines[$i] -match $importPattern){$parentRel=([string]$Matches['rel']).Replace('\','/');$fixtureRel=New-RAALFixtureOnlyCopyV010 -RelativePath $parentRel;$lines[$i]=$lines[$i].Replace($parentRel,$fixtureRel)}
     }
     return (($lines -join "`n")+"`n")
 }
 
 function New-RAALFixtureOnlyCopyV010 {
     param([Parameter(Mandatory=$true)][string]$RelativePath)
-    $rel=$RelativePath.Replace('\','/')
-    if($script:RAALFixtureOnlyMap.ContainsKey($rel)){return [string]$script:RAALFixtureOnlyMap[$rel]}
-    $full=Join-Path $root ($rel.Replace('/',[IO.Path]::DirectorySeparatorChar))
-    if(-not (Test-Path -LiteralPath $full -PathType Leaf)){throw "fixture-only source missing: $rel"}
-    $dirRel=[IO.Path]::GetDirectoryName($rel.Replace('/',[IO.Path]::DirectorySeparatorChar))
-    $leaf=[IO.Path]::GetFileNameWithoutExtension($rel)
-    $genName=$leaf+'.fixture-only.'+[Guid]::NewGuid().ToString('N')+'.ps1'
-    $genRel=(Join-Path $dirRel $genName).Replace('\','/')
-    $genFull=Join-Path $root ($genRel.Replace('/',[IO.Path]::DirectorySeparatorChar))
-    $script:RAALFixtureOnlyMap[$rel]=$genRel
-    $sourceText=[IO.File]::ReadAllText($full,[Text.UTF8Encoding]::new($false))
-    $fixtureText=ConvertTo-RAALFixtureOnlyPrefixV010 -Text $sourceText -Label $rel
-    [IO.File]::WriteAllText($genFull,$fixtureText,[Text.UTF8Encoding]::new($false))
-    $generatedFixtureFiles.Add($genFull)
-    return $genRel
+    $rel=$RelativePath.Replace('\','/');if($script:RAALFixtureOnlyMap.ContainsKey($rel)){return [string]$script:RAALFixtureOnlyMap[$rel]}
+    $full=Join-Path $root ($rel.Replace('/',[IO.Path]::DirectorySeparatorChar));if(-not (Test-Path -LiteralPath $full -PathType Leaf)){throw "fixture-only source missing: $rel"}
+    $dirRel=[IO.Path]::GetDirectoryName($rel.Replace('/',[IO.Path]::DirectorySeparatorChar));$leaf=[IO.Path]::GetFileNameWithoutExtension($rel);$genName=$leaf+'.fixture-only.'+[Guid]::NewGuid().ToString('N')+'.ps1';$genRel=(Join-Path $dirRel $genName).Replace('\','/');$genFull=Join-Path $root ($genRel.Replace('/',[IO.Path]::DirectorySeparatorChar));$script:RAALFixtureOnlyMap[$rel]=$genRel
+    $sourceText=[IO.File]::ReadAllText($full,[Text.UTF8Encoding]::new($false));$fixtureText=ConvertTo-RAALFixtureOnlyPrefixV010 -Text $sourceText -Label $rel;[IO.File]::WriteAllText($genFull,$fixtureText,[Text.UTF8Encoding]::new($false));$generatedFixtureFiles.Add($genFull);return $genRel
 }
 
-$source=Join-Path $root ($preApplyRel.Replace('/',[IO.Path]::DirectorySeparatorChar))
-$text=[IO.File]::ReadAllText($source,[Text.UTF8Encoding]::new($false)).Replace("`r`n","`n")
-
-# Keep the exact recovery-closed semantics validated by the parent r4 harness: do not
-# mutate live bytes after durable recovery closure merely to manufacture .git coverage.
+$source=Join-Path $root ($preApplyRel.Replace('/',[IO.Path]::DirectorySeparatorChar));$text=[IO.File]::ReadAllText($source,[Text.UTF8Encoding]::new($false)).Replace("`r`n","`n")
 $startMarker='    # Root VCS metadata is deliberately invisible to the runtime baseline but must be'
 $endMarker="'root git metadata changed runtime baseline'"
-$start=Get-RAALIntegrationUniqueMarkerIndexV010 -Text $text -Marker $startMarker -Label 'post-recovery-vcs-start'
-$endPhrase=Get-RAALIntegrationUniqueMarkerIndexV010 -Text $text -Marker $endMarker -Label 'post-recovery-vcs-end'
-if($endPhrase -le $start){throw 'integration semantic VCS patch boundaries reversed'}
-$end=$text.IndexOf("`n",$endPhrase,[StringComparison]::Ordinal)
-if($end -lt 0){$end=$text.Length}else{$end++}
+$start=Get-RAALIntegrationUniqueMarkerIndexV010 -Text $text -Marker $startMarker -Label 'post-recovery-vcs-start';$endPhrase=Get-RAALIntegrationUniqueMarkerIndexV010 -Text $text -Marker $endMarker -Label 'post-recovery-vcs-end'
+if($endPhrase -le $start){throw 'integration semantic VCS patch boundaries reversed'};$end=$text.IndexOf("`n",$endPhrase,[StringComparison]::Ordinal);if($end -lt 0){$end=$text.Length}else{$end++}
 $replacement=@'
-    # Recovery closure is durable evidence. Keep the live tree byte-identical after
-    # closure; the exact generic atomic parent matrix separately proves .git handling.
+    # Recovery closure is durable evidence. Keep live bytes unchanged after closure.
+    # Unauthorized byte-real drift is injected only in dedicated negative cases below.
     $rawLive=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$built.live_path)
 '@.Replace("`r`n","`n")
 $patched=$text.Substring(0,$start)+$replacement+$text.Substring($end)
 if($patched.IndexOf($startMarker,[StringComparison]::Ordinal) -ge 0){throw 'integration recovery-closed semantic patch failed'}
-
-# Recursively replace every inherited test_*.ps1 import with a temporary copy that
-# retains only setup/fixture/helper definitions before its matrix body. Core files
-# remain the exact qualified production-validation implementations; only already-green
-# parent test matrices are skipped.
 $fixtureOnly=ConvertTo-RAALFixtureOnlyPrefixV010 -Text $patched -Label $preApplyRel
 if($fixtureOnly.IndexOf('function New-RAPPFixtureV010',[StringComparison]::Ordinal) -lt 0 -or $fixtureOnly.IndexOf('function Invoke-RAPPFixtureV010',[StringComparison]::Ordinal) -lt 0){throw 'integration fixture-only pre-apply helpers missing'}
+$temp=Join-Path $preApplyDir ('test_recovery_atomic_fixture_only_'+[Guid]::NewGuid().ToString('N')+'.ps1')
 
-$integration=@'
+try {
+    [IO.File]::WriteAllText($temp,$fixtureOnly,[Text.UTF8Encoding]::new($false));. $temp
+    . (Join-Path $root 'validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1')
+    . (Join-Path $root 'validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/custom-app-production-atomic-live-swap-mutation.ps1')
+    . (Join-Path $root 'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/custom-app-production-recovery-aware-permit-atomic-live-swap.ps1')
 
-# ---- Recovery-aware pre-apply -> exact generic atomic composition ----
-. (Join-Path $root 'validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1')
-. (Join-Path $root 'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/custom-app-production-recovery-aware-permit-atomic-live-swap.ps1')
+    function Assert-RAALITrue([bool]$Value,[string]$Message){if(-not $Value){throw $Message}}
+    function Assert-RAALIFalse([bool]$Value,[string]$Message){if($Value){throw $Message}}
+    function Assert-RAALIEq($Actual,$Expected,[string]$Message){if([string]$Actual -cne [string]$Expected){throw "$Message actual=<$Actual> expected=<$Expected>"}}
 
-function Assert-RAALITrue([bool]$Value,[string]$Message){if(-not $Value){throw $Message}}
-function Assert-RAALIFalse([bool]$Value,[string]$Message){if($Value){throw $Message}}
-function Assert-RAALIEq($Actual,$Expected,[string]$Message){if([string]$Actual -cne [string]$Expected){throw "$Message actual=<$Actual> expected=<$Expected>"}}
-
-$script:RAALIAtomicFault='none'
-function Invoke-CustomAppProductionAtomicLiveSwapValidationHookV010 {
-    param([Parameter(Mandatory=$true)][string]$Checkpoint,[Parameter(Mandatory=$true)]$Context)
-    if($script:RAALIAtomicFault -ceq 'throw-after-candidate-move' -and $Checkpoint -ceq 'after-candidate-move'){throw 'recovery-aware-integration-after-candidate-move'}
-}
-
-# Recovery evidence intentionally carries a stable synthetic local tree while generic
-# atomic verifies byte-real paths. Bridge only the exact pre-swap live path while its
-# actual bytes still match the original byte-real tree. Candidate/stage/post-swap live
-# remain byte-real because their path/tree does not satisfy this bridge predicate.
-$script:RAALIParentLocalBaseline=(Get-Command Get-CustomAppLocalRuntimeBaseline -CommandType Function).ScriptBlock
-$script:RAALILiveBaselineBridge=$null
-function Get-CustomAppLocalRuntimeBaseline {
-    param([Parameter(Mandatory=$true)][string]$Name,[Parameter(Mandatory=$true)][string]$AppPath)
-    $actual=& $script:RAALIParentLocalBaseline -Name $Name -AppPath $AppPath
-    if($null -eq $script:RAALILiveBaselineBridge){return $actual}
-    $bridge=$script:RAALILiveBaselineBridge
-    try {
-        $actualPath=[IO.Path]::GetFullPath($AppPath).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
-        $livePath=[IO.Path]::GetFullPath([string]$bridge.live_path).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
-    } catch {return $actual}
-    if(-not $actualPath.Equals($livePath,[StringComparison]::OrdinalIgnoreCase)){return $actual}
-    if(([string]$actual.tree_sha256).Trim().ToLowerInvariant() -cne ([string]$bridge.actual_old_tree_sha256).Trim().ToLowerInvariant()){return $actual}
-    $copy=($actual|ConvertTo-Json -Depth 100|ConvertFrom-Json)
-    $copy.tree_sha256=([string]$bridge.stable_tree_sha256).Trim().ToLowerInvariant()
-    return $copy
-}
-
-function Invoke-RAALIRecoveryAtomicV010 {
-    param([Parameter(Mandatory=$true)]$X,[Parameter(Mandatory=$true)]$Prepared,[string]$Fault='none')
-    $ctx=New-RAIssueLiveContextV010 -Bundle $X.bundle
-    $priorOverride=$script:RAPPFreshLiveOverride
-    $priorFault=$script:RAALIAtomicFault
-    $priorBridge=$script:RAALILiveBaselineBridge
-    $script:RAPPFreshLiveOverride=[pscustomobject]@{stable_tree_sha256=[string]$X.stable_tree;actual_tree_sha256=[string]$X.actual_live_tree;live_path=[string]$X.live_path;manifest_name=[string]$X.manifest_name}
-    $script:RAALILiveBaselineBridge=[pscustomobject]@{stable_tree_sha256=[string]$X.stable_tree;actual_old_tree_sha256=[string]$X.actual_live_tree;live_path=[string]$X.live_path}
-    $script:RAALIAtomicFault=$Fault
-    $at=[DateTimeOffset]::Parse([string]$Prepared.result.post_backup_revalidated_at).AddSeconds(1)
-    try {
-        return Invoke-CustomAppProductionRecoveryAwarePermitAtomicLiveSwapV010 -RecoveryAwareStageExecutorResult $X.stage -RecoveryAwarePreparedResult $Prepared.result -Name ([string]$X.bundle.lifecycle.name) -LifecycleRow $X.bundle.lifecycle -ProvenanceRow $X.bundle.provenance -BindingRow $X.bundle.binding -LifecycleStageResult $X.bundle.stage -ShadowResult $X.bundle.shadow -RetirementResumeResult $X.q.resume.result -ShadowProtocolQualification $ctx.shadow -LiveAttestedQualification $ctx.live -AllowedRoot $X.q.f.ce.q.f.f.allowed -RecoveryStoreDirectory $X.q.f.ce.q.f.f.store -ConsumptionStoreDirectory $X.f.p.store -ExpectedTransactionId ([string]$X.q.f.ce.q.f.f.identity.transaction_id) -LocalAppDataRoot $X.q.f.ce.q.f.f.q.persistence.local -AppDataRoot $X.q.f.ce.q.f.f.q.persistence.roaming -ConsumptionPersistenceResult $X.f.persisted -Permit $X.f.p.f.p.r.issuer.permit -SessionKey $script:RAIssuerKey -Now $at
-    } finally {
-        $script:RAPPFreshLiveOverride=$priorOverride
-        $script:RAALIAtomicFault=$priorFault
-        $script:RAALILiveBaselineBridge=$priorBridge
+    $script:RAALIMutationFault='none'
+    function Invoke-CustomAppProductionAtomicLiveSwapMutationValidationHookV010 {
+        param([Parameter(Mandatory=$true)][string]$Checkpoint,[Parameter(Mandatory=$true)]$Context)
+        if($script:RAALIMutationFault -ceq 'throw-after-candidate-move' -and $Checkpoint -ceq 'after-candidate-move'){throw 'recovery-aware-integration-after-candidate-move'}
     }
-}
+    function Invoke-CustomAppProductionRecoveryAwarePermitAtomicValidationHookV010 {param([string]$Checkpoint,$Context)}
 
-function Remove-RAALITransactionRootsV010($X){
+    function Invoke-RAALIRecoveryAtomicV010 {
+        param([Parameter(Mandatory=$true)]$X,[Parameter(Mandatory=$true)]$Prepared,[string]$Fault='none',[Nullable[DateTimeOffset]]$At=$null)
+        $ctx=New-RAIssueLiveContextV010 -Bundle $X.bundle;$priorOverride=$script:RAPPFreshLiveOverride;$priorFault=$script:RAALIMutationFault
+        $script:RAPPFreshLiveOverride=[pscustomobject]@{stable_tree_sha256=[string]$X.stable_tree;actual_tree_sha256=[string]$X.actual_live_tree;live_path=[string]$X.live_path;manifest_name=[string]$X.manifest_name};$script:RAALIMutationFault=$Fault
+        $when=$(if($null -ne $At){[DateTimeOffset]$At}else{[DateTimeOffset]::Parse([string]$Prepared.result.post_backup_revalidated_at).AddSeconds(1)})
+        try {
+            Invoke-CustomAppProductionRecoveryAwarePermitAtomicLiveSwapV010 -RecoveryAwareStageExecutorResult $X.stage -RecoveryAwarePreparedResult $Prepared.result -Name ([string]$X.bundle.lifecycle.name) -LifecycleRow $X.bundle.lifecycle -ProvenanceRow $X.bundle.provenance -BindingRow $X.bundle.binding -LifecycleStageResult $X.bundle.stage -ShadowResult $X.bundle.shadow -RetirementResumeResult $X.q.resume.result -ShadowProtocolQualification $ctx.shadow -LiveAttestedQualification $ctx.live -AllowedRoot $X.q.f.ce.q.f.f.allowed -RecoveryStoreDirectory $X.q.f.ce.q.f.f.store -ConsumptionStoreDirectory $X.f.p.store -ExpectedTransactionId ([string]$X.q.f.ce.q.f.f.identity.transaction_id) -LocalAppDataRoot $X.q.f.ce.q.f.f.q.persistence.local -AppDataRoot $X.q.f.ce.q.f.f.q.persistence.roaming -ConsumptionPersistenceResult $X.f.persisted -Permit $X.f.p.f.p.r.issuer.permit -SessionKey $script:RAIssuerKey -Now $when
+        } finally {$script:RAPPFreshLiveOverride=$priorOverride;$script:RAALIMutationFault=$priorFault}
+    }
+    function Restore-RAALIValidV010 {param($X,$Prepared,$Result,[string]$Label)
+        $restore=Restore-CustomAppProductionAtomicLiveSwapV010 -LivePath ([string]$X.live_path) -AppBackupPath ([string]$Prepared.result.app_backup_path) -ExpectedAppBackupTreeSha256 ([string]$Prepared.result.app_backup_tree_sha256) -PersistenceBackupPath ([string]$Prepared.result.persistence_backup_path) -ExpectedPersistenceFingerprint ([string]$Prepared.result.persistence_fingerprint) -LocalAppDataRoot $X.q.f.ce.q.f.f.q.persistence.local -AppDataRoot $X.q.f.ce.q.f.f.q.persistence.roaming
+        Assert-RAALITrue ([bool]$restore.ok) ($Label+' restore failed: '+[string]$restore.reason);$clean=Remove-CustomAppProductionRecoveryAwarePermitAtomicTransactionV010 -TransactionRoot ([string]$Result.result.transaction_root) -LivePath ([string]$X.live_path);Assert-RAALITrue ([bool]$clean.ok) ($Label+' transaction cleanup failed: '+[string]$clean.reason)
+    }
+    function Assert-RAALINoTransactionV010 {param($X,[string]$Label);$parent=[IO.Path]::GetDirectoryName([IO.Path]::GetFullPath([string]$X.live_path));$tx=@(Get-ChildItem -LiteralPath $parent -Force -Directory -ErrorAction SilentlyContinue|Where-Object{$_.Name -match '^\.spotify-control-txn-[0-9a-fA-F]{32}$'});Assert-RAALITrue ($tx.Count -eq 0) ($Label+' left transaction workspace')}
+
+    $integrationCount=0
+    $valid=New-RAPPFixtureV010 -Label 'bounded-atomic-valid' -Nonce ('d'*32)
     try {
-        $parent=[IO.Path]::GetDirectoryName([IO.Path]::GetFullPath([string]$X.live_path))
-        foreach($item in @(Get-ChildItem -LiteralPath $parent -Force -Directory -ErrorAction SilentlyContinue | Where-Object{$_.Name -match '^\.spotify-control-txn-[0-9a-fA-F]{32}$'})){
-            Remove-CustomAppAtomicDirectoryV010 -Path $item.FullName -ExpectedParent $parent -ExpectedName $item.Name
-        }
-    } catch {}
-}
+        $prep=Invoke-RAPPFixtureV010 -X $valid;Assert-RAALITrue ([bool]$prep.ok) ('valid pre-apply denied: '+[string]$prep.reason);$before=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$valid.live_path)
+        Assert-RAALIEq ([string]$before.tree_sha256).Trim().ToLowerInvariant() ([string]$prep.result.app_backup_tree_sha256).Trim().ToLowerInvariant() 'valid byte-real live/backup mismatch before atomic'
+        Assert-RAALIFalse (([string]$valid.stable_tree).Trim().ToLowerInvariant() -ceq ([string]$before.tree_sha256).Trim().ToLowerInvariant()) 'valid fixture collapsed stable and byte-real trees'
+        $r=Invoke-RAALIRecoveryAtomicV010 -X $valid -Prepared $prep;Assert-RAALITrue ([bool]$r.ok) ('valid bounded recovery atomic denied: '+[string]$r.reason);Assert-RAALITrue ([bool]$r.result.byte_real_live_reverified -and [bool]$r.result.historical_consumption_reverified_after_atomic) 'valid evidence flags missing'
+        $live=& $script:RASEOriginalLocalBaseline -Name ([string]$valid.bundle.lifecycle.name) -AppPath ([string]$valid.live_path);Assert-RAALIEq ([string]$live.tree_sha256).Trim().ToLowerInvariant() ([string]$valid.remote_tree).Trim().ToLowerInvariant() 'valid post-swap live not exact staged runtime'
+        $old=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$r.result.old_live_path);Assert-RAALIEq ([string]$old.tree_sha256).Trim().ToLowerInvariant() ([string]$before.tree_sha256).Trim().ToLowerInvariant() 'valid old-live not exact byte-real original'
+        $persist=Get-SpotifyPersistenceSnapshot -LocalAppDataRoot $valid.q.f.ce.q.f.f.q.persistence.local -AppDataRoot $valid.q.f.ce.q.f.f.q.persistence.roaming;Assert-RAALIEq ([string]$persist.fingerprint).Trim().ToLowerInvariant() ([string]$prep.result.persistence_fingerprint).Trim().ToLowerInvariant() 'valid protected persistence changed';Restore-RAALIValidV010 $valid $prep $r 'valid';$integrationCount++
+    } finally {Remove-RAPPFixtureV010 $valid}
 
-$integrationCount=0
-$ix=New-RAPPFixtureV010 -Label 'atomic-integration-valid' -Nonce ('d'*32)
-try {
-    $prep=Invoke-RAPPFixtureV010 -X $ix
-    Assert-RAALITrue ([bool]$prep.ok) ('integration pre-apply denied: '+[string]$prep.reason)
-    $beforeFull=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$ix.live_path)
-    $r=Invoke-RAALIRecoveryAtomicV010 -X $ix -Prepared $prep
-    Assert-RAALITrue ([bool]$r.ok) ('recovery-aware atomic composition denied: '+[string]$r.reason)
-    Assert-RAALITrue ([bool]$r.recovery_revalidated_immediately_before_atomic -and [bool]$r.live_code_swap_performed) 'valid composition lost recovery/swap proof'
-    Assert-RAALITrue ([bool]$r.requires_transaction_finalization -and [bool]$r.requires_spicetify_apply_phase) 'valid composition lost downstream separation'
-    foreach($f in @('session_key_persisted','session_key_exposed','result_is_authority','apply_execution_authorized','spicetify_apply_authorized','additional_mutation_authorized','production_execution_authorized','production_mutation_authorized')){Assert-RAALIFalse ([bool]$r.result.$f) ('valid composition escaped '+$f)}
-    $resultCheck=Test-CustomAppProductionRecoveryAwarePermitAtomicLiveSwapResultV010 -Result $r.result
-    Assert-RAALITrue ([bool]$resultCheck.ok) ('valid composition result invalid: '+[string]$resultCheck.reason)
-    $liveRuntime=& $script:RASEOriginalLocalBaseline -Name ([string]$ix.bundle.lifecycle.name) -AppPath ([string]$ix.live_path)
-    Assert-RAALIEq ([string]$liveRuntime.tree_sha256).Trim().ToLowerInvariant() ([string]$ix.remote_tree).Trim().ToLowerInvariant() 'valid composition live runtime not exact remote tree'
-    $old=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$r.result.old_live_path)
-    Assert-RAALIEq ([string]$old.tree_sha256).Trim().ToLowerInvariant() ([string]$beforeFull.tree_sha256).Trim().ToLowerInvariant() 'valid composition old-live not exact pre-swap tree'
-    $persist=Get-SpotifyPersistenceSnapshot -LocalAppDataRoot $ix.q.f.ce.q.f.f.q.persistence.local -AppDataRoot $ix.q.f.ce.q.f.f.q.persistence.roaming
-    Assert-RAALIEq ([string]$persist.fingerprint).Trim().ToLowerInvariant() ([string]$prep.result.persistence_fingerprint).Trim().ToLowerInvariant() 'valid composition changed protected persistence'
-    $restore=Restore-CustomAppProductionAtomicLiveSwapV010 -LivePath ([string]$ix.live_path) -AppBackupPath ([string]$prep.result.app_backup_path) -ExpectedAppBackupTreeSha256 ([string]$prep.result.app_backup_tree_sha256) -PersistenceBackupPath ([string]$prep.result.persistence_backup_path) -ExpectedPersistenceFingerprint ([string]$prep.result.persistence_fingerprint) -LocalAppDataRoot $ix.q.f.ce.q.f.f.q.persistence.local -AppDataRoot $ix.q.f.ce.q.f.f.q.persistence.roaming
-    Assert-RAALITrue ([bool]$restore.ok) ('valid composition cleanup restore failed: '+[string]$restore.reason)
-    $integrationCount++
-} finally {Remove-RAALITransactionRootsV010 $ix;Remove-RAPPFixtureV010 $ix}
+    $fault=New-RAPPFixtureV010 -Label 'bounded-atomic-rollback' -Nonce ('e'*32)
+    try {
+        $prep=Invoke-RAPPFixtureV010 -X $fault;Assert-RAALITrue ([bool]$prep.ok) ('rollback pre-apply denied: '+[string]$prep.reason);$before=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$fault.live_path)
+        $r=Invoke-RAALIRecoveryAtomicV010 -X $fault -Prepared $prep -Fault 'throw-after-candidate-move';Assert-RAALIFalse ([bool]$r.ok) 'post-mutation fault unexpectedly succeeded';Assert-RAALITrue ([bool]$r.rollback_attempted -and [bool]$r.rollback_ok) ('post-mutation rollback not verified: '+[string]$r.reason)
+        $after=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$fault.live_path);Assert-RAALIEq ([string]$after.tree_sha256).Trim().ToLowerInvariant() ([string]$before.tree_sha256).Trim().ToLowerInvariant() 'post-mutation rollback app mismatch';$persist=Get-SpotifyPersistenceSnapshot -LocalAppDataRoot $fault.q.f.ce.q.f.f.q.persistence.local -AppDataRoot $fault.q.f.ce.q.f.f.q.persistence.roaming;Assert-RAALIEq ([string]$persist.fingerprint).Trim().ToLowerInvariant() ([string]$prep.result.persistence_fingerprint).Trim().ToLowerInvariant() 'post-mutation rollback persistence mismatch';Assert-RAALINoTransactionV010 $fault 'post-mutation rollback';$integrationCount++
+    } finally {Remove-RAPPFixtureV010 $fault}
 
-$fx=New-RAPPFixtureV010 -Label 'atomic-integration-rollback' -Nonce ('e'*32)
-try {
-    $prep=Invoke-RAPPFixtureV010 -X $fx
-    Assert-RAALITrue ([bool]$prep.ok) ('rollback integration pre-apply denied: '+[string]$prep.reason)
-    $beforeFull=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$fx.live_path)
-    $r=Invoke-RAALIRecoveryAtomicV010 -X $fx -Prepared $prep -Fault 'throw-after-candidate-move'
-    Assert-RAALIFalse ([bool]$r.ok) 'post-mutation integration fault unexpectedly succeeded'
-    Assert-RAALITrue ([bool]$r.rollback_attempted -and [bool]$r.rollback_ok) ('post-mutation integration rollback not verified: '+[string]$r.reason)
-    foreach($f in @('session_key_persisted','session_key_exposed','result_is_authority','apply_execution_authorized','spicetify_apply_authorized','additional_mutation_authorized','production_execution_authorized','production_mutation_authorized')){Assert-RAALIFalse ([bool]$r.$f) ('rollback composition escaped '+$f)}
-    $afterFull=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$fx.live_path)
-    Assert-RAALIEq ([string]$afterFull.tree_sha256).Trim().ToLowerInvariant() ([string]$beforeFull.tree_sha256).Trim().ToLowerInvariant() 'post-mutation integration rollback app tree mismatch'
-    $persist=Get-SpotifyPersistenceSnapshot -LocalAppDataRoot $fx.q.f.ce.q.f.f.q.persistence.local -AppDataRoot $fx.q.f.ce.q.f.f.q.persistence.roaming
-    Assert-RAALIEq ([string]$persist.fingerprint).Trim().ToLowerInvariant() ([string]$prep.result.persistence_fingerprint).Trim().ToLowerInvariant() 'post-mutation integration rollback persistence mismatch'
-    $integrationCount++
-} finally {Remove-RAALITransactionRootsV010 $fx;Remove-RAPPFixtureV010 $fx}
+    $liveDrift=New-RAPPFixtureV010 -Label 'bounded-atomic-byte-real-drift' -Nonce ('f'*32)
+    try {
+        $prep=Invoke-RAPPFixtureV010 -X $liveDrift;Assert-RAALITrue ([bool]$prep.ok) ('byte-real drift pre-apply denied: '+[string]$prep.reason);$git=Join-Path ([string]$liveDrift.live_path) '.git';[IO.Directory]::CreateDirectory($git)|Out-Null;[IO.File]::WriteAllText((Join-Path $git 'config'),'unauthorized-byte-real-drift',[Text.UTF8Encoding]::new($false))
+        $r=Invoke-RAALIRecoveryAtomicV010 -X $liveDrift -Prepared $prep;Assert-RAALIFalse ([bool]$r.ok) 'byte-real drift accepted';Assert-RAALITrue ([string]$r.reason -like '*byte-real-live-backup-mismatch*') ('byte-real drift reason '+[string]$r.reason);Assert-RAALINoTransactionV010 $liveDrift 'byte-real drift';$restore=Restore-CustomAppProductionAtomicLiveSwapV010 -LivePath ([string]$liveDrift.live_path) -AppBackupPath ([string]$prep.result.app_backup_path) -ExpectedAppBackupTreeSha256 ([string]$prep.result.app_backup_tree_sha256) -PersistenceBackupPath ([string]$prep.result.persistence_backup_path) -ExpectedPersistenceFingerprint ([string]$prep.result.persistence_fingerprint) -LocalAppDataRoot $liveDrift.q.f.ce.q.f.f.q.persistence.local -AppDataRoot $liveDrift.q.f.ce.q.f.f.q.persistence.roaming;Assert-RAALITrue ([bool]$restore.ok) 'byte-real drift cleanup restore failed';$integrationCount++
+    } finally {Remove-RAPPFixtureV010 $liveDrift}
 
-if($integrationCount -ne 2){throw "recovery-aware atomic integration count drifted: $integrationCount"}
-Write-Host "CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_ATOMIC_INTEGRATION_PASS count=$integrationCount recovery_closed_live_bytes=true recursive_fixture_only_parent=true ast_boundary_fallback=true byte_real_stable_tree_bridge=true actual_recovery_pre_apply=true exact_generic_atomic=true exact_rollback=true zero_apply_authority=true"
-'@.Replace("`r`n","`n")
+    $stageDrift=New-RAPPFixtureV010 -Label 'bounded-atomic-stage-drift' -Nonce ('1'*32)
+    try {
+        $prep=Invoke-RAPPFixtureV010 -X $stageDrift;Assert-RAALITrue ([bool]$prep.ok) ('stage drift pre-apply denied: '+[string]$prep.reason);$before=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$stageDrift.live_path);[IO.File]::AppendAllText((Join-Path ([string]$stageDrift.stage.stage_path) 'index.js'),"// unauthorized-stage-drift`n",[Text.UTF8Encoding]::new($false))
+        $r=Invoke-RAALIRecoveryAtomicV010 -X $stageDrift -Prepared $prep;Assert-RAALIFalse ([bool]$r.ok) 'stage drift accepted';Assert-RAALITrue ([string]$r.reason -like '*atomic-mutation-stage-runtime-mismatch*') ('stage drift reason '+[string]$r.reason);$after=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$stageDrift.live_path);Assert-RAALIEq ([string]$after.tree_sha256).Trim().ToLowerInvariant() ([string]$before.tree_sha256).Trim().ToLowerInvariant() 'stage drift changed live';Assert-RAALINoTransactionV010 $stageDrift 'stage drift';$integrationCount++
+    } finally {Remove-RAPPFixtureV010 $stageDrift}
 
-$temp=Join-Path $preApplyDir ('test_custom_app_production_recovery_aware_permit_atomic_integration_generated_'+[Guid]::NewGuid().ToString('N')+'.ps1')
-try {
-    [IO.File]::WriteAllText($temp,($fixtureOnly+$integration),[Text.UTF8Encoding]::new($false))
-    & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $temp
-    if($LASTEXITCODE){throw "generated recovery-aware atomic integration failed exit=$LASTEXITCODE"}
+    $historical=New-RAPPFixtureV010 -Label 'bounded-atomic-unrelated-rev2' -Nonce ('2'*32)
+    try {
+        $prep=Invoke-RAPPFixtureV010 -X $historical;Assert-RAALITrue ([bool]$prep.ok) ('historical pre-apply denied: '+[string]$prep.reason)
+        $histB=New-RAPCFixtureV010 -Label 'bounded-atomic-unrelated-rev2-future' -Name 'future-app' -Source 'owner/future-app' -Manifest 'Future App' -Nonce ('3'*32);$bAt=$historical.q.at.AddSeconds(16)
+        $bCandidate=Invoke-RAPCFixtureV010 -F $histB -ConsumptionState $historical.f.persisted.persisted_snapshot.state -ExpectedConsumptionRevision 1 -At $bAt;Assert-RAALITrue ([bool]$bCandidate.ok) ('unrelated rev2 candidate failed: '+[string]$bCandidate.reason)
+        $bCarrier=[pscustomobject]@{f=$histB;candidate=$bCandidate;store=$historical.f.p.store};$bPersist=Invoke-RAPCPFixtureV010 -F $bCarrier -At $bAt.AddSeconds(1);Assert-RAALITrue ([bool]$bPersist.ok) ('unrelated rev2 persistence failed: '+[string]$bPersist.reason)
+        $r=Invoke-RAALIRecoveryAtomicV010 -X $historical -Prepared $prep -At $bAt.AddSeconds(2);Assert-RAALITrue ([bool]$r.ok) ('historical rev1 denied after unrelated rev2: '+[string]$r.reason);Assert-RAALIEq $r.result.current_consumption_revision 2 'historical current revision';Assert-RAALIEq ([string]$r.result.historical_consumption_envelope_sha256).Trim().ToLowerInvariant() ([string]$historical.f.persisted.receipt.persistence_envelope_sha256).Trim().ToLowerInvariant() 'historical target envelope continuity';Restore-RAALIValidV010 $historical $prep $r 'historical';$integrationCount++
+    } finally {Remove-RAPPFixtureV010 $historical}
+
+    if($integrationCount -ne 5){throw "recovery-aware bounded atomic integration count drifted: $integrationCount != 5"}
+    Write-Host "CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_ATOMIC_INTEGRATION_PASS count=$integrationCount recovery_closed_live_bytes=true no_test_only_baseline_bridge=true stable_and_byte_real_views_separate=true bounded_mutation=true exact_rollback=true unrelated_historical_append=true zero_apply_authority=true"
 } finally {
     if(Test-Path -LiteralPath $temp){[IO.File]::Delete($temp)}
     foreach($path in @($generatedFixtureFiles)){if(Test-Path -LiteralPath $path){[IO.File]::Delete($path)}}
