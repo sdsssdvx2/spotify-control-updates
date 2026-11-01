@@ -82,10 +82,10 @@ function Test-CustomAppProductionRecoveryAwarePermitStageAdmissionReceiptV010 {
 }
 
 function Test-CustomAppProductionRecoveryAwarePermitStageBindingContinuityV010 {
-    param([AllowNull()]$StartReceipt,[AllowNull()]$StageBinding)
-    if($null -eq $StartReceipt -or $null -eq $StageBinding){return [pscustomobject]@{ok=$false;reason='recovery-aware-stage-binding-continuity-null'}}
+    param([AllowNull()]$StartDecision,[AllowNull()]$StageBinding)
+    if($null -eq $StartDecision -or $null -eq $StageBinding){return [pscustomobject]@{ok=$false;reason='recovery-aware-stage-binding-continuity-null'}}
     foreach($pair in @(@('name','name'),@('source_identity','source'),@('github_repo_id','repo_id'),@('surface_kind','surface'),@('remote_tree_sha256','remote_tree_sha256'),@('remote_commit_sha','commit_sha'))){
-        $a=([string]$StartReceipt.($pair[0])).Trim().ToLowerInvariant();$b=([string]$StageBinding.($pair[1])).Trim().ToLowerInvariant()
+        $a=([string]$StartDecision.($pair[0])).Trim().ToLowerInvariant();$b=([string]$StageBinding.($pair[1])).Trim().ToLowerInvariant()
         if($a -cne $b){return [pscustomobject]@{ok=$false;reason=('recovery-aware-stage-start-binding-'+$pair[0]+'-mismatch')}}
     }
     return [pscustomobject]@{ok=$true;reason='recovery-aware-stage-start-binding-continuity-exact'}
@@ -107,12 +107,12 @@ function Resolve-CustomAppProductionRecoveryAwarePermitStageAcquisitionAdmission
         Resolve-CustomAppProductionRecoveryAwarePermitExecutorStartGateV010 -Name $Name -LifecycleRow $LifecycleRow -ProvenanceRow $ProvenanceRow -BindingRow $BindingRow -StageResult $StageResult -ShadowResult $ShadowResult -RetirementResumeResult $RetirementResumeResult -CurrentBaseline $CurrentBaseline -ShadowProtocolQualification $ShadowProtocolQualification -LiveAttestedQualification $LiveAttestedQualification -AllowedRoot $AllowedRoot -RecoveryStoreDirectory $RecoveryStoreDirectory -ConsumptionStoreDirectory $ConsumptionStoreDirectory -ExpectedTransactionId $ExpectedTransactionId -LocalAppDataRoot $LocalAppDataRoot -AppDataRoot $AppDataRoot -ConsumptionPersistenceResult $ConsumptionPersistenceResult -Permit $Permit -SessionKey $SessionKey -Now $At -MaxRemoteObservationAgeHours $MaxRemoteObservationAgeHours
     }
     $pre=& $invokeStart $Now
-    if($null -eq $pre -or -not [bool]$pre.ok -or -not [bool]$pre.staging_eligible -or $null -eq $pre.receipt){return & $deny ('recovery-aware-stage-admission-pre-start-denied:'+[string]$pre.reason)}
+    if($null -eq $pre -or -not [bool]$pre.ok -or -not [bool]$pre.staging_eligible -or $null -eq $pre.receipt -or $null -eq $pre.decision){return & $deny ('recovery-aware-stage-admission-pre-start-denied:'+[string]$pre.reason)}
     $preCheck=Test-CustomAppProductionRecoveryAwarePermitExecutorStartReceiptV010 -Receipt $pre.receipt -Now $Now
     if(-not [bool]$preCheck.ok){return & $deny ('recovery-aware-stage-admission-pre-start-invalid:'+[string]$preCheck.reason)}
     $stageBinding=Test-CustomAppStageBindingRowV010 -BindingRow $BindingRow -ExpectedName $Name
     if(-not [bool]$stageBinding.ok){return & $deny ('recovery-aware-stage-admission-stage-binding-denied:'+[string]$stageBinding.reason)}
-    $continuity=Test-CustomAppProductionRecoveryAwarePermitStageBindingContinuityV010 -StartReceipt $pre.receipt -StageBinding $stageBinding
+    $continuity=Test-CustomAppProductionRecoveryAwarePermitStageBindingContinuityV010 -StartDecision $pre.decision -StageBinding $stageBinding
     if(-not [bool]$continuity.ok){return & $deny ([string]$continuity.reason)}
     try{$workspace=[IO.Path]::GetFullPath((Get-CustomAppStageWorkspaceRootV010)).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)}catch{return & $deny 'recovery-aware-stage-admission-workspace-root-invalid'}
     $post=& $invokeStart $Now
