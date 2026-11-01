@@ -2,7 +2,6 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $root 'validation/custom-app-production-recovery-aware-permit-executor-start-gate-v0.1.0/test_custom_app_production_recovery_aware_permit_executor_start_gate.ps1')
-. (Join-Path $root 'validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1')
 . (Join-Path $PSScriptRoot 'custom-app-production-recovery-aware-permit-stage-acquisition-admission.ps1')
 
 function Assert-RASA-True([bool]$Value,[string]$Message){if(-not $Value){throw $Message}}
