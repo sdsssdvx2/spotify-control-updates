@@ -5,10 +5,10 @@ $source=Join-Path $PSScriptRoot 'test_custom_app_production_recovery_aware_permi
 $text=[IO.File]::ReadAllText($source,[Text.UTF8Encoding]::new($false)).Replace("`r`n","`n")
 
 function Get-RAPPUniqueMarkerIndexV010 {
-    param([Parameter(Mandatory=$true)][string]$Input,[Parameter(Mandatory=$true)][string]$Marker,[Parameter(Mandatory=$true)][string]$Label)
-    $first=$Input.IndexOf($Marker,[StringComparison]::Ordinal)
+    param([Parameter(Mandatory=$true)][string]$Text,[Parameter(Mandatory=$true)][string]$Marker,[Parameter(Mandatory=$true)][string]$Label)
+    $first=$Text.IndexOf($Marker,[StringComparison]::Ordinal)
     if($first -lt 0){throw "r4 semantic patch marker missing: $Label"}
-    if($Input.IndexOf($Marker,$first+$Marker.Length,[StringComparison]::Ordinal) -ge 0){throw "r4 semantic patch marker not unique: $Label"}
+    if($Text.IndexOf($Marker,$first+$Marker.Length,[StringComparison]::Ordinal) -ge 0){throw "r4 semantic patch marker not unique: $Label"}
     return $first
 }
 
@@ -16,8 +16,8 @@ function Get-RAPPUniqueMarkerIndexV010 {
 # intentionally independent of quoting and CRLF/LF representation inside the block.
 $startMarker='    # Root VCS metadata is deliberately invisible to the runtime baseline but must be'
 $endMarker="'root git metadata changed runtime baseline'"
-$start=Get-RAPPUniqueMarkerIndexV010 -Input $text -Marker $startMarker -Label 'post-recovery-vcs-start'
-$endPhrase=Get-RAPPUniqueMarkerIndexV010 -Input $text -Marker $endMarker -Label 'post-recovery-vcs-end'
+$start=Get-RAPPUniqueMarkerIndexV010 -Text $text -Marker $startMarker -Label 'post-recovery-vcs-start'
+$endPhrase=Get-RAPPUniqueMarkerIndexV010 -Text $text -Marker $endMarker -Label 'post-recovery-vcs-end'
 if($endPhrase -le $start){throw 'r4 semantic VCS patch boundaries reversed'}
 $end=$text.IndexOf("`n",$endPhrase,[StringComparison]::Ordinal)
 if($end -lt 0){$end=$text.Length}else{$end++}
@@ -33,7 +33,7 @@ $patched=$text.Substring(0,$start)+$replacement+$text.Substring($end)
 # The generic pre-apply matrix already proves .git byte preservation; this layer keeps
 # stronger recovery continuity plus raw-tree/file-count/byte-count backup assertions.
 $gitAssertMarker='valid rollback backup omitted root git provenance'
-$assertAt=Get-RAPPUniqueMarkerIndexV010 -Input $patched -Marker $gitAssertMarker -Label 'root-git-valid-assertion'
+$assertAt=Get-RAPPUniqueMarkerIndexV010 -Text $patched -Marker $gitAssertMarker -Label 'root-git-valid-assertion'
 $lineStart=$patched.LastIndexOf("`n",$assertAt)
 if($lineStart -lt 0){$lineStart=0}else{$lineStart++}
 $lineEnd=$patched.IndexOf("`n",$assertAt,[StringComparison]::Ordinal)
