@@ -34,8 +34,17 @@ function Invoke-CustomAppStageAcquisitionV010 {
     $check=Test-CustomAppStageBindingRowV010 -BindingRow $BindingRow -ExpectedName $Name
     if(-not [bool]$check.ok){throw ('fixture-recovery-aware-stage-binding-denied:'+[string]$check.reason)}
     $workspace=New-CustomAppStageWorkspaceV010
-    $stage=Join-Path $workspace 'stage';[IO.Directory]::CreateDirectory($stage)|Out-Null
-    $baseline=[pscustomobject]@{schema=1;name=$Name;path=$stage;safe=$true;installable=$true;reason='fixture-staged-runtime';file_count=2;total_bytes=2;tree_sha256=([string]$check.remote_tree_sha256).Trim().ToLowerInvariant();files=@();manifest_valid=$true;manifest_name=[string]$check.manifest_name;layout_root='.';app_root_count=1;vcs_metadata_excluded=$true;mutation_authorized=$false;auto_update_authorized=$false;auto_install_authorized=$false}
+    $stage=Join-Path $workspace 'stage'
+    if($null -eq $script:RASELiveBaselineOverride){
+        # Deep parent fixtures created after this recovery-aware mock is installed still
+        # expect a byte-real generic staged runtime. Reproduce the exact validated generic
+        # fixture payload so pre-apply/recovery evidence can re-read the stage from disk.
+        Write-ProductionStageRuntimeV010 $stage ([string]$check.manifest_name) ($Name+'-remote-v2')
+        $baseline=& $script:RASEOriginalLocalBaseline -Name $Name -AppPath $stage
+    } else {
+        [IO.Directory]::CreateDirectory($stage)|Out-Null
+        $baseline=[pscustomobject]@{schema=1;name=$Name;path=$stage;safe=$true;installable=$true;reason='fixture-staged-runtime';file_count=2;total_bytes=2;tree_sha256=([string]$check.remote_tree_sha256).Trim().ToLowerInvariant();files=@();manifest_valid=$true;manifest_name=[string]$check.manifest_name;layout_root='.';app_root_count=1;vcs_metadata_excluded=$true;mutation_authorized=$false;auto_update_authorized=$false;auto_install_authorized=$false}
+    }
     $result=[pscustomobject]@{schema=$CustomAppStageAcquisitionSchema;managed_by=$CustomAppStageWorkspaceManagedBy;status='staged-verified';name=$Name;source_identity=[string]$check.source;github_repo_id=[int64]$check.repo_id;surface_kind=[string]$check.surface;commit_sha=[string]$check.commit_sha;remote_tree_sha256=[string]$check.remote_tree_sha256;binding_fingerprint=[string]$check.binding_fingerprint;binding_last_success=[string]$check.last_success;workspace_path=$workspace;stage_path=$stage;archive_sha256=(Get-CustomAppProductionStageExecutorSha256V010 ('recovery-aware-fixture-archive|'+[string]$check.source+'|'+[string]$check.commit_sha));stage_baseline=$baseline;mutation_mode='deny';mutation_authorized=$false;auto_update_authorized=$false;auto_install_authorized=$false;production_mutation_authorized=$false}
     switch($script:RASEStageMode){
         'authority' {$result.mutation_authorized=$true}
