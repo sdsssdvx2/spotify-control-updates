@@ -85,7 +85,7 @@ function Test-CustomAppProductionRecoveryAwarePermitTransactionFinalizationResul
     foreach($f in @('result_is_authority','apply_execution_authorized','spicetify_apply_authorized','additional_mutation_authorized','live_destination_authorized','production_execution_authorized','production_mutation_authorized')){if([bool]$Result.$f){return [pscustomobject]@{ok=$false;reason=('recovery-aware-finalization-result-authority-escaped-'+$f)}}}
     $at=[DateTimeOffset]::MinValue;if(-not [DateTimeOffset]::TryParse([string]$Result.finalized_at,[ref]$at)){return [pscustomobject]@{ok=$false;reason='recovery-aware-finalization-result-time-invalid'}}
     try{
-        if(Test-Path -LiteralPath ([string]$Result.transaction_root){return [pscustomobject]@{ok=$false;reason='recovery-aware-finalization-result-transaction-root-still-exists'}}
+        if(Test-Path -LiteralPath ([string]$Result.transaction_root)){return [pscustomobject]@{ok=$false;reason='recovery-aware-finalization-result-transaction-root-still-exists'}}
         if(-not (Test-Path -LiteralPath ([string]$Result.live_path) -PathType Container)){return [pscustomobject]@{ok=$false;reason='recovery-aware-finalization-result-live-path-missing'}}
         foreach($f in @('stage_workspace_path','app_backup_path','persistence_backup_path')){if(-not (Test-Path -LiteralPath ([string]$Result.$f) -PathType Container)){return [pscustomobject]@{ok=$false;reason=('recovery-aware-finalization-result-preserved-path-missing-'+$f)}}}
     }catch{return [pscustomobject]@{ok=$false;reason=('recovery-aware-finalization-result-path-check-failed:'+[string]$_.Exception.Message)}}
