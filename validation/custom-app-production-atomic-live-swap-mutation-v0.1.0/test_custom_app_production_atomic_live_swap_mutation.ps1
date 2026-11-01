@@ -70,5 +70,5 @@ $persistenceFault=New-AtomicFixtureV010 'mutation-persistence-fault' -Nonce '242
 
 $postVerify=New-AtomicFixtureV010 'mutation-post-verify' -Nonce '25252525252525252525252525252525';$r=Invoke-MutationFixtureV010 -Fixture $postVerify -Fault 'throw-after-post-verify';try{Assert-AtomicPostMutationFailureRolledBackV010 $postVerify $r 'mutation throw after post verify';Assert-True ([string]$r.reason -like '*fixture-mutation-after-post-verify*') 'mutation post-verify reason drifted';$mutationCount++}finally{Restore-MutationFixtureV010 $postVerify $r 'mutation post-verify'}
 
-if($mutationCount -ne 14){throw "mutation matrix count mismatch $mutationCount != 14"}
+if($mutationCount -ne 15){throw "mutation matrix count mismatch $mutationCount != 15"}
 Write-Host ('CUSTOM_APP_PRODUCTION_ATOMIC_LIVE_SWAP_MUTATION_MATRIX_PASS total='+$mutationCount)
