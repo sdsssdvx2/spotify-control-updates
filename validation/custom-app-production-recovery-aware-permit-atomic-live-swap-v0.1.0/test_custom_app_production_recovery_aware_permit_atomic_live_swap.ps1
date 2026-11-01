@@ -36,8 +36,37 @@ function New-RAPPFixtureV010 {
 
 $script:RAAAtomicFaultMode='none'
 $script:RAAStoreDriftPath=$null
+
+# Parent recovery fixtures deliberately carry two valid views at once: the durable
+# recovery-stable runtime tree used by permit continuity, and the byte-real live tree
+# that the rollback backup must preserve exactly. Generic atomic preconditions read the
+# runtime baseline directly, so project only the pre-swap live path to the stable view.
+# Every projected read first verifies the real bytes still match the fixture's original
+# byte-real runtime tree. Candidate/stage reads are never projected, and immediately
+# after the candidate move the live path returns to the real new runtime view.
+$script:RAAParentLocalBaseline=(Get-Command Get-CustomAppLocalRuntimeBaseline -CommandType Function).ScriptBlock
+$script:RAAStableLiveProjection=$null
+$script:RAAAtomicSwapHasMoved=$false
+function Get-CustomAppLocalRuntimeBaseline {
+    param([Parameter(Mandatory=$true)][string]$Name,[Parameter(Mandatory=$true)][string]$AppPath,[int]$MaxFiles=20000,[int64]$MaxFileBytes=67108864,[int64]$MaxTotalBytes=268435456,[int64]$MaxManifestBytes=1048576)
+    $actual=& $script:RAAParentLocalBaseline -Name $Name -AppPath $AppPath -MaxFiles $MaxFiles -MaxFileBytes $MaxFileBytes -MaxTotalBytes $MaxTotalBytes -MaxManifestBytes $MaxManifestBytes
+    if($null -eq $script:RAAStableLiveProjection -or $script:RAAAtomicSwapHasMoved){return $actual}
+    $p=$script:RAAStableLiveProjection
+    try{
+        $actualPath=[IO.Path]::GetFullPath($AppPath).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+        $livePath=[IO.Path]::GetFullPath([string]$p.live_path).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    }catch{return $actual}
+    if(-not $actualPath.Equals($livePath,[StringComparison]::OrdinalIgnoreCase)){return $actual}
+    if(([string]$actual.tree_sha256).Trim().ToLowerInvariant() -cne ([string]$p.actual_tree_sha256).Trim().ToLowerInvariant()){throw 'raa-byte-real-live-tree-drift-before-stable-projection'}
+    if([string]$actual.manifest_name -cne [string]$p.manifest_name){throw 'raa-byte-real-live-manifest-drift-before-stable-projection'}
+    $projected=Copy-RAA $actual
+    $projected.tree_sha256=([string]$p.stable_tree_sha256).Trim().ToLowerInvariant()
+    return $projected
+}
+
 function Invoke-CustomAppProductionAtomicLiveSwapValidationHookV010 {
     param([Parameter(Mandatory=$true)][string]$Checkpoint,[Parameter(Mandatory=$true)]$Context)
+    if($Checkpoint -ceq 'after-candidate-move'){$script:RAAAtomicSwapHasMoved=$true}
     switch($script:RAAAtomicFaultMode){
         'throw-after-candidate-move' {if($Checkpoint -ceq 'after-candidate-move'){throw 'raa-fixture-after-candidate-move'}}
         'ledger-drift-after-atomic-verification' {if($Checkpoint -ceq 'after-post-verify' -and -not [string]::IsNullOrWhiteSpace([string]$script:RAAStoreDriftPath)){[IO.File]::WriteAllText((Join-Path $script:RAAStoreDriftPath 'current.json'),'{not-json',[Text.UTF8Encoding]::new($false))}}
@@ -61,11 +90,13 @@ function Invoke-RAAFixtureV010 {
     param([Parameter(Mandatory=$true)]$F,[AllowNull()]$PreApply=$null,[AllowNull()]$Stage=$null,[AllowNull()]$Lifecycle=$null,[AllowNull()]$Binding=$null,[AllowNull()]$Permit=$null,[AllowNull()][byte[]]$Key=$null,[string]$Fault='none')
     if($null -eq $PreApply){$PreApply=$F.pre.result};if($null -eq $Stage){$Stage=$F.x.stage};if($null -eq $Lifecycle){$Lifecycle=$F.x.bundle.lifecycle};if($null -eq $Binding){$Binding=$F.x.bundle.binding};if($null -eq $Permit){$Permit=$F.x.f.p.f.p.r.issuer.permit};if($null -eq $Key){$Key=$script:RAIssuerKey}
     $when=[DateTimeOffset]::Parse([string]$F.pre.result.post_backup_revalidated_at).AddSeconds(1);$ctx=New-RAIssueLiveContextV010 -Bundle $F.x.bundle
-    $priorOverride=$script:RAPPFreshLiveOverride;$priorFault=$script:RAAAtomicFaultMode;$priorStore=$script:RAAStoreDriftPath
-    $script:RAPPFreshLiveOverride=[pscustomobject]@{stable_tree_sha256=[string]$F.x.stable_tree;actual_tree_sha256=[string]$F.x.actual_live_tree;live_path=[string]$F.x.live_path;manifest_name=[string]$F.x.manifest_name};$script:RAAAtomicFaultMode=$Fault;$script:RAAStoreDriftPath=[string]$F.x.f.p.store
+    $priorOverride=$script:RAPPFreshLiveOverride;$priorFault=$script:RAAAtomicFaultMode;$priorStore=$script:RAAStoreDriftPath;$priorProjection=$script:RAAStableLiveProjection;$priorMoved=$script:RAAAtomicSwapHasMoved
+    $script:RAPPFreshLiveOverride=[pscustomobject]@{stable_tree_sha256=[string]$F.x.stable_tree;actual_tree_sha256=[string]$F.x.actual_live_tree;live_path=[string]$F.x.live_path;manifest_name=[string]$F.x.manifest_name}
+    $script:RAAStableLiveProjection=[pscustomobject]@{stable_tree_sha256=[string]$F.x.stable_tree;actual_tree_sha256=[string]$F.x.actual_live_tree;live_path=[string]$F.x.live_path;manifest_name=[string]$F.x.manifest_name}
+    $script:RAAAtomicSwapHasMoved=$false;$script:RAAAtomicFaultMode=$Fault;$script:RAAStoreDriftPath=[string]$F.x.f.p.store
     try{
         return Invoke-CustomAppProductionRecoveryAwarePermitAtomicLiveSwapV010 -RecoveryAwarePreApplyResult $PreApply -RecoveryAwareStageExecutorResult $Stage -Name ([string]$F.x.bundle.lifecycle.name) -LifecycleRow $Lifecycle -ProvenanceRow $F.x.bundle.provenance -BindingRow $Binding -LifecycleStageResult $F.x.bundle.stage -ShadowResult $F.x.bundle.shadow -RetirementResumeResult $F.x.q.resume.result -ShadowProtocolQualification $ctx.shadow -LiveAttestedQualification $ctx.live -AllowedRoot $F.x.q.f.ce.q.f.f.allowed -RecoveryStoreDirectory $F.x.q.f.ce.q.f.f.store -ConsumptionStoreDirectory $F.x.f.p.store -ExpectedTransactionId ([string]$F.x.q.f.ce.q.f.f.identity.transaction_id) -LocalAppDataRoot $F.x.q.f.ce.q.f.f.q.persistence.local -AppDataRoot $F.x.q.f.ce.q.f.f.q.persistence.roaming -ConsumptionPersistenceResult $F.x.f.persisted -Permit $Permit -SessionKey $Key -Now $when
-    } finally {$script:RAPPFreshLiveOverride=$priorOverride;$script:RAAAtomicFaultMode=$priorFault;$script:RAAStoreDriftPath=$priorStore}
+    } finally {$script:RAPPFreshLiveOverride=$priorOverride;$script:RAAStableLiveProjection=$priorProjection;$script:RAAAtomicSwapHasMoved=$priorMoved;$script:RAAAtomicFaultMode=$priorFault;$script:RAAStoreDriftPath=$priorStore}
 }
 
 function Assert-RAANoAuthorityV010($R,[string]$Label){$o=if($R.PSObject.Properties['result'] -and $null -ne $R.result){$R.result}else{$R};foreach($f in @('session_key_persisted','session_key_exposed','atomic_result_is_authority','apply_authorized','spicetify_apply_authorized','additional_mutation_authorized','live_destination_authorized','production_execution_authorized','production_mutation_authorized')){Assert-RAAFalse ([bool]$o.$f) "$Label escaped $f"};Assert-RAATrue ([bool]$o.requires_transaction_finalization) "$Label missing transaction finalization";Assert-RAATrue ([bool]$o.requires_fresh_post_swap_apply_admission) "$Label missing fresh post-swap admission";Assert-RAATrue ([bool]$o.requires_spicetify_apply_phase) "$Label missing apply separation"}
