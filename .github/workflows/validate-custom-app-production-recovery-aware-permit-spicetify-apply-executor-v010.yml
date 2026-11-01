@@ -30,7 +30,7 @@ jobs:
           $pins=@(
             @($h,'validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/custom-app-production-recovery-aware-permit-spicetify-apply-executor.ps1','484211fa1cadf2265d3ad4b6179484c00411b636'),
             @($h,'validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/test_custom_app_production_recovery_aware_permit_spicetify_apply_executor.ps1','7cf0d00a6240a67001509b06ff2aec6d4e3b4934'),
-            @($h,'validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/test_custom_app_production_recovery_aware_permit_spicetify_apply_executor_integration.ps1','cccba71201f33d6d2faac800534f026445e49add'),
+            @($h,'validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/test_custom_app_production_recovery_aware_permit_spicetify_apply_executor_integration.ps1','329d2fe21d15d335960555ce2c56a2e976d9f50b'),
             @($p,'validation/custom-app-production-recovery-aware-permit-post-swap-apply-admission-v0.1.0/custom-app-production-recovery-aware-permit-post-swap-apply-admission.ps1','b8c1462224a2b852efc7294aca233148d658f3f8'),
             @('fe07d410531ea13c8fca379b01405631a3763e84','validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1','f7372b069fbfe6a0f8d8a0aad45312ffd33d9f0a'),
             @('fe07d410531ea13c8fca379b01405631a3763e84','validation/custom-app-production-spicetify-apply-executor-v0.1.0/test_custom_app_production_spicetify_apply_executor.ps1','4b17793e8a151d16089897bdf7f3545453b1833d'),
