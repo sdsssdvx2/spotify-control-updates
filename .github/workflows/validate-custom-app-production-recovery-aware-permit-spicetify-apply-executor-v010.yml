@@ -104,7 +104,10 @@ jobs:
         shell: powershell
         run: |
           $w=Join-Path $env:RUNNER_TEMP 'generic-apply';git worktree add --detach $w fe07d410531ea13c8fca379b01405631a3763e84;if($LASTEXITCODE){throw 'worktree add failed'}
-          try{1..2|ForEach-Object{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $w 'validation/custom-app-production-spicetify-apply-executor-v0.1.0/test_custom_app_production_spicetify_apply_executor.ps1');if($LASTEXITCODE){throw "generic apply regression failed pass $_"}}}finally{git worktree remove --force $w 2>$null}
+          try{
+            foreach($path in @('validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1')){$dest=Join-Path $w $path;New-Item -ItemType Directory -Force -Path (Split-Path $dest -Parent)|Out-Null;Copy-Item -LiteralPath $path -Destination $dest -Force}
+            1..2|ForEach-Object{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $w 'validation/custom-app-production-spicetify-apply-executor-v0.1.0/test_custom_app_production_spicetify_apply_executor.ps1');if($LASTEXITCODE){throw "generic apply regression failed pass $_"}}
+          }finally{git worktree remove --force $w 2>$null}
           'RECOVERY_AWARE_SPICETIFY_APPLY_EXECUTOR_GENERIC_REPLAY_PASS'
 
       - name: Rebuild hard-disabled candidate and run SelfTest
