@@ -61,6 +61,35 @@ jobs:
           1..2|ForEach-Object{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/test_custom_app_production_recovery_aware_permit_transaction_finalization.ps1';if($LASTEXITCODE){throw "recovery-aware finalization synthetic matrix failed pass $_"}}
           'RECOVERY_AWARE_TRANSACTION_FINALIZATION_SYNTHETIC_REPEAT_PASS'
 
+      - name: Materialize exact recovery integration sibling dependencies
+        shell: powershell
+        run: |
+          $deps=@(
+            @('ddc84778ab4815d4174198727b8d1d052a02182e','validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1','9b039819e7b2278fe4cf15c8585336dd07a8e8e3'),
+            @('6ba560e7980c3492fb032ebc720f029caa97b15c','validation/custom-app-production-stage-executor-v0.1.0/custom-app-production-stage-executor.ps1','349d4028997a9cc7a94540286c8b9ba6d6a5b050'),
+            @('6ba560e7980c3492fb032ebc720f029caa97b15c','validation/custom-app-production-stage-executor-v0.1.0/test_custom_app_production_stage_executor.ps1','4bb9d6d3ef7822809e75e28b3fb0cc03cb96861a'),
+            @('29fe26f505d2f0fb8d9f47e76b5b819ebe1c129d','validation/custom-app-production-executor-start-gate-v0.1.0/custom-app-production-executor-start-gate.ps1','1fa3ca9e77b4c8a48ef56afd656fd102e1636676'),
+            @('29fe26f505d2f0fb8d9f47e76b5b819ebe1c129d','validation/custom-app-production-executor-start-gate-v0.1.0/test_custom_app_production_executor_start_gate.ps1','f63b309beacd2a8f822f6f8c2801c7bb68409c35'),
+            @('1401103431e5a647002aef48394dc599c2db421f','validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/custom-app-production-recovery-aware-new-permit-readiness.ps1','0c73b5352c7b9bd29472d3a145a4fc4333d0574b'),
+            @('1401103431e5a647002aef48394dc599c2db421f','validation/custom-app-production-recovery-aware-new-permit-readiness-v0.1.0/test_custom_app_production_recovery_aware_new_permit_readiness.ps1','ac323f3b465475bf97b655344d989abe62731d48'),
+            @('6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c','validation/custom-app-production-promotion-gate-v0.1.0/custom-app-production-promotion-gate.ps1','1164c197405eac2295f789256e2886068611dd94'),
+            @('6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c','validation/custom-app-production-promotion-gate-v0.1.0/test_custom_app_production_promotion_gate.ps1','80b27015fa05951fe2c0f706eb60d212dac17d24'),
+            @('b53bcf39f715f1c35c7d1f99e157cdecb0a2a572','validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1','f8c91f5a566b24c82257742942bdc6fecfe68eb2'),
+            @('c420a1df6f306c7ba74772b91241cb14abd04738','validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','e2f2fc656235883d2a82b106289973f6ded409a5'),
+            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/custom-app-production-recovery-completion-evidence.ps1','3795f900cbf8ded834f721f7db7b126aa264b0e8'),
+            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/test_custom_app_production_recovery_completion_evidence.ps1','1451ce0aeb046fe36a1660b12647534b514cd738'),
+            @('6d0e964307aaf0c0a8aeece98d5597e81721538e','validation/custom-app-production-recovery-completion-evidence-v0.1.0/probe_custom_app_production_recovery_completion_evidence.ps1','8abbcb7eded67420d2e2b6e8bed3f9636ae9833d'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/test_custom_app_production_recovery_evidence.ps1','de37d029e175dbec899445dbe983e506a14a1b0a'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/probe_custom_app_production_recovery_evidence.ps1','84f73605526373652a4499b7f472537c8e2b5c03'),
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+            @('574fe182168271fa3497d58e269e9af1f60d9033','validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1','e91fa6a125f77352907c1119f6d9f47be9682550'),
+            @('e2b80822835bf5d59dc179e345e098b5bd79759e','validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/custom-app-production-atomic-live-swap-mutation.ps1','394e7bda96501f9ac320ceabe96b4cf96661fe2d'))
+          foreach($q in $deps){$path=$q[1];New-Item -ItemType Directory -Force -Path (Split-Path $path -Parent)|Out-Null;$env:S="$($q[0])`:$path";$env:O=$path;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['S']]))";if($LASTEXITCODE){throw "materialize failed $path"};$actual=(git hash-object $path).Trim();if($actual-cne$q[2]){throw "materialized blob drift $path $actual != $($q[2])"}}
+          'RECOVERY_AWARE_TRANSACTION_FINALIZATION_MATERIALIZATION_PASS'
+
       - name: Run byte-real recovery-aware pre-apply atomic finalization integration
         shell: powershell
         timeout-minutes: 90
