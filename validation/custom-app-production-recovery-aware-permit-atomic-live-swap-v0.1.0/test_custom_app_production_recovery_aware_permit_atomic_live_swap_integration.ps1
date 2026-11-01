@@ -28,16 +28,15 @@ $replacement=@'
     $rawLive=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$built.live_path)
 '@.Replace("`r`n","`n")
 $patched=$text.Substring(0,$start)+$replacement+$text.Substring($end)
+if($patched.IndexOf($startMarker,[StringComparison]::Ordinal) -ge 0){throw 'integration recovery-closed semantic patch failed'}
 
-$gitAssertMarker='valid rollback backup omitted root git provenance'
-$assertAt=Get-RAALIntegrationUniqueMarkerIndexV010 -Text $patched -Marker $gitAssertMarker -Label 'root-git-valid-assertion'
-$lineStart=$patched.LastIndexOf("`n",$assertAt)
-if($lineStart -lt 0){$lineStart=0}else{$lineStart++}
-$lineEnd=$patched.IndexOf("`n",$assertAt,[StringComparison]::Ordinal)
-if($lineEnd -lt 0){$lineEnd=$patched.Length}else{$lineEnd++}
-$newAssert="    Assert-RAPPTrue (Test-Path -LiteralPath ([string]`$r.result.app_backup_path) -PathType Container) 'valid app rollback backup missing';Assert-RAPPTrue (Test-Path -LiteralPath ([string]`$r.result.persistence_backup_path) -PathType Container) 'valid persistence backup missing'`n"
-$patched=$patched.Substring(0,$lineStart)+$newAssert+$patched.Substring($lineEnd)
-if($patched.IndexOf($startMarker,[StringComparison]::Ordinal) -ge 0 -or $patched.IndexOf($gitAssertMarker,[StringComparison]::Ordinal) -ge 0){throw 'integration recovery-closed semantic patch failed'}
+# This downstream layer needs the exact qualified fixture/helper definitions, not a
+# second execution of the already-green parent pre-apply matrix. Cut at the unique
+# parent matrix boundary, then append only the new atomic composition cases.
+$matrixMarker="`n"+'$count=0'+"`n"+'$valid=New-RAPPFixtureV010'
+$matrixAt=Get-RAALIntegrationUniqueMarkerIndexV010 -Text $patched -Marker $matrixMarker -Label 'parent-matrix-start'
+$fixtureOnly=$patched.Substring(0,$matrixAt+1)
+if($fixtureOnly.IndexOf('function New-RAPPFixtureV010',[StringComparison]::Ordinal) -lt 0 -or $fixtureOnly.IndexOf('function Invoke-RAPPFixtureV010',[StringComparison]::Ordinal) -lt 0 -or $fixtureOnly.IndexOf('$count=0',[StringComparison]::Ordinal) -ge 0){throw 'integration fixture-only extraction invalid'}
 
 $integration=@'
 
@@ -121,12 +120,12 @@ try {
 } finally {Remove-RAALITransactionRootsV010 $fx;Remove-RAPPFixtureV010 $fx}
 
 if($integrationCount -ne 2){throw "recovery-aware atomic integration count drifted: $integrationCount"}
-Write-Host "CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_ATOMIC_INTEGRATION_PASS count=$integrationCount recovery_closed_live_bytes=true actual_recovery_pre_apply=true exact_generic_atomic=true exact_rollback=true zero_apply_authority=true"
+Write-Host "CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_ATOMIC_INTEGRATION_PASS count=$integrationCount recovery_closed_live_bytes=true fixture_only_parent=true actual_recovery_pre_apply=true exact_generic_atomic=true exact_rollback=true zero_apply_authority=true"
 '@.Replace("`r`n","`n")
 
 $temp=Join-Path $preApplyDir ('test_custom_app_production_recovery_aware_permit_atomic_integration_generated_'+[Guid]::NewGuid().ToString('N')+'.ps1')
 try {
-    [IO.File]::WriteAllText($temp,($patched+$integration),[Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($temp,($fixtureOnly+$integration),[Text.UTF8Encoding]::new($false))
     & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $temp
     if($LASTEXITCODE){throw "generated recovery-aware atomic integration failed exit=$LASTEXITCODE"}
 } finally {
