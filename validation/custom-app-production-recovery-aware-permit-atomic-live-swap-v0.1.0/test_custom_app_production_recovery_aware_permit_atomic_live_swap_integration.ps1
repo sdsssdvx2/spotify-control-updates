@@ -1,9 +1,10 @@
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$preApplyRel='validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/test_custom_app_production_recovery_aware_permit_pre_apply_preparation.ps1'
 $preApplyDir=Join-Path $root 'validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0'
-$source=Join-Path $preApplyDir 'test_custom_app_production_recovery_aware_permit_pre_apply_preparation.ps1'
-$text=[IO.File]::ReadAllText($source,[Text.UTF8Encoding]::new($false)).Replace("`r`n","`n")
+$generatedFixtureFiles=New-Object System.Collections.Generic.List[string]
+$script:RAALFixtureOnlyMap=@{}
 
 function Get-RAALIntegrationUniqueMarkerIndexV010 {
     param([Parameter(Mandatory=$true)][string]$Text,[Parameter(Mandatory=$true)][string]$Marker,[Parameter(Mandatory=$true)][string]$Label)
@@ -12,6 +13,46 @@ function Get-RAALIntegrationUniqueMarkerIndexV010 {
     if($Text.IndexOf($Marker,$first+$Marker.Length,[StringComparison]::Ordinal) -ge 0){throw "integration semantic patch marker not unique: $Label"}
     return $first
 }
+
+function ConvertTo-RAALFixtureOnlyPrefixV010 {
+    param([Parameter(Mandatory=$true)][string]$Text,[Parameter(Mandatory=$true)][string]$Label)
+    $normalized=$Text.Replace("`r`n","`n")
+    $matrix=[regex]::Match($normalized,'(?im)^\$(?:count|casecount|testcount|total)\s*=\s*0\s*$')
+    if(-not $matrix.Success){throw "fixture-only matrix boundary missing: $Label"}
+    $prefix=$normalized.Substring(0,$matrix.Index)
+    $lines=@($prefix -split "`n")
+    $importPattern='^\s*\.\s*\(Join-Path\s+\$root\s+''(?<rel>validation/[^'']+/test_[^'']+\.ps1)''\)\s*$'
+    for($i=0;$i -lt $lines.Count;$i++){
+        if($lines[$i] -match $importPattern){
+            $parentRel=([string]$Matches['rel']).Replace('\','/')
+            $fixtureRel=New-RAALFixtureOnlyCopyV010 -RelativePath $parentRel
+            $lines[$i]=$lines[$i].Replace($parentRel,$fixtureRel)
+        }
+    }
+    return (($lines -join "`n")+"`n")
+}
+
+function New-RAALFixtureOnlyCopyV010 {
+    param([Parameter(Mandatory=$true)][string]$RelativePath)
+    $rel=$RelativePath.Replace('\','/')
+    if($script:RAALFixtureOnlyMap.ContainsKey($rel)){return [string]$script:RAALFixtureOnlyMap[$rel]}
+    $full=Join-Path $root ($rel.Replace('/',[IO.Path]::DirectorySeparatorChar))
+    if(-not (Test-Path -LiteralPath $full -PathType Leaf)){throw "fixture-only source missing: $rel"}
+    $dirRel=[IO.Path]::GetDirectoryName($rel.Replace('/',[IO.Path]::DirectorySeparatorChar))
+    $leaf=[IO.Path]::GetFileNameWithoutExtension($rel)
+    $genName=$leaf+'.fixture-only.'+[Guid]::NewGuid().ToString('N')+'.ps1'
+    $genRel=(Join-Path $dirRel $genName).Replace('\','/')
+    $genFull=Join-Path $root ($genRel.Replace('/',[IO.Path]::DirectorySeparatorChar))
+    $script:RAALFixtureOnlyMap[$rel]=$genRel
+    $sourceText=[IO.File]::ReadAllText($full,[Text.UTF8Encoding]::new($false))
+    $fixtureText=ConvertTo-RAALFixtureOnlyPrefixV010 -Text $sourceText -Label $rel
+    [IO.File]::WriteAllText($genFull,$fixtureText,[Text.UTF8Encoding]::new($false))
+    $generatedFixtureFiles.Add($genFull)
+    return $genRel
+}
+
+$source=Join-Path $root ($preApplyRel.Replace('/',[IO.Path]::DirectorySeparatorChar))
+$text=[IO.File]::ReadAllText($source,[Text.UTF8Encoding]::new($false)).Replace("`r`n","`n")
 
 # Keep the exact recovery-closed semantics validated by the parent r4 harness: do not
 # mutate live bytes after durable recovery closure merely to manufacture .git coverage.
@@ -30,13 +71,13 @@ $replacement=@'
 $patched=$text.Substring(0,$start)+$replacement+$text.Substring($end)
 if($patched.IndexOf($startMarker,[StringComparison]::Ordinal) -ge 0){throw 'integration recovery-closed semantic patch failed'}
 
-# This downstream layer needs the exact qualified fixture/helper definitions, not a
-# second execution of the already-green parent pre-apply matrix. Cut at the unique
-# parent matrix boundary, then append only the new atomic composition cases.
-$matrixMarker="`n"+'$count=0'+"`n"+'$valid=New-RAPPFixtureV010'
-$matrixAt=Get-RAALIntegrationUniqueMarkerIndexV010 -Text $patched -Marker $matrixMarker -Label 'parent-matrix-start'
-$fixtureOnly=$patched.Substring(0,$matrixAt+1)
-if($fixtureOnly.IndexOf('function New-RAPPFixtureV010',[StringComparison]::Ordinal) -lt 0 -or $fixtureOnly.IndexOf('function Invoke-RAPPFixtureV010',[StringComparison]::Ordinal) -lt 0 -or $fixtureOnly.IndexOf('$count=0',[StringComparison]::Ordinal) -ge 0){throw 'integration fixture-only extraction invalid'}
+# Recursively replace every inherited test_*.ps1 import with a temporary copy that
+# retains only setup/fixture/helper definitions before its matrix counter. Core files
+# remain the exact qualified production-validation implementations; only already-green
+# parent test matrices are skipped. This prevents 30+ minute duplicate matrix replay.
+$fixtureOnly=ConvertTo-RAALFixtureOnlyPrefixV010 -Text $patched -Label $preApplyRel
+if($fixtureOnly.IndexOf('function New-RAPPFixtureV010',[StringComparison]::Ordinal) -lt 0 -or $fixtureOnly.IndexOf('function Invoke-RAPPFixtureV010',[StringComparison]::Ordinal) -lt 0){throw 'integration fixture-only pre-apply helpers missing'}
+if($fixtureOnly -match '(?im)^\$(?:count|casecount|testcount|total)\s*=\s*0\s*$'){throw 'integration parent matrix survived recursive fixture isolation'}
 
 $integration=@'
 
@@ -120,7 +161,7 @@ try {
 } finally {Remove-RAALITransactionRootsV010 $fx;Remove-RAPPFixtureV010 $fx}
 
 if($integrationCount -ne 2){throw "recovery-aware atomic integration count drifted: $integrationCount"}
-Write-Host "CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_ATOMIC_INTEGRATION_PASS count=$integrationCount recovery_closed_live_bytes=true fixture_only_parent=true actual_recovery_pre_apply=true exact_generic_atomic=true exact_rollback=true zero_apply_authority=true"
+Write-Host "CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_ATOMIC_INTEGRATION_PASS count=$integrationCount recovery_closed_live_bytes=true recursive_fixture_only_parent=true actual_recovery_pre_apply=true exact_generic_atomic=true exact_rollback=true zero_apply_authority=true"
 '@.Replace("`r`n","`n")
 
 $temp=Join-Path $preApplyDir ('test_custom_app_production_recovery_aware_permit_atomic_integration_generated_'+[Guid]::NewGuid().ToString('N')+'.ps1')
@@ -130,4 +171,5 @@ try {
     if($LASTEXITCODE){throw "generated recovery-aware atomic integration failed exit=$LASTEXITCODE"}
 } finally {
     if(Test-Path -LiteralPath $temp){[IO.File]::Delete($temp)}
+    foreach($path in @($generatedFixtureFiles)){if(Test-Path -LiteralPath $path){[IO.File]::Delete($path)}}
 }
