@@ -34,7 +34,7 @@ jobs:
             @($base,'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/custom-app-production-recovery-aware-permit-atomic-live-swap.ps1','e3506fd65de02978b4c79c1a367461b5496ae3b9'),
             @($base,'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap.ps1','d17cb708a80bca4fc5948530f36828b9c7ae4130'),
             @($base,'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap_integration.ps1','1e4e10ac2c2f30dd1e1b98adb20070d49a4a94f6'),
-            @($h,'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap_integration_r2.ps1','b43c00e1dce61e9465eadee3639c3d8f9949cc86'),
+            @($h,'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap_integration_r2.ps1','dc200c28817d2688c2f55811d45cfd7282037f80'),
             @($h,'.github/workflows/validate-custom-app-production-recovery-aware-permit-atomic-live-swap-v010.yml','a687382622cb77071fe9ea7e8ee6001177068a45'),
             @($h,'.github/workflows/validate-custom-app-production-recovery-aware-permit-atomic-live-swap-v010-r2.yml','0e0239874f0e78d4a338281615bb2819448c35f5'),
             @($h,'.github/workflows/validate-custom-app-production-recovery-aware-permit-atomic-live-swap-v010-r3.yml','a65c4d8d37ce5b0e68f581163e0b125240ca83d0'),
