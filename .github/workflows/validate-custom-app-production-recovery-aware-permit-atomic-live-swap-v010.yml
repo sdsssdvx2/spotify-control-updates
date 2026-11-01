@@ -13,68 +13,72 @@ permissions: {contents: read}
 jobs:
   validate-windows:
     runs-on: windows-2025
-    timeout-minutes: 120
+    timeout-minutes: 420
     steps:
       - uses: actions/checkout@v4
-        with: {fetch-depth: 0, ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"}
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
 
       - name: Prove exact scope lineage pins and frozen production
         shell: powershell
         run: |
-          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h-cne$e){throw "head mismatch $h != $e"}
-          $p='43f9a433354f56e2db19f4edfa1ffa8f4a245088';if((git merge-base $p HEAD).Trim()-cne$p){throw 'not descended from exact validated recovery-aware pre-apply head'}
-          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
-          $allowed=@('.github/workflows/validate-custom-app-production-recovery-aware-permit-atomic-live-swap-v010.yml','validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/custom-app-production-recovery-aware-permit-atomic-live-swap.ps1','validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap.ps1','validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap_integration.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|?{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x -notin $changed){throw "missing $x"}}
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h -cne $e){throw "head mismatch $h != $e"}
+          $p='43f9a433354f56e2db19f4edfa1ffa8f4a245088';if((git merge-base $p HEAD).Trim() -cne $p){throw 'not descended from exact validated recovery-aware pre-apply head'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $allowed=@('.github/workflows/validate-custom-app-production-recovery-aware-permit-atomic-live-swap-v010.yml','validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/custom-app-production-recovery-aware-permit-atomic-live-swap.ps1','validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap.ps1','validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap_integration.ps1')
+          $changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x -notin $changed){throw "missing $x"}}
           $pins=@(
-            @($h,'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/custom-app-production-recovery-aware-permit-atomic-live-swap.ps1','8161b8d349882ce0926ae597448f4f96bbea44a1'),
-            @($h,'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap.ps1','3d4fd9437c2a14fde2873d9d689a3e8c0b63bc69'),
-            @($h,'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap_integration.ps1','3c8cfa65231fcec1987622832f4cd7b8fd66b124'),
+            @($h,'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/custom-app-production-recovery-aware-permit-atomic-live-swap.ps1','e3506fd65de02978b4c79c1a367461b5496ae3b9'),
+            @($h,'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap.ps1','d17cb708a80bca4fc5948530f36828b9c7ae4130'),
+            @($h,'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap_integration.ps1','1e4e10ac2c2f30dd1e1b98adb20070d49a4a94f6'),
             @($p,'validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/custom-app-production-recovery-aware-permit-pre-apply-preparation.ps1','eaad8a5f161f831bbbada1c1c0957a3dfc80edaa'),
             @($p,'validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/test_custom_app_production_recovery_aware_permit_pre_apply_preparation.ps1','62fee2fc47c900ccf2eaec96bdb920727f3c5690'),
             @($p,'validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/test_custom_app_production_recovery_aware_permit_pre_apply_preparation_r4.ps1','f5221f0934f9d0fd61a21c7a23f895ecd62b1b0c'),
-            @('574fe182168271fa3497d58e269e9af1f60d9033','validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1','e91fa6a125f77352907c1119f6d9f47be9682550'),
-            @('574fe182168271fa3497d58e269e9af1f60d9033','validation/custom-app-production-atomic-live-swap-v0.1.0/test_custom_app_production_atomic_live_swap.ps1','d79de6567377cf751f61114c0c1f773299a77239'))
-          foreach($q in $pins){$b=(git rev-parse "$($q[0])`:$($q[1])").Trim();if($b-cne$q[2]){throw "pin drift $($q[1]) $b != $($q[2])"}}
-          'RECOVERY_AWARE_ATOMIC_SCOPE_PINS_PASS'
+            @('e2b80822835bf5d59dc179e345e098b5bd79759e','validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/custom-app-production-atomic-live-swap-mutation.ps1','394e7bda96501f9ac320ceabe96b4cf96661fe2d'),
+            @('574fe182168271fa3497d58e269e9af1f60d9033','validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1','e91fa6a125f77352907c1119f6d9f47be9682550')
+          );foreach($q in $pins){$b=(git rev-parse "$($q[0])`:$($q[1])").Trim();if($b -cne $q[2]){throw "pin drift $($q[1]) $b != $($q[2])"}}
+          'RECOVERY_AWARE_BOUNDED_ATOMIC_SCOPE_PINS_PASS'
 
-      - name: Parse and audit recovery-aware atomic trust boundary
+      - name: Parse and audit recovery admission to bounded mutation trust boundary
         shell: powershell
         run: |
           $d='validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0';$core="$d/custom-app-production-recovery-aware-permit-atomic-live-swap.ps1";$test="$d/test_custom_app_production_recovery_aware_permit_atomic_live_swap.ps1";$integration="$d/test_custom_app_production_recovery_aware_permit_atomic_live_swap_integration.ps1"
-          foreach($f in @($core,$test,$integration)){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|%{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          foreach($f in @($core,$test,$integration)){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|ForEach-Object{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
           $c=Get-Content $core -Raw
-          foreach($m in @('Test-CustomAppProductionRecoveryAwarePermitPreApplyPreparedResultV010','Resolve-CustomAppProductionRecoveryAwarePermitStageAcquisitionAdmissionV010','ConvertTo-CustomAppProductionRecoveryAwarePermitGenericStageResultV010','ConvertTo-CustomAppProductionRecoveryAwarePermitGenericPreparedResultV010','Invoke-CustomAppProductionAtomicLiveSwapV010','recovery_pre_atomic_admission_fingerprint','requires_transaction_finalization=$true','requires_spicetify_apply_phase=$true','spicetify_apply_authorized=$false','production_mutation_authorized=$false')){if($c.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "core marker missing $m"}}
-          if(([regex]::Matches($c,'Resolve-CustomAppProductionRecoveryAwarePermitStageAcquisitionAdmissionV010')).Count-ne1){throw 'recovery admission call count drifted'}
-          if(([regex]::Matches($c,'Invoke-CustomAppProductionAtomicLiveSwapV010')).Count-ne1){throw 'generic atomic call count drifted'}
-          foreach($x in @('[IO.Directory]::Move(','Invoke-WebRequest','Invoke-RestMethod','Start-Process','spicetify apply','spicetify config','Save-AddonState')){if($c.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "wrapper gained forbidden direct primitive $x"}}
-          if($c -match 'session_key_persisted\s*=\s*\$true|session_key_exposed\s*=\s*\$true|spicetify_apply_authorized\s*=\s*\$true|production_execution_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'authority/session-key contract escaped'}
-          $t=Get-Content $test -Raw;foreach($m in @('wrong key accepted','binding drift accepted','live drift accepted','generic stage invalid accepted','rollback evidence not propagated','recovery_admission_exactly_once=true','generic_atomic_exactly_once=true','count=$count')){if($t.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "wrapper coverage missing $m"}}
-          $i=Get-Content $integration -Raw;foreach($m in @('Recovery closure is durable evidence','New-RAALFixtureOnlyCopyV010','fixture-only AST parse failed','RAALILiveBaselineBridge','recursive_fixture_only_parent=true','ast_boundary_fallback=true','byte_real_stable_tree_bridge=true','Invoke-RAALIRecoveryAtomicV010','throw-after-candidate-move','actual_recovery_pre_apply=true','exact_generic_atomic=true','exact_rollback=true','zero_apply_authority=true')){if($i.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "integration coverage missing $m"}}
-          'RECOVERY_AWARE_ATOMIC_PARSE_AUDIT_PASS'
+          foreach($m in @('Test-CustomAppProductionRecoveryAwarePermitPreApplyPreparedResultV010','Test-CustomAppProductionStageExecutorLiveBaselineV010','Get-CustomAppLocalRuntimeBaseline','Get-CustomAppUpdateTreeSnapshotV010','Resolve-CustomAppProductionRecoveryAwarePermitStageAcquisitionAdmissionV010','Invoke-CustomAppProductionAtomicLiveSwapMutationV010','Get-CustomAppProductionRecoveryAwarePermitConsumptionPersistedTargetV010','recovery-aware-atomic-byte-real-live-backup-mismatch','recovery-aware-atomic-post-mutation-same-app-newer-consumption','Restore-CustomAppProductionRecoveryAwarePermitAtomicAfterWrapperFailureV010','byte_real_live_reverified','historical_consumption_reverified_after_atomic','same_app_newer_consumption_absent','requires_fresh_post_swap_apply_admission=$true','spicetify_apply_authorized=$false','production_mutation_authorized=$false')){if($c.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "core marker missing $m"}}
+          if(([regex]::Matches($c,'Resolve-CustomAppProductionRecoveryAwarePermitStageAcquisitionAdmissionV010')).Count -ne 1){throw 'fresh recovery admission call count drifted'}
+          if(([regex]::Matches($c,'Invoke-CustomAppProductionAtomicLiveSwapMutationV010')).Count -ne 1){throw 'bounded mutation call count drifted'}
+          if(([regex]::Matches($c,'Get-CustomAppProductionRecoveryAwarePermitConsumptionPersistedTargetV010')).Count -ne 1){throw 'historical consumption reload count drifted'}
+          foreach($x in @('Invoke-CustomAppProductionAtomicLiveSwapV010','ConvertTo-CustomAppProductionRecoveryAwarePermitGenericStageResultV010','ConvertTo-CustomAppProductionRecoveryAwarePermitGenericPreparedResultV010','[IO.Directory]::Move(','Invoke-WebRequest','Invoke-RestMethod','Start-Process','ProcessStartInfo','spicetify apply','spicetify config','Save-AddonState')){if($c.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "wrapper gained forbidden/superseded primitive $x"}}
+          if($c -match 'session_key_persisted\s*=\s*\$true|session_key_exposed\s*=\s*\$true|apply_execution_authorized\s*=\s*\$true|spicetify_apply_authorized\s*=\s*\$true|additional_mutation_authorized\s*=\s*\$true|live_destination_authorized\s*=\s*\$true|production_execution_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'authority/session-key contract escaped'}
+          $t=Get-Content $test -Raw;foreach($m in @('byte-real live drift accepted','wrong key accepted','mutation pre-denial','primitive rollback evidence lost','historical reload failure','same-app newer consumption accepted','unrelated newer denied','bounded_mutation_exactly_once=true','stable_and_byte_real_views_separated=true','historical_append_supported=true','same_app_newer_fail_closed=true')){if($t.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "wrapper coverage missing $m"}}
+          $i=Get-Content $integration -Raw;foreach($m in @('Recovery closure is durable evidence','New-RAALFixtureOnlyCopyV010','fixture-only AST parse failed','Invoke-CustomAppProductionAtomicLiveSwapMutationValidationHookV010','bounded-atomic-byte-real-drift','bounded-atomic-stage-drift','bounded-atomic-unrelated-rev2','no_test_only_baseline_bridge=true','stable_and_byte_real_views_separate=true','unrelated_historical_append=true')){if($i.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "integration coverage missing $m"}}
+          if($i.IndexOf('RAALILiveBaselineBridge',[StringComparison]::OrdinalIgnoreCase)-ge0){throw 'test-only live baseline bridge returned'}
+          'RECOVERY_AWARE_BOUNDED_ATOMIC_PARSE_AUDIT_PASS'
 
-      - name: Run recovery-aware atomic wrapper matrix
+      - name: Run synthetic recovery-aware bounded atomic wrapper matrix
         shell: powershell
         timeout-minutes: 10
         run: |
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap.ps1';if($LASTEXITCODE){throw 'wrapper matrix failed'}
-          'RECOVERY_AWARE_ATOMIC_WRAPPER_MATRIX_PASS'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap.ps1';if($LASTEXITCODE){throw 'synthetic wrapper matrix failed'}
+          'RECOVERY_AWARE_BOUNDED_ATOMIC_WRAPPER_MATRIX_PASS'
 
-      - name: Replay exact generic atomic mutation and rollback matrix
+      - name: Replay exact validated bounded atomic mutation matrix
         shell: powershell
-        timeout-minutes: 15
+        timeout-minutes: 45
         run: |
-          $w=Join-Path $env:RUNNER_TEMP 'generic-atomic-574fe182';git worktree add --detach $w 574fe182168271fa3497d58e269e9af1f60d9033;if($LASTEXITCODE){throw 'generic atomic worktree add failed'}
+          $w=Join-Path $env:RUNNER_TEMP 'atomic-mutation-e2b80822';git worktree add --detach $w e2b80822835bf5d59dc179e345e098b5bd79759e;if($LASTEXITCODE){throw 'mutation worktree add failed'}
           try{
             $deps=@(
               @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
               @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'))
-            foreach($q in $deps){$out=Join-Path $w $q[1];New-Item -ItemType Directory -Force -Path (Split-Path $out -Parent)|Out-Null;$env:S="$($q[0])`:$($q[1])";$env:O=$out;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['S']]))";if($LASTEXITCODE){throw "materialize failed $($q[1])"};$actual=(git hash-object $out).Trim();if($actual-cne$q[2]){throw "materialized drift $($q[1])"}}
-            $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
-            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $w 'validation/custom-app-production-atomic-live-swap-v0.1.0/test_custom_app_production_atomic_live_swap.ps1');if($LASTEXITCODE){throw 'exact generic atomic matrix failed'}
+            foreach($q in $deps){$out=Join-Path $w $q[1];New-Item -ItemType Directory -Force -Path (Split-Path $out -Parent)|Out-Null;$env:S="$($q[0])`:$($q[1])";$env:O=$out;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['S']]))";if($LASTEXITCODE){throw "materialize failed $($q[1])"};if((git hash-object $out).Trim() -cne $q[2]){throw "materialized blob drift $($q[1])"}}
+            $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $w 'validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/test_custom_app_production_atomic_live_swap_mutation.ps1');if($LASTEXITCODE){throw 'exact bounded mutation matrix failed'}
           } finally {git worktree remove --force $w 2>$null}
-          'RECOVERY_AWARE_ATOMIC_GENERIC_MATRIX_PASS'
+          'RECOVERY_AWARE_BOUNDED_ATOMIC_MUTATION_REPLAY_PASS'
 
-      - name: Materialize exact recovery-aware composition dependencies
+      - name: Materialize exact recovery integration sibling dependencies
         shell: powershell
         run: |
           $deps=@(
@@ -97,36 +101,36 @@ jobs:
             @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
             @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
             @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
-            @('574fe182168271fa3497d58e269e9af1f60d9033','validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1','e91fa6a125f77352907c1119f6d9f47be9682550'))
-          foreach($q in $deps){$path=$q[1];New-Item -ItemType Directory -Force -Path (Split-Path $path -Parent)|Out-Null;$env:S="$($q[0])`:$path";$env:O=$path;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['S']]))";if($LASTEXITCODE){throw "materialize failed $path"};$actual=(git hash-object $path).Trim();if($actual-cne$q[2]){throw "materialized blob drift $path $actual != $($q[2])"}}
-          'RECOVERY_AWARE_ATOMIC_COMPOSITION_MATERIALIZATION_PASS'
+            @('574fe182168271fa3497d58e269e9af1f60d9033','validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1','e91fa6a125f77352907c1119f6d9f47be9682550'),
+            @('e2b80822835bf5d59dc179e345e098b5bd79759e','validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/custom-app-production-atomic-live-swap-mutation.ps1','394e7bda96501f9ac320ceabe96b4cf96661fe2d'))
+          foreach($q in $deps){$path=$q[1];New-Item -ItemType Directory -Force -Path (Split-Path $path -Parent)|Out-Null;$env:S="$($q[0])`:$path";$env:O=$path;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['S']]))";if($LASTEXITCODE){throw "materialize failed $path"};$actual=(git hash-object $path).Trim();if($actual -cne $q[2]){throw "materialized blob drift $path $actual != $($q[2])"}}
+          'RECOVERY_AWARE_BOUNDED_ATOMIC_MATERIALIZATION_PASS'
 
-      - name: Run recursive fixture-only recovery atomic composition and rollback matrix
+      - name: Run actual recovery-aware bounded atomic integration
         shell: powershell
-        timeout-minutes: 20
+        timeout-minutes: 180
         run: |
           $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap_integration.ps1';if($LASTEXITCODE){throw 'recovery-aware atomic integration matrix failed'}
-          'RECOVERY_AWARE_ATOMIC_RECURSIVE_INTEGRATION_MATRIX_PASS'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap_integration.ps1';if($LASTEXITCODE){throw 'actual recovery-aware bounded atomic integration failed'}
+          'RECOVERY_AWARE_BOUNDED_ATOMIC_INTEGRATION_PASS'
 
       - name: Rebuild exact recovery-readiness hard-disabled candidate and run SelfTest
         shell: powershell
-        timeout-minutes: 15
         run: |
           $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'candidate rebuild failed'}
           $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json";$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant()
-          if((Get-Item $a).Length-ne1382213 -or $ah-cne'c2e5ffd4fe9b14b5c31dd53e7d093bd9b5db2a4ad49fa19449d299e3c14fac2f'){throw 'Addon Manager parent drift'};if((Get-Item $m).Length-ne284327 -or $mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control parent drift'};if($rh-cne'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw 'candidate report drift'}
-          $s=Join-Path $env:RUNNER_TEMP 'raal-atomic-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'Addon Manager SelfTest failed'}
-          'RECOVERY_AWARE_ATOMIC_SELFTEST_PASS'
+          if((Get-Item $a).Length -ne 1382213 -or $ah -cne 'c2e5ffd4fe9b14b5c31dd53e7d093bd9b5db2a4ad49fa19449d299e3c14fac2f'){throw 'Addon Manager hard-disabled candidate drift'};if((Get-Item $m).Length -ne 284327 -or $mh -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate drift'};if($rh -cne 'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw 'candidate report drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'recovery-aware-bounded-atomic-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'Addon Manager SelfTest failed'}
+          'RECOVERY_AWARE_BOUNDED_ATOMIC_SELFTEST_PASS'
 
       - name: Prove protected surfaces immutable and write evidence
         shell: powershell
         run: |
-          $p='43f9a433354f56e2db19f4edfa1ffa8f4a245088';$expected=@('.github/workflows/validate-custom-app-production-recovery-aware-permit-atomic-live-swap-v010.yml','validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/custom-app-production-recovery-aware-permit-atomic-live-swap.ps1','validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap.ps1','validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap_integration.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|?{$_ -notin $expected});if($bad.Count){throw "unexpected surface $($bad -join ', ')"}
+          $p='43f9a433354f56e2db19f4edfa1ffa8f4a245088';$expected=@('.github/workflows/validate-custom-app-production-recovery-aware-permit-atomic-live-swap-v010.yml','validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/custom-app-production-recovery-aware-permit-atomic-live-swap.ps1','validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap.ps1','validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap_integration.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "unexpected changed surface $($bad -join ', ')"}
           foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/custom-app-production-recovery-aware-permit-pre-apply-preparation.ps1','validation/custom-app-production-recovery-aware-permit-stage-executor-v0.1.0/custom-app-production-recovery-aware-permit-stage-executor.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
-          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main moved'}
-          $d='validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_recovery_aware_pre_apply_parent=$p;generic_atomic_head='574fe182168271fa3497d58e269e9af1f60d9033';fresh_recovery_admission_immediately_before_atomic=$true;generic_atomic_invoked_exactly_once=$true;generic_atomic_full_fault_matrix_replayed=$true;recovery_closed_end_to_end_composition_replayed=$true;recursive_fixture_only_parent_matrices=$true;fixture_isolation_ast_fallback=$true;pre_swap_stable_tree_byte_real_bridge=$true;post_mutation_composition_rollback_verified=$true;exact_app_and_persistence_rollback_inherited=$true;spicetify_apply_executed=$false;spicetify_apply_authority=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
-          'RECOVERY_AWARE_ATOMIC_IMMUTABILITY_PASS'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $d='validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();parent=$p;qualified_mutation_head='e2b80822835bf5d59dc179e345e098b5bd79759e';fresh_recovery_admission_exactly_once=$true;bounded_mutation_exactly_once=$true;generic_atomic_admission_not_reused=$true;stable_recovery_tree_preserved=$true;byte_real_live_reverified=$true;full_live_backup_equivalence_required=$true;historical_consumption_reloaded_after_mutation=$true;unrelated_newer_consumption_supported=$true;same_app_newer_consumption_fail_closed=$true;post_mutation_wrapper_failure_rolls_back=$true;transaction_workspace_cleanup_on_failure=$true;session_key_persisted=$false;session_key_exposed=$false;spicetify_apply_authority=$false;production_mutation_authority=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'RECOVERY_AWARE_BOUNDED_ATOMIC_IMMUTABILITY_PASS'
 
       - uses: actions/upload-artifact@v4
         with:
