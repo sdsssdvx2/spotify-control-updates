@@ -1,0 +1,99 @@
+name: Validate Custom App Production Recovery-Aware Permit Transaction Finalization v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-aware-permit-transaction-finalization-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0]
+    paths: ['validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/**','.github/workflows/validate-custom-app-production-recovery-aware-permit-transaction-finalization-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact recovery-aware lineage scope and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h-cne$e){throw "head mismatch $h != $e"}
+          $p='cb2e50b715a7d7f1bbc7b3b810104cefff7f7d50';if((git merge-base $p HEAD).Trim()-cne$p){throw 'not descended from exact validated recovery-aware atomic head'}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $allowed=@('.github/workflows/validate-custom-app-production-recovery-aware-permit-transaction-finalization-v010.yml','validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/custom-app-production-recovery-aware-permit-transaction-finalization.ps1','validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/test_custom_app_production_recovery_aware_permit_transaction_finalization.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x-notin$changed){throw "missing $x"}}
+          $pins=@(
+            @($h,'validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/custom-app-production-recovery-aware-permit-transaction-finalization.ps1','9c725e47d432addac24fe4a6cd59e37af393b6c7'),
+            @($h,'validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/test_custom_app_production_recovery_aware_permit_transaction_finalization.ps1','879b8ba65ef0e8e5cf4c11ecde574c11ae576b39'),
+            @($p,'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/custom-app-production-recovery-aware-permit-atomic-live-swap.ps1','e3506fd65de02978b4c79c1a367461b5496ae3b9'),
+            @('75a39eea7b0ef7d35d193962607752ef1a873ae0','validation/custom-app-production-transaction-finalization-v0.1.0/custom-app-production-transaction-finalization.ps1','2958ae3f92173215d32ef8bf284a9433c52caa61'),
+            @('75a39eea7b0ef7d35d193962607752ef1a873ae0','validation/custom-app-production-transaction-finalization-v0.1.0/test_custom_app_production_transaction_finalization.ps1','5918c6e97a17a487affdf5bddaed2e5a8b037cee')
+          );foreach($q in $pins){$b=(git rev-parse "$($q[0])`:$($q[1])").Trim();if($b-cne$q[2]){throw "pin drift $($q[1]) $b != $($q[2])"}}
+          'RECOVERY_AWARE_TRANSACTION_FINALIZATION_SCOPE_PINS_PASS'
+
+      - name: Parse and audit recovery-aware cleanup-only trust boundary
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0';$core="$d/custom-app-production-recovery-aware-permit-transaction-finalization.ps1";$test="$d/test_custom_app_production_recovery_aware_permit_transaction_finalization.ps1"
+          foreach($f in @($core,$test)){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|ForEach-Object{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $c=Get-Content $core -Raw
+          foreach($m in @('Test-CustomAppProductionRecoveryAwarePermitAtomicLiveSwapResultV010','Get-CustomAppProductionRecoveryAwarePermitTransactionFinalizationConsumptionV010','Remove-CustomAppProductionRecoveryAwarePermitAtomicTransactionV010','historical_consumption_reverified_before_cleanup=$true','historical_consumption_reverified_after_cleanup=$true','same_app_newer_consumption_absent=$true','requires_fresh_post_swap_apply_admission=$true','requires_recovery_if_post_cleanup_validation_fails=$true','apply_execution_authorized=$false','spicetify_apply_authorized=$false','production_mutation_authorized=$false')){if($c.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "core marker missing $m"}}
+          if(([regex]::Matches($c,'Remove-CustomAppProductionRecoveryAwarePermitAtomicTransactionV010')).Count-ne1){throw 'bounded transaction cleanup call count drifted'}
+          foreach($x in @('Invoke-CustomAppProductionTransactionFinalizationV010','[IO.Directory]::Move(','Invoke-WebRequest','Invoke-RestMethod','Start-Process','ProcessStartInfo','spicetify apply','spicetify config','SessionKey')){if($c.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "forbidden trust-boundary primitive $x"}}
+          if($c-match 'apply_execution_authorized\s*=\s*\$true|spicetify_apply_authorized\s*=\s*\$true|additional_mutation_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true|result_is_authority\s*=\s*\$true'){throw 'authority escaped'}
+          $q=Get-Content $test -Raw;foreach($m in @('same-app-newer','unrelated-newer','before-hook-fail','cleanup-fail','after-hook-fail','post-live-drift','post-persistence-drift','persistence-backup-drift','post-consumption-fail','extra-entry','app-backup-drift','rehashed authority escape accepted')){if($q.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "synthetic coverage missing $m"}}
+          'RECOVERY_AWARE_TRANSACTION_FINALIZATION_PARSE_AUDIT_PASS'
+
+      - name: Run recovery-aware transaction finalization synthetic matrix twice
+        shell: powershell
+        run: |
+          $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
+          1..2|ForEach-Object{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/test_custom_app_production_recovery_aware_permit_transaction_finalization.ps1';if($LASTEXITCODE){throw "recovery-aware finalization synthetic matrix failed pass $_"}}
+          'RECOVERY_AWARE_TRANSACTION_FINALIZATION_SYNTHETIC_REPEAT_PASS'
+
+      - name: Replay exact validated generic transaction-finalization matrix
+        shell: powershell
+        timeout-minutes: 60
+        run: |
+          $w=Join-Path $env:RUNNER_TEMP 'generic-finalization-75a39eea';git worktree add --detach $w 75a39eea7b0ef7d35d193962607752ef1a873ae0;if($LASTEXITCODE){throw 'generic finalization worktree add failed'}
+          try{
+            $deps=@(
+              @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+              @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'))
+            foreach($q in $deps){$out=Join-Path $w $q[1];New-Item -ItemType Directory -Force -Path (Split-Path $out -Parent)|Out-Null;$env:S="$($q[0])`:$($q[1])";$env:O=$out;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['S']]))";if($LASTEXITCODE){throw "materialize failed $($q[1])"};if((git hash-object $out).Trim()-cne$q[2]){throw "materialized blob drift $($q[1])"}}
+            $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP;1..2|ForEach-Object{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $w 'validation/custom-app-production-transaction-finalization-v0.1.0/test_custom_app_production_transaction_finalization.ps1');if($LASTEXITCODE){throw "generic finalization regression failed pass $_"}}
+          } finally {git worktree remove --force $w 2>$null}
+          'RECOVERY_AWARE_TRANSACTION_FINALIZATION_GENERIC_REPLAY_PASS'
+
+      - name: Rebuild exact recovery-readiness hard-disabled candidate and run SelfTest
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'candidate rebuild failed'}
+          $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json";$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant()
+          if((Get-Item $a).Length-ne1382213-or$ah-cne'c2e5ffd4fe9b14b5c31dd53e7d093bd9b5db2a4ad49fa19449d299e3c14fac2f'){throw 'Addon Manager candidate drift'};if((Get-Item $m).Length-ne284327-or$mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate drift'};if($rh-cne'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw 'candidate report drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'raft-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'Addon Manager SelfTest failed'}
+          'RECOVERY_AWARE_TRANSACTION_FINALIZATION_SELFTEST_PASS'
+
+      - name: Prove protected surfaces immutable and write evidence
+        shell: powershell
+        run: |
+          $p='cb2e50b715a7d7f1bbc7b3b810104cefff7f7d50';$expected=@('.github/workflows/validate-custom-app-production-recovery-aware-permit-transaction-finalization-v010.yml','validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/custom-app-production-recovery-aware-permit-transaction-finalization.ps1','validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/test_custom_app_production_recovery_aware_permit_transaction_finalization.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "unexpected changed surface $($bad -join ', ')"}
+          foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/custom-app-production-recovery-aware-permit-atomic-live-swap.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $d='validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();parent=$p;cleanup_only=$true;historical_consumption_reverified_before_cleanup=$true;historical_consumption_reverified_after_cleanup=$true;same_app_newer_consumption_denied=$true;unrelated_newer_consumption_allowed=$true;transaction_workspace_only_deleted=$true;stage_workspace_preserved=$true;app_backup_preserved=$true;persistence_backup_preserved=$true;post_cleanup_failure_requires_recovery=$true;fresh_post_swap_apply_admission_required=$true;raw_session_key_accepted=$false;apply_authority=$false;production_mutation_authority=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'RECOVERY_AWARE_TRANSACTION_FINALIZATION_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-recovery-aware-permit-transaction-finalization-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/custom-app-production-recovery-aware-permit-transaction-finalization.ps1
+            validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/test_custom_app_production_recovery_aware_permit_transaction_finalization.ps1
+            validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/ci-evidence.json
+          if-no-files-found: error
