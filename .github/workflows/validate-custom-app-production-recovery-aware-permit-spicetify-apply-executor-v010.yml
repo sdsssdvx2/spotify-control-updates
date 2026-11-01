@@ -26,8 +26,8 @@ jobs:
           if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
           $allowed=@('.github/workflows/validate-custom-app-production-recovery-aware-permit-spicetify-apply-executor-v010.yml','validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/custom-app-production-recovery-aware-permit-spicetify-apply-executor.ps1','validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/test_custom_app_production_recovery_aware_permit_spicetify_apply_executor.ps1','validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/test_custom_app_production_recovery_aware_permit_spicetify_apply_executor_integration.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_-notin$allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x-notin$changed){throw "missing $x"}}
           $pins=@(
-            @($h,'validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/custom-app-production-recovery-aware-permit-spicetify-apply-executor.ps1','cc42e15cc8918cbcc9a1ada0c8183d535c8fa132'),
-            @($h,'validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/test_custom_app_production_recovery_aware_permit_spicetify_apply_executor.ps1','4ddf27c41cd1ea535d79322632b7ce6ce7028ed7'),
+            @($h,'validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/custom-app-production-recovery-aware-permit-spicetify-apply-executor.ps1','cc42e15cc891d233c59c934a5928ff14371c3f80'),
+            @($h,'validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/test_custom_app_production_recovery_aware_permit_spicetify_apply_executor.ps1','4ddf27c41cd1f4006981fa17478e09f0f72e7152'),
             @($h,'validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/test_custom_app_production_recovery_aware_permit_spicetify_apply_executor_integration.ps1','329d2fe21d15d335960555ce2c56a2e976d9f50b'),
             @($p,'validation/custom-app-production-recovery-aware-permit-post-swap-apply-admission-v0.1.0/custom-app-production-recovery-aware-permit-post-swap-apply-admission.ps1','b8c1462224a2b852efc7294aca233148d658f3f8'),
             @('fe07d410531ea13c8fca379b01405631a3763e84','validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1','f7372b069fbfe6a0f8d8a0aad45312ffd33d9f0a'),
@@ -129,6 +129,6 @@ jobs:
           path: |
             validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/custom-app-production-recovery-aware-permit-spicetify-apply-executor.ps1
             validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/test_custom_app_production_recovery_aware_permit_spicetify_apply_executor.ps1
-            validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/test_custom_app_production_recovery_aware_permit-spicetify-apply-executor_integration.ps1
+            validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/test_custom_app_production_recovery_aware_permit_spicetify_apply_executor_integration.ps1
             validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/ci-evidence.json
           if-no-files-found: warn
