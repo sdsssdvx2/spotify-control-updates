@@ -23,9 +23,9 @@ $patched=$text.Substring(0,$i)+$importNew+$text.Substring($i+$importOld.Length)
 
 $restoreOld="        Restore-RAALIValidV010 `$valid `$prep `$r 'valid';`$integrationCount++"
 $restoreNew=@'
-        $fakeDir=Join-Path ([string]$valid.base) 'recovery-aware-apply-fake';[IO.Directory]::CreateDirectory($fakeDir)|Out-Null
-        $fakeExe=Join-Path $fakeDir 'spicetify.exe';$fakeCount=Join-Path $fakeDir 'apply-count.txt'
-        $fakeSource=@"
+        $raxApplyFakeDir=Join-Path ([string]$valid.base) 'recovery-aware-apply-fake';[IO.Directory]::CreateDirectory($raxApplyFakeDir)|Out-Null
+        $raxApplyFakeExe=Join-Path $raxApplyFakeDir 'spicetify.exe';$raxApplyFakeCount=Join-Path $raxApplyFakeDir 'apply-count.txt'
+        $raxApplyFakeSource=@"
 using System;
 using System.IO;
 public static class RecoveryAwareSpicetifyFake {
@@ -40,25 +40,25 @@ public static class RecoveryAwareSpicetifyFake {
     }
 }
 "@
-        Add-Type -TypeDefinition $fakeSource -Language CSharp -OutputAssembly $fakeExe -OutputType ConsoleApplication
-        Assert-RAALITrue (Test-Path -LiteralPath $fakeExe -PathType Leaf) 'real recovery-aware apply fake spicetify.exe missing'
-        $fakeSha=(Get-FileHash -LiteralPath $fakeExe -Algorithm SHA256).Hash.ToLowerInvariant();$env:RAX_REAL_COUNT=$fakeCount
+        Add-Type -TypeDefinition $raxApplyFakeSource -Language CSharp -OutputAssembly $raxApplyFakeExe -OutputType ConsoleApplication
+        Assert-RAALITrue (Test-Path -LiteralPath $raxApplyFakeExe -PathType Leaf) 'real recovery-aware apply fake spicetify.exe missing'
+        $raxApplyFakeSha=(Get-FileHash -LiteralPath $raxApplyFakeExe -Algorithm SHA256).Hash.ToLowerInvariant();$env:RAX_REAL_COUNT=$raxApplyFakeCount
         try {
             $applyNow=$postAt.AddSeconds(1)
-            $apply=Invoke-CustomAppProductionRecoveryAwarePermitSpicetifyApplyExecutorV010 -PriorRecoveryAwareAdmissionDecision $post.decision -RecoveryAwareFinalizationResult $final.result -RecoveryAwareAtomicResult $r.result -RecoveryAwarePreparedResult $prep.result -RecoveryAwareStageExecutorResult $valid.stage -ConsumptionPersistenceResult $valid.f.persisted -Permit $valid.f.p.f.p.r.issuer.permit -Name ([string]$valid.bundle.lifecycle.name) -LifecycleRow $valid.bundle.lifecycle -ProvenanceRow $valid.bundle.provenance -BindingRow $valid.bundle.binding -AllowedRoot $valid.q.f.ce.q.f.f.allowed -ConsumptionStoreDirectory $valid.f.p.store -SessionKey $script:RAIssuerKey -LocalAppDataRoot $valid.q.f.ce.q.f.f.q.persistence.local -AppDataRoot $valid.q.f.ce.q.f.f.q.persistence.roaming -SpicetifyExecutablePath $fakeExe -ExpectedSpicetifySha256 $fakeSha -Now $applyNow -TimeoutSeconds 10
+            $apply=Invoke-CustomAppProductionRecoveryAwarePermitSpicetifyApplyExecutorV010 -PriorRecoveryAwareAdmissionDecision $post.decision -RecoveryAwareFinalizationResult $final.result -RecoveryAwareAtomicResult $r.result -RecoveryAwarePreparedResult $prep.result -RecoveryAwareStageExecutorResult $valid.stage -ConsumptionPersistenceResult $valid.f.persisted -Permit $valid.f.p.f.p.r.issuer.permit -Name ([string]$valid.bundle.lifecycle.name) -LifecycleRow $valid.bundle.lifecycle -ProvenanceRow $valid.bundle.provenance -BindingRow $valid.bundle.binding -AllowedRoot $valid.q.f.ce.q.f.f.allowed -ConsumptionStoreDirectory $valid.f.p.store -SessionKey $script:RAIssuerKey -LocalAppDataRoot $valid.q.f.ce.q.f.f.q.persistence.local -AppDataRoot $valid.q.f.ce.q.f.f.q.persistence.roaming -SpicetifyExecutablePath $raxApplyFakeExe -ExpectedSpicetifySha256 $raxApplyFakeSha -Now $applyNow -TimeoutSeconds 10
         } finally {Remove-Item Env:RAX_REAL_COUNT -ErrorAction SilentlyContinue}
         Assert-RAALITrue ([bool]$apply.ok) ('real recovery-aware Spicetify apply denied: '+[string]$apply.reason)
         Assert-RAALITrue ([bool]$apply.spicetify_apply_executed) 'real recovery-aware apply did not report execution'
         Assert-RAALIFalse ([bool]$apply.rollback_attempted) 'real recovery-aware apply unexpectedly rolled back'
         Assert-RAALITrue ([bool]$apply.requires_post_apply_commit_cleanup) 'real recovery-aware apply missing post-apply cleanup requirement'
-        $applyCount=0;if(Test-Path -LiteralPath $fakeCount -PathType Leaf){[void][int]::TryParse(([IO.File]::ReadAllText($fakeCount)).Trim(),[ref]$applyCount)}
+        $applyCount=0;if(Test-Path -LiteralPath $raxApplyFakeCount -PathType Leaf){[void][int]::TryParse(([IO.File]::ReadAllText($raxApplyFakeCount)).Trim(),[ref]$applyCount)}
         Assert-RAALITrue ($applyCount -eq 1) ('real recovery-aware apply process count drifted: '+$applyCount)
         $applyCheck=Test-CustomAppProductionRecoveryAwarePermitSpicetifyApplyResultV010 -Result $apply.result;Assert-RAALITrue ([bool]$applyCheck.ok) ('real recovery-aware apply result validator denied: '+[string]$applyCheck.reason)
         Assert-RAALIEq ([string]$apply.result.historical_consumption_envelope_sha256).Trim().ToLowerInvariant() ([string]$post.decision.historical_consumption_envelope_sha256).Trim().ToLowerInvariant() 'real recovery-aware apply historical envelope continuity'
         Assert-RAALITrue ([int64]$apply.result.current_consumption_revision -ge [int64]$post.decision.current_consumption_revision) 'real recovery-aware apply consumption revision regressed'
         Assert-RAALIEq ([string]$apply.result.live_tree_sha256).Trim().ToLowerInvariant() ([string]$valid.remote_tree).Trim().ToLowerInvariant() 'real recovery-aware apply live tree not staged remote tree'
         Assert-RAALIEq ([string]$apply.result.remote_tree_sha256).Trim().ToLowerInvariant() ([string]$valid.remote_tree).Trim().ToLowerInvariant() 'real recovery-aware apply remote tree drifted'
-        Assert-RAALIEq ([string]$apply.result.spicetify_executable_sha256).Trim().ToLowerInvariant() $fakeSha 'real recovery-aware apply executable hash drifted'
+        Assert-RAALIEq ([string]$apply.result.spicetify_executable_sha256).Trim().ToLowerInvariant() $raxApplyFakeSha 'real recovery-aware apply executable hash drifted'
         foreach($field in @('session_key_persisted','session_key_exposed','result_is_authority','spicetify_apply_authorized','additional_mutation_authorized','live_destination_authorized','production_execution_authorized','production_mutation_authorized')){Assert-RAALIFalse ([bool]$apply.result.$field) ('real recovery-aware apply authority/key escaped '+$field)}
         $liveAfterApply=& $script:RASEOriginalLocalBaseline -Name ([string]$valid.bundle.lifecycle.name) -AppPath ([string]$valid.live_path);Assert-RAALIEq ([string]$liveAfterApply.tree_sha256).Trim().ToLowerInvariant() ([string]$valid.remote_tree).Trim().ToLowerInvariant() 'real recovery-aware apply mutated CustomApp live tree'
         $persistAfterApply=Get-SpotifyPersistenceSnapshot -LocalAppDataRoot $valid.q.f.ce.q.f.f.q.persistence.local -AppDataRoot $valid.q.f.ce.q.f.f.q.persistence.roaming;Assert-RAALIEq ([string]$persistAfterApply.fingerprint).Trim().ToLowerInvariant() ([string]$prep.result.persistence_fingerprint).Trim().ToLowerInvariant() 'real recovery-aware apply mutated protected persistence in fake success path'
@@ -68,7 +68,7 @@ public static class RecoveryAwareSpicetifyFake {
 $i=Get-RAXIUniqueIndexV010 -Text $patched -Marker $restoreOld -Label 'post-swap-valid-restore-anchor'
 $patched=$patched.Substring(0,$i)+$restoreNew.TrimEnd("`r","`n")+$patched.Substring($i+$restoreOld.Length)
 
-foreach($m in @('custom-app-production-spicetify-apply-executor.ps1','custom-app-production-recovery-aware-permit-spicetify-apply-executor.ps1','Invoke-CustomAppProductionRecoveryAwarePermitSpicetifyApplyExecutorV010','RecoveryAwareSpicetifyFake','real recovery-aware apply process count drifted','real recovery-aware apply result validator denied','real recovery-aware apply lost retained evidence')){if($patched.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "apply integration coverage marker missing $m"}}
+foreach($m in @('custom-app-production-spicetify-apply-executor.ps1','custom-app-production-recovery-aware-permit-spicetify-apply-executor.ps1','Invoke-CustomAppProductionRecoveryAwarePermitSpicetifyApplyExecutorV010','RecoveryAwareSpicetifyFake','raxApplyFakeExe','real recovery-aware apply process count drifted','real recovery-aware apply result validator denied','real recovery-aware apply lost retained evidence')){if($patched.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "apply integration coverage marker missing $m"}}
 $pt=$null;$pe=$null;$past=[Management.Automation.Language.Parser]::ParseInput($patched,[ref]$pt,[ref]$pe);if($pe.Count){$pe|ForEach-Object{Write-Error ("patched post-swap generator line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw 'patched post-swap generator PS5.1 parse failed'}
 $pex=@($past.FindAll({param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -ceq 'Invoke-Expression'},$true));if($pex.Count){throw 'patched post-swap generator gained executable Invoke-Expression command'}
 $temp=Join-Path $PSScriptRoot ('test_recovery_aware_apply_generated_'+[Guid]::NewGuid().ToString('N')+'.ps1')
