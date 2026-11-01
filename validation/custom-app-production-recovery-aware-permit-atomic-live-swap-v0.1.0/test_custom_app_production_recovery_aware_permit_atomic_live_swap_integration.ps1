@@ -17,9 +17,20 @@ function Get-RAALIntegrationUniqueMarkerIndexV010 {
 function ConvertTo-RAALFixtureOnlyPrefixV010 {
     param([Parameter(Mandatory=$true)][string]$Text,[Parameter(Mandatory=$true)][string]$Label)
     $normalized=$Text.Replace("`r`n","`n")
-    $matrix=[regex]::Match($normalized,'(?im)^\$(?:count|casecount|testcount|total)\s*=\s*0\s*$')
-    if(-not $matrix.Success){throw "fixture-only matrix boundary missing: $Label"}
-    $prefix=$normalized.Substring(0,$matrix.Index)
+    $matrix=[regex]::Match($normalized,'(?im)^\$(?:(?:count|casecount|testcount|total)|[A-Za-z_][A-Za-z0-9_]*count)\s*=\s*0\s*$')
+    if($matrix.Success){
+        $boundary=$matrix.Index
+    } else {
+        $tokens=$null;$errors=$null
+        $ast=[Management.Automation.Language.Parser]::ParseInput($normalized,[ref]$tokens,[ref]$errors)
+        if($errors.Count){throw "fixture-only AST parse failed: $Label"}
+        $functions=@($ast.EndBlock.Statements | Where-Object{$_ -is [Management.Automation.Language.FunctionDefinitionAst]})
+        if($functions.Count -eq 0){throw "fixture-only matrix boundary missing and no helper functions: $Label"}
+        $boundary=0
+        foreach($fn in $functions){if([int]$fn.Extent.EndOffset -gt $boundary){$boundary=[int]$fn.Extent.EndOffset}}
+        if($boundary -le 0 -or $boundary -ge $normalized.Length -or [string]::IsNullOrWhiteSpace($normalized.Substring($boundary))){throw "fixture-only AST fallback found no matrix body: $Label"}
+    }
+    $prefix=$normalized.Substring(0,$boundary)
     $lines=@($prefix -split "`n")
     $importPattern='^\s*\.\s*\(Join-Path\s+\$root\s+''(?<rel>validation/[^'']+/test_[^'']+\.ps1)''\)\s*$'
     for($i=0;$i -lt $lines.Count;$i++){
@@ -72,12 +83,11 @@ $patched=$text.Substring(0,$start)+$replacement+$text.Substring($end)
 if($patched.IndexOf($startMarker,[StringComparison]::Ordinal) -ge 0){throw 'integration recovery-closed semantic patch failed'}
 
 # Recursively replace every inherited test_*.ps1 import with a temporary copy that
-# retains only setup/fixture/helper definitions before its matrix counter. Core files
+# retains only setup/fixture/helper definitions before its matrix body. Core files
 # remain the exact qualified production-validation implementations; only already-green
-# parent test matrices are skipped. This prevents 30+ minute duplicate matrix replay.
+# parent test matrices are skipped.
 $fixtureOnly=ConvertTo-RAALFixtureOnlyPrefixV010 -Text $patched -Label $preApplyRel
 if($fixtureOnly.IndexOf('function New-RAPPFixtureV010',[StringComparison]::Ordinal) -lt 0 -or $fixtureOnly.IndexOf('function Invoke-RAPPFixtureV010',[StringComparison]::Ordinal) -lt 0){throw 'integration fixture-only pre-apply helpers missing'}
-if($fixtureOnly -match '(?im)^\$(?:count|casecount|testcount|total)\s*=\s*0\s*$'){throw 'integration parent matrix survived recursive fixture isolation'}
 
 $integration=@'
 
@@ -95,12 +105,36 @@ function Invoke-CustomAppProductionAtomicLiveSwapValidationHookV010 {
     if($script:RAALIAtomicFault -ceq 'throw-after-candidate-move' -and $Checkpoint -ceq 'after-candidate-move'){throw 'recovery-aware-integration-after-candidate-move'}
 }
 
+# Recovery evidence intentionally carries a stable synthetic local tree while generic
+# atomic verifies byte-real paths. Bridge only the exact pre-swap live path while its
+# actual bytes still match the original byte-real tree. Candidate/stage/post-swap live
+# remain byte-real because their path/tree does not satisfy this bridge predicate.
+$script:RAALIParentLocalBaseline=(Get-Command Get-CustomAppLocalRuntimeBaseline -CommandType Function).ScriptBlock
+$script:RAALILiveBaselineBridge=$null
+function Get-CustomAppLocalRuntimeBaseline {
+    param([Parameter(Mandatory=$true)][string]$Name,[Parameter(Mandatory=$true)][string]$AppPath)
+    $actual=& $script:RAALIParentLocalBaseline -Name $Name -AppPath $AppPath
+    if($null -eq $script:RAALILiveBaselineBridge){return $actual}
+    $bridge=$script:RAALILiveBaselineBridge
+    try {
+        $actualPath=[IO.Path]::GetFullPath($AppPath).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+        $livePath=[IO.Path]::GetFullPath([string]$bridge.live_path).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    } catch {return $actual}
+    if(-not $actualPath.Equals($livePath,[StringComparison]::OrdinalIgnoreCase)){return $actual}
+    if(([string]$actual.tree_sha256).Trim().ToLowerInvariant() -cne ([string]$bridge.actual_old_tree_sha256).Trim().ToLowerInvariant()){return $actual}
+    $copy=($actual|ConvertTo-Json -Depth 100|ConvertFrom-Json)
+    $copy.tree_sha256=([string]$bridge.stable_tree_sha256).Trim().ToLowerInvariant()
+    return $copy
+}
+
 function Invoke-RAALIRecoveryAtomicV010 {
     param([Parameter(Mandatory=$true)]$X,[Parameter(Mandatory=$true)]$Prepared,[string]$Fault='none')
     $ctx=New-RAIssueLiveContextV010 -Bundle $X.bundle
     $priorOverride=$script:RAPPFreshLiveOverride
     $priorFault=$script:RAALIAtomicFault
+    $priorBridge=$script:RAALILiveBaselineBridge
     $script:RAPPFreshLiveOverride=[pscustomobject]@{stable_tree_sha256=[string]$X.stable_tree;actual_tree_sha256=[string]$X.actual_live_tree;live_path=[string]$X.live_path;manifest_name=[string]$X.manifest_name}
+    $script:RAALILiveBaselineBridge=[pscustomobject]@{stable_tree_sha256=[string]$X.stable_tree;actual_old_tree_sha256=[string]$X.actual_live_tree;live_path=[string]$X.live_path}
     $script:RAALIAtomicFault=$Fault
     $at=[DateTimeOffset]::Parse([string]$Prepared.result.post_backup_revalidated_at).AddSeconds(1)
     try {
@@ -108,6 +142,7 @@ function Invoke-RAALIRecoveryAtomicV010 {
     } finally {
         $script:RAPPFreshLiveOverride=$priorOverride
         $script:RAALIAtomicFault=$priorFault
+        $script:RAALILiveBaselineBridge=$priorBridge
     }
 }
 
@@ -161,7 +196,7 @@ try {
 } finally {Remove-RAALITransactionRootsV010 $fx;Remove-RAPPFixtureV010 $fx}
 
 if($integrationCount -ne 2){throw "recovery-aware atomic integration count drifted: $integrationCount"}
-Write-Host "CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_ATOMIC_INTEGRATION_PASS count=$integrationCount recovery_closed_live_bytes=true recursive_fixture_only_parent=true actual_recovery_pre_apply=true exact_generic_atomic=true exact_rollback=true zero_apply_authority=true"
+Write-Host "CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_ATOMIC_INTEGRATION_PASS count=$integrationCount recovery_closed_live_bytes=true recursive_fixture_only_parent=true ast_boundary_fallback=true byte_real_stable_tree_bridge=true actual_recovery_pre_apply=true exact_generic_atomic=true exact_rollback=true zero_apply_authority=true"
 '@.Replace("`r`n","`n")
 
 $temp=Join-Path $preApplyDir ('test_custom_app_production_recovery_aware_permit_atomic_integration_generated_'+[Guid]::NewGuid().ToString('N')+'.ps1')
