@@ -17,6 +17,12 @@ function Test-CustomAppProductionRecoveryAwarePermitPostApplyCleanupSha256V010 {
     param([AllowNull()][string]$Value)
     return (-not [string]::IsNullOrWhiteSpace($Value) -and $Value -cmatch '^[0-9a-f]{64}$')
 }
+function Get-CustomAppProductionRecoveryAwarePermitPostApplyCleanupSafeReasonV010 {
+    param([AllowNull()]$Value,[string]$NullReason='null',[string]$MissingReason='reason-missing')
+    if($null-eq$Value){return $NullReason}
+    if($Value.PSObject.Properties['reason']){return [string]$Value.reason}
+    return $MissingReason
+}
 
 function New-CustomAppProductionRecoveryAwarePermitPostApplyCleanupDeniedV010 {
     param(
@@ -62,15 +68,16 @@ function Test-CustomAppProductionRecoveryAwarePermitPostApplyCleanupLineageV010 
         [Parameter(Mandatory=$true)]$ApplyResult,[Parameter(Mandatory=$true)]$FinalizationResult,[Parameter(Mandatory=$true)]$AtomicResult,[Parameter(Mandatory=$true)]$PreparedResult,[Parameter(Mandatory=$true)]$StageResult,[Parameter(Mandatory=$true)][string]$Name
     )
     $checks=@(
-        @(Test-CustomAppProductionRecoveryAwarePermitSpicetifyApplyResultV010 -Result $ApplyResult,'apply'),
-        @(Test-CustomAppProductionRecoveryAwarePermitTransactionFinalizationResultV010 -Result $FinalizationResult,'finalization'),
-        @(Test-CustomAppProductionRecoveryAwarePermitAtomicLiveSwapResultV010 -Result $AtomicResult,'atomic'),
-        @(Test-CustomAppProductionRecoveryAwarePermitPreApplyPreparedResultV010 -Result $PreparedResult,'prepared'),
-        @(Test-CustomAppProductionRecoveryAwarePermitStageExecutorResultV010 -Result $StageResult,'stage')
+        @((Test-CustomAppProductionRecoveryAwarePermitSpicetifyApplyResultV010 -Result $ApplyResult),'apply'),
+        @((Test-CustomAppProductionRecoveryAwarePermitTransactionFinalizationResultV010 -Result $FinalizationResult),'finalization'),
+        @((Test-CustomAppProductionRecoveryAwarePermitAtomicLiveSwapResultV010 -Result $AtomicResult),'atomic'),
+        @((Test-CustomAppProductionRecoveryAwarePermitPreApplyPreparedResultV010 -Result $PreparedResult),'prepared'),
+        @((Test-CustomAppProductionRecoveryAwarePermitStageExecutorResultV010 -Result $StageResult),'stage')
     )
-    foreach($entry in $checks){$check=$entry[0];$label=[string]$entry[1];if($null-eq$check -or -not[bool]$check.ok){return [pscustomobject]@{ok=$false;reason=('recovery-aware-cleanup-'+$label+'-result-invalid:'+[string]$check.reason)}}}
+    foreach($entry in $checks){$check=$entry[0];$label=[string]$entry[1];if($null-eq$check){return [pscustomobject]@{ok=$false;reason=('recovery-aware-cleanup-'+$label+'-result-invalid:null')}};if(-not[bool]$check.ok){return [pscustomobject]@{ok=$false;reason=('recovery-aware-cleanup-'+$label+'-result-invalid:'+(Get-CustomAppProductionRecoveryAwarePermitPostApplyCleanupSafeReasonV010 $check))}}}
     $continuity=Test-CustomAppProductionRecoveryAwarePermitPostSwapApplyContinuityV010 -FinalizationResult $FinalizationResult -AtomicResult $AtomicResult -PreparedResult $PreparedResult -StageResult $StageResult -Name $Name
-    if($null-eq$continuity -or -not[bool]$continuity.ok){return [pscustomobject]@{ok=$false;reason=('recovery-aware-cleanup-upstream-continuity-invalid:'+[string]$continuity.reason)}}
+    if($null-eq$continuity){return [pscustomobject]@{ok=$false;reason='recovery-aware-cleanup-upstream-continuity-invalid:null'}}
+    if(-not[bool]$continuity.ok){return [pscustomobject]@{ok=$false;reason=('recovery-aware-cleanup-upstream-continuity-invalid:'+(Get-CustomAppProductionRecoveryAwarePermitPostApplyCleanupSafeReasonV010 $continuity))}}
     $pairs=@(
         @('recovery_finalization_result_fingerprint',[string]$ApplyResult.recovery_finalization_result_fingerprint,[string]$FinalizationResult.result_fingerprint),
         @('recovery_atomic_result_fingerprint',[string]$ApplyResult.recovery_atomic_result_fingerprint,[string]$AtomicResult.result_fingerprint),
@@ -92,10 +99,10 @@ function Test-CustomAppProductionRecoveryAwarePermitPostApplyCleanupLineageV010 
     $genericPrepared=ConvertTo-CustomAppProductionRecoveryAwarePermitGenericPreparedResultV010 -Result $PreparedResult
     $genericFinal=ConvertTo-CustomAppProductionRecoveryAwarePermitGenericFinalizationResultV010 -RecoveryAwareFinalizationResult $FinalizationResult -RecoveryAwareAtomicResult $AtomicResult -GenericPreparedResult $genericPrepared -GenericStageResult $genericStage
     $genericApply=ConvertTo-CustomAppProductionRecoveryAwarePermitGenericApplyResultV010 -RecoveryAwareApplyResult $ApplyResult -GenericFinalizationResult $genericFinal -GenericPreparedResult $genericPrepared -GenericStageResult $genericStage
-    $gs=Test-CustomAppProductionPostApplyStageReceiptV010 -Result $genericStage;if(-not[bool]$gs.ok){return [pscustomobject]@{ok=$false;reason=('recovery-aware-cleanup-generic-stage-invalid:'+[string]$gs.reason)}}
-    $gp=Test-CustomAppProductionPostApplyPreparedReceiptV010 -Result $genericPrepared;if(-not[bool]$gp.ok){return [pscustomobject]@{ok=$false;reason=('recovery-aware-cleanup-generic-prepared-invalid:'+[string]$gp.reason)}}
-    $gf=Test-CustomAppProductionTransactionFinalizationResultV010 -Result $genericFinal;if(-not[bool]$gf.ok){return [pscustomobject]@{ok=$false;reason=('recovery-aware-cleanup-generic-finalization-invalid:'+[string]$gf.reason)}}
-    $ga=Test-CustomAppProductionSpicetifyApplyResultV010 -Result $genericApply;if(-not[bool]$ga.ok){return [pscustomobject]@{ok=$false;reason=('recovery-aware-cleanup-generic-apply-invalid:'+[string]$ga.reason)}}
+    $gs=Test-CustomAppProductionPostApplyStageReceiptV010 -Result $genericStage;if($null-eq$gs){return [pscustomobject]@{ok=$false;reason='recovery-aware-cleanup-generic-stage-invalid:null'}};if(-not[bool]$gs.ok){return [pscustomobject]@{ok=$false;reason=('recovery-aware-cleanup-generic-stage-invalid:'+(Get-CustomAppProductionRecoveryAwarePermitPostApplyCleanupSafeReasonV010 $gs))}}
+    $gp=Test-CustomAppProductionPostApplyPreparedReceiptV010 -Result $genericPrepared;if($null-eq$gp){return [pscustomobject]@{ok=$false;reason='recovery-aware-cleanup-generic-prepared-invalid:null'}};if(-not[bool]$gp.ok){return [pscustomobject]@{ok=$false;reason=('recovery-aware-cleanup-generic-prepared-invalid:'+(Get-CustomAppProductionRecoveryAwarePermitPostApplyCleanupSafeReasonV010 $gp))}}
+    $gf=Test-CustomAppProductionTransactionFinalizationResultV010 -Result $genericFinal;if($null-eq$gf){return [pscustomobject]@{ok=$false;reason='recovery-aware-cleanup-generic-finalization-invalid:null'}};if(-not[bool]$gf.ok){return [pscustomobject]@{ok=$false;reason=('recovery-aware-cleanup-generic-finalization-invalid:'+(Get-CustomAppProductionRecoveryAwarePermitPostApplyCleanupSafeReasonV010 $gf))}}
+    $ga=Test-CustomAppProductionSpicetifyApplyResultV010 -Result $genericApply;if($null-eq$ga){return [pscustomobject]@{ok=$false;reason='recovery-aware-cleanup-generic-apply-invalid:null'}};if(-not[bool]$ga.ok){return [pscustomobject]@{ok=$false;reason=('recovery-aware-cleanup-generic-apply-invalid:'+(Get-CustomAppProductionRecoveryAwarePermitPostApplyCleanupSafeReasonV010 $ga))}}
     if(([string]$genericApply.result_fingerprint).Trim().ToLowerInvariant()-cne([string]$ApplyResult.generic_apply_result_fingerprint).Trim().ToLowerInvariant()){return [pscustomobject]@{ok=$false;reason='recovery-aware-cleanup-generic-apply-fingerprint-continuity-mismatch'}}
     return [pscustomobject]@{ok=$true;reason='recovery-aware-cleanup-lineage-and-generic-bridges-valid';generic_stage=$genericStage;generic_prepared=$genericPrepared;generic_finalization=$genericFinal;generic_apply=$genericApply}
 }
@@ -141,9 +148,11 @@ function Invoke-CustomAppProductionRecoveryAwarePermitPostApplyCommitCleanupV010
     $deny={param([string]$Reason,$Generic=$null,[bool]$Attempted=$false,[string]$Stage='not-attempted',[string]$App='not-attempted',[string]$Persistence='not-attempted',$Post=$null) New-CustomAppProductionRecoveryAwarePermitPostApplyCleanupDeniedV010 -Reason $Reason -GenericResult $Generic -CleanupAttempted $Attempted -StageStatus $Stage -AppStatus $App -PersistenceStatus $Persistence -PostConsumption $Post}
     if($SessionKey.Length-lt32){return & $deny 'recovery-aware-cleanup-session-key-too-short'}
     $lineage=Test-CustomAppProductionRecoveryAwarePermitPostApplyCleanupLineageV010 -ApplyResult $RecoveryAwareApplyResult -FinalizationResult $RecoveryAwareFinalizationResult -AtomicResult $RecoveryAwareAtomicResult -PreparedResult $RecoveryAwarePreparedResult -StageResult $RecoveryAwareStageExecutorResult -Name $Name
-    if($null-eq$lineage -or -not[bool]$lineage.ok){return & $deny ([string]$lineage.reason)}
+    if($null-eq$lineage){return & $deny 'recovery-aware-cleanup-lineage-denied:null'}
+    if(-not[bool]$lineage.ok){return & $deny ('recovery-aware-cleanup-lineage-denied:'+(Get-CustomAppProductionRecoveryAwarePermitPostApplyCleanupSafeReasonV010 $lineage))}
     $pre=Get-CustomAppProductionRecoveryAwarePermitTransactionFinalizationConsumptionV010 -AtomicResult $RecoveryAwareAtomicResult -PreparedResult $RecoveryAwarePreparedResult -StageExecutorResult $RecoveryAwareStageExecutorResult -ConsumptionPersistenceResult $ConsumptionPersistenceResult -AllowedRoot $AllowedRoot -ConsumptionStoreDirectory $ConsumptionStoreDirectory -Name $Name
-    if($null-eq$pre -or -not[bool]$pre.ok){return & $deny ('recovery-aware-cleanup-pre-consumption-denied:'+[string]$pre.reason)}
+    if($null-eq$pre){return & $deny 'recovery-aware-cleanup-pre-consumption-denied:null'}
+    if(-not[bool]$pre.ok){return & $deny ('recovery-aware-cleanup-pre-consumption-denied:'+(Get-CustomAppProductionRecoveryAwarePermitPostApplyCleanupSafeReasonV010 $pre))}
     if(([string]$pre.historical_envelope_sha256).Trim().ToLowerInvariant()-cne([string]$RecoveryAwareApplyResult.historical_consumption_envelope_sha256).Trim().ToLowerInvariant()){return & $deny 'recovery-aware-cleanup-pre-historical-envelope-drift'}
     try{$preRevision=[int64]$pre.current_revision;$applyRevision=[int64]$RecoveryAwareApplyResult.current_consumption_revision}catch{return & $deny 'recovery-aware-cleanup-pre-current-revision-invalid'}
     if($preRevision-lt$applyRevision){return & $deny 'recovery-aware-cleanup-pre-current-revision-regressed'}
@@ -154,12 +163,14 @@ function Invoke-CustomAppProductionRecoveryAwarePermitPostApplyCommitCleanupV010
     if(-not[bool]$generic.ok){
         $attempted=[bool]$generic.cleanup_attempted;$stage=$(if($generic.PSObject.Properties['stage_cleanup_status']){[string]$generic.stage_cleanup_status}else{'not-attempted'});$app=$(if($generic.PSObject.Properties['app_backup_cleanup_status']){[string]$generic.app_backup_cleanup_status}else{'not-attempted'});$persist=$(if($generic.PSObject.Properties['persistence_backup_cleanup_status']){[string]$generic.persistence_backup_cleanup_status}else{'not-attempted'})
         $post=$null;if($attempted){$post=Get-CustomAppProductionRecoveryAwarePermitTransactionFinalizationConsumptionV010 -AtomicResult $RecoveryAwareAtomicResult -PreparedResult $RecoveryAwarePreparedResult -StageExecutorResult $RecoveryAwareStageExecutorResult -ConsumptionPersistenceResult $ConsumptionPersistenceResult -AllowedRoot $AllowedRoot -ConsumptionStoreDirectory $ConsumptionStoreDirectory -Name $Name}
-        return & $deny ('recovery-aware-cleanup-generic-cleanup-denied:'+[string]$generic.reason) $generic $attempted $stage $app $persist $post
+        return & $deny ('recovery-aware-cleanup-generic-cleanup-denied:'+(Get-CustomAppProductionRecoveryAwarePermitPostApplyCleanupSafeReasonV010 $generic)) $generic $attempted $stage $app $persist $post
     }
     $gc=Test-CustomAppProductionPostApplyCommitCleanupResultV010 -Result $generic.result
-    if($null-eq$gc -or -not[bool]$gc.ok){return & $deny ('recovery-aware-cleanup-generic-result-invalid:'+[string]$gc.reason) $generic $true ([string]$generic.result.stage_cleanup_status) ([string]$generic.result.app_backup_cleanup_status) ([string]$generic.result.persistence_backup_cleanup_status)}
+    if($null-eq$gc){return & $deny 'recovery-aware-cleanup-generic-result-invalid:null' $generic $true ([string]$generic.result.stage_cleanup_status) ([string]$generic.result.app_backup_cleanup_status) ([string]$generic.result.persistence_backup_cleanup_status)}
+    if(-not[bool]$gc.ok){return & $deny ('recovery-aware-cleanup-generic-result-invalid:'+(Get-CustomAppProductionRecoveryAwarePermitPostApplyCleanupSafeReasonV010 $gc)) $generic $true ([string]$generic.result.stage_cleanup_status) ([string]$generic.result.app_backup_cleanup_status) ([string]$generic.result.persistence_backup_cleanup_status)}
     $post=Get-CustomAppProductionRecoveryAwarePermitTransactionFinalizationConsumptionV010 -AtomicResult $RecoveryAwareAtomicResult -PreparedResult $RecoveryAwarePreparedResult -StageExecutorResult $RecoveryAwareStageExecutorResult -ConsumptionPersistenceResult $ConsumptionPersistenceResult -AllowedRoot $AllowedRoot -ConsumptionStoreDirectory $ConsumptionStoreDirectory -Name $Name
-    if($null-eq$post -or -not[bool]$post.ok){return & $deny ('recovery-aware-cleanup-post-consumption-denied:'+[string]$post.reason) $generic $true ([string]$generic.result.stage_cleanup_status) ([string]$generic.result.app_backup_cleanup_status) ([string]$generic.result.persistence_backup_cleanup_status) $post}
+    if($null-eq$post){return & $deny 'recovery-aware-cleanup-post-consumption-denied:null' $generic $true ([string]$generic.result.stage_cleanup_status) ([string]$generic.result.app_backup_cleanup_status) ([string]$generic.result.persistence_backup_cleanup_status)}
+    if(-not[bool]$post.ok){return & $deny ('recovery-aware-cleanup-post-consumption-denied:'+(Get-CustomAppProductionRecoveryAwarePermitPostApplyCleanupSafeReasonV010 $post)) $generic $true ([string]$generic.result.stage_cleanup_status) ([string]$generic.result.app_backup_cleanup_status) ([string]$generic.result.persistence_backup_cleanup_status) $post}
     if(([string]$post.historical_envelope_sha256).Trim().ToLowerInvariant()-cne([string]$pre.historical_envelope_sha256).Trim().ToLowerInvariant()){return & $deny 'recovery-aware-cleanup-post-historical-envelope-drift' $generic $true ([string]$generic.result.stage_cleanup_status) ([string]$generic.result.app_backup_cleanup_status) ([string]$generic.result.persistence_backup_cleanup_status) $post}
     try{$postRevision=[int64]$post.current_revision}catch{return & $deny 'recovery-aware-cleanup-post-current-revision-invalid' $generic $true ([string]$generic.result.stage_cleanup_status) ([string]$generic.result.app_backup_cleanup_status) ([string]$generic.result.persistence_backup_cleanup_status) $post}
     if($postRevision-lt$preRevision){return & $deny 'recovery-aware-cleanup-post-current-revision-regressed' $generic $true ([string]$generic.result.stage_cleanup_status) ([string]$generic.result.app_backup_cleanup_status) ([string]$generic.result.persistence_backup_cleanup_status) $post}
@@ -179,6 +190,7 @@ function Invoke-CustomAppProductionRecoveryAwarePermitPostApplyCommitCleanupV010
     }
     $result.result_fingerprint=Get-CustomAppProductionRecoveryAwarePermitPostApplyCleanupSha256V010 (Get-CustomAppProductionRecoveryAwarePermitPostApplyCleanupResultMaterialV010 -Result $result)
     $check=Test-CustomAppProductionRecoveryAwarePermitPostApplyCleanupResultV010 -Result $result
-    if(-not[bool]$check.ok){return & $deny ('recovery-aware-cleanup-result-self-validation-failed:'+[string]$check.reason) $generic $true ([string]$generic.result.stage_cleanup_status) ([string]$generic.result.app_backup_cleanup_status) ([string]$generic.result.persistence_backup_cleanup_status) $post}
+    if($null-eq$check){return & $deny 'recovery-aware-cleanup-result-self-validation-failed:null' $generic $true ([string]$generic.result.stage_cleanup_status) ([string]$generic.result.app_backup_cleanup_status) ([string]$generic.result.persistence_backup_cleanup_status) $post}
+    if(-not[bool]$check.ok){return & $deny ('recovery-aware-cleanup-result-self-validation-failed:'+(Get-CustomAppProductionRecoveryAwarePermitPostApplyCleanupSafeReasonV010 $check)) $generic $true ([string]$generic.result.stage_cleanup_status) ([string]$generic.result.app_backup_cleanup_status) ([string]$generic.result.persistence_backup_cleanup_status) $post}
     return [pscustomobject]@{ok=$true;reason=[string]$result.reason;result=$result;cleanup_attempted=$true;partial_cleanup_possible=$false;requires_idempotent_cleanup_resume=$false;rollback_attempted=$false;spicetify_apply_executed=$false;requires_new_permit_for_future_update=$true;result_is_authority=$false;spicetify_apply_authorized=$false;additional_mutation_authorized=$false;production_execution_authorized=$false;production_mutation_authorized=$false}
 }
