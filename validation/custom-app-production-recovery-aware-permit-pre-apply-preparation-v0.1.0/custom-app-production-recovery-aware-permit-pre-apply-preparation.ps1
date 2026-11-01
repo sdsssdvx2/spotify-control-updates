@@ -19,11 +19,15 @@ function Test-CustomAppProductionRecoveryAwarePermitPreApplySha256V010 {
 }
 
 function New-CustomAppProductionRecoveryAwarePermitPreApplyDeniedV010 {
-    param([Parameter(Mandatory=$true)][string]$Reason,[bool]$BackupsPrepared=$false)
+    param(
+        [Parameter(Mandatory=$true)][string]$Reason,
+        [bool]$BackupsPrepared=$false,
+        [bool]$CleanupRequired=$false
+    )
     return [pscustomobject]@{
         ok=$false;reason=$Reason;result=$null;backups_prepared=$BackupsPrepared;recovery_revalidated_before_backups=$false;recovery_revalidated_after_backups=$false
         session_key_accepted=$false;session_key_persisted=$false;session_key_exposed=$false;preparation_is_authority=$false;backups_are_authority=$false
-        requires_atomic_apply_rollback_executor=$true;requires_fresh_revalidation_before_apply=$true;requires_cleanup_if_not_applied=$BackupsPrepared
+        requires_atomic_apply_rollback_executor=$true;requires_fresh_revalidation_before_apply=$true;requires_cleanup_if_not_applied=$CleanupRequired
         apply_authorized=$false;live_destination_authorized=$false;production_execution_authorized=$false;production_mutation_authorized=$false
     }
 }
@@ -136,7 +140,7 @@ function Invoke-CustomAppProductionRecoveryAwarePermitPreApplyPreparationV010 {
         [Parameter(Mandatory=$true)][string]$RollbackBackupRoot,[Parameter(Mandatory=$true)][string]$PersistenceBackupRoot,
         [DateTimeOffset]$Now=[DateTimeOffset]::UtcNow,[Nullable[DateTimeOffset]]$PostBackupNow=$null,[int]$MaxRemoteObservationAgeHours=36
     )
-    $deny={param([string]$Reason,[bool]$Prepared=$false) New-CustomAppProductionRecoveryAwarePermitPreApplyDeniedV010 -Reason $Reason -BackupsPrepared $Prepared}
+    $deny={param([string]$Reason,[bool]$Prepared=$false,[bool]$CleanupRequired=$false) New-CustomAppProductionRecoveryAwarePermitPreApplyDeniedV010 -Reason $Reason -BackupsPrepared $Prepared -CleanupRequired $CleanupRequired}
     if($SessionKey.Length -lt 32){return & $deny 'recovery-aware-pre-apply-session-key-too-short'}
     $stageCheck=Test-CustomAppProductionRecoveryAwarePermitStageExecutorResultV010 -Result $RecoveryAwareStageExecutorResult
     if(-not [bool]$stageCheck.ok){return & $deny ('recovery-aware-pre-apply-stage-result-invalid:'+[string]$stageCheck.reason)}
@@ -167,22 +171,27 @@ function Invoke-CustomAppProductionRecoveryAwarePermitPreApplyPreparationV010 {
     $genericStage=ConvertTo-CustomAppProductionRecoveryAwarePermitGenericStageResultV010 -RecoveryAwareResult $RecoveryAwareStageExecutorResult
     $genericStageCheck=Test-CustomAppProductionStageExecutorResultV010 -Result $genericStage
     if(-not [bool]$genericStageCheck.ok){return & $deny ('recovery-aware-pre-apply-generic-stage-bridge-invalid:'+[string]$genericStageCheck.reason)}
-    $generic=Invoke-CustomAppProductionPreApplyPreparationV010 -AllowedRoot $AllowedRoot -StoreDirectory $ConsumptionStoreDirectory -ExpectedConsumptionId ([string]$RecoveryAwareStageExecutorResult.consumption_id) -StageExecutorResult $genericStage -Permit $Permit -Name $Name -LifecycleRow $LifecycleRow -ProvenanceRow $ProvenanceRow -BindingRow $BindingRow -ShadowProtocolQualification $ShadowProtocolQualification -LiveAttestedQualification $LiveAttestedQualification -SessionKey $SessionKey -RollbackBackupRoot $RollbackBackupRoot -PersistenceBackupRoot $PersistenceBackupRoot -LocalAppDataRoot $LocalAppDataRoot -AppDataRoot $AppDataRoot -Now $Now -MaxRemoteObservationAgeHours $MaxRemoteObservationAgeHours
-    if($null -eq $generic -or -not [bool]$generic.ok -or $null -eq $generic.result){return & $deny ('recovery-aware-pre-apply-generic-preparation-denied:'+[string]$generic.reason)}
+    $generic=$null
+    try{
+        $generic=Invoke-CustomAppProductionPreApplyPreparationV010 -AllowedRoot $AllowedRoot -StoreDirectory $ConsumptionStoreDirectory -ExpectedConsumptionId ([string]$RecoveryAwareStageExecutorResult.consumption_id) -StageExecutorResult $genericStage -Permit $Permit -Name $Name -LifecycleRow $LifecycleRow -ProvenanceRow $ProvenanceRow -BindingRow $BindingRow -ShadowProtocolQualification $ShadowProtocolQualification -LiveAttestedQualification $LiveAttestedQualification -SessionKey $SessionKey -RollbackBackupRoot $RollbackBackupRoot -PersistenceBackupRoot $PersistenceBackupRoot -LocalAppDataRoot $LocalAppDataRoot -AppDataRoot $AppDataRoot -Now $Now -MaxRemoteObservationAgeHours $MaxRemoteObservationAgeHours
+    }catch{
+        return & $deny ('recovery-aware-pre-apply-generic-preparation-threw:'+[string]$_.Exception.Message) $false $true
+    }
+    if($null -eq $generic -or -not [bool]$generic.ok -or $null -eq $generic.result){return & $deny ('recovery-aware-pre-apply-generic-preparation-denied:'+[string]$generic.reason) $false $true}
     $genericCheck=Test-CustomAppProductionPreApplyPreparedResultV010 -Result $generic.result
-    if(-not [bool]$genericCheck.ok){return & $deny ('recovery-aware-pre-apply-generic-preparation-invalid:'+[string]$genericCheck.reason) $true}
+    if(-not [bool]$genericCheck.ok){return & $deny ('recovery-aware-pre-apply-generic-preparation-invalid:'+[string]$genericCheck.reason) $true $true}
 
     $postAt=$(if($null -ne $PostBackupNow){[DateTimeOffset]$PostBackupNow}else{[DateTimeOffset]::UtcNow})
-    if($postAt -lt $Now){return & $deny 'recovery-aware-pre-apply-post-backup-time-before-pre-backup-time' $true}
+    if($postAt -lt $Now){return & $deny 'recovery-aware-pre-apply-post-backup-time-before-pre-backup-time' $true $true}
     $freshPostLive=Test-CustomAppProductionStageExecutorLiveBaselineV010 -LifecycleRow $LifecycleRow -Permit $Permit -BindingRow $BindingRow -Name $Name
-    if(-not [bool]$freshPostLive.ok){return & $deny ('recovery-aware-pre-apply-post-backup-live-revalidation-denied:'+[string]$freshPostLive.reason) $true}
-    if(([string]$freshPostLive.tree_sha256).Trim().ToLowerInvariant() -cne ([string]$generic.result.live_tree_sha256).Trim().ToLowerInvariant()){return & $deny 'recovery-aware-pre-apply-post-backup-live-tree-continuity-mismatch' $true}
+    if(-not [bool]$freshPostLive.ok){return & $deny ('recovery-aware-pre-apply-post-backup-live-revalidation-denied:'+[string]$freshPostLive.reason) $true $true}
+    if(([string]$freshPostLive.tree_sha256).Trim().ToLowerInvariant() -cne ([string]$generic.result.live_tree_sha256).Trim().ToLowerInvariant()){return & $deny 'recovery-aware-pre-apply-post-backup-live-tree-continuity-mismatch' $true $true}
     $post=& $invokeRecoveryAdmission $freshPostLive.baseline $postAt
-    if($null -eq $post -or -not [bool]$post.ok -or -not [bool]$post.stage_acquisition_eligible -or $null -eq $post.receipt){return & $deny ('recovery-aware-pre-apply-post-backup-admission-denied:'+[string]$post.reason) $true}
+    if($null -eq $post -or -not [bool]$post.ok -or -not [bool]$post.stage_acquisition_eligible -or $null -eq $post.receipt){return & $deny ('recovery-aware-pre-apply-post-backup-admission-denied:'+[string]$post.reason) $true $true}
     $postCheck=Test-CustomAppProductionRecoveryAwarePermitStageAdmissionReceiptV010 -Receipt $post.receipt -Now $postAt
-    if(-not [bool]$postCheck.ok){return & $deny ('recovery-aware-pre-apply-post-backup-admission-invalid:'+[string]$postCheck.reason) $true}
+    if(-not [bool]$postCheck.ok){return & $deny ('recovery-aware-pre-apply-post-backup-admission-invalid:'+[string]$postCheck.reason) $true $true}
     foreach($f in @('name','source_identity','transaction_id','github_repo_id','surface_kind','consumption_id','consumption_persistence_fingerprint','historical_consumption_envelope_sha256','binding_fingerprint')){
-        if(([string]$pre.receipt.$f).Trim().ToLowerInvariant() -cne ([string]$post.receipt.$f).Trim().ToLowerInvariant()){return & $deny ('recovery-aware-pre-apply-post-backup-admission-continuity-drift-'+$f) $true}
+        if(([string]$pre.receipt.$f).Trim().ToLowerInvariant() -cne ([string]$post.receipt.$f).Trim().ToLowerInvariant()){return & $deny ('recovery-aware-pre-apply-post-backup-admission-continuity-drift-'+$f) $true $true}
     }
 
     $g=$generic.result
@@ -210,7 +219,7 @@ function Invoke-CustomAppProductionRecoveryAwarePermitPreApplyPreparationV010 {
     }
     $result.result_fingerprint=Get-CustomAppProductionRecoveryAwarePermitPreApplySha256V010 (Get-CustomAppProductionRecoveryAwarePermitPreApplyResultMaterialV010 -Result $result)
     $check=Test-CustomAppProductionRecoveryAwarePermitPreApplyPreparedResultV010 -Result $result
-    if(-not [bool]$check.ok){return & $deny ('recovery-aware-pre-apply-output-invalid:'+[string]$check.reason) $true}
+    if(-not [bool]$check.ok){return & $deny ('recovery-aware-pre-apply-output-invalid:'+[string]$check.reason) $true $true}
     return [pscustomobject]@{
         ok=$true;reason='recovery-aware-pre-apply-backups-prepared-verified-zero-apply-authority';result=$result;backups_prepared=$true;recovery_revalidated_before_backups=$true;recovery_revalidated_after_backups=$true
         session_key_accepted=$true;session_key_persisted=$false;session_key_exposed=$false;preparation_is_authority=$false;backups_are_authority=$false
