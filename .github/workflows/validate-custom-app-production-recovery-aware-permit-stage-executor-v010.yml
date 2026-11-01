@@ -30,7 +30,7 @@ jobs:
           $changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x -notin $changed){throw "missing $x"}}
           $pins=@(
             @($h,'validation/custom-app-production-recovery-aware-permit-stage-executor-v0.1.0/custom-app-production-recovery-aware-permit-stage-executor.ps1','93a7c88270ebfd9de90fe638fde9f2408bf4cf28'),
-            @($h,'validation/custom-app-production-recovery-aware-permit-stage-executor-v0.1.0/test_custom_app_production_recovery_aware_permit_stage_executor.ps1','14d0684ae350088943e3cd4da960064e9857c117'),
+            @($h,'validation/custom-app-production-recovery-aware-permit-stage-executor-v0.1.0/test_custom_app_production_recovery_aware_permit_stage_executor.ps1','49b619a670dda3fc031d9c0d2910aac355a3e455'),
             @($p,'validation/custom-app-production-recovery-aware-permit-stage-acquisition-admission-v0.1.0/custom-app-production-recovery-aware-permit-stage-acquisition-admission.ps1','51c00469a8d0d37242deb0b2af510d14bd2da732'),
             @($p,'validation/custom-app-production-recovery-aware-permit-stage-acquisition-admission-v0.1.0/test_custom_app_production_recovery_aware_permit_stage_acquisition_admission.ps1','e0311e3350da138654dc2f588bb7a76a92adccb3'),
             @('6ba560e7980c3492fb032ebc720f029caa97b15c','validation/custom-app-production-stage-executor-v0.1.0/custom-app-production-stage-executor.ps1','349d4028997a9cc7a94540286c8b9ba6d6a5b050'),
