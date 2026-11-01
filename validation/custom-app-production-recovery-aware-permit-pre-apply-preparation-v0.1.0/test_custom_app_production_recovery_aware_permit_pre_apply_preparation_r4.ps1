@@ -2,7 +2,7 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 
 $source=Join-Path $PSScriptRoot 'test_custom_app_production_recovery_aware_permit_pre_apply_preparation.ps1'
-$text=[IO.File]::ReadAllText($source,[Text.UTF8Encoding]::new($false))
+$text=[IO.File]::ReadAllText($source,[Text.UTF8Encoding]::new($false)).Replace("`r`n","`n")
 
 $oldVcs=@'
     # Root VCS metadata is deliberately invisible to the runtime baseline but must be
@@ -12,19 +12,19 @@ $oldVcs=@'
     $rawLive=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$built.live_path)
     $runtimeAfterGit=& $script:RASEOriginalLocalBaseline -Name ([string]$built.bundle.lifecycle.name) -AppPath ([string]$built.live_path)
     Assert-RAPPEq ([string]$runtimeAfterGit.tree_sha256).Trim().ToLowerInvariant() ([string]$built.actual_live_tree).Trim().ToLowerInvariant() 'root git metadata changed runtime baseline'
-'@
+'@.Replace("`r`n","`n")
 $newVcs=@'
     # Recovery closure is durable evidence. Do not add VCS metadata or any other bytes
     # after closure merely to exercise backup copying; generic pre-apply already proves
     # byte-exact .git preservation. Snapshot the unchanged recovery-closed live tree.
     $rawLive=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$built.live_path)
-'@
+'@.Replace("`r`n","`n")
 $oldAssert=@'
     Assert-RAPPTrue (Test-Path -LiteralPath ([string]$r.result.app_backup_path) -PathType Container) 'valid app rollback backup missing';Assert-RAPPTrue (Test-Path -LiteralPath ([string]$r.result.persistence_backup_path) -PathType Container) 'valid persistence backup missing';Assert-RAPPTrue (Test-Path -LiteralPath (Join-Path ([string]$r.result.app_backup_path) '.git\config') -PathType Leaf) 'valid rollback backup omitted root git provenance'
-'@
+'@.Replace("`r`n","`n")
 $newAssert=@'
     Assert-RAPPTrue (Test-Path -LiteralPath ([string]$r.result.app_backup_path) -PathType Container) 'valid app rollback backup missing';Assert-RAPPTrue (Test-Path -LiteralPath ([string]$r.result.persistence_backup_path) -PathType Container) 'valid persistence backup missing'
-'@
+'@.Replace("`r`n","`n")
 
 function Replace-RAPPExactOnceV010([string]$Input,[string]$Old,[string]$New,[string]$Label){
     $first=$Input.IndexOf($Old,[StringComparison]::Ordinal)
