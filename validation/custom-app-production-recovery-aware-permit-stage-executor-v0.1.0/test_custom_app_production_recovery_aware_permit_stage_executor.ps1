@@ -10,23 +10,39 @@ function Assert-RASEFalse([bool]$Value,[string]$Message){if($Value){throw $Messa
 function Assert-RASEEq($Actual,$Expected,[string]$Message){if([string]$Actual -cne [string]$Expected){throw "$Message actual=<$Actual> expected=<$Expected>"}}
 function Copy-RASE($Object){return (($Object|ConvertTo-Json -Depth 100)|ConvertFrom-Json)}
 
-# The recovery-aware fixture family deliberately carries attested local-baseline data
-# without requiring a real Spotify CustomApps directory. Keep the generic live-baseline
-# validator intact, but give its underlying observer a fixture-scoped offline source.
+# Preserve the exact parent observers. The synthetic local baseline is exposed only
+# for the single generic fresh-live validation call that follows our direct stage
+# acquisition. Deep recovery-readiness admissions must continue to see the untouched
+# parent observer, otherwise their old/live/restore state machine is contaminated.
 $script:RASEOriginalLocalBaseline=(Get-Command Get-CustomAppLocalRuntimeBaseline -CommandType Function).ScriptBlock
-$script:RASELiveBaselineOverride=$null
+$script:RASEOriginalFreshLiveValidator=(Get-Command Test-CustomAppProductionStageExecutorLiveBaselineV010 -CommandType Function).ScriptBlock
+$script:RASEPostStageBaselineOverride=$null
+$script:RASEInsideFreshLiveObserver=$false
+$script:RASEDirectInvocationActive=$false
+$script:RASEFreshLiveCallArmed=$false
+$script:RASELiveTreeAfterStage=$null
+
 function Get-CustomAppLocalRuntimeBaseline {
     param([Parameter(Mandatory=$true)][string]$Name,[Parameter(Mandatory=$true)][string]$AppPath,[int]$MaxFiles=20000,[int64]$MaxFileBytes=67108864,[int64]$MaxTotalBytes=268435456,[int64]$MaxManifestBytes=1048576)
-    if($null -eq $script:RASELiveBaselineOverride){return & $script:RASEOriginalLocalBaseline -Name $Name -AppPath $AppPath -MaxFiles $MaxFiles -MaxFileBytes $MaxFileBytes -MaxTotalBytes $MaxTotalBytes -MaxManifestBytes $MaxManifestBytes}
-    $x=$script:RASELiveBaselineOverride
-    return [pscustomobject]@{schema=1;name=$Name;path=$AppPath;safe=$true;installable=$true;reason='fixture-attested-local-runtime';file_count=2;total_bytes=2;tree_sha256=[string]$x.tree_sha256;files=@();manifest_valid=$true;manifest_name=[string]$x.manifest_name;layout_root='.';app_root_count=1;vcs_metadata_excluded=$true;mutation_authorized=$false;auto_update_authorized=$false;auto_install_authorized=$false}
+    if(-not $script:RASEInsideFreshLiveObserver -or $null -eq $script:RASEPostStageBaselineOverride){return & $script:RASEOriginalLocalBaseline -Name $Name -AppPath $AppPath -MaxFiles $MaxFiles -MaxFileBytes $MaxFileBytes -MaxTotalBytes $MaxTotalBytes -MaxManifestBytes $MaxManifestBytes}
+    $x=$script:RASEPostStageBaselineOverride
+    $tree=$(if(-not [string]::IsNullOrWhiteSpace([string]$script:RASELiveTreeAfterStage)){$script:RASELiveTreeAfterStage}else{[string]$x.tree_sha256})
+    return [pscustomobject]@{schema=1;name=$Name;path=$AppPath;safe=$true;installable=$true;reason='fixture-attested-local-runtime';file_count=2;total_bytes=2;tree_sha256=$tree;files=@();manifest_valid=$true;manifest_name=[string]$x.manifest_name;layout_root='.';app_root_count=1;vcs_metadata_excluded=$true;mutation_authorized=$false;auto_update_authorized=$false;auto_install_authorized=$false}
+}
+
+function Test-CustomAppProductionStageExecutorLiveBaselineV010 {
+    param([AllowNull()]$LifecycleRow,[AllowNull()]$Permit,[AllowNull()]$BindingRow,[Parameter(Mandatory=$true)][string]$Name)
+    if(-not $script:RASEFreshLiveCallArmed -or $null -eq $script:RASEPostStageBaselineOverride){return & $script:RASEOriginalFreshLiveValidator -LifecycleRow $LifecycleRow -Permit $Permit -BindingRow $BindingRow -Name $Name}
+    $script:RASEFreshLiveCallArmed=$false
+    $script:RASEInsideFreshLiveObserver=$true
+    try{return & $script:RASEOriginalFreshLiveValidator -LifecycleRow $LifecycleRow -Permit $Permit -BindingRow $BindingRow -Name $Name}
+    finally{$script:RASEInsideFreshLiveObserver=$false}
 }
 
 $script:RASEStageMode='valid'
 $script:RASEStageInvocationCount=0
 $script:RASEStageAllowedRoot=$null
 $script:RASEStageConsumptionStore=$null
-$script:RASELiveTreeAfterStage=$null
 function Invoke-CustomAppStageAcquisitionV010 {
     param([Parameter(Mandatory=$true)][string]$Name,[Parameter(Mandatory=$true)]$BindingRow)
     $script:RASEStageInvocationCount++
@@ -35,10 +51,9 @@ function Invoke-CustomAppStageAcquisitionV010 {
     if(-not [bool]$check.ok){throw ('fixture-recovery-aware-stage-binding-denied:'+[string]$check.reason)}
     $workspace=New-CustomAppStageWorkspaceV010
     $stage=Join-Path $workspace 'stage'
-    if($null -eq $script:RASELiveBaselineOverride){
-        # Deep parent fixtures created after this recovery-aware mock is installed still
-        # expect a byte-real generic staged runtime. Reproduce the exact validated generic
-        # fixture payload so pre-apply/recovery evidence can re-read the stage from disk.
+    if(-not $script:RASEDirectInvocationActive){
+        # Deep parent fixtures created after this mock is installed still expect a
+        # byte-real generic staged runtime that pre-apply/recovery evidence can re-read.
         Write-ProductionStageRuntimeV010 $stage ([string]$check.manifest_name) ($Name+'-remote-v2')
         $baseline=& $script:RASEOriginalLocalBaseline -Name $Name -AppPath $stage
     } else {
@@ -54,6 +69,7 @@ function Invoke-CustomAppStageAcquisitionV010 {
         'mutate-binding' {$BindingRow.source_identity='other/repo'}
         'tamper-store' {if([string]::IsNullOrWhiteSpace($script:RASEStageConsumptionStore)){throw 'fixture-consumption-store-null'};[IO.File]::WriteAllText((Join-Path $script:RASEStageConsumptionStore 'current.json'),'{not-json',[Text.UTF8Encoding]::new($false))}
     }
+    if($script:RASEDirectInvocationActive){$script:RASEFreshLiveCallArmed=$true}
     return $result
 }
 
@@ -68,26 +84,13 @@ function Invoke-RASEFixtureV010 {
     $ctx=New-RAIssueLiveContextV010 -Bundle $Bundle
     if($null -eq $Baseline){$Baseline=$ctx.baseline};if($null -eq $ShadowQualification){$ShadowQualification=$ctx.shadow};if($null -eq $LiveQualification){$LiveQualification=$ctx.live}
     $script:RASEStageMode=$Mode;$script:RASEStageInvocationCount=0;$script:RASEStageAllowedRoot=[string]$Q.f.ce.q.f.f.allowed;$script:RASEStageConsumptionStore=$ConsumptionStore;$script:RASELiveTreeAfterStage=$null
-    $script:RASELiveBaselineOverride=[pscustomobject]@{tree_sha256=[string]$Bundle.binding.last_local_tree_sha256;manifest_name=[string]$Bundle.binding.last_local_manifest_name}
+    $script:RASEPostStageBaselineOverride=[pscustomobject]@{tree_sha256=[string]$Bundle.binding.last_local_tree_sha256;manifest_name=[string]$Bundle.binding.last_local_manifest_name}
+    $script:RASEDirectInvocationActive=$true;$script:RASEFreshLiveCallArmed=$false;$script:RASEInsideFreshLiveObserver=$false
     try{
-        if($Mode -ceq 'mutate-live'){
-            # The stage mock flips RASELiveTreeAfterStage. The observer reads it after acquisition.
-            $original=(Get-Command Invoke-CustomAppStageAcquisitionV010 -CommandType Function).ScriptBlock
-        }
-        $result=Invoke-CustomAppProductionRecoveryAwarePermitStageExecutorV010 -Name ([string]$Bundle.lifecycle.name) -LifecycleRow $Bundle.lifecycle -ProvenanceRow $Bundle.provenance -BindingRow $Bundle.binding -StageResult $Bundle.stage -ShadowResult $Bundle.shadow -RetirementResumeResult $Q.resume.result -CurrentBaseline $Baseline -ShadowProtocolQualification $ShadowQualification -LiveAttestedQualification $LiveQualification -AllowedRoot $Q.f.ce.q.f.f.allowed -RecoveryStoreDirectory $Q.f.ce.q.f.f.store -ConsumptionStoreDirectory $ConsumptionStore -ExpectedTransactionId ([string]$Q.f.ce.q.f.f.identity.transaction_id) -LocalAppDataRoot $Q.f.ce.q.f.f.q.persistence.local -AppDataRoot $Q.f.ce.q.f.f.q.persistence.roaming -ConsumptionPersistenceResult $PersistenceResult -Permit $Permit -SessionKey $Key -Now $At -PostStageNow $PostAt
-        return $result
+        return Invoke-CustomAppProductionRecoveryAwarePermitStageExecutorV010 -Name ([string]$Bundle.lifecycle.name) -LifecycleRow $Bundle.lifecycle -ProvenanceRow $Bundle.provenance -BindingRow $Bundle.binding -StageResult $Bundle.stage -ShadowResult $Bundle.shadow -RetirementResumeResult $Q.resume.result -CurrentBaseline $Baseline -ShadowProtocolQualification $ShadowQualification -LiveAttestedQualification $LiveQualification -AllowedRoot $Q.f.ce.q.f.f.allowed -RecoveryStoreDirectory $Q.f.ce.q.f.f.store -ConsumptionStoreDirectory $ConsumptionStore -ExpectedTransactionId ([string]$Q.f.ce.q.f.f.identity.transaction_id) -LocalAppDataRoot $Q.f.ce.q.f.f.q.persistence.local -AppDataRoot $Q.f.ce.q.f.f.q.persistence.roaming -ConsumptionPersistenceResult $PersistenceResult -Permit $Permit -SessionKey $Key -Now $At -PostStageNow $PostAt
     } finally {
-        $script:RASELiveBaselineOverride=$null;$script:RASEStageConsumptionStore=$null;$script:RASEStageAllowedRoot=$null;$script:RASEStageMode='valid';$script:RASELiveTreeAfterStage=$null
+        $script:RASEPostStageBaselineOverride=$null;$script:RASEDirectInvocationActive=$false;$script:RASEFreshLiveCallArmed=$false;$script:RASEInsideFreshLiveObserver=$false;$script:RASEStageConsumptionStore=$null;$script:RASEStageAllowedRoot=$null;$script:RASEStageMode='valid';$script:RASELiveTreeAfterStage=$null
     }
-}
-
-# Teach the fixture observer to expose a stage-time live drift only after acquisition.
-$script:RASEObserverBase=(Get-Command Get-CustomAppLocalRuntimeBaseline -CommandType Function).ScriptBlock
-function Get-CustomAppLocalRuntimeBaseline {
-    param([Parameter(Mandatory=$true)][string]$Name,[Parameter(Mandatory=$true)][string]$AppPath,[int]$MaxFiles=20000,[int64]$MaxFileBytes=67108864,[int64]$MaxTotalBytes=268435456,[int64]$MaxManifestBytes=1048576)
-    if($null -eq $script:RASELiveBaselineOverride){return & $script:RASEOriginalLocalBaseline -Name $Name -AppPath $AppPath -MaxFiles $MaxFiles -MaxFileBytes $MaxFileBytes -MaxTotalBytes $MaxTotalBytes -MaxManifestBytes $MaxManifestBytes}
-    $tree=$(if(-not [string]::IsNullOrWhiteSpace([string]$script:RASELiveTreeAfterStage)){$script:RASELiveTreeAfterStage}else{[string]$script:RASELiveBaselineOverride.tree_sha256})
-    return [pscustomobject]@{schema=1;name=$Name;path=$AppPath;safe=$true;installable=$true;reason='fixture-attested-local-runtime';file_count=2;total_bytes=2;tree_sha256=$tree;files=@();manifest_valid=$true;manifest_name=[string]$script:RASELiveBaselineOverride.manifest_name;layout_root='.';app_root_count=1;vcs_metadata_excluded=$true;mutation_authorized=$false;auto_update_authorized=$false;auto_install_authorized=$false}
 }
 
 function Assert-RASENoAuthorityV010($Result,[string]$Label){
