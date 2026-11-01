@@ -26,12 +26,21 @@ $first=$text.IndexOf($old,[StringComparison]::Ordinal)
 if($first-lt0){throw 'r2 target assertion not found'}
 if($text.IndexOf($old,$first+$old.Length,[StringComparison]::Ordinal)-ge0){throw 'r2 target assertion not unique'}
 $patched=$text.Substring(0,$first)+$new.TrimEnd("`r","`n")+$text.Substring($first+$old.Length)
+
+$stageOld="Assert-RAALITrue ([string]`$r.reason -like '*atomic-mutation-stage-runtime-mismatch*') ('stage drift reason '+[string]`$r.reason)"
+$stageNew="Assert-RAALITrue ([string]`$r.reason -ceq 'recovery-aware-atomic-prepared-result-invalid:recovery-aware-pre-apply-generic-result-invalid:pre-apply-result-stage-integrity-mismatch') ('stage drift reason '+[string]`$r.reason)"
+$stageFirst=$patched.IndexOf($stageOld,[StringComparison]::Ordinal)
+if($stageFirst-lt0){throw 'r2 stage-drift expectation not found'}
+if($patched.IndexOf($stageOld,$stageFirst+$stageOld.Length,[StringComparison]::Ordinal)-ge0){throw 'r2 stage-drift expectation not unique'}
+$patched=$patched.Substring(0,$stageFirst)+$stageNew+$patched.Substring($stageFirst+$stageOld.Length)
+
 $oldMarker='stable_and_byte_real_views_separate=true'
-$newMarker='recovery_stable_full_tree_equals_byte_real_full_tree=true byte_real_backup_exact=true optional_vcs_provenance_parity=true runtime_view_verified_independently=true'
+$newMarker='recovery_stable_full_tree_equals_byte_real_full_tree=true byte_real_backup_exact=true optional_vcs_provenance_parity=true runtime_view_verified_independently=true stage_drift_rejected_at_prepared_integrity_gate=true'
 if($patched.IndexOf($oldMarker,[StringComparison]::Ordinal)-lt0){throw 'r2 output marker not found'}
 $patched=$patched.Replace($oldMarker,$newMarker)
 if($patched.IndexOf('valid fixture collapsed stable and byte-real trees',[StringComparison]::Ordinal)-ge0){throw 'r2 obsolete assertion survived patch'}
-foreach($m in @('valid recovery-stable full tree no longer equals byte-real full tree before atomic','valid byte-real live/rollback backup full tree mismatch before atomic','valid byte-real live/rollback backup file count mismatch before atomic','valid byte-real live/rollback backup byte count mismatch before atomic','valid byte-real runtime view drifted before atomic','valid live/rollback backup VCS presence mismatch','valid live/rollback backup VCS tree mismatch','recovery_stable_full_tree_equals_byte_real_full_tree=true','byte_real_backup_exact=true','optional_vcs_provenance_parity=true','runtime_view_verified_independently=true')){if($patched.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "r2 semantic marker missing $m"}}
+if($patched.IndexOf("*atomic-mutation-stage-runtime-mismatch*",[StringComparison]::Ordinal)-ge0){throw 'r2 obsolete late stage-drift expectation survived patch'}
+foreach($m in @('valid recovery-stable full tree no longer equals byte-real full tree before atomic','valid byte-real live/rollback backup full tree mismatch before atomic','valid byte-real live/rollback backup file count mismatch before atomic','valid byte-real live/rollback backup byte count mismatch before atomic','valid byte-real runtime view drifted before atomic','valid live/rollback backup VCS presence mismatch','valid live/rollback backup VCS tree mismatch','recovery-aware-atomic-prepared-result-invalid:recovery-aware-pre-apply-generic-result-invalid:pre-apply-result-stage-integrity-mismatch','recovery_stable_full_tree_equals_byte_real_full_tree=true','byte_real_backup_exact=true','optional_vcs_provenance_parity=true','runtime_view_verified_independently=true','stage_drift_rejected_at_prepared_integrity_gate=true')){if($patched.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "r2 semantic marker missing $m"}}
 foreach($bad in @('valid live .git provenance missing before atomic','valid rollback backup .git provenance missing before atomic','valid fixture collapsed runtime view and byte-real full tree','recovery-closed no-VCS fixture unexpectedly split runtime and full tree','r2 fixture unexpectedly reintroduced post-recovery VCS metadata')){if($patched.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "obsolete cross-domain/VCS assumption survived: $bad"}}
 $temp=Join-Path $PSScriptRoot ('test_custom_app_production_recovery_aware_permit_atomic_live_swap_integration_r2_generated_'+[Guid]::NewGuid().ToString('N')+'.ps1')
 try{
@@ -43,4 +52,4 @@ try{
 } finally {
     if(Test-Path -LiteralPath $temp){[IO.File]::Delete($temp)}
 }
-Write-Host 'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_ATOMIC_INTEGRATION_R2_PATCH_HARNESS_PASS recovery_stable_full_tree_equals_byte_real_full_tree=true byte_real_backup_exact=true optional_vcs_provenance_parity=true runtime_view_verified_independently=true recovery_closed_live_bytes_unchanged=true'
+Write-Host 'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_ATOMIC_INTEGRATION_R2_PATCH_HARNESS_PASS recovery_stable_full_tree_equals_byte_real_full_tree=true byte_real_backup_exact=true optional_vcs_provenance_parity=true runtime_view_verified_independently=true stage_drift_rejected_at_prepared_integrity_gate=true recovery_closed_live_bytes_unchanged=true'
