@@ -13,7 +13,7 @@ $importOld=@'
 $importNew=$importOld+"`n    . (Join-Path `$root 'validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/custom-app-production-recovery-aware-permit-transaction-finalization.ps1')"
 '@.TrimEnd("`r","`n")
 $importNew=@'
-$importNew=$importOld+"`n    . (Join-Path `$root 'validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/custom-app-production-recovery-aware-permit-transaction-finalization.ps1')`n    . (Join-Path `$root 'validation/custom-app-production-transaction-finalization-v0.1.0/custom-app-production-transaction-finalization.ps1')`n    . (Join-Path `$root 'validation/custom-app-production-post-swap-apply-admission-v0.1.0/custom-app-production-post-swap-apply-admission.ps1')`n    . (Join-Path `$root 'validation/custom-app-production-recovery-aware-permit-post-swap-apply-admission-v0.1.0/custom-app-production-recovery-aware-permit-post-swap-apply-admission.ps1')"
+$importNew=$importOld+"`n    . (Join-Path `$root 'validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/custom-app-production-recovery-aware-permit-transaction-finalization.ps1')`n    . (Join-Path `$root 'validation/custom-app-production-transaction-finalization-v0.1.0/custom-app-production-transaction-finalization.ps1')`n    . (Join-Path `$root 'validation/custom-app-remote-binding-observer-v0.4.0/custom-app-remote-binding-state.ps1')`n    . (Join-Path `$root 'validation/custom-app-production-post-swap-apply-admission-v0.1.0/custom-app-production-post-swap-apply-admission.ps1')`n    . (Join-Path `$root 'validation/custom-app-production-recovery-aware-permit-post-swap-apply-admission-v0.1.0/custom-app-production-recovery-aware-permit-post-swap-apply-admission.ps1')"
 '@.TrimEnd("`r","`n")
 $i=Get-RAPSAIUniqueIndexV010 -Text $text -Marker $importOld -Label 'generated-import-chain';$patched=$text.Substring(0,$i)+$importNew+$text.Substring($i+$importOld.Length)
 
@@ -38,7 +38,7 @@ $restoreNew=@'
 '@
 $i=Get-RAPSAIUniqueIndexV010 -Text $patched -Marker $restoreOld -Label 'valid-restore-anchor';$patched=$patched.Substring(0,$i)+$restoreNew.TrimEnd("`r","`n")+$patched.Substring($i+$restoreOld.Length)
 
-foreach($m in @('Resolve-CustomAppProductionRecoveryAwarePermitPostSwapApplyAdmissionV010','real recovery-aware post-swap admission denied','real post-swap decision validator denied','real post-swap admission mutated live runtime','real post-swap admission mutated protected persistence','real post-swap admission lost retained evidence')){if($patched.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "post-swap integration marker missing $m"}}
+foreach($m in @('custom-app-remote-binding-state.ps1','Resolve-CustomAppProductionRecoveryAwarePermitPostSwapApplyAdmissionV010','real recovery-aware post-swap admission denied','real post-swap decision validator denied','real post-swap admission mutated live runtime','real post-swap admission mutated protected persistence','real post-swap admission lost retained evidence')){if($patched.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "post-swap integration marker missing $m"}}
 $temp=Join-Path $PSScriptRoot ('test_recovery_aware_post_swap_generated_'+[Guid]::NewGuid().ToString('N')+'.ps1')
 try{
     [IO.File]::WriteAllText($temp,$patched,[Text.UTF8Encoding]::new($false));$tokens=$null;$errors=$null;[Management.Automation.Language.Parser]::ParseFile($temp,[ref]$tokens,[ref]$errors)|Out-Null
@@ -46,4 +46,4 @@ try{
     & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $temp
     if($LASTEXITCODE){throw "generated recovery-aware post-swap integration failed exit=$LASTEXITCODE"}
 } finally {if(Test-Path -LiteralPath $temp){[IO.File]::Delete($temp)}}
-Write-Host 'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_POST_SWAP_APPLY_ADMISSION_BYTE_REAL_INTEGRATION_PASS real_preapply=true real_atomic=true real_finalization=true generic_postswap_reused=true ledger_double_read=true live_runtime_unchanged=true persistence_unchanged=true evidence_preserved=true zero_authority=true'
+Write-Host 'CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_PERMIT_POST_SWAP_APPLY_ADMISSION_BYTE_REAL_INTEGRATION_PASS real_preapply=true real_atomic=true real_finalization=true generic_postswap_reused=true ledger_double_read=true remote_binding_exact=true live_runtime_unchanged=true persistence_unchanged=true evidence_preserved=true zero_authority=true'
