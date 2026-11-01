@@ -28,7 +28,7 @@ jobs:
           $pins=@(
             @($h,'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/custom-app-production-recovery-aware-permit-atomic-live-swap.ps1','8161b8d349882ce0926ae597448f4f96bbea44a1'),
             @($h,'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap.ps1','3d4fd9437c2a14fde2873d9d689a3e8c0b63bc69'),
-            @($h,'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap_integration.ps1','8c1158d406b3efacea67abadbf8fc821386a45e1'),
+            @($h,'validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/test_custom_app_production_recovery_aware_permit_atomic_live_swap_integration.ps1','bfc24ad7849e7f734b20f811ab4ee05069a8b5e0'),
             @($p,'validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/custom-app-production-recovery-aware-permit-pre-apply-preparation.ps1','eaad8a5f161f831bbbada1c1c0957a3dfc80edaa'),
             @($p,'validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/test_custom_app_production_recovery_aware_permit_pre_apply_preparation.ps1','62fee2fc47c900ccf2eaec96bdb920727f3c5690'),
             @($p,'validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/test_custom_app_production_recovery_aware_permit_pre_apply_preparation_r4.ps1','f5221f0934f9d0fd61a21c7a23f895ecd62b1b0c'),
@@ -49,7 +49,7 @@ jobs:
           foreach($x in @('[IO.Directory]::Move(','Invoke-WebRequest','Invoke-RestMethod','Start-Process','spicetify apply','spicetify config','Save-AddonState')){if($c.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "wrapper gained forbidden direct primitive $x"}}
           if($c -match 'session_key_persisted\s*=\s*\$true|session_key_exposed\s*=\s*\$true|spicetify_apply_authorized\s*=\s*\$true|production_execution_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'authority/session-key contract escaped'}
           $t=Get-Content $test -Raw;foreach($m in @('wrong key accepted','binding drift accepted','live drift accepted','generic stage invalid accepted','rollback evidence not propagated','recovery_admission_exactly_once=true','generic_atomic_exactly_once=true','count=$count')){if($t.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "wrapper coverage missing $m"}}
-          $i=Get-Content $integration -Raw;foreach($m in @('Recovery closure is durable evidence','Invoke-RAALIRecoveryAtomicV010','throw-after-candidate-move','actual_recovery_pre_apply=true','exact_generic_atomic=true','exact_rollback=true','zero_apply_authority=true')){if($i.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "integration coverage missing $m"}}
+          $i=Get-Content $integration -Raw;foreach($m in @('Recovery closure is durable evidence','parent-matrix-start','fixture_only_parent=true','Invoke-RAALIRecoveryAtomicV010','throw-after-candidate-move','actual_recovery_pre_apply=true','exact_generic_atomic=true','exact_rollback=true','zero_apply_authority=true')){if($i.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "integration coverage missing $m"}}
           'RECOVERY_AWARE_ATOMIC_PARSE_AUDIT_PASS'
 
       - name: Run recovery-aware atomic wrapper matrix
