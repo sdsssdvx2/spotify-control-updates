@@ -12,8 +12,12 @@ function Get-RAXIUniqueIndexV010 {
     return $i
 }
 
-$importOld="    . (Join-Path ``$root 'validation/custom-app-production-recovery-aware-permit-post-swap-apply-admission-v0.1.0/custom-app-production-recovery-aware-permit-post-swap-apply-admission.ps1')`""
-$importNew=$importOld+"`n    . (Join-Path ``$root 'validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1')`n    . (Join-Path ``$root 'validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/custom-app-production-recovery-aware-permit-spicetify-apply-executor.ps1')`""
+$importOld=@'
+custom-app-production-recovery-aware-permit-post-swap-apply-admission-v0.1.0/custom-app-production-recovery-aware-permit-post-swap-apply-admission.ps1')"
+'@.TrimEnd("`r","`n")
+$importNew=@'
+custom-app-production-recovery-aware-permit-post-swap-apply-admission-v0.1.0/custom-app-production-recovery-aware-permit-post-swap-apply-admission.ps1')`n    . (Join-Path `$root 'validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1')`n    . (Join-Path `$root 'validation/custom-app-production-recovery-aware-permit-spicetify-apply-executor-v0.1.0/custom-app-production-recovery-aware-permit-spicetify-apply-executor.ps1')"
+'@.TrimEnd("`r","`n")
 $i=Get-RAXIUniqueIndexV010 -Text $text -Marker $importOld -Label 'post-swap-generated-import-tail'
 $patched=$text.Substring(0,$i)+$importNew+$text.Substring($i+$importOld.Length)
 
@@ -65,7 +69,8 @@ $i=Get-RAXIUniqueIndexV010 -Text $patched -Marker $restoreOld -Label 'post-swap-
 $patched=$patched.Substring(0,$i)+$restoreNew.TrimEnd("`r","`n")+$patched.Substring($i+$restoreOld.Length)
 
 foreach($m in @('custom-app-production-spicetify-apply-executor.ps1','custom-app-production-recovery-aware-permit-spicetify-apply-executor.ps1','Invoke-CustomAppProductionRecoveryAwarePermitSpicetifyApplyExecutorV010','RecoveryAwareSpicetifyFake','real recovery-aware apply process count drifted','real recovery-aware apply result validator denied','real recovery-aware apply lost retained evidence')){if($patched.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "apply integration coverage marker missing $m"}}
-if($patched.IndexOf('Invoke-Expression',[StringComparison]::OrdinalIgnoreCase)-ge0){throw 'apply integration gained Invoke-Expression'}
+$pt=$null;$pe=$null;$past=[Management.Automation.Language.Parser]::ParseInput($patched,[ref]$pt,[ref]$pe);if($pe.Count){$pe|ForEach-Object{Write-Error ("patched post-swap generator line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw 'patched post-swap generator PS5.1 parse failed'}
+$pex=@($past.FindAll({param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -ceq 'Invoke-Expression'},$true));if($pex.Count){throw 'patched post-swap generator gained executable Invoke-Expression command'}
 $temp=Join-Path $PSScriptRoot ('test_recovery_aware_apply_generated_'+[Guid]::NewGuid().ToString('N')+'.ps1')
 try{
     [IO.File]::WriteAllText($temp,$patched,[Text.UTF8Encoding]::new($false));$tokens=$null;$errors=$null;[Management.Automation.Language.Parser]::ParseFile($temp,[ref]$tokens,[ref]$errors)|Out-Null
