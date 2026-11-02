@@ -1,0 +1,146 @@
+name: Validate Custom App Production Evidence-Bound Recovery Restart Integration v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-evidence-bound-recovery-restart-integration-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-evidence-bound-recovery-restart-integration-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-evidence-bound-recovery-restart-integration-v010.yml'
+  pull_request:
+    branches: [validate/custom-app-production-evidence-bound-journal-atomic-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-evidence-bound-recovery-restart-integration-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-evidence-bound-recovery-restart-integration-v010.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope lineage pins and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h -cne $e){throw "head mismatch $h != $e"}
+          $base='c21a8c72dd8920df8e1faa59eb6aedee76a15e06';if((git merge-base $base HEAD).Trim() -cne $base){throw 'not descended from exact evidence-bound journal atomic head'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $allowed=@(
+            '.github/workflows/validate-custom-app-production-evidence-bound-recovery-restart-integration-v010.yml',
+            'validation/custom-app-production-evidence-bound-recovery-restart-integration-v0.1.0/seed_evidence_bound_recovery_restart.ps1',
+            'validation/custom-app-production-evidence-bound-recovery-restart-integration-v0.1.0/recover_evidence_bound_recovery_restart.ps1'
+          )
+          $changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x -notin $changed){throw "missing $x"}}
+          $pins=@(
+            @($h,'validation/custom-app-production-evidence-bound-recovery-restart-integration-v0.1.0/seed_evidence_bound_recovery_restart.ps1','fda166057f7d39a99d49c7e261803984749c9246'),
+            @($h,'validation/custom-app-production-evidence-bound-recovery-restart-integration-v0.1.0/recover_evidence_bound_recovery_restart.ps1','53fcee83e26e25b390cbd1d33a9885c94badfc3b'),
+            @('c21a8c72dd8920df8e1faa59eb6aedee76a15e06','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'),
+            @('c21a8c72dd8920df8e1faa59eb6aedee76a15e06','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/test_custom_app_production_evidence_bound_journal_atomic.ps1','dad1028758e3f03aebd86a84adc5c1d26a37bee3'),
+            @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','79580da78443a18bd281d4fce61c4a57d958a196'),
+            @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),
+            @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/test_custom_app_production_journal_aware_atomic_mutation.ps1','c550723053a47f776762cd1508b72f2db8808dce'),
+            @('d9a1face71511bdaeeef4e8c761415ef9ec95fc0','validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','0273d7e28a56759b1d0ec9cbf037483b04d98d63'),
+            @('c3e1f960447ba84d2410af9c37a22a384f2a5436','validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1','5fec613c460619da5dbfe88fca5c7334e9e93f76'),
+            @('c3e1f960447ba84d2410af9c37a22a384f2a5436','validation/custom-app-production-recovery-restore-executor-v0.1.0/test_custom_app_production_recovery_restore_executor.ps1','5f925d804a3561167f7d8b388a79239eee61fa3d'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3')
+          )
+          git fetch --no-tags origin validate/custom-app-production-recovery-restore-executor-v0.1.0 validate/custom-app-production-recovery-evidence-envelope-v0.1.0 | Out-Null
+          foreach($p in $pins){$b=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($b -cne $p[2]){throw "pin drift $($p[1]) $b != $($p[2])"}}
+          'EVIDENCE_BOUND_RECOVERY_RESTART_SCOPE_PINS_PASS'
+
+      - name: Parse and audit restart-only boundary
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-evidence-bound-recovery-restart-integration-v0.1.0';$seed="$d/seed_evidence_bound_recovery_restart.ps1";$recover="$d/recover_evidence_bound_recovery_restart.ps1"
+          foreach($f in @($seed,$recover)){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|ForEach-Object{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $s=Get-Content $seed -Raw;$r=Get-Content $recover -Raw
+          foreach($m in @('after-live-move-before-journal','first-rename-complete-unjournaled','Invoke-CustomAppProductionJournalAwareAtomicStartingRepairV010','live-moved-to-old','Read-CustomAppProductionRecoveryEvidenceV010')){if($s.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "seed coverage marker missing $m"}}
+          foreach($m in @('Resolve-CustomAppProductionRecoveryRestoreResumeAdmissionV010','Invoke-CustomAppProductionRecoveryRestoreExecutorV010','rollback-complete','recovery apply count was not exactly one','rollback-complete replay unexpectedly accepted','Read-CustomAppProductionRecoveryEvidenceV010')){if($r.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "recover coverage marker missing $m"}}
+          foreach($f in @($s,$r)){foreach($x in @('Spotify-Managed-DomainVPN.vbs','launch-managed.vbs','CreateShortcut','WScript.Shell','.lnk','DomainVPN-Universal-TUN')){if($f.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "managed/DomainVPN boundary escaped via $x"}}}
+          'EVIDENCE_BOUND_RECOVERY_RESTART_PARSE_BOUNDARY_PASS'
+
+      - name: Prove crash state survives a real process boundary into exact recovery executor
+        shell: powershell
+        timeout-minutes: 210
+        run: |
+          $src=(Get-Location).Path
+          $seedWork=Join-Path $env:RUNNER_TEMP 'evidence-bound-restart-seed-worktree'
+          $recoverWork=Join-Path $env:RUNNER_TEMP 'evidence-bound-restart-recover-worktree'
+          $state=Join-Path $env:RUNNER_TEMP 'evidence-bound-restart-state.json'
+          $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
+          function Materialize([string]$Work,[string]$Commit,[string]$Path,[string]$Blob){
+            $out=Join-Path $Work $Path;New-Item -ItemType Directory -Force -Path (Split-Path $out -Parent)|Out-Null
+            $env:EBR_SPEC="$Commit`:$Path";$env:EBR_OUT=$out
+            python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['EBR_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['EBR_SPEC']]))"
+            if($LASTEXITCODE){throw "materialize failed $Path"};$actual=(git hash-object $out).Trim();if($actual -cne $Blob){throw "materialized blob drift $Path $actual != $Blob"}
+          }
+          git worktree add --detach $seedWork e2b80822835bf5d59dc179e345e098b5bd79759e;if($LASTEXITCODE){throw 'seed worktree add failed'}
+          try {
+            foreach($q in @(
+              @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+              @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+              @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+              @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+              @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','79580da78443a18bd281d4fce61c4a57d958a196'),
+              @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),
+              @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/test_custom_app_production_journal_aware_atomic_mutation.ps1','c550723053a47f776762cd1508b72f2db8808dce'),
+              @('c21a8c72dd8920df8e1faa59eb6aedee76a15e06','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'),
+              @('c21a8c72dd8920df8e1faa59eb6aedee76a15e06','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/test_custom_app_production_evidence_bound_journal_atomic.ps1','dad1028758e3f03aebd86a84adc5c1d26a37bee3')
+            )){Materialize $seedWork $q[0] $q[1] $q[2]}
+            $seedRel='validation/custom-app-production-evidence-bound-recovery-restart-integration-v0.1.0/seed_evidence_bound_recovery_restart.ps1';$seedOut=Join-Path $seedWork $seedRel;New-Item -ItemType Directory -Force -Path (Split-Path $seedOut -Parent)|Out-Null;Copy-Item -LiteralPath (Join-Path $src $seedRel) -Destination $seedOut
+            if((git hash-object $seedOut).Trim() -cne 'fda166057f7d39a99d49c7e261803984749c9246'){throw 'seed script copied blob drift'}
+            Push-Location $seedWork;try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $seedRel -StatePath $state;if($LASTEXITCODE){throw 'seed process failed'}}finally{Pop-Location}
+            if(-not (Test-Path -LiteralPath $state -PathType Leaf)){throw 'seed process did not persist restart state'}
+          } finally {git worktree remove --force $seedWork 2>$null}
+
+          git worktree add --detach $recoverWork c3e1f960447ba84d2410af9c37a22a384f2a5436;if($LASTEXITCODE){throw 'recovery worktree add failed'}
+          try {
+            foreach($q in @(
+              @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+              @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/test_custom_app_production_recovery_evidence.ps1','de37d029e175dbec899445dbe983e506a14a1b0a'),
+              @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/probe_custom_app_production_recovery_evidence.ps1','84f73605526373652a4499b7f472537c8e2b5c03'),
+              @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+              @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+              @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae')
+            )){Materialize $recoverWork $q[0] $q[1] $q[2]}
+            $recoverRel='validation/custom-app-production-evidence-bound-recovery-restart-integration-v0.1.0/recover_evidence_bound_recovery_restart.ps1';$recoverOut=Join-Path $recoverWork $recoverRel;New-Item -ItemType Directory -Force -Path (Split-Path $recoverOut -Parent)|Out-Null;Copy-Item -LiteralPath (Join-Path $src $recoverRel) -Destination $recoverOut
+            if((git hash-object $recoverOut).Trim() -cne '53fcee83e26e25b390cbd1d33a9885c94badfc3b'){throw 'recovery script copied blob drift'}
+            Push-Location $recoverWork;try{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $recoverRel -StatePath $state;if($LASTEXITCODE){throw 'recovery process failed'}}finally{Pop-Location}
+          } finally {git worktree remove --force $recoverWork 2>$null}
+          'EVIDENCE_BOUND_RECOVERY_RESTART_CROSS_PROCESS_PASS'
+
+      - name: Rebuild exact hard-disabled candidate and run Addon Manager SelfTest
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'candidate rebuild failed'}
+          $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json";$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant()
+          if((Get-Item $a).Length -ne 1382213 -or $ah -cne 'c2e5ffd4fe9b14b5c31dd53e7d093bd9b5db2a4ad49fa19449d299e3c14fac2f'){throw 'Addon Manager hard-disabled candidate drift'}
+          if((Get-Item $m).Length -ne 284327 -or $mh -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate drift'}
+          if($rh -cne 'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw 'candidate report drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'evidence-bound-restart-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'Addon Manager SelfTest failed'}
+          'EVIDENCE_BOUND_RECOVERY_RESTART_HARD_DISABLED_SELFTEST_PASS'
+
+      - name: Prove protected surfaces immutable and write evidence
+        shell: powershell
+        run: |
+          $base='c21a8c72dd8920df8e1faa59eb6aedee76a15e06';$expected=@('.github/workflows/validate-custom-app-production-evidence-bound-recovery-restart-integration-v010.yml','validation/custom-app-production-evidence-bound-recovery-restart-integration-v0.1.0/seed_evidence_bound_recovery_restart.ps1','validation/custom-app-production-evidence-bound-recovery-restart-integration-v0.1.0/recover_evidence_bound_recovery_restart.ps1');$changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "unexpected changed surface $($bad -join ', ')"}
+          foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1')){git diff --quiet $base HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $d='validation/custom-app-production-evidence-bound-recovery-restart-integration-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();validated_evidence_bound_atomic_parent=$base;seed_process_separate=$true;recovery_process_separate=$true;first_rename_crash_repaired_to_live_moved_to_old=$true;durable_evidence_survives_restart=$true;restore_resume_admission_verified=$true;exact_restore_executor_verified=$true;recovery_apply_exactly_once=$true;rollback_complete_persisted=$true;rollback_complete_replay_denied=$true;managed_shortcut_touched=$false;domainvpn_wrapper_touched=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'EVIDENCE_BOUND_RECOVERY_RESTART_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-evidence-bound-recovery-restart-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-evidence-bound-recovery-restart-integration-v0.1.0/seed_evidence_bound_recovery_restart.ps1
+            validation/custom-app-production-evidence-bound-recovery-restart-integration-v0.1.0/recover_evidence_bound_recovery_restart.ps1
+            validation/custom-app-production-evidence-bound-recovery-restart-integration-v0.1.0/ci-evidence.json
+          if-no-files-found: error
