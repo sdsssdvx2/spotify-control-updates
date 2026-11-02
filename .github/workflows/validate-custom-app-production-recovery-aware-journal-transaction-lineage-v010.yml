@@ -1,0 +1,106 @@
+name: Validate Custom App Production Recovery-Aware Journal Transaction Lineage v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-recovery-aware-journal-transaction-lineage-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-recovery-aware-journal-transaction-lineage-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-recovery-aware-journal-transaction-lineage-v010.yml'
+  pull_request:
+    branches: [validate/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-recovery-aware-journal-transaction-lineage-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-recovery-aware-journal-transaction-lineage-v010.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope lineage pins and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h -cne $e){throw "head mismatch $h != $e"}
+          $base='c549230acb222bd8132bea22912af5853f316785';if((git merge-base $base HEAD).Trim() -cne $base){throw 'not descended from exact #191 restart-recovery integration head'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $allowed=@(
+            '.github/workflows/validate-custom-app-production-recovery-aware-journal-transaction-lineage-v010.yml',
+            'validation/custom-app-production-recovery-aware-journal-transaction-lineage-v0.1.0/custom-app-production-recovery-aware-journal-transaction-lineage.ps1',
+            'validation/custom-app-production-recovery-aware-journal-transaction-lineage-v0.1.0/test_custom_app_production_recovery_aware_journal_transaction_lineage.ps1'
+          )
+          $changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x -notin $changed){throw "missing $x"}}
+          $pins=@(
+            @('validation/custom-app-production-recovery-aware-journal-transaction-lineage-v0.1.0/custom-app-production-recovery-aware-journal-transaction-lineage.ps1','bcfbe80331d212199fe27beee04bf18865b9a415'),
+            @('validation/custom-app-production-recovery-aware-journal-transaction-lineage-v0.1.0/test_custom_app_production_recovery_aware_journal_transaction_lineage.ps1','7a16cf1b84fdead8d70370b0007d6bbd512468b2'),
+            @('validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/custom-app-production-recovery-aware-permit-pre-apply-preparation.ps1','eaad8a5f161f831bbbada1c1c0957a3dfc80edaa'),
+            @('validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'),
+            @('validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','79580da78443a18bd281d4fce61c4a57d958a196'),
+            @('validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),
+            @('validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+            @('validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','0273d7e28a56759b1d0ec9cbf037483b04d98d63'),
+            @('validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1','5fec613c460619da5dbfe88fca5c7334e9e93f76'),
+            @('validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/recovery_worker.ps1','ab94eac803e7124451a01f66b05c25bdac6d10a3'),
+            @('validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/test_custom_app_production_evidence_bound_recovery_restore_integration.ps1','757a236306712e0f45c961cdd52cca054fa7758d')
+          )
+          foreach($q in $pins){$b=(git hash-object $q[0]).Trim();if($b -cne $q[1]){throw "immutable/local pin drift $($q[0]) $b != $($q[1])"}}
+          'RECOVERY_AWARE_JOURNAL_TRANSACTION_LINEAGE_SCOPE_PINS_PASS'
+
+      - name: Parse and audit zero-authority generation bridge ordering
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-aware-journal-transaction-lineage-v0.1.0';$core="$d/custom-app-production-recovery-aware-journal-transaction-lineage.ps1";$test="$d/test_custom_app_production_recovery_aware_journal_transaction_lineage.ps1"
+          foreach($f in @($core,$test)){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|ForEach-Object{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $c=Get-Content $core -Raw
+          foreach($m in @('transaction-lineage-v1.json','upstream_transaction_id','crash_transaction_id','New-CustomAppProductionCrashJournalIdentityV010','Write-CustomAppProductionRecoveryAwareJournalTransactionLineageV010','Invoke-CustomAppProductionEvidenceBoundJournalAtomicMutationV010','Resolve-CustomAppProductionRecoveryAwareJournalTransactionLineageV010','after-lineage-binding-before-journal-init','transaction-lineage-existing-exact-replay')){if($c.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "core marker missing $m"}}
+          foreach($x in @('Invoke-WebRequest','Invoke-RestMethod','Start-Process','powershell.exe','[IO.Directory]::Move','spicetify apply','SessionKey','Create-CustomAppProductionPermit')){if($c.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "core forbidden direct primitive $x"}}
+          if(([regex]::Matches($c,'Invoke-CustomAppProductionEvidenceBoundJournalAtomicMutationV010').Count)-ne1){throw 'qualified evidence-bound atomic must be invoked exactly once'}
+          $write=$c.IndexOf('Write-CustomAppProductionRecoveryAwareJournalTransactionLineageV010 -AllowedRoot',[StringComparison]::Ordinal);$atomic=$c.IndexOf('Invoke-CustomAppProductionEvidenceBoundJournalAtomicMutationV010 -GenericPreparedResult',[StringComparison]::Ordinal);if($write-lt0-or$atomic-lt0-or$write-ge$atomic){throw 'lineage durable write is not ordered before qualified atomic invocation'}
+          if($c -match 'lineage_is_authority\s*=\s*\$true|execution_authorized\s*=\s*\$true|restore_authorized\s*=\s*\$true|apply_authorized\s*=\s*\$true|cleanup_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'lineage core authority escaped'}
+          $tt=Get-Content $test -Raw;foreach($m in @('pre-journal-replay','transaction-lineage-v1.json','upstream-tamper','after-live-move-before-journal','first-rename-complete-unjournaled','Invoke-IRSeparateProcessRecoveryV010','rollback-complete','CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_JOURNAL_TRANSACTION_LINEAGE_MATRIX_PASS')){if($tt.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "test marker missing $m"}}
+          'RECOVERY_AWARE_JOURNAL_TRANSACTION_LINEAGE_PARSE_ORDERING_PASS'
+
+      - name: Run recovery-aware generation lineage and separate-process crash recovery matrix
+        shell: powershell
+        timeout-minutes: 185
+        run: |
+          $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-recovery-aware-journal-transaction-lineage-v0.1.0/test_custom_app_production_recovery_aware_journal_transaction_lineage.ps1'
+          if($LASTEXITCODE){throw 'recovery-aware journal transaction lineage matrix failed'}
+          'RECOVERY_AWARE_JOURNAL_TRANSACTION_LINEAGE_RUNTIME_PASS'
+
+      - name: Rebuild exact hard-disabled candidate and run Addon Manager SelfTest
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'candidate rebuild failed'}
+          $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json";$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant()
+          if((Get-Item $a).Length -ne 1382213 -or $ah -cne 'c2e5ffd4fe9b14b5c31dd53e7d093bd9b5db2a4ad49fa19449d299e3c14fac2f'){throw 'Addon Manager hard-disabled candidate drift'}
+          if((Get-Item $m).Length -ne 284327 -or $mh -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate drift'}
+          if($rh -cne 'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw 'candidate report drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'lineage-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'Addon Manager SelfTest failed'}
+          'RECOVERY_AWARE_JOURNAL_TRANSACTION_LINEAGE_HARD_DISABLED_SELFTEST_PASS'
+
+      - name: Prove protected surfaces immutable and write evidence
+        shell: powershell
+        run: |
+          $base='c549230acb222bd8132bea22912af5853f316785';$expected=@('.github/workflows/validate-custom-app-production-recovery-aware-journal-transaction-lineage-v010.yml','validation/custom-app-production-recovery-aware-journal-transaction-lineage-v0.1.0/custom-app-production-recovery-aware-journal-transaction-lineage.ps1','validation/custom-app-production-recovery-aware-journal-transaction-lineage-v0.1.0/test_custom_app_production_recovery_aware_journal_transaction_lineage.ps1');$changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "unexpected changed surface $($bad -join ', ')"}
+          foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/recovery_worker.ps1','validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/test_custom_app_production_evidence_bound_recovery_restore_integration.ps1','validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/custom-app-production-recovery-aware-permit-pre-apply-preparation.ps1')){git diff --quiet $base HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $d='validation/custom-app-production-recovery-aware-journal-transaction-lineage-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();base=$base;qualified_recovery_aware_pre_apply_head='43f9a433354f56e2db19f4edfa1ffa8f4a245088';qualified_evidence_bound_atomic_head='c21a8c72dd8920df8e1faa59eb6aedee76a15e06';qualified_restart_recovery_head='c549230acb222bd8132bea22912af5853f316785';upstream_and_crash_transaction_ids_explicitly_distinct_and_bound=$true;lineage_persisted_before_crash_journal=$true;exact_pre_journal_replay_proven=$true;tamper_fails_closed_before_live_mutation=$true;forged_upstream_transaction_rejected=$true;first_rename_unjournaled_repaired_then_separate_process_restored=$true;lineage_survives_rollback_complete=$true;hard_disabled_candidate_unchanged=$true;production_main_changed=$false;production_mutation_authority=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'RECOVERY_AWARE_JOURNAL_TRANSACTION_LINEAGE_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-recovery-aware-journal-transaction-lineage-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-recovery-aware-journal-transaction-lineage-v0.1.0/custom-app-production-recovery-aware-journal-transaction-lineage.ps1
+            validation/custom-app-production-recovery-aware-journal-transaction-lineage-v0.1.0/test_custom_app_production_recovery_aware_journal_transaction_lineage.ps1
+            validation/custom-app-production-recovery-aware-journal-transaction-lineage-v0.1.0/ci-evidence.json
