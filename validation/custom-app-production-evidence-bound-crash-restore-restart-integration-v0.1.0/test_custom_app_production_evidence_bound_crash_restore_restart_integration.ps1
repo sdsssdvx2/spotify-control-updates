@@ -74,7 +74,7 @@ function Invoke-EBCRCaseV010 {
         $atomic=Invoke-EBFixtureV010 -Fixture $fixture -Nonce $TransactionNonce -Label $label
         Assert-EBCRTrue ([bool]$atomic.ok) ('candidate-live producer denied: '+[string]$atomic.reason)
         Assert-EBCRTrue ([bool]$atomic.result.recovery_evidence_persisted) 'candidate-live producer lost recovery evidence'
-        Assert-EBCREq $atomic.result.journal_phase 'candidate-live' 'candidate-live producer phase'
+        Assert-EBCRTrue ([bool]$atomic.result.recovery_evidence_bound_before_atomic_barrier) 'candidate-live evidence ordering flag false'
     }
 
     $journal=Read-CustomAppProductionCrashJournalV010 -AllowedRoot $trust -StoreDirectory $store
