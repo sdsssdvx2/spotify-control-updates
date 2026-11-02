@@ -29,7 +29,7 @@ jobs:
           $allowed=@('.github/workflows/validate-custom-app-production-real-pc-readiness-adapter-v010.yml','validation/custom-app-production-real-pc-readiness-adapter-v0.1.0/custom-app-production-real-pc-readiness-adapter.ps1','validation/custom-app-production-real-pc-readiness-adapter-v0.1.0/test_custom_app_production_real_pc_readiness_adapter.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_-notin$allowed});if($bad.Count){throw "scope escaped: $($bad-join', ')"};foreach($x in $allowed){if($x-notin$changed){throw "missing $x"}}
           $pins=@(
             @($h,'validation/custom-app-production-real-pc-readiness-adapter-v0.1.0/custom-app-production-real-pc-readiness-adapter.ps1','3729e5e13f5c997e7fe6fb6b83287d71fb2c82eb'),
-            @($h,'validation/custom-app-production-real-pc-readiness-adapter-v0.1.0/test_custom_app_production_real_pc_readiness_adapter.ps1','8191019ca2587d2a1717133dea8ad9af16b9c2fb'),
+            @($h,'validation/custom-app-production-real-pc-readiness-adapter-v0.1.0/test_custom_app_production_real_pc_readiness_adapter.ps1','ed63dfd270199331dcb384ae47c2c56ee4e809bc'),
             @('979e9d6362ead31016b9532f98629d6bcc2bbb56','validation/custom-app-promotion-eligibility-gate-v0.1.0/custom-app-promotion-eligibility.ps1','94c1b0ba8f2454078252a723f89ccc0327cbc181'),
             @('c128595c3ac7eab338f5d23d7041ae56a6822948','validation/custom-app-live-attested-production-admission-v0.1.0/custom-app-live-attested-production-admission.ps1','9bdcbf0a928539e5f3c4e28b7de1d68589e18525'),
             @($p,'validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/build_candidate.py','18244f603b07d1c95c91ed1f1f2eb5828c4dc947')
