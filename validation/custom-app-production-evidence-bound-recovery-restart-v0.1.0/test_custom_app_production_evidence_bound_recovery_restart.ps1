@@ -72,7 +72,10 @@ function Invoke-ERCrossProcessRestartV010 {
     foreach($line in @($childOutput)){Write-Host $line}
     Assert-ERTrueV010 (Test-Path -LiteralPath $resultPath -PathType Leaf) "$Label worker result missing"
     $result=Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
-    if($childExit -ne 0){throw "$Label cross-process worker failed exit=$childExit error=$([string]$result.error)"}
+    if($childExit -ne 0){
+        Write-Host ('ER_RESTART_WORKER_DIAGNOSTIC '+($result|ConvertTo-Json -Depth 20 -Compress))
+        throw "$Label cross-process worker failed exit=$childExit error=$([string]$result.error)"
+    }
     Assert-ERTrueV010 ([bool]$result.success) "$Label worker success flag false: $([string]$result.error)"
     Assert-ERTrueV010 ([int]$result.process_id -ne $PID) "$Label did not execute in a distinct process"
     Assert-ERTrueV010 ([bool]$result.bootstrap_dependencies_verified) "$Label bootstrap dependency inventory was not verified"
