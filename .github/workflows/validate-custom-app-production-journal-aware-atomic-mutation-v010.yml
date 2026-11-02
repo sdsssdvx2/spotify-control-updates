@@ -34,12 +34,14 @@ jobs:
           $allowed=@(
             '.github/workflows/validate-custom-app-production-journal-aware-atomic-mutation-v010.yml',
             'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1',
+            'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1',
             'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/test_custom_app_production_journal_aware_atomic_mutation.ps1'
           )
           $changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x -notin $changed){throw "missing $x"}}
           $pins=@(
             @($h,'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','79580da78443a18bd281d4fce61c4a57d958a196'),
-            @($h,'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/test_custom_app_production_journal_aware_atomic_mutation.ps1','37cc595b649d12f804691c29ac4bcc977cef94d9'),
+            @($h,'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),
+            @($h,'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/test_custom_app_production_journal_aware_atomic_mutation.ps1','c550723053a47f776762cd1508b72f2db8808dce'),
             @('e2b80822835bf5d59dc179e345e098b5bd79759e','validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/custom-app-production-atomic-live-swap-mutation.ps1','394e7bda96501f9ac320ceabe96b4cf96661fe2d'),
             @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae')
           );foreach($q in $pins){$b=(git rev-parse "$($q[0])`:$($q[1])").Trim();if($b -cne $q[2]){throw "pin drift $($q[1]) $b != $($q[2])"}}
@@ -48,20 +50,18 @@ jobs:
       - name: Parse and audit journal-aware bounded mutation contract
         shell: powershell
         run: |
-          $d='validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0';$core="$d/custom-app-production-journal-aware-atomic-mutation.ps1";$test="$d/test_custom_app_production_journal_aware_atomic_mutation.ps1"
-          foreach($f in @($core,$test)){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|ForEach-Object{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $d='validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0';$core="$d/custom-app-production-journal-aware-atomic-mutation.ps1";$repair="$d/custom-app-production-journal-aware-atomic-repair-v011.ps1";$test="$d/test_custom_app_production_journal_aware_atomic_mutation.ps1"
+          foreach($f in @($core,$repair,$test)){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|ForEach-Object{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
           $c=Get-Content $core -Raw
-          foreach($m in @(
-            'TransactionNonce','.spotify-control-txn-','Initialize-CustomAppProductionCrashJournalV010',
-            "-Phase 'atomic-mutation-starting'","-Phase 'live-moved-to-old'","-Phase 'candidate-live'",
-            'after-atomic-starting-before-live-move','after-live-move-before-journal','after-candidate-move-before-journal',
-            'pre-first-rename-exact','first-rename-complete-unjournaled','repair_phase=$repair',
-            'journal_bound_before_live_side_effect=$true','requires_transaction_finalization=$true','requires_spicetify_apply_phase=$true'
-          )){if($c.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "core marker missing $m"}}
+          foreach($m in @('TransactionNonce','.spotify-control-txn-','Initialize-CustomAppProductionCrashJournalV010',"-Phase 'atomic-mutation-starting'","-Phase 'live-moved-to-old'","-Phase 'candidate-live'",'after-atomic-starting-before-live-move','after-live-move-before-journal','after-candidate-move-before-journal','pre-first-rename-exact','first-rename-complete-unjournaled','repair_phase=$repair','journal_bound_before_live_side_effect=$true','requires_transaction_finalization=$true','requires_spicetify_apply_phase=$true')){if($c.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "core marker missing $m"}}
           if(([regex]::Matches($c,'\[IO\.Directory\]::Move\(')).Count -ne 2){throw 'journal-aware atomic must contain exactly two same-parent directory moves'}
           foreach($x in @('Invoke-WebRequest','Invoke-RestMethod','Start-Process','ProcessStartInfo','spicetify apply','spicetify config','Invoke-CustomAppProductionRecoveryAwarePermitIssuerV010','Invoke-CustomAppProductionRecoveryAwarePermitConsumptionV010')){if($c.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "journal-aware atomic gained forbidden authority/external primitive $x"}}
           if($c -match 'result_is_authority\s*=\s*\$true|spicetify_apply_authorized\s*=\s*\$true|additional_mutation_authorized\s*=\s*\$true|production_execution_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'journal-aware atomic authority escaped'}
-          $t=Get-Content $test -Raw;foreach($m in @('Get-JATrustRootV010','fixture unexpectedly collapsed live under consumption-store root','pre-first-rename-exact','first-rename-complete-unjournaled','exact-app-and-persistence-recovery-required','candidate drift accepted','unexpected transaction child accepted','CUSTOM_APP_PRODUCTION_JOURNAL_AWARE_ATOMIC_MATRIX_PASS cases=$count')){if($t.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "test coverage marker missing $m"}}
+          $r=Get-Content $repair -Raw
+          foreach($m in @('Read-CustomAppProductionCrashJournalV010','journal-aware-atomic-starting-repair-head-changed-after-inspection','$effectiveNow=$Now','if($effectiveNow -lt $recorded){$effectiveNow=$recorded}','ExpectedRevision ([int64]$r.journal_revision','ExpectedEntrySha256 ([string]$r.journal_entry_sha256')){if($r.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "repair overlay marker missing $m"}}
+          foreach($x in @('[IO.Directory]::Move(','[IO.Directory]::Delete','Remove-Item','Move-Item','Copy-Item','Invoke-WebRequest','Invoke-RestMethod','Start-Process','ProcessStartInfo','spicetify apply','spicetify config')){if($r.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "repair overlay gained forbidden side effect $x"}}
+          if($r -match 'repair_is_authority\s*=\s*\$true|restore_authorized\s*=\s*\$true|apply_authorized\s*=\s*\$true|production_execution_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'repair overlay authority escaped'}
+          $t=Get-Content $test -Raw;foreach($m in @('Get-JATrustRootV010','fixture unexpectedly collapsed live under consumption-store root','AddMinutes(-1)','pre-first-rename-exact','first-rename-complete-unjournaled','exact-app-and-persistence-recovery-required','candidate drift accepted','unexpected transaction child accepted','CUSTOM_APP_PRODUCTION_JOURNAL_AWARE_ATOMIC_MATRIX_PASS cases=$count')){if($t.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "test coverage marker missing $m"}}
           if($t.IndexOf('Invoke-Expression',[StringComparison]::OrdinalIgnoreCase)-ge0){throw 'dynamic execution forbidden'}
           'JOURNAL_AWARE_ATOMIC_PARSE_AUDIT_PASS'
 
@@ -93,10 +93,10 @@ jobs:
             )
             foreach($q in $deps){$out=Join-Path $w $q[1];New-Item -ItemType Directory -Force -Path (Split-Path $out -Parent)|Out-Null;$env:S="$($q[0])`:$($q[1])";$env:O=$out;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['S']]))";if($LASTEXITCODE){throw "materialize failed $($q[1])"};if((git hash-object $out).Trim() -cne $q[2]){throw "materialized blob drift $($q[1])"}}
             $newDir=Join-Path $w 'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0';New-Item -ItemType Directory -Force -Path $newDir|Out-Null
-            Copy-Item -LiteralPath (Join-Path $src 'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1') -Destination $newDir
-            Copy-Item -LiteralPath (Join-Path $src 'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/test_custom_app_production_journal_aware_atomic_mutation.ps1') -Destination $newDir
+            foreach($f in @('custom-app-production-journal-aware-atomic-mutation.ps1','custom-app-production-journal-aware-atomic-repair-v011.ps1','test_custom_app_production_journal_aware_atomic_mutation.ps1')){Copy-Item -LiteralPath (Join-Path (Join-Path $src 'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0') $f) -Destination $newDir}
             if((git hash-object (Join-Path $newDir 'custom-app-production-journal-aware-atomic-mutation.ps1')).Trim() -cne '79580da78443a18bd281d4fce61c4a57d958a196'){throw 'copied journal-aware core drift'}
-            if((git hash-object (Join-Path $newDir 'test_custom_app_production_journal_aware_atomic_mutation.ps1')).Trim() -cne '37cc595b649d12f804691c29ac4bcc977cef94d9'){throw 'copied journal-aware test drift'}
+            if((git hash-object (Join-Path $newDir 'custom-app-production-journal-aware-atomic-repair-v011.ps1')).Trim() -cne '210c4dda2311eb5defcbcd74977e4f4148ea7c38'){throw 'copied journal-aware repair overlay drift'}
+            if((git hash-object (Join-Path $newDir 'test_custom_app_production_journal_aware_atomic_mutation.ps1')).Trim() -cne 'c550723053a47f776762cd1508b72f2db8808dce'){throw 'copied journal-aware test drift'}
             $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
             1..2|ForEach-Object{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $newDir 'test_custom_app_production_journal_aware_atomic_mutation.ps1');if($LASTEXITCODE){throw "journal-aware atomic matrix failed pass $_"}}
           } finally {git worktree remove --force $w 2>$null}
@@ -118,10 +118,10 @@ jobs:
       - name: Prove protected surfaces immutable and write evidence
         shell: powershell
         run: |
-          $base='cb2e50b715a7d7f1bbc7b3b810104cefff7f7d50';$expected=@('.github/workflows/validate-custom-app-production-journal-aware-atomic-mutation-v010.yml','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/test_custom_app_production_journal_aware_atomic_mutation.ps1');$changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "unexpected changed surface $($bad -join ', ')"}
+          $base='cb2e50b715a7d7f1bbc7b3b810104cefff7f7d50';$expected=@('.github/workflows/validate-custom-app-production-journal-aware-atomic-mutation-v010.yml','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/test_custom_app_production_journal_aware_atomic_mutation.ps1');$changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "unexpected changed surface $($bad -join ', ')"}
           foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/custom-app-production-recovery-aware-permit-atomic-live-swap.ps1')){git diff --quiet $base HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
-          $d='validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();base=$base;qualified_mutation_head='e2b80822835bf5d59dc179e345e098b5bd79759e';qualified_journal_head='7e26187e2360089024e9d72d0701be6f1577a1ef';profile_like_trust_root=$true;consumption_store_not_used_as_live_trust_root=$true;transaction_root_bound_before_side_effect=$true;atomic_starting_exact_inspection=$true;first_rename_unjournaled_normalized=$true;candidate_drift_fail_closed=$true;unexpected_transaction_child_fail_closed=$true;legacy_bounded_atomic_replayed=$true;hard_disabled_candidate_unchanged=$true;production_main_changed=$false;production_mutation_authority=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          $d='validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();base=$base;qualified_mutation_head='e2b80822835bf5d59dc179e345e098b5bd79759e';qualified_journal_head='7e26187e2360089024e9d72d0701be6f1577a1ef';profile_like_trust_root=$true;consumption_store_not_used_as_live_trust_root=$true;transaction_root_bound_before_side_effect=$true;atomic_starting_exact_inspection=$true;first_rename_unjournaled_normalized=$true;durable_head_timestamp_monotonic_repair=$true;stale_caller_time_clamped=$true;candidate_drift_fail_closed=$true;unexpected_transaction_child_fail_closed=$true;legacy_bounded_atomic_replayed=$true;hard_disabled_candidate_unchanged=$true;production_main_changed=$false;production_mutation_authority=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
           'JOURNAL_AWARE_ATOMIC_IMMUTABILITY_PASS'
 
       - uses: actions/upload-artifact@v4
@@ -129,6 +129,7 @@ jobs:
           name: custom-app-production-journal-aware-atomic-mutation-v010-${{ github.run_id }}
           path: |
             validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1
+            validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1
             validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/test_custom_app_production_journal_aware_atomic_mutation.ps1
             validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/ci-evidence.json
           if-no-files-found: error
