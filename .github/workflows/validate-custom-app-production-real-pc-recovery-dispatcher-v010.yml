@@ -1,0 +1,107 @@
+name: Validate Custom App Production Real-PC Recovery Dispatcher v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-real-pc-recovery-dispatcher-v0.1.0]
+    paths: ['validation/custom-app-production-real-pc-recovery-dispatcher-v0.1.0/**','.github/workflows/validate-custom-app-production-real-pc-recovery-dispatcher-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-real-pc-readiness-adapter-v0.1.0]
+    paths: ['validation/custom-app-production-real-pc-recovery-dispatcher-v0.1.0/**','.github/workflows/validate-custom-app-production-real-pc-recovery-dispatcher-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact lineage scope pins and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h-cne$e){throw "head mismatch $h != $e"}
+          $p='999d34a058a6eef3a6f28a137af4f86c26c5c298';if((git merge-base $p HEAD).Trim()-cne$p){throw 'not descended from exact real-PC readiness head'}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $allowed=@('.github/workflows/validate-custom-app-production-real-pc-recovery-dispatcher-v010.yml','validation/custom-app-production-real-pc-recovery-dispatcher-v0.1.0/custom-app-production-real-pc-recovery-dispatcher.ps1','validation/custom-app-production-real-pc-recovery-dispatcher-v0.1.0/test_custom_app_production_real_pc_recovery_dispatcher.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_-notin$allowed});if($bad.Count){throw "scope escaped: $($bad-join', ')"};foreach($x in $allowed){if($x-notin$changed){throw "missing $x"}}
+          $pins=@(
+            @($h,'validation/custom-app-production-real-pc-recovery-dispatcher-v0.1.0/custom-app-production-real-pc-recovery-dispatcher.ps1','5e18f2ad01483552245b42847cdfa470bad92013'),
+            @($h,'validation/custom-app-production-real-pc-recovery-dispatcher-v0.1.0/test_custom_app_production_real_pc_recovery_dispatcher.ps1','95a9e669f4909dc82f8664edb2b9fb00266be96e'),
+            @('e4ff8ef949421152999515c5031744e352435f75','validation/custom-app-production-recovery-routing-admission-v0.1.0/custom-app-production-recovery-routing-admission.ps1','4225bb042aa8d240706e1f383e54f12894e74512'),
+            @('e4ff8ef949421152999515c5031744e352435f75','validation/custom-app-production-recovery-routing-admission-v0.1.0/test_custom_app_production_recovery_routing_admission.ps1','791b5df714509a42ab0ab53340f450d3f8fd7ca0'),
+            @('5a2840d824f1e28e2920657d0e3a8e139d7e8b71','validation/custom-app-production-bounded-recovery-executor-v0.1.0/custom-app-production-bounded-recovery-executor.ps1','e580daa3b2f1f506131bc59e0e8969a36bc30441'),
+            @('5a2840d824f1e28e2920657d0e3a8e139d7e8b71','validation/custom-app-production-bounded-recovery-executor-v0.1.0/test_custom_app_production_bounded_recovery_executor.ps1','32e37e8b14c68af74daa36d5991661cf6e793fa6'),
+            @($p,'validation/custom-app-production-real-pc-readiness-adapter-v0.1.0/custom-app-production-real-pc-readiness-adapter.ps1','3729e5e13f5c997e7fe6fb6b83287d71fb2c82eb')
+          );foreach($q in $pins){$b=(git rev-parse "$($q[0])`:$($q[1])").Trim();if($b-cne$q[2]){throw "pin drift $($q[1]) $b != $($q[2])"}}
+          'REAL_PC_RECOVERY_DISPATCHER_SCOPE_PINS_PASS'
+
+      - name: Parse and audit bounded delegation trust boundary
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-real-pc-recovery-dispatcher-v0.1.0';$core="$d/custom-app-production-real-pc-recovery-dispatcher.ps1";$test="$d/test_custom_app_production_real_pc_recovery_dispatcher.ps1"
+          foreach($f in @($core,$test)){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|%{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $c=Get-Content $core -Raw
+          foreach($m in @('Read-CustomAppProductionCrashJournalV010','Resolve-CustomAppProductionRecoveryRoutingAdmissionV010','Test-CustomAppProductionRecoveryRoutingAdmissionReceiptV010','Invoke-CustomAppProductionBoundedRecoveryExecutorV010','Test-CustomAppProductionBoundedRecoveryExecutorResultV010','Get-SpicetifyAssetRoots','Get-CustomAppLocalRuntimeBaseline','Get-SpotifyPersistenceSnapshot','generic_fixture_contract_verified=$true','terminal_handoff_required=$true','production_mutation_authorized=$false')){if($c.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "core marker missing $m"}}
+          if(([regex]::Matches($c,'Invoke-CustomAppProductionBoundedRecoveryExecutorV010')).Count-ne1){throw 'bounded executor call count drifted'}
+          foreach($x in @('New-Item','Remove-Item','Copy-Item','Move-Item','Set-Content','Add-Content','Out-File','[IO.Directory]::CreateDirectory','[IO.Directory]::Delete','[IO.Directory]::Move','[IO.File]::Copy','[IO.File]::Write','Invoke-WebRequest','Invoke-RestMethod','Start-Process','Diagnostics.ProcessStartInfo','WaitForExit')){if($c.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "dispatcher gained direct side effect primitive $x"}}
+          if($c-match 'result_is_authority\s*=\s*\$true|routing_is_authority\s*=\s*\$true|permit_issued\s*=\s*\$true|execution_authorized\s*=\s*\$true|restore_authorized\s*=\s*\$true|apply_authorized\s*=\s*\$true|cleanup_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'authority escaped dispatcher'}
+          'REAL_PC_RECOVERY_DISPATCHER_PARSE_AUDIT_PASS'
+
+      - name: Run real-PC recovery dispatcher matrix twice
+        shell: powershell
+        run: |
+          $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
+          1..2|%{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-real-pc-recovery-dispatcher-v0.1.0/test_custom_app_production_real_pc_recovery_dispatcher.ps1';if($LASTEXITCODE){throw "dispatcher matrix failed pass $_"}}
+          'REAL_PC_RECOVERY_DISPATCHER_MATRIX_REPEAT_PASS'
+
+      - name: Replay exact routing admission matrix
+        shell: powershell
+        run: |
+          $dir='validation/custom-app-production-recovery-routing-admission-v0.1.0';$deps=@(
+            @('e4ff8ef949421152999515c5031744e352435f75',"$dir/custom-app-production-recovery-routing-admission.ps1",'4225bb042aa8d240706e1f383e54f12894e74512'),
+            @('e4ff8ef949421152999515c5031744e352435f75',"$dir/test_custom_app_production_recovery_routing_admission.ps1",'791b5df714509a42ab0ab53340f450d3f8fd7ca0')
+          );foreach($q in $deps){$env:S="$($q[0])`:$($q[1])";$env:O=$q[1];python -c "import os,subprocess,pathlib;pathlib.Path(os.environ['O']).parent.mkdir(parents=True,exist_ok=True);pathlib.Path(os.environ['O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['S']]))";if((git hash-object $q[1]).Trim()-cne$q[2]){throw "routing materialization drift $($q[1])"}}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$dir/test_custom_app_production_recovery_routing_admission.ps1";if($LASTEXITCODE){throw 'routing admission regression failed'}
+          'REAL_PC_RECOVERY_DISPATCHER_ROUTING_REPLAY_PASS'
+
+      - name: Prepare and replay exact bounded recovery executor matrix
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-bounded-recovery-executor-v0.1.0';$core="$d/custom-app-production-bounded-recovery-executor.ps1";$src="$d/test_custom_app_production_bounded_recovery_executor.ps1";$runtime="$d/test_custom_app_production_bounded_recovery_executor.runtime.ps1"
+          $deps=@(
+            @('5a2840d824f1e28e2920657d0e3a8e139d7e8b71',$core,'e580daa3b2f1f506131bc59e0e8969a36bc30441'),
+            @('5a2840d824f1e28e2920657d0e3a8e139d7e8b71',$src,'32e37e8b14c68af74daa36d5991661cf6e793fa6'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae')
+          );foreach($q in $deps){$env:S="$($q[0])`:$($q[1])";$env:O=$q[1];python -c "import os,subprocess,pathlib;pathlib.Path(os.environ['O']).parent.mkdir(parents=True,exist_ok=True);pathlib.Path(os.environ['O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['S']]))";if((git hash-object $q[1]).Trim()-cne$q[2]){throw "bounded materialization drift $($q[1])"}}
+          $text=Get-Content -LiteralPath $src -Raw;$old1="Assert-RXFalse (Test-Path -LiteralPath ([IO.Path]::GetDirectoryName([string]`$q.f.prepared.app_backup_path)) 'app backup container survived housekeeping'";$new1="Assert-RXFalse (Test-Path -LiteralPath ([IO.Path]::GetDirectoryName([string]`$q.f.prepared.app_backup_path))) 'app backup container survived housekeeping'";$old2="Assert-RXTrue (Test-Path -LiteralPath ([IO.Path]::GetDirectoryName([string]`$q.f.prepared.app_backup_path)) 'cleanup live drift removed backup'";$new2="Assert-RXTrue (Test-Path -LiteralPath ([IO.Path]::GetDirectoryName([string]`$q.f.prepared.app_backup_path))) 'cleanup live drift removed backup'";if($text.IndexOf($old1,[StringComparison]::Ordinal)-lt0-or$text.IndexOf($old2,[StringComparison]::Ordinal)-lt0){throw 'bounded repaired-harness anchors drifted'};$patched=$text.Replace($old1,$new1).Replace($old2,$new2);[IO.File]::WriteAllText($runtime,$patched,[Text.UTF8Encoding]::new($false));$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $runtime),[ref]$t,[ref]$er)|Out-Null;if($er.Count){throw 'bounded runtime matrix parse failed'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $runtime;if($LASTEXITCODE){throw 'bounded recovery executor regression failed'}
+          'REAL_PC_RECOVERY_DISPATCHER_BOUNDED_REPLAY_PASS'
+
+      - name: Rebuild exact hard-disabled candidate and run SelfTest
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'candidate build failed'};$a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json";if((Get-Item $a).Length-ne1382213-or(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant()-cne'c2e5ffd4fe9b14b5c31dd53e7d093bd9b5db2a4ad49fa19449d299e3c14fac2f'){throw 'addon candidate drift'};if((Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant()-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'spotify candidate drift'};if((Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant()-cne'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw 'candidate report drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'real-pc-recovery-dispatcher-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'hard-disabled candidate SelfTest failed'}
+          'REAL_PC_RECOVERY_DISPATCHER_HARD_DISABLED_SELFTEST_PASS'
+
+      - name: Prove protected surfaces immutable and write evidence
+        shell: powershell
+        run: |
+          $p='999d34a058a6eef3a6f28a137af4f86c26c5c298';foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-real-pc-readiness-adapter-v0.1.0/custom-app-production-real-pc-readiness-adapter.ps1')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}};if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $d='validation/custom-app-production-real-pc-recovery-dispatcher-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();parent=$p;user_profile_bound=$true;journal_store_exact=$true;spicetify_path_sha_bound=$true;routing_freshness_bound=$true;bounded_executor_exactly_once=$true;manual_route_never_executes=$true;terminal_route_never_executes=$true;post_journal_live_persistence_reverified=$true;generic_fixture_contract_internal_only=$true;production_mutation_authority=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'REAL_PC_RECOVERY_DISPATCHER_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: real-pc-recovery-dispatcher-v010-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            validation/custom-app-production-real-pc-recovery-dispatcher-v0.1.0/custom-app-production-real-pc-recovery-dispatcher.ps1
+            validation/custom-app-production-real-pc-recovery-dispatcher-v0.1.0/test_custom_app_production_real_pc_recovery_dispatcher.ps1
+            validation/custom-app-production-real-pc-recovery-dispatcher-v0.1.0/ci-evidence.json
