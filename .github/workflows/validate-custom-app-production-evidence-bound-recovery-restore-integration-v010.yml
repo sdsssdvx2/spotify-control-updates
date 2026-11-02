@@ -32,7 +32,7 @@ jobs:
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
           $allowed=@('.github/workflows/validate-custom-app-production-evidence-bound-recovery-restore-integration-v010.yml','validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/recovery_worker.ps1','validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/test_custom_app_production_evidence_bound_recovery_restore_integration.ps1')
           $changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x -notin $changed){throw "missing $x"}}
-          $localPins=@(@('validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/recovery_worker.ps1','997c5dcb2e6b52874bafbae933ae11eeceeccf33'),@('validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/test_custom_app_production_evidence_bound_recovery_restore_integration.ps1','757a236306712e0f45c961cdd52cca054fa7758d'))
+          $localPins=@(@('validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/recovery_worker.ps1','ab94eac803e7124451a01f66b05c25bdac6d10a3'),@('validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/test_custom_app_production_evidence_bound_recovery_restore_integration.ps1','757a236306712e0f45c961cdd52cca054fa7758d'))
           foreach($q in $localPins){$b=(git hash-object $q[0]).Trim();if($b -cne $q[1]){throw "local pin drift $($q[0]) $b != $($q[1])"}}
           $remoteHeads=@(
             @('validate/custom-app-production-recovery-evidence-envelope-v0.1.0','993af44afee9adb0c28e5fb702cb6ccfbd7cd99c'),
@@ -102,7 +102,7 @@ jobs:
               @('validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/test_custom_app_production_journal_aware_atomic_mutation.ps1','c550723053a47f776762cd1508b72f2db8808dce'),
               @('validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'),
               @('validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/test_custom_app_production_evidence_bound_journal_atomic.ps1','dad1028758e3f03aebd86a84adc5c1d26a37bee3'),
-              @('validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/recovery_worker.ps1','997c5dcb2e6b52874bafbae933ae11eeceeccf33'),
+              @('validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/recovery_worker.ps1','ab94eac803e7124451a01f66b05c25bdac6d10a3'),
               @('validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/test_custom_app_production_evidence_bound_recovery_restore_integration.ps1','757a236306712e0f45c961cdd52cca054fa7758d'),
               @('validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','0273d7e28a56759b1d0ec9cbf037483b04d98d63'),
               @('validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1','5fec613c460619da5dbfe88fca5c7334e9e93f76')
