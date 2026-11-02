@@ -4,12 +4,13 @@ param(
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 
-$repo=(git rev-parse --show-toplevel).Trim()
 $head=(git rev-parse HEAD).Trim()
 if($head -cne $ExpectedHead){throw "head mismatch $head != $ExpectedHead"}
 
 $integrationRel='validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/test_custom_app_production_durable_dual_transaction_id_bridge_integration.ps1'
 $regressionRel='validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/test_custom_app_production_dual_transaction_id_bridge_regression_v011.ps1'
+$rappTestRel='validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/test_custom_app_production_recovery_aware_permit_pre_apply_preparation.ps1'
+$irTestRel='validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/test_custom_app_production_evidence_bound_recovery_restore_integration.ps1'
 $work=Join-Path $env:RUNNER_TEMP ('ddib-v011-'+[Guid]::NewGuid().ToString('N'))
 $oldHelper=$env:SC_VALIDATION_HELPER_ONLY
 
@@ -53,15 +54,37 @@ function Enable-DDIBRunnerHelperOnlyV011 {
         [IO.File]::WriteAllText($full,$updated,[Text.UTF8Encoding]::new($false))
         [void]$patched.Add($full)
     }
-    $required=@(
-        'validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/test_custom_app_production_recovery_aware_permit_pre_apply_preparation.ps1',
-        'validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/test_custom_app_production_evidence_bound_recovery_restore_integration.ps1'
-    )
-    foreach($r in $required){
+    foreach($r in @($rappTestRel,$irTestRel)){
         $p=[IO.Path]::GetFullPath((Join-Path $Root $r))
         if($p -notin $patched){throw "required parent harness was not helper-only patched: $r"}
     }
     return @($patched)
+}
+
+function Convert-DDIBRunnerParentsToIsolatedModulesV011 {
+    param([Parameter(Mandatory=$true)][string]$Root)
+    $rappPath=Join-Path $Root $rappTestRel
+    $irPath=Join-Path $Root $irTestRel
+    $rappModule=Join-Path (Split-Path $rappPath -Parent) 'ddib_v011_rapp_helper.psm1'
+    $irModule=Join-Path (Split-Path $irPath -Parent) 'ddib_v011_ir_helper.psm1'
+    Copy-Item -LiteralPath $rappPath -Destination $rappModule -Force
+    Copy-Item -LiteralPath $irPath -Destination $irModule -Force
+
+    $integrationPath=Join-Path $Root $integrationRel
+    $raw=[IO.File]::ReadAllText($integrationPath)
+    $oldRapp=". (Join-Path `$root 'validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/test_custom_app_production_recovery_aware_permit_pre_apply_preparation.ps1')"
+    $newRapp="Import-Module (Join-Path `$root 'validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/ddib_v011_rapp_helper.psm1') -Force -DisableNameChecking"
+    $oldIr=". (Join-Path `$root 'validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/test_custom_app_production_evidence_bound_recovery_restore_integration.ps1')"
+    $newIr="Import-Module (Join-Path `$root 'validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/ddib_v011_ir_helper.psm1') -Force -DisableNameChecking"
+    if($raw.IndexOf($oldRapp,[StringComparison]::Ordinal)-lt0 -or $raw.IndexOf($oldIr,[StringComparison]::Ordinal)-lt0){throw 'parent dot-source anchors drifted'}
+    $raw=$raw.Replace($oldRapp,$newRapp).Replace($oldIr,$newIr)
+    [IO.File]::WriteAllText($integrationPath,$raw,[Text.UTF8Encoding]::new($false))
+
+    foreach($p in @($rappModule,$irModule,$integrationPath)){
+        $tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseFile($p,[ref]$tokens,[ref]$errors)
+        if($errors.Count){throw "isolated module/integration parse failed $p"}
+    }
+    return [pscustomobject]@{rapp_module=$rappModule;ir_module=$irModule;integration_path=$integrationPath}
 }
 
 try {
@@ -109,10 +132,11 @@ try {
         @($regressionRel,'722cafc907fa4bca5568646c0995b9dc78f31279'),
         @('validation/custom-app-production-dual-transaction-id-bridge-v0.1.0/custom-app-production-dual-transaction-id-bridge.ps1','ce018db8c13d569036ca378bbe3b4a2a84ab3bcd'),
         @('validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/custom-app-production-recovery-aware-permit-pre-apply-preparation.ps1','eaad8a5f161f831bbbada1c1c0957a3dfc80edaa'),
-        @('validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/test_custom_app_production_recovery_aware_permit_pre_apply_preparation.ps1','62fee2fc47c900ccf2eaec96bdb920727f3c5690'),
+        @($rappTestRel,'62fee2fc47c900ccf2eaec96bdb920727f3c5690'),
         @('validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'),
         @('validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','0273d7e28a56759b1d0ec9cbf037483b04d98d63'),
-        @('validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1','5fec613c460619da5dbfe88fca5c7334e9e93f76')
+        @('validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1','5fec613c460619da5dbfe88fca5c7334e9e93f76'),
+        @($irTestRel,'757a236306712e0f45c961cdd52cca054fa7758d')
     )
     foreach($q in $pins){Assert-DDIBRunnerBlobV011 -Root $work -Path $q[0] -Expected $q[1]}
 
@@ -127,27 +151,29 @@ try {
 
     $patched=@(Enable-DDIBRunnerHelperOnlyV011 -Root $work -ExcludedRelativePaths @($integrationRel,$regressionRel))
     if($patched.Count -lt 2){throw "helper-only patch coverage too small: $($patched.Count)"}
+    $isolation=Convert-DDIBRunnerParentsToIsolatedModulesV011 -Root $work
     $env:SC_VALIDATION_HELPER_ONLY='1'
-    $intOut=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $work $integrationRel) 2>&1)
+    $intOut=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ([string]$isolation.integration_path) 2>&1)
     $intOut | ForEach-Object { Write-Output $_ }
-    if($LASTEXITCODE){throw 'durable dual-id helper-only integration failed'}
+    if($LASTEXITCODE){throw 'durable dual-id module-isolated helper integration failed'}
     if(($intOut -join "`n").IndexOf('CUSTOM_APP_PRODUCTION_DURABLE_DUAL_TRANSACTION_ID_BRIDGE_INTEGRATION_PASS cases=8 separate_process_recovery=true',[StringComparison]::Ordinal)-lt0){throw 'durable dual-id integration pass marker missing'}
 
     $evidence=[ordered]@{
-        schema=1
+        schema=2
         expected_head=$ExpectedHead
         source_integration_head='408e24ce7f66d1f5f23025a196b19cd8a42fcda7'
         source_integration_test_blob='445c73bdd27f376a1d280b56070998bfdb203516'
         canonical_bridge_regression_cases=16
         byte_real_integration_cases=8
         helper_only_parent_harnesses=$patched.Count
+        parent_harness_isolation='module-scope'
         parent_matrix_reexecution=$false
         separate_process_recovery=$true
         production_code_changed=$false
         launcher_or_shortcut_changed=$false
     }
     $evidence|ConvertTo-Json|Set-Content (Join-Path $PSScriptRoot 'ci-runtime-evidence.json') -Encoding UTF8
-    Write-Output "CUSTOM_APP_PRODUCTION_DURABLE_DUAL_TRANSACTION_ID_BRIDGE_INTEGRATION_V011_PASS cases=8 helper_only_parent_harnesses=$($patched.Count)"
+    Write-Output "CUSTOM_APP_PRODUCTION_DURABLE_DUAL_TRANSACTION_ID_BRIDGE_INTEGRATION_V011_PASS cases=8 parent_harness_isolation=module-scope helper_only_parent_harnesses=$($patched.Count)"
 }
 finally {
     $env:SC_VALIDATION_HELPER_ONLY=$oldHelper
