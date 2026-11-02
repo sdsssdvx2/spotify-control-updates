@@ -71,20 +71,85 @@ jobs:
           foreach($forbidden in @('[IO.Directory]::Move','Start-Process','Invoke-WebRequest','Invoke-RestMethod','System.Net.Http','spicetify apply')){if($text.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "forbidden direct primitive in bridge core: $forbidden"}}
           'PS51_PARSE_STATIC_SECURITY_PASS' | Tee-Object -FilePath static.log
 
+      - name: Prepare exact qualified runtime graph with monotonic recovery restore
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $w=Join-Path $env:RUNNER_TEMP 'raeb-qualified-runtime'
+          git worktree add --detach $w HEAD
+          if($LASTEXITCODE){throw 'qualified runtime worktree add failed'}
+          $materialize=@(
+            @('13f4314b81816b1b1c3bb3c2fb4280b6c015f8de','validation/custom-app-remote-source-contract-v0.1.0'),
+            @('13f4314b81816b1b1c3bb3c2fb4280b6c015f8de','validation/custom-app-local-runtime-baseline-v0.1.0'),
+            @('c420a1df6f306c7ba74772b91241cb14abd04738','validation/custom-app-stage-acquisition-contract-v0.1.0'),
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0'),
+            @('b266bad660d4b7bc87e7093c5b12f0cff1dc466f','validation/custom-app-production-recovery-plan-contract-v0.1.0'),
+            @('ffb5aad4a605691ee7b80392498b0cb6fa4e4052','validation/custom-app-production-recovery-preflight-v0.1.0'),
+            @('ffb5aad4a605691ee7b80392498b0cb6fa4e4052','validation/custom-app-production-recovery-execution-admission-v0.1.0'),
+            @('5232e5adeb13e6942acb210b3cd13058e1eaaf05','validation/custom-app-production-recovery-evidence-admission-integration-v0.1.0'),
+            @('d3969a746ed1736fe93586bd025116c2526fbff5','validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0'),
+            @('d9a1face71511bdaeeef4e8c761415ef9ec95fc0','validation/custom-app-production-recovery-restore-resume-admission-v0.1.0'),
+            @('574fe182168271fa3497d58e269e9af1f60d9033','validation/custom-app-production-atomic-live-swap-v0.1.0'),
+            @('fe07d410531ea13c8fca379b01405631a3763e84','validation/custom-app-production-spicetify-apply-executor-v0.1.0'),
+            @('c3e1f960447ba84d2410af9c37a22a384f2a5436','validation/custom-app-production-recovery-restore-executor-v0.1.0'),
+            @('e2b80822835bf5d59dc179e345e098b5bd79759e','validation/custom-app-production-atomic-live-swap-mutation-v0.1.0'),
+            @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0'),
+            @('c21a8c72dd8920df8e1faa59eb6aedee76a15e06','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0'),
+            @('11386815b91c71364fa7a67fabdc8c0386fbd982','validation/custom-app-production-recovery-restore-monotonic-time-v0.1.0')
+          )
+          foreach($q in $materialize){
+            git cat-file -e "$($q[0])^{commit}" 2>$null
+            if($LASTEXITCODE){throw "qualified dependency commit unavailable $($q[0])"}
+            git -C $w checkout $q[0] -- $q[1]
+            if($LASTEXITCODE){throw "qualified dependency materialization failed $($q[0]) $($q[1])"}
+          }
+          $patcher=Join-Path $w 'validation/custom-app-production-recovery-restore-monotonic-time-v0.1.0/patch_recovery_restore_executor_monotonic_time.py'
+          if((git hash-object $patcher).Trim() -cne '5d698f82aa60f56b1e90e4f5ad530a45879a31ab'){throw 'monotonic patcher blob drift'}
+          $restoreCore=Join-Path $w 'validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1'
+          if((git hash-object $restoreCore).Trim() -cne '5fec613c460619da5dbfe88fca5c7334e9e93f76'){throw 'base recovery restore blob drift'}
+          $patched=Join-Path $env:RUNNER_TEMP 'raeb-recovery-restore-monotonic.ps1'
+          python $patcher --source $restoreCore --output $patched
+          if($LASTEXITCODE){throw 'monotonic recovery restore patch generation failed'}
+          $patchedSha=(Get-FileHash -LiteralPath $patched -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($patchedSha -cne '1fa0f849682d4f8cbc37c35dc1474fc436a75ada064fa4912ae6951d4968aff3'){throw "monotonic patched restore SHA drift $patchedSha"}
+          $tokens=$null;$errors=$null
+          [Management.Automation.Language.Parser]::ParseFile($patched,[ref]$tokens,[ref]$errors)|Out-Null
+          if($errors.Count){$errors|ForEach-Object{Write-Error $_.Message};throw 'monotonic patched restore PS5.1 parse failed'}
+          Copy-Item -LiteralPath $patched -Destination $restoreCore -Force
+          $rx=[IO.File]::ReadAllText($restoreCore)
+          foreach($m in @('custom-app-production-recovery-restore-executor-monotonic-time-v1','$effectiveNow=$Now','recovery-restore-executor-monotonic-journal-head-changed-before-barrier')){if($rx.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "patched restore marker missing $m"}}
+          if($rx.IndexOf('$Now.AddMilliseconds(',[StringComparison]::Ordinal)-ge0){throw 'unpatched restore time use remains'}
+          $currentCore=Join-Path $w $env:CORE;$currentTest=Join-Path $w $env:TEST
+          if((git hash-object $currentCore).Trim() -cne (git hash-object $env:CORE).Trim()){throw 'current recovery-aware core changed during worktree assembly'}
+          if((git hash-object $currentTest).Trim() -cne (git hash-object $env:TEST).Trim()){throw 'current recovery-aware test changed during worktree assembly'}
+          "RAEB_RUNTIME_ROOT=$w" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "RAEB_QUALIFIED_RUNTIME_MONOTONIC_PASS patched_sha=$patchedSha" | Tee-Object -FilePath runtime-assembly.log
+
       - name: Replay inherited evidence-bound restart recovery integration
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/test_custom_app_production_evidence_bound_recovery_restore_integration.ps1' 2>&1 | Tee-Object -FilePath inherited-recovery.log
-          if($LASTEXITCODE){throw "inherited #191 integration failed exit=$LASTEXITCODE"}
+          $log=Join-Path $env:GITHUB_WORKSPACE 'inherited-recovery.log'
+          Push-Location $env:RAEB_RUNTIME_ROOT
+          try{
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/test_custom_app_production_evidence_bound_recovery_restore_integration.ps1' 2>&1 | Tee-Object -FilePath $log
+            if($LASTEXITCODE){throw "inherited #191 integration failed exit=$LASTEXITCODE"}
+          }finally{Pop-Location}
 
       - name: Run recovery-aware dual-ID journal atomic matrix
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $env:TEST 2>&1 | Tee-Object -FilePath dual-id.log
-          if($LASTEXITCODE){throw "dual-id matrix failed exit=$LASTEXITCODE"}
-          $out=[IO.File]::ReadAllText((Resolve-Path 'dual-id.log'))
+          $log=Join-Path $env:GITHUB_WORKSPACE 'dual-id.log'
+          Push-Location $env:RAEB_RUNTIME_ROOT
+          try{
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $env:TEST 2>&1 | Tee-Object -FilePath $log
+            if($LASTEXITCODE){throw "dual-id matrix failed exit=$LASTEXITCODE"}
+          }finally{Pop-Location}
+          $out=[IO.File]::ReadAllText($log)
           if($out.IndexOf('CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_EVIDENCE_BOUND_JOURNAL_ATOMIC_PASS cases=3 dual_id=true separate_process_recovery=true prior_current_store_separation=true',[StringComparison]::Ordinal)-lt0){throw 'dual-id success marker missing'}
 
       - name: Verify protected inherited surface unchanged
@@ -94,7 +159,10 @@ jobs:
           $changed=@(git diff --name-only $env:BASE_SHA HEAD)
           $protected=@($changed|Where-Object{$_ -like 'src/*' -or $_ -like 'addon-manager/*' -or $_ -like 'spotify-control/*' -or $_ -like 'bin/*' -or $_ -like 'launch-managed.vbs' -or $_ -like '*Spotify*Managed*'})
           if($protected.Count){throw "protected surface changed: $($protected -join ', ')"}
-          'PROTECTED_SURFACE_UNCHANGED_PASS' | Tee-Object -FilePath protected.log
+          $main=(git ls-remote origin refs/heads/main).Split("`t")[0]
+          if($main -cne $env:FROZEN_MAIN_SHA){throw "production main moved during runtime: $main"}
+          'PROTECTED_SURFACE_UNCHANGED_PASS managed_launcher_untouched=true domainvpn_wrapper_untouched=true' | Tee-Object -FilePath protected.log
+          if(-not [string]::IsNullOrWhiteSpace($env:RAEB_RUNTIME_ROOT) -and (Test-Path -LiteralPath $env:RAEB_RUNTIME_ROOT)){git worktree remove --force $env:RAEB_RUNTIME_ROOT 2>$null}
 
       - name: Upload validation evidence
         if: always()
@@ -105,6 +173,7 @@ jobs:
           path: |
             scope.log
             static.log
+            runtime-assembly.log
             inherited-recovery.log
             dual-id.log
             protected.log
