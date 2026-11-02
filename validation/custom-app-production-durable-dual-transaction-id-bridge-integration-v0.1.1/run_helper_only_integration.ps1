@@ -61,30 +61,28 @@ function Enable-DDIBRunnerHelperOnlyV011 {
     return @($patched)
 }
 
-function Convert-DDIBRunnerParentsToIsolatedModulesV011 {
+function Convert-DDIBRunnerRecoveryHelperToIsolatedModuleV011 {
     param([Parameter(Mandatory=$true)][string]$Root)
-    $rappPath=Join-Path $Root $rappTestRel
+    # Preserve the original #180 global helper/function resolution exactly. Only #191 is
+    # isolated because its fake Spicetify variables collide with the older recovery
+    # executor fixture variables when every historical test harness shares one scope.
     $irPath=Join-Path $Root $irTestRel
-    $rappModule=Join-Path (Split-Path $rappPath -Parent) 'ddib_v011_rapp_helper.psm1'
     $irModule=Join-Path (Split-Path $irPath -Parent) 'ddib_v011_ir_helper.psm1'
-    Copy-Item -LiteralPath $rappPath -Destination $rappModule -Force
     Copy-Item -LiteralPath $irPath -Destination $irModule -Force
 
     $integrationPath=Join-Path $Root $integrationRel
     $raw=[IO.File]::ReadAllText($integrationPath)
-    $oldRapp=". (Join-Path `$root 'validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/test_custom_app_production_recovery_aware_permit_pre_apply_preparation.ps1')"
-    $newRapp="Import-Module (Join-Path `$root 'validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/ddib_v011_rapp_helper.psm1') -Force -DisableNameChecking"
     $oldIr=". (Join-Path `$root 'validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/test_custom_app_production_evidence_bound_recovery_restore_integration.ps1')"
     $newIr="Import-Module (Join-Path `$root 'validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/ddib_v011_ir_helper.psm1') -Force -DisableNameChecking"
-    if($raw.IndexOf($oldRapp,[StringComparison]::Ordinal)-lt0 -or $raw.IndexOf($oldIr,[StringComparison]::Ordinal)-lt0){throw 'parent dot-source anchors drifted'}
-    $raw=$raw.Replace($oldRapp,$newRapp).Replace($oldIr,$newIr)
+    if($raw.IndexOf($oldIr,[StringComparison]::Ordinal)-lt0){throw 'recovery helper dot-source anchor drifted'}
+    $raw=$raw.Replace($oldIr,$newIr)
     [IO.File]::WriteAllText($integrationPath,$raw,[Text.UTF8Encoding]::new($false))
 
-    foreach($p in @($rappModule,$irModule,$integrationPath)){
+    foreach($p in @($irModule,$integrationPath)){
         $tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseFile($p,[ref]$tokens,[ref]$errors)
-        if($errors.Count){throw "isolated module/integration parse failed $p"}
+        if($errors.Count){throw "isolated recovery module/integration parse failed $p"}
     }
-    return [pscustomobject]@{rapp_module=$rappModule;ir_module=$irModule;integration_path=$integrationPath}
+    return [pscustomobject]@{ir_module=$irModule;integration_path=$integrationPath}
 }
 
 try {
@@ -151,29 +149,30 @@ try {
 
     $patched=@(Enable-DDIBRunnerHelperOnlyV011 -Root $work -ExcludedRelativePaths @($integrationRel,$regressionRel))
     if($patched.Count -lt 2){throw "helper-only patch coverage too small: $($patched.Count)"}
-    $isolation=Convert-DDIBRunnerParentsToIsolatedModulesV011 -Root $work
+    $isolation=Convert-DDIBRunnerRecoveryHelperToIsolatedModuleV011 -Root $work
     $env:SC_VALIDATION_HELPER_ONLY='1'
     $intOut=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ([string]$isolation.integration_path) 2>&1)
     $intOut | ForEach-Object { Write-Output $_ }
-    if($LASTEXITCODE){throw 'durable dual-id module-isolated helper integration failed'}
+    if($LASTEXITCODE){throw 'durable dual-id recovery-helper-isolated integration failed'}
     if(($intOut -join "`n").IndexOf('CUSTOM_APP_PRODUCTION_DURABLE_DUAL_TRANSACTION_ID_BRIDGE_INTEGRATION_PASS cases=8 separate_process_recovery=true',[StringComparison]::Ordinal)-lt0){throw 'durable dual-id integration pass marker missing'}
 
     $evidence=[ordered]@{
-        schema=2
+        schema=3
         expected_head=$ExpectedHead
         source_integration_head='408e24ce7f66d1f5f23025a196b19cd8a42fcda7'
         source_integration_test_blob='445c73bdd27f376a1d280b56070998bfdb203516'
         canonical_bridge_regression_cases=16
         byte_real_integration_cases=8
         helper_only_parent_harnesses=$patched.Count
-        parent_harness_isolation='module-scope'
+        parent_harness_isolation='recovery-helper-module-scope'
+        recovery_aware_helper_resolution='original-global-order-preserved'
         parent_matrix_reexecution=$false
         separate_process_recovery=$true
         production_code_changed=$false
         launcher_or_shortcut_changed=$false
     }
     $evidence|ConvertTo-Json|Set-Content (Join-Path $PSScriptRoot 'ci-runtime-evidence.json') -Encoding UTF8
-    Write-Output "CUSTOM_APP_PRODUCTION_DURABLE_DUAL_TRANSACTION_ID_BRIDGE_INTEGRATION_V011_PASS cases=8 parent_harness_isolation=module-scope helper_only_parent_harnesses=$($patched.Count)"
+    Write-Output "CUSTOM_APP_PRODUCTION_DURABLE_DUAL_TRANSACTION_ID_BRIDGE_INTEGRATION_V011_PASS cases=8 parent_harness_isolation=recovery-helper-module-scope helper_only_parent_harnesses=$($patched.Count)"
 }
 finally {
     $env:SC_VALIDATION_HELPER_ONLY=$oldHelper
