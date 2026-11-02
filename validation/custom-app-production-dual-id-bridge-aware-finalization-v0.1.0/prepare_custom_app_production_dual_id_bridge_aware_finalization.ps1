@@ -12,9 +12,6 @@ function Materialize-DBAFDependencyV011 {
     $out=Join-Path $RepoRoot $Path
     New-Item -ItemType Directory -Force -Path (Split-Path $out -Parent)|Out-Null
     $spec="$Commit`:$Path"
-    $bytes=& git -C $RepoRoot cat-file blob $spec 2>$null
-    if($LASTEXITCODE){throw "dependency read failed $spec"}
-    # git text output would normalize binary/newline semantics; use Python for byte-exact write.
     $env:DBAF_SRC=$spec;$env:DBAF_OUT=$out;$env:DBAF_REPO=$RepoRoot
     python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['DBAF_OUT']).write_bytes(subprocess.check_output(['git','-C',os.environ['DBAF_REPO'],'cat-file','blob',os.environ['DBAF_SRC']]))"
     if($LASTEXITCODE){throw "dependency materialize failed $spec"}
@@ -38,6 +35,7 @@ $deps=@(
   @('d9a1face71511bdaeeef4e8c761415ef9ec95fc0','validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','0273d7e28a56759b1d0ec9cbf037483b04d98d63'),
   @('574fe182168271fa3497d58e269e9af1f60d9033','validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1','e91fa6a125f77352907c1119f6d9f47be9682550'),
   @('e2b80822835bf5d59dc179e345e098b5bd79759e','validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/custom-app-production-atomic-live-swap-mutation.ps1','394e7bda96501f9ac320ceabe96b4cf96661fe2d'),
+  @('e2b80822835bf5d59dc179e345e098b5bd79759e','validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/test_custom_app_production_atomic_live_swap_mutation.ps1','d15e0768162b0659c57602eaf0242b035b48b0c7'),
   @('fe07d410531ea13c8fca379b01405631a3763e84','validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1','f7372b069fbfe6a0f8d8a0aad45312ffd33d9f0a'),
   @('c3e1f960447ba84d2410af9c37a22a384f2a5436','validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1','5fec613c460619da5dbfe88fca5c7334e9e93f76'),
   @('11386815b91c71364fa7a67fabdc8c0386fbd982','validation/custom-app-production-recovery-restore-monotonic-time-v0.1.0/patch_recovery_restore_executor_monotonic_time.py','5d698f82aa60f56b1e90e4f5ad530a45879a31ab'),
@@ -64,4 +62,4 @@ if($patchedSha-cne'1fa0f849682d4f8cbc37c35dc1474fc436a75ada064fa4912ae6951d4968a
 $tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseFile($patched,[ref]$tokens,[ref]$errors)
 if($errors.Count){$errors|ForEach-Object{Write-Error $_};throw 'monotonic patched recovery PS5.1 parse failed'}
 Copy-Item -LiteralPath $patched -Destination $restore -Force
-Write-Output 'DUAL_ID_BRIDGE_AWARE_FINALIZATION_DEPENDENCIES_MONOTONIC_V011_PASS'
+Write-Output 'DUAL_ID_BRIDGE_AWARE_FINALIZATION_DEPENDENCIES_MONOTONIC_V012_PASS'
