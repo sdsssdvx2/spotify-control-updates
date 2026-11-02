@@ -25,12 +25,15 @@ jobs:
           $base='37ba03425e225cd5dc0513e4deabaf97c6e32524'
           if((git merge-base $base HEAD).Trim() -cne $base){ throw 'repair head is not descended from exact v0.1.4 head' }
           $repair='.github/workflows/repair-dual-id-finalization-nonexistent-atomic-field.yml'
+          $core='validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/custom-app-production-dual-id-bridge-aware-finalization.ps1'
           $delta=@(git diff --name-only "$base...HEAD")
-          foreach($p in $delta){ if($p -cne $repair){ throw "unexpected pre-repair delta: $p" } }
+          foreach($p in $delta){ if($p -notin @($repair,$core)){ throw "unexpected repair delta: $p" } }
+          if($repair -notin $delta){ throw 'repair workflow delta missing' }
           $main=(git ls-remote origin refs/heads/main).Split("`t")[0]
           if($main -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){ throw "production main moved: $main" }
+          'DUAL_ID_FINALIZATION_REPAIR_SCOPE_FROZEN_MAIN_PASS'
 
-      - name: Remove exactly one invalid result-field continuity pair
+      - name: Ensure formal durable bridge continuity repair
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -38,37 +41,56 @@ jobs:
           $bad="@('atomic-caller-admission',[string]`$EvidenceBoundAtomicResult.caller_admission_fingerprint,[string]`$pre.precommit_fingerprint),"
           $raw=[IO.File]::ReadAllText((Resolve-Path $path))
           $count=([regex]::Matches($raw,[regex]::Escape($bad))).Count
-          if($count -ne 1){ throw "expected exactly one invalid atomic caller-admission pair, found $count" }
-          $fixed=$raw.Replace($bad,'')
+          if($count -gt 1){ throw "invalid atomic caller-admission pair duplicated: $count" }
+          $fixed=$raw
+          if($count -eq 1){ $fixed=$raw.Replace($bad,'') }
           if($fixed.IndexOf('EvidenceBoundAtomicResult.caller_admission_fingerprint',[StringComparison]::Ordinal) -ge 0){ throw 'nonexistent #190 result field still referenced' }
-          if(([regex]::Matches($fixed,[regex]::Escape("@('durable-precommit',[string]`$DurableBridgeIntegrationResult.precommit_fingerprint,[string]`$pre.precommit_fingerprint)")).Count -ne 1){ throw 'formal durable precommit continuity guard missing' }
-          if(([regex]::Matches($fixed,[regex]::Escape("@('durable-atomic',[string]`$DurableBridgeIntegrationResult.atomic_result_fingerprint,[string]`$EvidenceBoundAtomicResult.result_fingerprint)")).Count -ne 1){ throw 'formal durable atomic-result continuity guard missing' }
+
+          $durablePrecommit="@('durable-precommit',[string]`$DurableBridgeIntegrationResult.precommit_fingerprint,[string]`$pre.precommit_fingerprint)"
+          $durableAtomic="@('durable-atomic',[string]`$DurableBridgeIntegrationResult.atomic_result_fingerprint,[string]`$EvidenceBoundAtomicResult.result_fingerprint)"
+          if(([regex]::Matches($fixed,[regex]::Escape($durablePrecommit))).Count -ne 1){ throw 'formal durable precommit continuity guard missing' }
+          if(([regex]::Matches($fixed,[regex]::Escape($durableAtomic))).Count -ne 1){ throw 'formal durable atomic-result continuity guard missing' }
+
           $qualified='validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1'
           $q=[IO.File]::ReadAllText((Resolve-Path $qualified))
           if($q.IndexOf('[Parameter(Mandatory=$true)][string]$CallerAdmissionFingerprint',[StringComparison]::Ordinal) -lt 0){ throw '#190 caller admission input contract missing' }
           if($q.IndexOf('caller_admission_fingerprint',[StringComparison]::OrdinalIgnoreCase) -ge 0){ throw '#190 unexpectedly exposes caller admission fingerprint; repair premise invalid' }
+
           $durable='validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/custom-app-production-durable-dual-transaction-id-bridge-integration.ps1'
           $d=[IO.File]::ReadAllText((Resolve-Path $durable))
           $binding='-CallerAdmissionFingerprint ([string]$pre.precommit_fingerprint)'
           if($d.IndexOf($binding,[StringComparison]::Ordinal) -lt 0){ throw 'durable bridge no longer binds precommit fingerprint into #190 caller admission input' }
-          [IO.File]::WriteAllText((Resolve-Path $path),$fixed,(New-Object Text.UTF8Encoding($false)))
+
+          if($count -eq 1){ [IO.File]::WriteAllText((Resolve-Path $path),$fixed,(New-Object Text.UTF8Encoding($false))) }
           $tokens=$null;$errors=$null
           [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)
           if($errors.Count){ $errors|ForEach-Object{Write-Error $_}; throw 'PS5.1 parse failed after continuity repair' }
           $diff=@(git diff --name-only)
-          if($diff.Count -ne 1 -or $diff[0] -cne $path){ throw "repair escaped exact finalization core: $($diff -join ', ')" }
-          'DUAL_ID_FINALIZATION_FORMAL_DURABLE_CONTRACT_REPAIR_PASS'
+          if($count -eq 1){
+            if($diff.Count -ne 1 -or $diff[0] -cne $path){ throw "repair escaped exact finalization core: $($diff -join ', ')" }
+            'DUAL_ID_FINALIZATION_FORMAL_DURABLE_CONTRACT_REPAIR_READY'
+          } else {
+            if($diff.Count -ne 0){ throw "already-repaired verification found dirty tree: $($diff -join ', ')" }
+            'DUAL_ID_FINALIZATION_FORMAL_DURABLE_CONTRACT_ALREADY_APPLIED_PASS'
+          }
 
-      - name: Commit validation-only repair
+      - name: Commit validation-only repair when needed
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
+          $path='validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/custom-app-production-dual-id-bridge-aware-finalization.ps1'
+          git diff --quiet -- $path
+          if($LASTEXITCODE -eq 0){
+            'DUAL_ID_FINALIZATION_REPAIR_NO_COMMIT_NEEDED_PASS'
+            exit 0
+          }
           git config user.name 'spotify-control-validation-bot'
           git config user.email '98333820+sdsssdvx2@users.noreply.github.com'
-          git add -- 'validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/custom-app-production-dual-id-bridge-aware-finalization.ps1'
+          git add -- $path
           git diff --cached --quiet
-          if($LASTEXITCODE -eq 0){ throw 'no formal-contract repair staged' }
+          if($LASTEXITCODE -eq 0){ throw 'expected formal-contract repair was not staged' }
           git commit -m 'validation: use durable bridge contract for atomic admission continuity'
           if($LASTEXITCODE){ throw 'formal-contract repair commit failed' }
           git push origin HEAD:validate/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0
           if($LASTEXITCODE){ throw 'formal-contract repair push failed' }
+          'DUAL_ID_FINALIZATION_FORMAL_DURABLE_CONTRACT_REPAIR_PUSHED'
