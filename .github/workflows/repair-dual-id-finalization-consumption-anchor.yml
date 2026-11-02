@@ -1,0 +1,65 @@
+name: Repair dual-ID finalization consumption anchor
+
+on:
+  push:
+    branches:
+      - validate/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Prove exact repair scope and canonical precommit consumption anchor
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='95d775fed393e4edb3c3553b3dd6a173ae65a8ce'
+          $core='validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/custom-app-production-dual-id-bridge-aware-finalization.ps1'
+          $repair='.github/workflows/repair-dual-id-finalization-consumption-anchor.yml'
+          if((git merge-base $base HEAD).Trim() -cne $base){ throw 'repair head not descended from exact failed-matrix head' }
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){ throw 'production main moved' }
+          $delta=@(git diff --name-only "$base...HEAD");foreach($p in $delta){if($p -cne $repair){throw "repair scope escaped before patch: $p"}}
+          $durableHead='408e24ce7f66d1f5f23025a196b19cd8a42fcda7'
+          $durablePath='validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/custom-app-production-durable-dual-transaction-id-bridge-integration.ps1'
+          $durableBlob='c9a58a181d3c5f5a230fa895785c3a42a928c8cd'
+          git cat-file -e "$durableHead^{commit}" 2>$null;if($LASTEXITCODE){git fetch --no-tags origin $durableHead|Out-Null;if($LASTEXITCODE){throw 'durable bridge fetch failed'}}
+          if((git rev-parse "$durableHead`:$durablePath").Trim() -cne $durableBlob){throw 'durable bridge pin drift'}
+          $d=(git show "$durableHead`:$durablePath") -join "`n";if($LASTEXITCODE){throw 'durable bridge read failed'}
+          foreach($m in @('[string]$Envelope.consumption_id','consumption_id=([string]$g.consumption_id).Trim().ToLowerInvariant()')){if($d.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "canonical precommit consumption anchor missing: $m"}}
+          'DUAL_ID_FINALIZATION_CONSUMPTION_ANCHOR_PREMISE_PASS'
+
+      - name: Anchor consumption reload to durable precommit instead of hidden recovery result fields
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $path='validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/custom-app-production-dual-id-bridge-aware-finalization.ps1'
+          $raw=[IO.File]::ReadAllText((Resolve-Path $path));$fixed=$raw
+          $oldParam='param([Parameter(Mandatory=$true)]$PreparedResult,[Parameter(Mandatory=$true)]$StageResult,[Parameter(Mandatory=$true)]$ConsumptionPersistenceResult,[Parameter(Mandatory=$true)][string]$AllowedRoot,[Parameter(Mandatory=$true)][string]$ConsumptionStoreDirectory,[Parameter(Mandatory=$true)][string]$Name)'
+          $newParam='param([Parameter(Mandatory=$true)]$PreparedResult,[Parameter(Mandatory=$true)]$StageResult,[Parameter(Mandatory=$true)][string]$ExpectedConsumptionId,[Parameter(Mandatory=$true)]$ConsumptionPersistenceResult,[Parameter(Mandatory=$true)][string]$AllowedRoot,[Parameter(Mandatory=$true)][string]$ConsumptionStoreDirectory,[Parameter(Mandatory=$true)][string]$Name)'
+          $oldCid='$cid=([string]$PreparedResult.consumption_id).Trim().ToLowerInvariant();if($cid-cne([string]$StageResult.consumption_id).Trim().ToLowerInvariant()){return [pscustomobject]@{ok=$false;reason=''dual-id-finalization-consumption-id-stage-prepared-mismatch''}}'
+          $newCid='$cid=$ExpectedConsumptionId.Trim().ToLowerInvariant();if(-not(Test-CustomAppProductionDualIdBridgeAwareFinalizationSha256V010 $cid)){return [pscustomobject]@{ok=$false;reason=''dual-id-finalization-consumption-id-precommit-invalid''}}'
+          $oldCall='-PreparedResult $RecoveryAwarePreparedResult -StageResult $RecoveryAwareStageExecutorResult -ConsumptionPersistenceResult $ConsumptionPersistenceResult'
+          $newCall='-PreparedResult $RecoveryAwarePreparedResult -StageResult $RecoveryAwareStageExecutorResult -ExpectedConsumptionId ([string]$pre.consumption_id) -ConsumptionPersistenceResult $ConsumptionPersistenceResult'
+          foreach($pair in @(@($oldParam,$newParam,1),@($oldCid,$newCid,1),@($oldCall,$newCall,2))){$n=([regex]::Matches($fixed,[regex]::Escape([string]$pair[0]))).Count;if($n-ne[int]$pair[2]){throw "repair target count mismatch expected=$($pair[2]) actual=$n target=$($pair[0])"};$fixed=$fixed.Replace([string]$pair[0],[string]$pair[1])}
+          foreach($bad in @('PreparedResult.consumption_id','StageResult.consumption_id')){if($fixed.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "hidden recovery result consumption assumption remains: $bad"}}
+          foreach($required in @('ExpectedConsumptionId','-ExpectedConsumptionId ([string]$pre.consumption_id)','dual-id-finalization-consumption-id-precommit-invalid','historical_consumption_envelope_sha256')){if($fixed.IndexOf($required,[StringComparison]::Ordinal)-lt0){throw "required consumption anchor marker missing: $required"}}
+          [IO.File]::WriteAllText((Resolve-Path $path),$fixed,(New-Object Text.UTF8Encoding($false)))
+          $tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors);if($errors.Count){$errors|ForEach-Object{Write-Error $_};throw 'PS5.1 parse failed after consumption anchor repair'}
+          $diff=@(git diff --name-only);if($diff.Count-ne1-or$diff[0]-cne$path){throw "repair escaped exact core: $($diff -join ', ')"}
+          'DUAL_ID_FINALIZATION_CONSUMPTION_ANCHOR_REPAIR_READY'
+
+      - name: Commit validation-only repair
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop';$path='validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/custom-app-production-dual-id-bridge-aware-finalization.ps1'
+          git config user.name 'spotify-control-validation-bot';git config user.email '98333820+sdsssdvx2@users.noreply.github.com';git add -- $path;git commit -m 'validation: anchor finalization consumption to durable precommit';if($LASTEXITCODE){throw 'repair commit failed'};git push origin HEAD:validate/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0;if($LASTEXITCODE){throw 'repair push failed'}
+          'DUAL_ID_FINALIZATION_CONSUMPTION_ANCHOR_REPAIR_PUSHED'
