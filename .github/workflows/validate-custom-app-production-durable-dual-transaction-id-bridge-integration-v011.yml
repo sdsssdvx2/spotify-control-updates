@@ -95,5 +95,5 @@ jobs:
             validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.1/ci-runtime-evidence.json
             validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.1/ci-evidence.json
             validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/custom-app-production-durable-dual-transaction-id-bridge-integration.ps1
-            validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/test_custom_app_production-durable_dual_transaction_id_bridge_integration.ps1
+            validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/test_custom_app_production_durable_dual_transaction_id_bridge_integration.ps1
             validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/test_custom_app_production_dual_transaction_id_bridge_regression_v011.ps1
