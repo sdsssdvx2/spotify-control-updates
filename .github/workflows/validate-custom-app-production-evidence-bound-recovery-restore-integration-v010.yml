@@ -45,7 +45,9 @@ jobs:
             @('c21a8c72dd8920df8e1faa59eb6aedee76a15e06','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/test_custom_app_production_evidence_bound_journal_atomic.ps1','dad1028758e3f03aebd86a84adc5c1d26a37bee3'),
             @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','79580da78443a18bd281d4fce61c4a57d958a196'),
             @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),
+            @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/test_custom_app_production_journal_aware_atomic_mutation.ps1','c550723053a47f776762cd1508b72f2db8808dce'),
             @('e2b80822835bf5d59dc179e345e098b5bd79759e','validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/custom-app-production-atomic-live-swap-mutation.ps1','394e7bda96501f9ac320ceabe96b4cf96661fe2d'),
+            @('e2b80822835bf5d59dc179e345e098b5bd79759e','validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/test_custom_app_production_atomic_live_swap_mutation.ps1','d15e0768162b0659c57602eaf0242b035b48b0c7'),
             @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
             @('d9a1face71511bdaeeef4e8c761415ef9ec95fc0','validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','0273d7e28a56759b1d0ec9cbf037483b04d98d63'),
             @('c3e1f960447ba84d2410af9c37a22a384f2a5436','validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1','5fec613c460619da5dbfe88fca5c7334e9e93f76'),
@@ -69,14 +71,20 @@ jobs:
         shell: powershell
         timeout-minutes: 170
         run: |
-          $src=(Get-Location).Path;$w=Join-Path $env:RUNNER_TEMP 'evidence-bound-recovery-restore-integration';git worktree add --detach $w c3e1f960447ba84d2410af9c37a22a384f2a5436;if($LASTEXITCODE){throw 'integration worktree add failed'}
+          $runHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';$w=Join-Path $env:RUNNER_TEMP 'evidence-bound-recovery-restore-integration';git worktree add --detach $w c3e1f960447ba84d2410af9c37a22a384f2a5436;if($LASTEXITCODE){throw 'integration worktree add failed'}
           try{
-            $copyDirs=@('validation/custom-app-production-atomic-live-swap-mutation-v0.1.0','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0','validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0')
-            foreach($rel in $copyDirs){$from=Join-Path $src $rel;$to=Join-Path $w $rel;if(-not(Test-Path -LiteralPath $from -PathType Container)){throw "source dir missing $rel"};New-Item -ItemType Directory -Force -Path $to|Out-Null;Copy-Item -Path (Join-Path $from '*') -Destination $to -Recurse -Force}
+            $materialize=@(
+              @('e2b80822835bf5d59dc179e345e098b5bd79759e','validation/custom-app-production-atomic-live-swap-mutation-v0.1.0'),
+              @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0'),
+              @('c21a8c72dd8920df8e1faa59eb6aedee76a15e06','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0'),
+              @($runHead,'validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0')
+            );foreach($q in $materialize){git -C $w checkout $q[0] -- $q[1];if($LASTEXITCODE){throw "exact materialization failed $($q[0]) $($q[1])"}}
             $checks=@(
               @('validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/custom-app-production-atomic-live-swap-mutation.ps1','394e7bda96501f9ac320ceabe96b4cf96661fe2d'),
+              @('validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/test_custom_app_production_atomic_live_swap_mutation.ps1','d15e0768162b0659c57602eaf0242b035b48b0c7'),
               @('validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','79580da78443a18bd281d4fce61c4a57d958a196'),
               @('validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),
+              @('validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/test_custom_app_production_journal_aware_atomic_mutation.ps1','c550723053a47f776762cd1508b72f2db8808dce'),
               @('validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'),
               @('validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/test_custom_app_production_evidence_bound_journal_atomic.ps1','dad1028758e3f03aebd86a84adc5c1d26a37bee3'),
               @('validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/recovery_worker.ps1','997c5dcb2e6b52874bafbae933ae11eeceeccf33'),
