@@ -65,7 +65,7 @@ jobs:
             if($errors.Count){ $errors|ForEach-Object{Write-Host "PARSE_ERROR path=$path line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> message=$($_.Message)"}; throw "PS5.1 parse failed: $path" }
           }
           $text=[IO.File]::ReadAllText((Resolve-Path $env:CORE))
-          $atomicCalls=([regex]::Matches($text,'(?m)^\s*\$atomic\s*=\s*Invoke-CustomAppProductionEvidenceBoundJournalAtomicMutationV010\b')).Count
+          $atomicCalls=([regex]::Matches($text,'\$atomic\s*=\s*Invoke-CustomAppProductionEvidenceBoundJournalAtomicMutationV010\b')).Count
           if($atomicCalls -ne 1){throw "qualified evidence-bound atomic call count $atomicCalls"}
           foreach($marker in @('Resolve-CustomAppProductionRecoveryAwarePermitStageAcquisitionAdmissionV010','ConvertTo-CustomAppProductionRecoveryAwarePermitGenericPreparedResultV010','permit_lineage_transaction_id','journal_transaction_id','recovery-aware-evidence-bound-prior-recovery-store-must-differ-from-current-journal-store','crash_recovery_uses_journal_transaction_id')){if($text.IndexOf($marker,[StringComparison]::Ordinal)-lt0){throw "core marker missing: $marker"}}
           foreach($forbidden in @('[IO.Directory]::Move','Start-Process','Invoke-WebRequest','Invoke-RestMethod','System.Net.Http','spicetify apply')){if($text.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "forbidden direct primitive in bridge core: $forbidden"}}
