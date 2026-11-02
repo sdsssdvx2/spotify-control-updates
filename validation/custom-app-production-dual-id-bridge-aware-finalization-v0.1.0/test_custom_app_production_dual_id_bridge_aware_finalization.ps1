@@ -8,6 +8,7 @@ $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 function Assert-DBAFV010 {param([bool]$Condition,[string]$Message)if(-not$Condition){throw$Message}}
 $script:DBAFFault=$null
 $script:DBAFConsumptionMode='stable'
+$script:DBAFCurrentName='test-app'
 function Invoke-CustomAppProductionDualIdBridgeAwareFinalizationValidationHookV010 {
     param([Parameter(Mandatory=$true)][string]$Checkpoint,[Parameter(Mandatory=$true)]$Context)
     if($script:DBAFFault-ceq$Checkpoint){throw('dbaf-fixture-fault:'+$Checkpoint)}
@@ -16,8 +17,8 @@ function Get-CustomAppProductionRecoveryAwarePermitConsumptionPersistedTargetV01
     param([Parameter(Mandatory=$true)][string]$AllowedRoot,[Parameter(Mandatory=$true)][string]$StoreDirectory,[Parameter(Mandatory=$true)]$TargetState,[Parameter(Mandatory=$true)][int64]$TargetRevision,[Parameter(Mandatory=$true)][string]$ExpectedConsumptionId)
     $hist=Get-CustomAppProductionDualIdBridgeAwareFinalizationSha256V010 ('historical|'+$ExpectedConsumptionId)
     $cur=Get-CustomAppProductionDualIdBridgeAwareFinalizationSha256V010 ('current|'+$ExpectedConsumptionId+'|'+$script:DBAFConsumptionMode)
-    $rows=@([pscustomobject]@{name='test-app';consumption_id=$ExpectedConsumptionId})
-    if($script:DBAFConsumptionMode-ceq'same-app-newer'){$rows+=,[pscustomobject]@{name='test-app';consumption_id=('9'*64)}}
+    $rows=@([pscustomobject]@{name=$script:DBAFCurrentName;consumption_id=$ExpectedConsumptionId})
+    if($script:DBAFConsumptionMode-ceq'same-app-newer'){$rows+=,[pscustomobject]@{name=$script:DBAFCurrentName;consumption_id=('9'*64)}}
     elseif($script:DBAFConsumptionMode-ceq'other-app-newer'){$rows+=,[pscustomobject]@{name='other-app';consumption_id=('8'*64)}}
     $rev=[int64]$rows.Count
     return[pscustomobject]@{ok=$true;reason='dbaf-fixture-persisted-target';target_envelope=[pscustomobject]@{envelope_sha256=$hist};current_envelope=[pscustomobject]@{envelope_sha256=$cur};current_state=[pscustomobject]@{consumptions=$rows};current_revision=$rev}
@@ -26,6 +27,7 @@ function New-DBAFFixtureV010 {
     param([Parameter(Mandatory=$true)][string]$Label)
     $x=New-LDFixtureV010 -Label $Label -FixtureNonce ([Guid]::NewGuid().ToString('N')) -PermitSeed ('permit-'+$Label)
     $name=([string]$x.fixture.q.x.f.name).Trim().ToLowerInvariant()
+    $script:DBAFCurrentName=$name
     $hist=Get-CustomAppProductionDualIdBridgeAwareFinalizationSha256V010 ('historical|'+[string]$x.generic.consumption_id)
     $x.carrier|Add-Member -NotePropertyName historical_consumption_envelope_sha256 -NotePropertyValue $hist -Force
     $x.stage|Add-Member -NotePropertyName historical_consumption_envelope_sha256 -NotePropertyValue $hist -Force
@@ -39,6 +41,7 @@ function New-DBAFFixtureV010 {
 }
 function Invoke-DBAFFinalizeV010 {
     param([Parameter(Mandatory=$true)]$F,[DateTimeOffset]$Now=[DateTimeOffset]::UtcNow)
+    $script:DBAFCurrentName=[string]$F.name
     return Invoke-CustomAppProductionDualIdBridgeAwareFinalizationV010 -DurableBridgeIntegrationResult $F.bridge.result -EvidenceBoundAtomicResult $F.atomic -RecoveryAwarePreparedResult $F.x.carrier -RecoveryAwareStageExecutorResult $F.x.stage -Name $F.name -LifecycleRow $F.lifecycle -AllowedRoot $F.trust -JournalStoreDirectory $F.store -ConsumptionStoreDirectory $F.consumption_store -ConsumptionPersistenceResult $F.consumption -LocalAppDataRoot ([string]$F.x.fixture.q.persistence.local) -AppDataRoot ([string]$F.x.fixture.q.persistence.roaming) -Now $Now
 }
 function Assert-DBAFZeroAuthorityV010 {param([Parameter(Mandatory=$true)]$Value)foreach($f in @('result_is_authority','execution_authorized','finalization_authorized','apply_execution_authorized','spicetify_apply_authorized','cleanup_authorized','additional_mutation_authorized','live_destination_authorized','production_execution_authorized','production_mutation_authorized')){if($Value.PSObject.Properties[$f]){Assert-DBAFV010 (-not[bool]$Value.$f) ('authority escaped '+$f)}}}
@@ -75,7 +78,7 @@ $f3.atomic.transaction_id=[string]$f3.bridge.result.permit_transaction_id
 $f3.atomic.result_fingerprint=Get-CustomAppProductionEvidenceBoundJournalAtomicMutationSha256V010 (Get-CustomAppProductionEvidenceBoundJournalAtomicMutationResultMaterialV010 -Result $f3.atomic)
 $r3=Invoke-DBAFFinalizeV010 -F $f3
 Assert-DBAFV010 (-not[bool]$r3.ok) 'journal id tamper unexpectedly accepted'
-Assert-DBAFV010 (Test-Path -LiteralPath ([string]$f3.bridge.precommit.transaction_root) -PathType Container) 'journal id tamper touched transaction root'
+Assert-DBAFV010 (Test-Path -LiteralPath ([string]$f3.atomic.transaction_root) -PathType Container) 'journal id tamper touched transaction root'
 Write-Output 'DBAF_CASE_3_JOURNAL_ID_TAMPER_DENIED_PASS'
 
 # 4. Same-app newer consumption denies cleanup; unrelated newer consumption is allowed.
