@@ -1,0 +1,73 @@
+name: Repair dual-ID finalization validator name
+
+on:
+  push:
+    branches:
+      - validate/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Prove exact repair ancestry scope and frozen main
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='04d535e5ec0ba16a448bed127ccf3318b69e5931'
+          if((git merge-base $base HEAD).Trim() -cne $base){ throw 'repair head is not descended from exact v0.1.3 head' }
+          $repair='.github/workflows/repair-dual-id-finalization-validator-name.yml'
+          $delta=@(git diff --name-only "$base...HEAD")
+          foreach($p in $delta){ if($p -cne $repair){ throw "unexpected pre-repair delta: $p" } }
+          $main=(git ls-remote origin refs/heads/main).Split("`t")[0]
+          if($main -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){ throw "production main moved: $main" }
+
+      - name: Replace exactly one invalid validator symbol
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $path='validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/custom-app-production-dual-id-bridge-aware-finalization.ps1'
+          $wrong='Test-CustomAppProductionEvidenceBoundJournalAtomicMutationResultV010'
+          $right='Test-CustomAppProductionEvidenceBoundJournalAtomicResultV010'
+          $raw=[IO.File]::ReadAllText((Resolve-Path $path))
+          $wrongCount=([regex]::Matches($raw,[regex]::Escape($wrong))).Count
+          $rightBefore=([regex]::Matches($raw,[regex]::Escape($right))).Count
+          if($wrongCount -ne 1){ throw "expected exactly one invalid validator symbol, found $wrongCount" }
+          $fixed=$raw.Replace($wrong,$right)
+          if(([regex]::Matches($fixed,[regex]::Escape($wrong))).Count -ne 0){ throw 'invalid validator symbol remains' }
+          if(([regex]::Matches($fixed,[regex]::Escape($right))).Count -ne ($rightBefore+1)){ throw 'replacement count mismatch' }
+          $reverse=$fixed.Replace($right,$wrong)
+          if($rightBefore -eq 0 -and $reverse -cne $raw){ throw 'repair changed bytes beyond exact validator token' }
+          $enc=New-Object Text.UTF8Encoding($false)
+          [IO.File]::WriteAllText((Resolve-Path $path),$fixed,$enc)
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)
+          if($errors.Count){ $errors|ForEach-Object{Write-Error $_}; throw 'PS5.1 parse failed after validator repair' }
+          $q='validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1'
+          $qualified=[IO.File]::ReadAllText((Resolve-Path $q))
+          if($qualified.IndexOf(('function '+$right),[StringComparison]::Ordinal) -lt 0){ throw 'qualified #190 core does not define repaired validator' }
+          $diff=@(git diff --name-only)
+          if($diff.Count -ne 1 -or $diff[0] -cne $path){ throw "repair escaped exact core: $($diff -join ', ')" }
+          'DUAL_ID_FINALIZATION_VALIDATOR_SYMBOL_REPAIR_PASS'
+
+      - name: Commit validation-only repair
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'spotify-control-validation-bot'
+          git config user.email '98333820+sdsssdvx2@users.noreply.github.com'
+          git add -- 'validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/custom-app-production-dual-id-bridge-aware-finalization.ps1'
+          git diff --cached --quiet
+          if($LASTEXITCODE -eq 0){ throw 'no validator repair staged' }
+          git commit -m 'validation: fix exact #190 atomic result validator symbol'
+          if($LASTEXITCODE){ throw 'validator repair commit failed' }
+          git push origin HEAD:validate/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0
+          if($LASTEXITCODE){ throw 'validator repair push failed' }
