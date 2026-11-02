@@ -1,0 +1,86 @@
+name: Repair dual-ID finalization hidden atomic identity fields
+
+on:
+  push:
+    branches:
+      - validate/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Prove repair premise and exact upstream contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){ throw 'production main moved' }
+          $core='validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/custom-app-production-dual-id-bridge-aware-finalization.ps1'
+          $repair='.github/workflows/repair-dual-id-finalization-hidden-atomic-identity-fields.yml'
+          $base='d5901dc9fc192f268e940edac79598f1913ff90d'
+          if((git merge-base $base HEAD).Trim() -cne $base){ throw 'repair head not descended from exact failed-matrix head' }
+          $delta=@(git diff --name-only "$base...HEAD")
+          foreach($p in $delta){ if($p -cne $repair){ throw "repair scope escaped before patch: $p" } }
+
+          $atomicHead='c21a8c72dd8920df8e1faa59eb6aedee76a15e06'
+          $atomicPath='validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1'
+          $atomicBlob='55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'
+          git cat-file -e "$atomicHead^{commit}" 2>$null
+          if($LASTEXITCODE){ git fetch --no-tags origin $atomicHead | Out-Null; if($LASTEXITCODE){ throw 'exact #190 fetch failed' } }
+          $actual=(git rev-parse "$atomicHead`:$atomicPath").Trim(); if($actual -cne $atomicBlob){ throw "#190 core pin drift: $actual" }
+          $q=(git show "$atomicHead`:$atomicPath") -join "`n"; if($LASTEXITCODE){ throw 'exact #190 read failed' }
+          $s=$q.IndexOf('function Get-CustomAppProductionEvidenceBoundJournalAtomicResultMaterialV010',[StringComparison]::Ordinal)
+          $e=$q.IndexOf('function Test-CustomAppProductionEvidenceBoundJournalAtomicResultV010',[StringComparison]::Ordinal)
+          if($s -lt 0 -or $e -le $s){ throw '#190 result material boundary missing' }
+          $material=$q.Substring($s,$e-$s)
+          foreach($f in @('consumption_id','source_identity','remote_commit_sha')){ if($material.IndexOf(('Result.'+$f),[StringComparison]::OrdinalIgnoreCase) -ge 0){ throw "repair premise invalid: #190 exposes $f" } }
+          'DUAL_ID_FINALIZATION_HIDDEN_ATOMIC_FIELDS_PREMISE_PASS'
+
+      - name: Remove only nonexistent atomic result field comparisons
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $path='validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/custom-app-production-dual-id-bridge-aware-finalization.ps1'
+          $raw=[IO.File]::ReadAllText((Resolve-Path $path))
+          $targets=@(
+            "@('atomic-consumption',[string]`$EvidenceBoundAtomicResult.consumption_id,[string]`$pre.consumption_id),",
+            "@('atomic-source',[string]`$EvidenceBoundAtomicResult.source_identity,[string]`$pre.source_identity),",
+            "@('atomic-commit',[string]`$EvidenceBoundAtomicResult.remote_commit_sha,[string]`$pre.remote_commit_sha),"
+          )
+          $fixed=$raw
+          foreach($t in $targets){
+            $n=([regex]::Matches($fixed,[regex]::Escape($t))).Count
+            if($n -gt 1){ throw "hidden atomic field comparison duplicated: $t count=$n" }
+            if($n -eq 1){ $fixed=$fixed.Replace($t,'') }
+          }
+          foreach($f in @('consumption_id','source_identity','remote_commit_sha')){ if($fixed.IndexOf(('EvidenceBoundAtomicResult.'+$f),[StringComparison]::OrdinalIgnoreCase) -ge 0){ throw "nonexistent #190 result field reference remains: $f" } }
+          foreach($required in @("@('durable-precommit',[string]`$DurableBridgeIntegrationResult.precommit_fingerprint,[string]`$pre.precommit_fingerprint)","@('durable-atomic',[string]`$DurableBridgeIntegrationResult.atomic_result_fingerprint,[string]`$EvidenceBoundAtomicResult.result_fingerprint)","@('atomic-journal',[string]`$EvidenceBoundAtomicResult.transaction_id,[string]`$journal)","@('atomic-name',[string]`$EvidenceBoundAtomicResult.name,[string]`$pre.name)","@('atomic-runtime',[string]`$EvidenceBoundAtomicResult.post_runtime_tree_sha256,[string]`$generic.stage_tree_sha256)","@('atomic-persistence',[string]`$EvidenceBoundAtomicResult.persistence_fingerprint,[string]`$generic.persistence_fingerprint)")){ if($fixed.IndexOf($required,[StringComparison]::Ordinal) -lt 0){ throw "required continuity guard missing after repair: $required" } }
+          if($fixed -cne $raw){ [IO.File]::WriteAllText((Resolve-Path $path),$fixed,(New-Object Text.UTF8Encoding($false))) }
+          $tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors);if($errors.Count){$errors|ForEach-Object{Write-Error $_};throw 'PS5.1 parse failed after hidden-field repair'}
+          $diff=@(git diff --name-only)
+          if($fixed -cne $raw){ if($diff.Count-ne1 -or $diff[0]-cne$path){ throw "repair escaped exact core: $($diff -join ', ')" }; 'DUAL_ID_FINALIZATION_HIDDEN_ATOMIC_FIELDS_REPAIR_READY' }
+          else { if($diff.Count){ throw "already repaired but tree dirty: $($diff -join ', ')" }; 'DUAL_ID_FINALIZATION_HIDDEN_ATOMIC_FIELDS_ALREADY_REPAIRED_PASS' }
+
+      - name: Commit validation-only repair when needed
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $path='validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/custom-app-production-dual-id-bridge-aware-finalization.ps1'
+          git diff --quiet -- $path
+          if($LASTEXITCODE -eq 0){ 'DUAL_ID_FINALIZATION_HIDDEN_ATOMIC_FIELDS_NO_COMMIT_NEEDED_PASS'; exit 0 }
+          git config user.name 'spotify-control-validation-bot'
+          git config user.email '98333820+sdsssdvx2@users.noreply.github.com'
+          git add -- $path
+          git commit -m 'validation: honor evidence-bound atomic result contract'
+          if($LASTEXITCODE){ throw 'hidden-field repair commit failed' }
+          git push origin HEAD:validate/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0
+          if($LASTEXITCODE){ throw 'hidden-field repair push failed' }
+          'DUAL_ID_FINALIZATION_HIDDEN_ATOMIC_FIELDS_REPAIR_PUSHED'
