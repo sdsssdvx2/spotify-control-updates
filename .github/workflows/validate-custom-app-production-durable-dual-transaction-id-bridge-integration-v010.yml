@@ -1,0 +1,133 @@
+name: Validate Custom App Production Durable Dual Transaction ID Bridge Integration v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-durable-dual-transaction-id-bridge-integration-v010.yml'
+  pull_request:
+    branches: [validate/custom-app-production-dual-transaction-id-bridge-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-durable-dual-transaction-id-bridge-integration-v010.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope canonical bridge lineage and frozen production
+        shell: powershell
+        run: |
+          $head=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($head-cne$expected){throw "head mismatch $head != $expected"}
+          $base='115411ed1a16f66a168443fb03b6e164fd114c0d';if((git merge-base $base HEAD).Trim()-cne$base){throw 'not descended from exact dual transaction id bridge head'}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $allowed=@('.github/workflows/validate-custom-app-production-durable-dual-transaction-id-bridge-integration-v010.yml','validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/custom-app-production-durable-dual-transaction-id-bridge-integration.ps1','validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/test_custom_app_production_durable_dual_transaction_id_bridge_integration.ps1')
+          $changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_-notin$allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($p in $allowed){if($p-notin$changed){throw "missing changed surface $p"}}
+          $localPins=@(
+            @('validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/custom-app-production-durable-dual-transaction-id-bridge-integration.ps1','c9a58a181d3c5f5a230fa895785c3a42a928c8cd'),
+            @('validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/test_custom_app_production_durable_dual_transaction_id_bridge_integration.ps1','445c73bdd27f376a1d280b56070998bfdb203516'),
+            @('validation/custom-app-production-dual-transaction-id-bridge-v0.1.0/custom-app-production-dual-transaction-id-bridge.ps1','ce018db8c13d569036ca378bbe3b4a2a84ab3bcd'),
+            @('validation/custom-app-production-dual-transaction-id-bridge-v0.1.0/test_custom_app_production_dual_transaction_id_bridge.ps1','c145e9d99aa51f009e375ef361973bce60e96314'),
+            @('validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/custom-app-production-recovery-aware-permit-pre-apply-preparation.ps1','eaad8a5f161f831bbbada1c1c0957a3dfc80edaa'),
+            @('validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/test_custom_app_production_recovery_aware_permit_pre_apply_preparation.ps1','62fee2fc47c900ccf2eaec96bdb920727f3c5690'),
+            @('validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'),
+            @('validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','0273d7e28a56759b1d0ec9cbf037483b04d98d63'),
+            @('validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1','5fec613c460619da5dbfe88fca5c7334e9e93f76')
+          );foreach($q in $localPins){$b=(git hash-object $q[0]).Trim();if($LASTEXITCODE-or$b-cne$q[1]){throw "local pin drift $($q[0]) $b != $($q[1])"}}
+          $historical=@(
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+            @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),
+            @('c549230acb222bd8132bea22912af5853f316785','validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/recovery_worker.ps1','ab94eac803e7124451a01f66b05c25bdac6d10a3'),
+            @('c549230acb222bd8132bea22912af5853f316785','validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/test_custom_app_production_evidence_bound_recovery_restore_integration.ps1','757a236306712e0f45c961cdd52cca054fa7758d')
+          );foreach($q in $historical){$b=(git rev-parse "$($q[0])`:$($q[1])" 2>$null).Trim();if($LASTEXITCODE-or$b-cne$q[2]){throw "historical pin drift $($q[1]) $b != $($q[2])"}}
+          git fetch --no-tags origin validate/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0|Out-Null;if($LASTEXITCODE){throw 'failed to fetch exact #191 branch'};if((git rev-parse FETCH_HEAD).Trim()-cne'c549230acb222bd8132bea22912af5853f316785'){throw '#191 branch head drift'}
+          'DURABLE_DUAL_TRANSACTION_ID_BRIDGE_SCOPE_PINS_PASS'
+
+      - name: Parse and audit precommit-before-mutation canonical-receipt ordering
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0';$core="$d/custom-app-production-durable-dual-transaction-id-bridge-integration.ps1";$test="$d/test_custom_app_production_durable_dual_transaction_id_bridge_integration.ps1";$bridge='validation/custom-app-production-dual-transaction-id-bridge-v0.1.0/custom-app-production-dual-transaction-id-bridge.ps1'
+          foreach($f in @($core,$test,$bridge)){ $tokens=$null;$errors=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $c=Get-Content $core -Raw
+          foreach($m in @('dual-transaction-id-bridge-precommit-v1.json','dual-transaction-id-bridge-receipt-v1.json','Write-CustomAppProductionDurableDualTransactionIdBridgeIntegrationPrecommitV010','Invoke-CustomAppProductionEvidenceBoundJournalAtomicMutationV010','Resolve-CustomAppProductionDualTransactionIdBridgeV010','Write-CustomAppProductionDurableDualTransactionIdBridgeIntegrationReceiptV010','after-precommit-before-journal-init','after-atomic-before-canonical-bridge','after-canonical-bridge-before-final-receipt','FileMode]::CreateNew')){if($c.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "core marker missing $m"}}
+          if(([regex]::Matches($c,'Invoke-CustomAppProductionEvidenceBoundJournalAtomicMutationV010').Count)-ne1){throw 'qualified #190 atomic call count is not exactly one'}
+          if(([regex]::Matches($c,'Resolve-CustomAppProductionDualTransactionIdBridgeV010').Count)-ne1){throw 'canonical dual bridge resolver call count is not exactly one'}
+          $pre=$c.IndexOf('Write-CustomAppProductionDurableDualTransactionIdBridgeIntegrationPrecommitV010 -AllowedRoot',[StringComparison]::Ordinal);$atomic=$c.IndexOf('Invoke-CustomAppProductionEvidenceBoundJournalAtomicMutationV010 -GenericPreparedResult',[StringComparison]::Ordinal);$bridgePos=$c.IndexOf('Resolve-CustomAppProductionDualTransactionIdBridgeV010 -RecoveryAwarePreparedResult',[StringComparison]::Ordinal);$final=$c.IndexOf('Write-CustomAppProductionDurableDualTransactionIdBridgeIntegrationReceiptV010 -AllowedRoot',[StringComparison]::Ordinal);if($pre-lt0-or$atomic-lt0-or$bridgePos-lt0-or$final-lt0-or-not($pre-lt$atomic-and$atomic-lt$bridgePos-and$bridgePos-lt$final)){throw 'durable dual-id ordering invalid'}
+          foreach($x in @('Invoke-WebRequest','Invoke-RestMethod','Start-Process','powershell.exe','[IO.Directory]::Move','spicetify apply','Create-CustomAppProductionPermit')){if($c.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "core forbidden direct primitive $x"}}
+          if($c-match'precommit_is_authority\s*=\s*\$true|bridge_is_authority\s*=\s*\$true|execution_authorized\s*=\s*\$true|finalization_authorized\s*=\s*\$true|spicetify_apply_authorized\s*=\s*\$true|cleanup_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'authority escaped in durable dual-id core'}
+          $t=Get-Content $test -Raw;foreach($m in @('precommit-replay','precommit-tamper','permit-tamper','after-live-move-before-journal','first-rename-complete-unjournaled','after-atomic-before-canonical-bridge','after-canonical-bridge-before-final-receipt','final-tamper','Invoke-IRSeparateProcessRecoveryV010','rollback-complete','CUSTOM_APP_PRODUCTION_DURABLE_DUAL_TRANSACTION_ID_BRIDGE_INTEGRATION_PASS')){if($t.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "test marker missing $m"}}
+          'DURABLE_DUAL_TRANSACTION_ID_BRIDGE_PARSE_ORDERING_PASS'
+
+      - name: Replay canonical bridge and run byte-real crash-restart integration matrix
+        shell: powershell
+        timeout-minutes: 220
+        run: |
+          $runHead='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';$w=Join-Path $env:RUNNER_TEMP 'durable-dual-id-bridge-integration';git worktree add --detach $w $runHead;if($LASTEXITCODE){throw 'integration worktree add failed'}
+          try{
+            $materialize=@(
+              @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0'),
+              @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0'),
+              @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0'),
+              @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0'),
+              @('e2b80822835bf5d59dc179e345e098b5bd79759e','validation/custom-app-production-atomic-live-swap-mutation-v0.1.0'),
+              @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0'),
+              @('c21a8c72dd8920df8e1faa59eb6aedee76a15e06','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0'),
+              @('c549230acb222bd8132bea22912af5853f316785','validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0')
+            );foreach($q in $materialize){git -C $w checkout $q[0] -- $q[1];if($LASTEXITCODE){throw "exact dependency materialization failed $($q[0]) $($q[1])"}}
+            $checks=@(
+              @('validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+              @('validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+              @('validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+              @('validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+              @('validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),
+              @('validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'),
+              @('validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/recovery_worker.ps1','ab94eac803e7124451a01f66b05c25bdac6d10a3'),
+              @('validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/test_custom_app_production_evidence_bound_recovery_restore_integration.ps1','757a236306712e0f45c961cdd52cca054fa7758d')
+            );foreach($q in $checks){$b=(git -C $w hash-object $q[0]).Trim();if($LASTEXITCODE-or$b-cne$q[1]){throw "materialized blob drift $($q[0]) $b != $($q[1])"}}
+            $env:TEMP=Join-Path $env:RUNNER_TEMP 'ddib-runtime-temp';$env:TMP=$env:TEMP;New-Item -ItemType Directory -Force -Path $env:TEMP|Out-Null
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $w 'validation/custom-app-production-dual-transaction-id-bridge-v0.1.0/test_custom_app_production_dual_transaction_id_bridge.ps1');if($LASTEXITCODE){throw 'canonical dual transaction id bridge 16-case matrix failed'}
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $w 'validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/test_custom_app_production_durable_dual_transaction_id_bridge_integration.ps1');if($LASTEXITCODE){throw 'durable dual-id byte-real crash-restart integration failed'}
+          } finally {git worktree remove --force $w 2>$null}
+          'DURABLE_DUAL_TRANSACTION_ID_BRIDGE_RUNTIME_PASS'
+
+      - name: Rebuild exact hard-disabled candidate and run Addon Manager SelfTest
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'candidate rebuild failed'}
+          $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json";$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant()
+          if((Get-Item $a).Length-ne1382213-or$ah-cne'c2e5ffd4fe9b14b5c31dd53e7d093bd9b5db2a4ad49fa19449d299e3c14fac2f'){throw 'Addon Manager hard-disabled candidate drift'}
+          if((Get-Item $m).Length-ne284327-or$mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate drift'}
+          if($rh-cne'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw 'candidate report drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'ddib-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'Addon Manager SelfTest failed'}
+          'DURABLE_DUAL_TRANSACTION_ID_BRIDGE_HARD_DISABLED_SELFTEST_PASS'
+
+      - name: Prove protected surfaces immutable and write evidence
+        shell: powershell
+        run: |
+          $base='115411ed1a16f66a168443fb03b6e164fd114c0d';$expected=@('.github/workflows/validate-custom-app-production-durable-dual-transaction-id-bridge-integration-v010.yml','validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/custom-app-production-durable-dual-transaction-id-bridge-integration.ps1','validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/test_custom_app_production_durable_dual_transaction_id_bridge_integration.ps1');$changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_-notin$expected});if($bad.Count){throw "unexpected changed surface $($bad -join ', ')"}
+          foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-dual-transaction-id-bridge-v0.1.0/custom-app-production-dual-transaction-id-bridge.ps1','validation/custom-app-production-dual-transaction-id-bridge-v0.1.0/test_custom_app_production_dual_transaction_id_bridge.ps1','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/custom-app-production-recovery-aware-permit-pre-apply-preparation.ps1')){git diff --quiet $base HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $d='validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();base=$base;canonical_dual_bridge_head='115411ed1a16f66a168443fb03b6e164fd114c0d';qualified_evidence_bound_atomic_head='c21a8c72dd8920df8e1faa59eb6aedee76a15e06';qualified_restart_recovery_head='c549230acb222bd8132bea22912af5853f316785';precommit_persisted_before_journal_and_live_mutation=$true;permit_and_journal_transaction_namespaces_distinct=$true;canonical_bridge_resolver_reused=$true;canonical_bridge_16_case_matrix_replayed=$true;byte_real_integration_cases=8;pre_journal_exact_replay_proven=$true;precommit_tamper_fails_closed=$true;first_rename_unjournaled_repair_then_separate_process_recovery=$true;post_atomic_crash_recovery=$true;post_canonical_pre_receipt_crash_recovery=$true;final_receipt_tamper_fails_closed=$true;precommit_survives_rollback_complete=$true;hard_disabled_candidate_unchanged=$true;production_main_changed=$false;production_mutation_authority=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'DURABLE_DUAL_TRANSACTION_ID_BRIDGE_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-durable-dual-transaction-id-bridge-integration-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/custom-app-production-durable-dual-transaction-id-bridge-integration.ps1
+            validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/test_custom_app_production_durable_dual_transaction_id_bridge_integration.ps1
+            validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/ci-evidence.json
