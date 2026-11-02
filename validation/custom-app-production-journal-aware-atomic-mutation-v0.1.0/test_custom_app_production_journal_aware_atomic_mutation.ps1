@@ -4,6 +4,7 @@ $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $root 'validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1')
 . (Join-Path $root 'validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/test_custom_app_production_atomic_live_swap_mutation.ps1')
 . (Join-Path $PSScriptRoot 'custom-app-production-journal-aware-atomic-mutation.ps1')
+. (Join-Path $PSScriptRoot 'custom-app-production-journal-aware-atomic-repair-v011.ps1')
 
 $script:JournalAwareAtomicFaultMode='none'
 function Invoke-CustomAppProductionJournalAwareAtomicValidationHookV010 {
@@ -85,7 +86,7 @@ try{
     Assert-False ([bool]$r.ok) 'pre-first crash unexpectedly succeeded';Assert-True ([string]$r.journal_phase -ceq 'atomic-mutation-starting') 'pre-first phase drift';Assert-False ([bool]$r.live_move_started) 'pre-first incorrectly marked live move'
     $ia=Get-JAInspectionArgsV010 $pre 'pre-first';$i=Resolve-CustomAppProductionJournalAwareAtomicStartingInspectionV010 @ia
     Assert-True ([bool]$i.ok) ('pre-first inspection denied: '+[string]$i.reason);Assert-True ([string]$i.receipt.state -ceq 'pre-first-rename-exact') 'pre-first state mismatch';Assert-True ([string]$i.receipt.repair_phase -ceq 'rollback-required') 'pre-first repair phase mismatch'
-    $repair=Invoke-CustomAppProductionJournalAwareAtomicStartingRepairV010 @ia;Assert-True ([bool]$repair.ok) ('pre-first repair denied: '+[string]$repair.reason);Assert-True ([string]$repair.phase -ceq 'rollback-required') 'pre-first repair journal phase mismatch'
+    $repair=Invoke-CustomAppProductionJournalAwareAtomicStartingRepairV010 @ia -Now ([DateTimeOffset]::UtcNow.AddMinutes(-1));Assert-True ([bool]$repair.ok) ('pre-first repair denied: '+[string]$repair.reason);Assert-True ([string]$repair.phase -ceq 'rollback-required') 'pre-first repair journal phase mismatch'
     $count++
 }finally{Restore-JAFixtureV010 $pre (Get-JATransactionRootV010 $r)}
 
