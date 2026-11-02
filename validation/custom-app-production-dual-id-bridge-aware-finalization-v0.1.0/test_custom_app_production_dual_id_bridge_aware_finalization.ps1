@@ -75,7 +75,7 @@ Write-Output 'DBAF_CASE_2_BRIDGE_TAMPER_DENIED_PASS'
 # 3. Atomic journal ID substitution is denied before cleanup even when result fingerprint is recomputed.
 $f3=New-DBAFFixtureV010 'journal-id-tamper'
 $f3.atomic.transaction_id=[string]$f3.bridge.result.permit_transaction_id
-$f3.atomic.result_fingerprint=Get-CustomAppProductionEvidenceBoundJournalAtomicMutationSha256V010 (Get-CustomAppProductionEvidenceBoundJournalAtomicMutationResultMaterialV010 -Result $f3.atomic)
+$f3.atomic.result_fingerprint=Get-CustomAppProductionEvidenceBoundJournalAtomicSha256V010 (Get-CustomAppProductionEvidenceBoundJournalAtomicResultMaterialV010 -Result $f3.atomic)
 $r3=Invoke-DBAFFinalizeV010 -F $f3
 Assert-DBAFV010 (-not[bool]$r3.ok) 'journal id tamper unexpectedly accepted'
 Assert-DBAFV010 (Test-Path -LiteralPath ([string]$f3.atomic.transaction_root) -PathType Container) 'journal id tamper touched transaction root'
