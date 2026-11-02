@@ -24,4 +24,5 @@ function Materialize-DBAPDependencyV010 {
 }
 
 Materialize-DBAPDependencyV010 -Commit 'a4f6d4772afb895dd253a4c82a21643711ac0829' -Path 'validation/custom-app-production-post-swap-apply-admission-v0.1.0/custom-app-production-post-swap-apply-admission.ps1' -ExpectedBlob '190382903e23d7abc59b525829c5ecd5c76f7ff1'
+Materialize-DBAPDependencyV010 -Commit 'da3bf726c2c888bd6ac8c4aaee8fd13660a9235f' -Path 'validation/custom-app-remote-binding-observer-v0.4.0/custom-app-remote-binding-state.ps1' -ExpectedBlob 'bd19cbb3da2087e68b2452fe62471d4eca2cd990'
 Write-Output 'DUAL_ID_BRIDGE_AWARE_POST_SWAP_APPLY_ADMISSION_DEPENDENCIES_PASS'
