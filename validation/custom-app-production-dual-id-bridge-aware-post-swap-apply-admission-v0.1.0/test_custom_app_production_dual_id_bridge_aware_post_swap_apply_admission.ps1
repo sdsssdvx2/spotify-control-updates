@@ -11,6 +11,13 @@ function Assert-DBAPEq($Actual,$Expected,[string]$Message){if([string]$Actual-cn
 function Copy-DBAP($Value){return (($Value|ConvertTo-Json -Depth 80)|ConvertFrom-Json)}
 function Assert-DBAPNoAuthority($Value,[string]$Label){foreach($f in @('session_key_persisted','session_key_exposed','admission_is_authority','apply_execution_authorized','spicetify_apply_authorized','additional_mutation_authorized','live_destination_authorized','production_execution_authorized','production_mutation_authorized')){if($Value.PSObject.Properties[$f]){Assert-DBAPFalse ([bool]$Value.$f) "$Label escaped $f"}}}
 
+# The inherited permit harness uses this exact ephemeral fixture key. Capture it under a
+# dedicated integration-test name because the deeply dot-sourced #194 replay contains
+# many nested scopes and must not be relied on to leave an unqualified $key visible here.
+# This is test-only state; no session key is persisted into any result or production file.
+$script:DBAPSessionKey=[byte[]](1..32)
+Assert-DBAPTrue ($script:DBAPSessionKey.Length-eq32) 'fixture session key drift'
+
 # The inherited permit harness uses a fixed 2026-10-28 logical clock and a matching
 # fixed remote-observation timestamp. This post-swap integration must instead prove a
 # permit that is still live at the durable crash-journal time. Preserve the exact
@@ -35,7 +42,7 @@ function New-DBAPFixtureV010 {
 }
 function Invoke-DBAPV010 {
     param([Parameter(Mandatory=$true)]$Q,[AllowNull()]$Final=$null,[AllowNull()]$Bridge=$null,[AllowNull()]$Atomic=$null,[AllowNull()][byte[]]$Key=$null,[AllowNull()]$Lifecycle=$null,[AllowNull()]$Provenance=$null,[AllowNull()]$Binding=$null,[DateTimeOffset]$At=[DateTimeOffset]::MinValue)
-    $f=$Q.f;if($null-eq$Final){$Final=$Q.final.result};if($null-eq$Bridge){$Bridge=$f.bridge.result};if($null-eq$Atomic){$Atomic=$f.atomic};if($null-eq$Key){$Key=$key};if($null-eq$Lifecycle){$Lifecycle=$f.x.fixture.q.x.f.lifecycle};if($null-eq$Provenance){$Provenance=$f.x.fixture.q.x.f.provenance};if($null-eq$Binding){$Binding=$f.x.fixture.q.x.f.binding};if($At-eq[DateTimeOffset]::MinValue){$At=$Q.now}
+    $f=$Q.f;if($null-eq$Final){$Final=$Q.final.result};if($null-eq$Bridge){$Bridge=$f.bridge.result};if($null-eq$Atomic){$Atomic=$f.atomic};if($null-eq$Key){$Key=$script:DBAPSessionKey};if($null-eq$Lifecycle){$Lifecycle=$f.x.fixture.q.x.f.lifecycle};if($null-eq$Provenance){$Provenance=$f.x.fixture.q.x.f.provenance};if($null-eq$Binding){$Binding=$f.x.fixture.q.x.f.binding};if($At-eq[DateTimeOffset]::MinValue){$At=$Q.now}
     Resolve-CustomAppProductionDualIdBridgeAwarePostSwapApplyAdmissionV010 -DualIdFinalizationResult $Final -DurableBridgeIntegrationResult $Bridge -EvidenceBoundAtomicResult $Atomic -RecoveryAwarePreparedResult $f.x.carrier -RecoveryAwareStageExecutorResult $f.x.stage -GenericPreparedResult $f.x.generic -GenericStageExecutorResult $f.x.fixture.q.stage.result -Permit $f.x.fixture.q.x.permit -Name $f.name -LifecycleRow $Lifecycle -ProvenanceRow $Provenance -BindingRow $Binding -AllowedRoot $f.trust -JournalStoreDirectory $f.store -ConsumptionStoreDirectory $f.x.fixture.q.x.store.store -SessionKey $Key -LocalAppDataRoot ([string]$f.x.fixture.q.persistence.local) -AppDataRoot ([string]$f.x.fixture.q.persistence.roaming) -Now $At
 }
 
@@ -96,4 +103,4 @@ $count++
 $fp=Copy-DBAP $r.decision;$fp.admission_fingerprint=('f'*64);$fc=Test-CustomAppProductionDualIdBridgeAwarePostSwapApplyAdmissionDecisionV010 $fp;Assert-DBAPFalse ([bool]$fc.ok) 'decision fingerprint tamper accepted';$count++
 
 if($count-ne10){throw "dual-ID post-swap admission matrix count mismatch $count"}
-Write-Output "CUSTOM_APP_PRODUCTION_DUAL_ID_BRIDGE_AWARE_POST_SWAP_APPLY_ADMISSION_PASS cases=$count byte_real=true fresh_remote_observation=true real_permit_hmac=true durable_ledger=true journal_id_separate=true zero_authority=true"
+Write-Output "CUSTOM_APP_PRODUCTION_DUAL_ID_BRIDGE_AWARE_POST_SWAP_APPLY_ADMISSION_PASS cases=$count byte_real=true fresh_remote_observation=true explicit_ephemeral_session_key=true real_permit_hmac=true durable_ledger=true journal_id_separate=true zero_authority=true"
