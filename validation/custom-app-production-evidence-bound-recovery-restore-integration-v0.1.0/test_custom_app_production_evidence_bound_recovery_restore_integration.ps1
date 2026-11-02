@@ -43,8 +43,8 @@ function Assert-IRRestoredStateV010 {
     param($Fixture,[string]$Label)
     $full=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$Fixture.q.x.live)
     Assert-IREq ([string]$full.tree_sha256) ([string]$Fixture.full_before.tree_sha256) "$Label restored full tree"
-    Assert-IRTrue ([int]$full.file_count -eq [int]$Fixture.full_before.file_count "$Label restored file count")
-    Assert-IRTrue ([int64]$full.total_bytes -eq [int64]$Fixture.full_before.total_bytes "$Label restored total bytes")
+    Assert-IRTrue ([int]$full.file_count -eq [int]$Fixture.full_before.file_count) "$Label restored file count"
+    Assert-IRTrue ([int64]$full.total_bytes -eq [int64]$Fixture.full_before.total_bytes) "$Label restored total bytes"
     $runtime=Get-CustomAppLocalRuntimeBaseline -Name ([string]$Fixture.q.x.f.name) -AppPath ([string]$Fixture.q.x.live)
     Assert-IREq ([string]$runtime.tree_sha256) ([string]$Fixture.runtime_before.tree_sha256) "$Label restored runtime tree"
     $persist=Get-SpotifyPersistenceSnapshot -LocalAppDataRoot ([string]$Fixture.q.persistence.local) -AppDataRoot ([string]$Fixture.q.persistence.roaming)
@@ -63,7 +63,6 @@ function Invoke-IRSeparateProcessRecoveryV010 {
     $control=Join-Path (Get-EBTrustRootV010) ('evidence-bound-recovery-control-'+[Guid]::NewGuid().ToString('N'))
     [IO.Directory]::CreateDirectory($control)|Out-Null
     $statePath=Join-Path $control 'state.json';$resultPath=Join-Path $control 'worker-result.json';$countPath=Join-Path $control 'apply-count.txt';$appliedPath=Join-Path $control 'applied.txt'
-    $txnRoot=$null
     $jr=Get-EBJournalV010 $Fixture $StoreLabel
     if($null -eq $jr -or -not[bool]$jr.ok){throw "$Label pre-worker journal unreadable"}
     $txnRoot=[string]$jr.entry.transaction_root
