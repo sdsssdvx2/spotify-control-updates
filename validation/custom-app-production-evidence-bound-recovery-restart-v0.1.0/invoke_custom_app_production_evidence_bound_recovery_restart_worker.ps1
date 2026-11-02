@@ -9,6 +9,7 @@ $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $load=@(
     'validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1',
     'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1',
+    'validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1',
     'validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1',
     'validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1',
     'validation/custom-app-production-recovery-plan-contract-v0.1.0/custom-app-production-recovery-plan.ps1',
