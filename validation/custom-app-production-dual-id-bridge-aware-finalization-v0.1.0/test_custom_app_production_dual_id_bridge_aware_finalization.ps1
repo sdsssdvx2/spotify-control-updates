@@ -5,13 +5,13 @@ $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $root 'validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/custom-app-production-recovery-aware-permit-transaction-finalization.ps1')
 . (Join-Path $PSScriptRoot 'custom-app-production-dual-id-bridge-aware-finalization.ps1')
 
-function Assert-DBAFV010 {param([bool]$Condition,[string]$Message)if(-not$Condition){throw$Message}}
+function Assert-DBAFV010 {param([bool]$Condition,[string]$Message)if(-not$Condition){throw $Message}}
 $script:DBAFFault=$null
 $script:DBAFConsumptionMode='stable'
 $script:DBAFCurrentName='test-app'
 function Invoke-CustomAppProductionDualIdBridgeAwareFinalizationValidationHookV010 {
     param([Parameter(Mandatory=$true)][string]$Checkpoint,[Parameter(Mandatory=$true)]$Context)
-    if($script:DBAFFault-ceq$Checkpoint){throw('dbaf-fixture-fault:'+$Checkpoint)}
+    if($script:DBAFFault-ceq$Checkpoint){throw ('dbaf-fixture-fault:'+$Checkpoint)}
 }
 function Get-CustomAppProductionRecoveryAwarePermitConsumptionPersistedTargetV010 {
     param([Parameter(Mandatory=$true)][string]$AllowedRoot,[Parameter(Mandatory=$true)][string]$StoreDirectory,[Parameter(Mandatory=$true)]$TargetState,[Parameter(Mandatory=$true)][int64]$TargetRevision,[Parameter(Mandatory=$true)][string]$ExpectedConsumptionId)
@@ -21,7 +21,7 @@ function Get-CustomAppProductionRecoveryAwarePermitConsumptionPersistedTargetV01
     if($script:DBAFConsumptionMode-ceq'same-app-newer'){$rows+=,[pscustomobject]@{name=$script:DBAFCurrentName;consumption_id=('9'*64)}}
     elseif($script:DBAFConsumptionMode-ceq'other-app-newer'){$rows+=,[pscustomobject]@{name='other-app';consumption_id=('8'*64)}}
     $rev=[int64]$rows.Count
-    return[pscustomobject]@{ok=$true;reason='dbaf-fixture-persisted-target';target_envelope=[pscustomobject]@{envelope_sha256=$hist};current_envelope=[pscustomobject]@{envelope_sha256=$cur};current_state=[pscustomobject]@{consumptions=$rows};current_revision=$rev}
+    return [pscustomobject]@{ok=$true;reason='dbaf-fixture-persisted-target';target_envelope=[pscustomobject]@{envelope_sha256=$hist};current_envelope=[pscustomobject]@{envelope_sha256=$cur};current_state=[pscustomobject]@{consumptions=$rows};current_revision=$rev}
 }
 function New-DBAFFixtureV010 {
     param([Parameter(Mandatory=$true)][string]$Label)
@@ -37,7 +37,7 @@ function New-DBAFFixtureV010 {
     $consStore=Join-Path (Get-EBTrustRootV010) ('dbaf-consumption-'+$Label+'-'+[Guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Force -Path $consStore|Out-Null
     $cons=[pscustomobject]@{receipt=[pscustomobject]@{persisted_revision=1};persisted_snapshot=[pscustomobject]@{state=[pscustomobject]@{consumptions=@([pscustomobject]@{name=$name;consumption_id=[string]$x.generic.consumption_id})}}}
     $life=[pscustomobject]@{managed_by='dynamic-spicetify-v1';present=$true;user_removed=$false;ambiguous=$false;safe_local_identity=$true;locations=@([string]$x.fixture.q.x.live)}
-    return[pscustomobject]@{x=$x;name=$name;store=$store;bridge=$bridge;atomic=$bridge.atomic.result;consumption_store=$consStore;consumption=$cons;lifecycle=$life;trust=(Get-EBTrustRootV010)}
+    return [pscustomobject]@{x=$x;name=$name;store=$store;bridge=$bridge;atomic=$bridge.atomic.result;consumption_store=$consStore;consumption=$cons;lifecycle=$life;trust=(Get-EBTrustRootV010)}
 }
 function Invoke-DBAFFinalizeV010 {
     param([Parameter(Mandatory=$true)]$F,[DateTimeOffset]$Now=[DateTimeOffset]::UtcNow)
