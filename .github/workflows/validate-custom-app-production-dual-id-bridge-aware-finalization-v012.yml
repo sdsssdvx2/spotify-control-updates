@@ -1,4 +1,4 @@
-name: Validate Custom App Production Dual-ID Bridge-Aware Finalization v0.1.2
+name: Validate Custom App Production Dual-ID Bridge-Aware Finalization v0.1.3
 
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
           fetch-depth: 0
           ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
 
-      - name: Prove exact scope lineage pins zero-authority and launcher boundary
+      - name: Prove exact scope lineage pins lexical safety zero-authority and launcher boundary
         shell: powershell
         run: |
           $head=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($head-cne$expected){throw "head mismatch $head != $expected"}
@@ -35,13 +35,16 @@ jobs:
           $prep='validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/prepare_custom_app_production_dual_id_bridge_aware_finalization.ps1'
           $wf='.github/workflows/validate-custom-app-production-dual-id-bridge-aware-finalization-v012.yml'
           $allowed=@($core,$test,$prep,$wf);$changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_-notin$allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($p in $allowed){if($p-notin$changed){throw "missing changed surface $p"}}
-          $pins=@(@($core,'6706aa554ca6f3fd7471b612c6017abd9c2c53b8'),@($test,'b5d11e3f5f113a91c18d1031b1407c0e4a52e530'),@($prep,'e970b129861c695a4dbcc07a4c98cfdffae530a7'));foreach($p in $pins){$actual=(git hash-object $p[0]).Trim();if($actual-cne$p[1]){throw "validation blob drift $($p[0]) $actual != $($p[1])"}}
-          foreach($p in @($core,$test,$prep)){$tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors);if($errors.Count){$errors|ForEach-Object{Write-Error $_};throw "PS5.1 parse failed $p"}}
+          $pins=@(@($core,'4b302b17787c2abc3fa24566c41286010431cbd0'),@($test,'3297d7864482f41ee781438d7617ca7fe0d40ba7'),@($prep,'e970b129861c695a4dbcc07a4c98cfdffae530a7'));foreach($p in $pins){$actual=(git hash-object $p[0]).Trim();if($actual-cne$p[1]){throw "validation blob drift $($p[0]) $actual != $($p[1])"}}
+          foreach($p in @($core,$test,$prep)){
+            $tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors);if($errors.Count){$errors|ForEach-Object{Write-Error $_};throw "PS5.1 parse failed $p"}
+            $text=[IO.File]::ReadAllText((Resolve-Path $p));if($text-match'\breturn[\[\$&\(]' -or $text-match'\bthrow[\[\$\(]'){throw "PowerShell keyword lexical boundary regression $p"}
+          }
           $raw=Get-Content $core -Raw;foreach($m in @('permit_transaction_id','journal_transaction_id','forward_continuity_uses_permit_id','crash_recovery_uses_journal_id','candidate-live','transaction-finalized','same-app-newer-consumption','requires_recovery_if_post_cleanup_validation_fails')){if($raw.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "core marker missing $m"}}
           foreach($badToken in @('Invoke-WebRequest','Invoke-RestMethod','Start-Process','System.Diagnostics.Process','launch-managed.vbs','Spotify-Managed-DomainVPN.vbs','CreateShortcut','TargetPath','WorkingDirectory =')){if($raw.IndexOf($badToken,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "forbidden core surface $badToken"}}
           if($raw-match'result_is_authority\s*=\s*\$true|execution_authorized\s*=\s*\$true|finalization_authorized\s*=\s*\$true|spicetify_apply_authorized\s*=\s*\$true|cleanup_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'authority escaped in bridge-aware finalization core'}
           $prepRaw=Get-Content $prep -Raw;foreach($m in @("'394e7bda96501f9ac320ceabe96b4cf96661fe2d'","'d15e0768162b0659c57602eaf0242b035b48b0c7'")){if($prepRaw.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "exact #182 dependency pin missing $m"}}
-          'DUAL_ID_BRIDGE_AWARE_FINALIZATION_V012_SCOPE_PARSE_AUTHORITY_PASS'
+          'DUAL_ID_BRIDGE_AWARE_FINALIZATION_V013_SCOPE_PARSE_LEXICAL_AUTHORITY_PASS'
 
       - name: Materialize exact qualified dependencies and monotonic recovery executor
         shell: powershell
@@ -57,12 +60,12 @@ jobs:
         run: |
           $outer=$env:RUNNER_TEMP;$test='validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/test_custom_app_production_dual_id_bridge_aware_finalization.ps1'
           1..2|ForEach-Object{
-            $pass=[int]$_;$runtime=Join-Path $outer ('dbaf-v012-pass-'+$pass+'-'+[Guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Force -Path $runtime|Out-Null;$exit=0
-            try{$env:RUNNER_TEMP=$runtime;$env:TEMP=$runtime;$env:TMP=$runtime;Write-Host "DBAF_V012_ISOLATED_ROOT pass=$pass root=$runtime";& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test;$exit=$LASTEXITCODE}
+            $pass=[int]$_;$runtime=Join-Path $outer ('dbaf-v013-pass-'+$pass+'-'+[Guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Force -Path $runtime|Out-Null;$exit=0
+            try{$env:RUNNER_TEMP=$runtime;$env:TEMP=$runtime;$env:TMP=$runtime;Write-Host "DBAF_V013_ISOLATED_ROOT pass=$pass root=$runtime";& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test;$exit=$LASTEXITCODE}
             finally{$env:RUNNER_TEMP=$outer;$env:TEMP=$outer;$env:TMP=$outer}
             if($exit){throw "bridge-aware finalization matrix failed pass $pass"}
           }
-          'DUAL_ID_BRIDGE_AWARE_FINALIZATION_V012_MATRIX_REPEAT_PASS'
+          'DUAL_ID_BRIDGE_AWARE_FINALIZATION_V013_MATRIX_REPEAT_PASS'
 
       - name: Rebuild exact hard-disabled candidate and run Addon Manager SelfTest
         shell: powershell
@@ -73,9 +76,9 @@ jobs:
           if((Get-Item $a).Length-ne1382213-or$ah-cne'c2e5ffd4fe9b14b5c31dd53e7d093bd9b5db2a4ad49fa19449d299e3c14fac2f'){throw 'Addon Manager candidate drift'}
           if((Get-Item $m).Length-ne284327-or$mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate drift'}
           if($rh-cne'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw 'candidate report drift'}
-          $s=Join-Path $env:RUNNER_TEMP 'dbaf-v012-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null
+          $s=Join-Path $env:RUNNER_TEMP 'dbaf-v013-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'Addon Manager SelfTest failed'}
-          'DUAL_ID_BRIDGE_AWARE_FINALIZATION_V012_HARD_DISABLED_SELFTEST_PASS'
+          'DUAL_ID_BRIDGE_AWARE_FINALIZATION_V013_HARD_DISABLED_SELFTEST_PASS'
 
       - name: Prove protected surfaces and write evidence
         shell: powershell
@@ -83,13 +86,13 @@ jobs:
           $base='2d46886f2dcaf28617e2aaae7bdeca1339fea4a9';if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
           foreach($p in @('manifest.json','stable-version.json','addon-policy-registry.json','bin/spotify-control.ps1','bin/addon-manager.ps1','bin/spotify-control-agent.vbs')){git diff --quiet $base HEAD -- $p;if($LASTEXITCODE){throw "protected managed payload changed $p"}}
           $changed=@(git diff --name-only "$base...HEAD");foreach($p in $changed){if($p-match'(?i)(\.lnk$|launch-managed\.vbs|domainvpn|launchers[/\\])'){throw "launcher/domainvpn boundary escaped: $p"}}
-          $out=Join-Path $env:RUNNER_TEMP 'dbaf-v012-evidence';New-Item -ItemType Directory -Force -Path $out|Out-Null
-          [pscustomobject]@{schema=3;managed_by='custom-app-production-dual-id-bridge-aware-finalization-validation-v1';head=(git rev-parse HEAD).Trim();base=$base;production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2';core_blob='6706aa554ca6f3fd7471b612c6017abd9c2c53b8';test_blob='b5d11e3f5f113a91c18d1031b1407c0e4a52e530';preparer_blob='e970b129861c695a4dbcc07a4c98cfdffae530a7';atomic_mutation_blob='394e7bda96501f9ac320ceabe96b4cf96661fe2d';atomic_mutation_test_blob='d15e0768162b0659c57602eaf0242b035b48b0c7';durable_bridge_head='408e24ce7f66d1f5f23025a196b19cd8a42fcda7';atomic_head='c21a8c72dd8920df8e1faa59eb6aedee76a15e06';legacy_finalization_semantics_head='0c32a30cf61dc9f3e61725d30d5df1df9a73ef56';permit_id_forward_only=$true;journal_id_recovery_only=$true;transaction_finalized_journal_bound=$true;post_cleanup_failure_requires_recovery=$true;matrix_cases=7;matrix_repetitions=2;hard_disabled_candidate_unchanged=$true;managed_payload_changed=$false;launcher_or_shortcut_changed=$false;domainvpn_wrapper_changed=$false;production_main_changed=$false;production_mutation_authority=$false;validated_at=[DateTimeOffset]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $out 'dual-id-bridge-aware-finalization-validation.json') -Encoding UTF8
-          'DUAL_ID_BRIDGE_AWARE_FINALIZATION_V012_PROTECTED_SURFACES_PASS'
+          $out=Join-Path $env:RUNNER_TEMP 'dbaf-v013-evidence';New-Item -ItemType Directory -Force -Path $out|Out-Null
+          [pscustomobject]@{schema=4;managed_by='custom-app-production-dual-id-bridge-aware-finalization-validation-v1';head=(git rev-parse HEAD).Trim();base=$base;production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2';core_blob='4b302b17787c2abc3fa24566c41286010431cbd0';test_blob='3297d7864482f41ee781438d7617ca7fe0d40ba7';preparer_blob='e970b129861c695a4dbcc07a4c98cfdffae530a7';atomic_mutation_blob='394e7bda96501f9ac320ceabe96b4cf96661fe2d';atomic_mutation_test_blob='d15e0768162b0659c57602eaf0242b035b48b0c7';durable_bridge_head='408e24ce7f66d1f5f23025a196b19cd8a42fcda7';atomic_head='c21a8c72dd8920df8e1faa59eb6aedee76a15e06';legacy_finalization_semantics_head='0c32a30cf61dc9f3e61725d30d5df1df9a73ef56';powerShell_keyword_boundaries_normalized=$true;permit_id_forward_only=$true;journal_id_recovery_only=$true;transaction_finalized_journal_bound=$true;post_cleanup_failure_requires_recovery=$true;matrix_cases=7;matrix_repetitions=2;hard_disabled_candidate_unchanged=$true;managed_payload_changed=$false;launcher_or_shortcut_changed=$false;domainvpn_wrapper_changed=$false;production_main_changed=$false;production_mutation_authority=$false;validated_at=[DateTimeOffset]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $out 'dual-id-bridge-aware-finalization-validation.json') -Encoding UTF8
+          'DUAL_ID_BRIDGE_AWARE_FINALIZATION_V013_PROTECTED_SURFACES_PASS'
 
       - uses: actions/upload-artifact@v4
         with:
-          name: custom-app-production-dual-id-bridge-aware-finalization-v012-${{ github.run_id }}
-          path: ${{ runner.temp }}/dbaf-v012-evidence/dual-id-bridge-aware-finalization-validation.json
+          name: custom-app-production-dual-id-bridge-aware-finalization-v013-${{ github.run_id }}
+          path: ${{ runner.temp }}/dbaf-v013-evidence/dual-id-bridge-aware-finalization-validation.json
           if-no-files-found: error
           retention-days: 14
