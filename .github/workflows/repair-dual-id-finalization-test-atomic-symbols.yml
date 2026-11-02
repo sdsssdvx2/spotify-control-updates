@@ -1,0 +1,59 @@
+name: Repair dual-ID finalization test atomic symbols
+
+on:
+  push:
+    branches:
+      - validate/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Prove exact repair scope and canonical #190 symbols
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='f8da3a05acb21ce53bfa957e567acae51d248b78'
+          $test='validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/test_custom_app_production_dual_id_bridge_aware_finalization.ps1'
+          $repair='.github/workflows/repair-dual-id-finalization-test-atomic-symbols.yml'
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'repair head not descended from exact current head'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $delta=@(git diff --name-only "$base...HEAD");foreach($p in $delta){if($p -cne $repair){throw "repair scope escaped before patch: $p"}}
+          $atomicHead='c21a8c72dd8920df8e1faa59eb6aedee76a15e06';$atomicPath='validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1';$atomicBlob='55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'
+          git cat-file -e "$atomicHead^{commit}" 2>$null;if($LASTEXITCODE){git fetch --no-tags origin $atomicHead|Out-Null;if($LASTEXITCODE){throw '#190 exact fetch failed'}}
+          if((git rev-parse "$atomicHead`:$atomicPath").Trim() -cne $atomicBlob){throw '#190 core pin drift'}
+          $q=(git show "$atomicHead`:$atomicPath") -join "`n";if($LASTEXITCODE){throw '#190 core read failed'}
+          foreach($m in @('function Get-CustomAppProductionEvidenceBoundJournalAtomicSha256V010','function Get-CustomAppProductionEvidenceBoundJournalAtomicResultMaterialV010')){if($q.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "canonical #190 symbol missing: $m"}}
+          foreach($bad in @('function Get-CustomAppProductionEvidenceBoundJournalAtomicMutationSha256V010','function Get-CustomAppProductionEvidenceBoundJournalAtomicMutationResultMaterialV010')){if($q.IndexOf($bad,[StringComparison]::Ordinal)-ge0){throw "unexpected legacy #190 symbol exists: $bad"}}
+          'DUAL_ID_FINALIZATION_TEST_ATOMIC_SYMBOL_PREMISE_PASS'
+
+      - name: Replace only stale test symbol names
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop';$path='validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/test_custom_app_production_dual_id_bridge_aware_finalization.ps1';$raw=[IO.File]::ReadAllText((Resolve-Path $path));$fixed=$raw
+          $pairs=@(
+            @('Get-CustomAppProductionEvidenceBoundJournalAtomicMutationSha256V010','Get-CustomAppProductionEvidenceBoundJournalAtomicSha256V010'),
+            @('Get-CustomAppProductionEvidenceBoundJournalAtomicMutationResultMaterialV010','Get-CustomAppProductionEvidenceBoundJournalAtomicResultMaterialV010')
+          )
+          foreach($p in $pairs){$n=([regex]::Matches($fixed,[regex]::Escape([string]$p[0]))).Count;if($n-ne1){throw "stale symbol target count mismatch: $($p[0]) count=$n"};$fixed=$fixed.Replace([string]$p[0],[string]$p[1])}
+          foreach($bad in @('Get-CustomAppProductionEvidenceBoundJournalAtomicMutationSha256V010','Get-CustomAppProductionEvidenceBoundJournalAtomicMutationResultMaterialV010')){if($fixed.IndexOf($bad,[StringComparison]::Ordinal)-ge0){throw "stale symbol remains: $bad"}}
+          [IO.File]::WriteAllText((Resolve-Path $path),$fixed,(New-Object Text.UTF8Encoding($false)))
+          $tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors);if($errors.Count){$errors|ForEach-Object{Write-Error $_};throw 'test parse failed after symbol repair'}
+          $diff=@(git diff --name-only);if($diff.Count-ne1-or$diff[0]-cne$path){throw "repair escaped exact test: $($diff -join ', ')"}
+          'DUAL_ID_FINALIZATION_TEST_ATOMIC_SYMBOL_REPAIR_READY'
+
+      - name: Commit validation-only test repair
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop';$path='validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/test_custom_app_production_dual_id_bridge_aware_finalization.ps1'
+          git config user.name 'spotify-control-validation-bot';git config user.email '98333820+sdsssdvx2@users.noreply.github.com';git add -- $path;git commit -m 'validation: use canonical evidence-bound atomic test symbols';if($LASTEXITCODE){throw 'test repair commit failed'};git push origin HEAD:validate/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0;if($LASTEXITCODE){throw 'test repair push failed'}
+          'DUAL_ID_FINALIZATION_TEST_ATOMIC_SYMBOL_REPAIR_PUSHED'
