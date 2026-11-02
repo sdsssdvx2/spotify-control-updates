@@ -45,7 +45,7 @@ function New-RPFixture([string]$Base){
     return [pscustomobject]@{local=$local;app=$app;lifecycle=$l;provenance=$p;binding=$b}
 }
 function Invoke-RP($F,[string]$Mode='valid',[AllowNull()]$Lifecycle=$null,[AllowNull()][string]$LocalOverride=$null){
-    $script:RPMode=$Mode;if($null-eq$Lifecycle){$Lifecycle=$F.lifecycle};if($null-eq$LocalOverride){$LocalOverride=$F.local}
+    $script:RPMode=$Mode;if($null-eq$Lifecycle){$Lifecycle=$F.lifecycle};if([string]::IsNullOrWhiteSpace($LocalOverride)){$LocalOverride=$F.local}
     return Resolve-CustomAppProductionRealPcReadinessV010 -Name 'tagify' -LifecycleRow $Lifecycle -ProvenanceRow $F.provenance -BindingRow $F.binding -LocalAppDataRoot $LocalOverride -AppDataRoot $F.app -Now ([DateTimeOffset]'2026-11-02T00:00:00Z')
 }
 function Assert-RPNoAuthority($R,[string]$L){$x=if($R.PSObject.Properties['result']-and$null-ne$R.result){$R.result}else{$R};foreach($f in @('permit_issued','result_is_authority','admission_is_authority','execution_authorized','restore_authorized','apply_authorized','cleanup_authorized','mutation_authorized','auto_update_authorized','auto_install_authorized','production_execution_authorized','production_mutation_authorized')){Assert-RPFalse ([bool]$x.$f) "$L escaped $f"}}
