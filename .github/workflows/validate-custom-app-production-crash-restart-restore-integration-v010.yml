@@ -39,7 +39,9 @@ jobs:
             @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),
             @('d9a1face71511bdaeeef4e8c761415ef9ec95fc0','validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','0273d7e28a56759b1d0ec9cbf037483b04d98d63'),
             @('c3e1f960447ba84d2410af9c37a22a384f2a5436','validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1','5fec613c460619da5dbfe88fca5c7334e9e93f76'),
-            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3')
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/test_custom_app_production_recovery_evidence.ps1','de37d029e175dbec899445dbe983e506a14a1b0a'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/probe_custom_app_production_recovery_evidence.ps1','84f73605526373652a4499b7f472537c8e2b5c03')
           )
           foreach($p in $pins){$b=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($b -cne $p[2]){throw "immutable pin drift $($p[1]) $b != $($p[2])"}}
           'CRASH_RESTART_RESTORE_SCOPE_PINS_PASS'
@@ -58,13 +60,10 @@ jobs:
         shell: powershell
         timeout-minutes: 300
         run: |
-          $src=(Get-Location).Path
-          $w=Join-Path $env:RUNNER_TEMP 'crash-restart-integration-work'
-          $r=Join-Path $env:RUNNER_TEMP 'crash-restart-recovery-source'
+          $src=(Get-Location).Path;$w=Join-Path $env:RUNNER_TEMP 'crash-restart-integration-work';$r=Join-Path $env:RUNNER_TEMP 'crash-restart-recovery-source'
           git worktree add --detach $w e2b80822835bf5d59dc179e345e098b5bd79759e;if($LASTEXITCODE){throw 'atomic integration worktree add failed'}
           git worktree add --detach $r c3e1f960447ba84d2410af9c37a22a384f2a5436;if($LASTEXITCODE){throw 'recovery source worktree add failed'}
           try{
-            # #182 is the exact substrate used by #190. Add only the durable sibling files #190 itself materializes.
             $deps=@(
               @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
               @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
@@ -73,21 +72,25 @@ jobs:
             )
             foreach($q in $deps){$out=Join-Path $w $q[1];New-Item -ItemType Directory -Force -Path (Split-Path $out -Parent)|Out-Null;$env:S="$($q[0])`:$($q[1])";$env:O=$out;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['S']]))";if($LASTEXITCODE){throw "materialize failed $($q[1])"};if((git hash-object $out).Trim() -cne $q[2]){throw "materialized blob drift $($q[1])"}}
 
-            # Copy exact #189 + #190 files from this validation lineage into the #182 substrate.
-            foreach($dir in @('custom-app-production-journal-aware-atomic-mutation-v0.1.0','custom-app-production-evidence-bound-journal-atomic-v0.1.0')){
-              $from=Join-Path $src ('validation/'+$dir);$to=Join-Path $w ('validation/'+$dir);if(Test-Path -LiteralPath $to){Remove-Item -LiteralPath $to -Recurse -Force};Copy-Item -LiteralPath $from -Destination $to -Recurse
-            }
+            foreach($dir in @('custom-app-production-journal-aware-atomic-mutation-v0.1.0','custom-app-production-evidence-bound-journal-atomic-v0.1.0')){$from=Join-Path $src ('validation/'+$dir);$to=Join-Path $w ('validation/'+$dir);if(Test-Path -LiteralPath $to){Remove-Item -LiteralPath $to -Recurse -Force};Copy-Item -LiteralPath $from -Destination $to -Recurse}
             if((git hash-object (Join-Path $w 'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1')).Trim() -cne '79580da78443a18bd281d4fce61c4a57d958a196'){throw 'journal-aware core copy drift'}
             if((git hash-object (Join-Path $w 'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1')).Trim() -cne '210c4dda2311eb5defcbcd74977e4f4148ea7c38'){throw 'journal-aware repair copy drift'}
             if((git hash-object (Join-Path $w 'validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1')).Trim() -cne '55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'){throw 'evidence-bound core copy drift'}
             if((git hash-object (Join-Path $w 'validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/test_custom_app_production_evidence_bound_journal_atomic.ps1')).Trim() -cne 'dad1028758e3f03aebd86a84adc5c1d26a37bee3'){throw 'evidence-bound test copy drift'}
 
-            # Overlay the exact recovery-only validation family from #157 without touching production files.
-            $recoveryDirs=@(Get-ChildItem -LiteralPath (Join-Path $r 'validation') -Directory | Where-Object {$_.Name -like 'custom-app-production-recovery-*'})
+            $recoveryDirs=@(Get-ChildItem -LiteralPath (Join-Path $r 'validation') -Directory|Where-Object{$_.Name -like 'custom-app-production-recovery-*'})
             foreach($d in $recoveryDirs){$to=Join-Path (Join-Path $w 'validation') $d.Name;if(Test-Path -LiteralPath $to){Remove-Item -LiteralPath $to -Recurse -Force};Copy-Item -LiteralPath $d.FullName -Destination $to -Recurse}
-            foreach($shared in @('custom-app-production-atomic-live-swap-v0.1.0','custom-app-production-spicetify-apply-executor-v0.1.0','custom-app-stage-acquisition-contract-v0.1.0')){
-              $from=Join-Path (Join-Path $r 'validation') $shared;if(Test-Path -LiteralPath $from){$to=Join-Path (Join-Path $w 'validation') $shared;if(Test-Path -LiteralPath $to){Remove-Item -LiteralPath $to -Recurse -Force};Copy-Item -LiteralPath $from -Destination $to -Recurse}
-            }
+            foreach($shared in @('custom-app-production-atomic-live-swap-v0.1.0','custom-app-production-spicetify-apply-executor-v0.1.0','custom-app-stage-acquisition-contract-v0.1.0')){$from=Join-Path (Join-Path $r 'validation') $shared;if(Test-Path -LiteralPath $from){$to=Join-Path (Join-Path $w 'validation') $shared;if(Test-Path -LiteralPath $to){Remove-Item -LiteralPath $to -Recurse -Force};Copy-Item -LiteralPath $from -Destination $to -Recurse}}
+
+            # #157's own CI materializes these three exact PR #153 siblings. Do the same after
+            # recovery overlay so its nested admission tests have the identical durable-evidence closure.
+            $evidenceDeps=@(
+              @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+              @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/test_custom_app_production_recovery_evidence.ps1','de37d029e175dbec899445dbe983e506a14a1b0a'),
+              @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/probe_custom_app_production_recovery_evidence.ps1','84f73605526373652a4499b7f472537c8e2b5c03')
+            )
+            foreach($q in $evidenceDeps){$out=Join-Path $w $q[1];New-Item -ItemType Directory -Force -Path (Split-Path $out -Parent)|Out-Null;$env:S="$($q[0])`:$($q[1])";$env:O=$out;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['S']]))";if($LASTEXITCODE){throw "recovery evidence materialize failed $($q[1])"};if((git hash-object $out).Trim() -cne $q[2]){throw "recovery evidence blob drift $($q[1])"}}
+
             if((git hash-object (Join-Path $w 'validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1')).Trim() -cne '0273d7e28a56759b1d0ec9cbf037483b04d98d63'){throw 'restore-resume core copy drift'}
             if((git hash-object (Join-Path $w 'validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1')).Trim() -cne '5fec613c460619da5dbfe88fca5c7334e9e93f76'){throw 'restore executor core copy drift'}
             if((git hash-object (Join-Path $w 'validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1')).Trim() -cne 'f7372b069fbfe6a0f8d8a0aad45312ffd33d9f0a'){throw 'generic apply core drift'}
@@ -96,14 +99,9 @@ jobs:
             $newDir=Join-Path $w 'validation/custom-app-production-crash-restart-restore-integration-v0.1.0';New-Item -ItemType Directory -Force -Path $newDir|Out-Null
             Copy-Item -LiteralPath (Join-Path $src 'validation/custom-app-production-crash-restart-restore-integration-v0.1.0/test_custom_app_production_crash_restart_restore_integration.ps1') -Destination $newDir
             if((git hash-object (Join-Path $newDir 'test_custom_app_production_crash_restart_restore_integration.ps1')).Trim() -cne '45c3d7fbe14484d696171ee9669bf56bf78ace38'){throw 'integration test copy drift'}
-
             $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
-            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $newDir 'test_custom_app_production_crash_restart_restore_integration.ps1')
-            if($LASTEXITCODE){throw 'fresh-process crash restart restore integration failed'}
-          } finally {
-            git worktree remove --force $w 2>$null
-            git worktree remove --force $r 2>$null
-          }
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $newDir 'test_custom_app_production_crash_restart_restore_integration.ps1');if($LASTEXITCODE){throw 'fresh-process crash restart restore integration failed'}
+          } finally {git worktree remove --force $w 2>$null;git worktree remove --force $r 2>$null}
           'CRASH_RESTART_RESTORE_FRESH_PROCESS_INTEGRATION_PASS'
 
       - name: Rebuild exact hard-disabled candidate and run Addon Manager SelfTest
