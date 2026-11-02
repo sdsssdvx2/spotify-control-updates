@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   repair:
-    if: github.sha == '98b5d1208b6463c8917bbddecd8e725d2828fa54'
     runs-on: windows-2025
     timeout-minutes: 20
     steps:
@@ -19,12 +18,15 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.sha }}
 
-      - name: Prove exact validation branch and frozen production main
+      - name: Prove exact validation ancestry scope and frozen production main
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          $head=(git rev-parse HEAD).Trim()
-          if($head -cne '98b5d1208b6463c8917bbddecd8e725d2828fa54'){ throw "unexpected repair source head $head" }
+          $base='98b5d1208b6463c8917bbddecd8e725d2828fa54'
+          if((git merge-base $base HEAD).Trim() -cne $base){ throw 'repair branch no longer descends from exact v0.1.2 head' }
+          $delta=@(git diff --name-only "$base...HEAD")
+          $repair='.github/workflows/repair-dual-id-bridge-aware-finalization-lexical-boundaries.yml'
+          foreach($p in $delta){ if($p -cne $repair){ throw "unexpected pre-repair delta from v0.1.2: $p" } }
           $main=(git ls-remote origin refs/heads/main).Split("`t")[0]
           if($main -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){ throw "production main moved: $main" }
 
