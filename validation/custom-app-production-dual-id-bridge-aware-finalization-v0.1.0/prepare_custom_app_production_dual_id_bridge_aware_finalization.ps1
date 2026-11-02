@@ -48,6 +48,7 @@ $deps=@(
   @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),
   @('c21a8c72dd8920df8e1faa59eb6aedee76a15e06','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'),
   @('c21a8c72dd8920df8e1faa59eb6aedee76a15e06','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/test_custom_app_production_evidence_bound_journal_atomic.ps1','dad1028758e3f03aebd86a84adc5c1d26a37bee3'),
+  @('cb2e50b715a7d7f1bbc7b3b810104cefff7f7d50','validation/custom-app-production-recovery-aware-permit-atomic-live-swap-v0.1.0/custom-app-production-recovery-aware-permit-atomic-live-swap.ps1','e3506fd65de02978b4c79c1a367461b5496ae3b9'),
   @('0c32a30cf61dc9f3e61725d30d5df1df9a73ef56','validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/custom-app-production-recovery-aware-permit-transaction-finalization.ps1','9c725e47d432addac24fe4a6cd59e37af393b6c7')
 )
 foreach($d in $deps){Materialize-DBAFDependencyV011 -Commit $d[0] -Path $d[1] -ExpectedBlob $d[2]}
