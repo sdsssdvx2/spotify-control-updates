@@ -1,0 +1,111 @@
+name: Validate recovery-aware evidence-bound journal atomic v0.1.0
+
+on:
+  push:
+    branches:
+      - validate/custom-app-production-recovery-aware-evidence-bound-journal-atomic-v0.1.0
+  pull_request:
+    branches:
+      - validate/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-2025
+    timeout-minutes: 240
+    env:
+      BASE_SHA: c549230acb222bd8132bea22912af5853f316785
+      FROZEN_MAIN_SHA: d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2
+      CORE: validation/custom-app-production-recovery-aware-evidence-bound-journal-atomic-v0.1.0/custom-app-production-recovery-aware-evidence-bound-journal-atomic.ps1
+      TEST: validation/custom-app-production-recovery-aware-evidence-bound-journal-atomic-v0.1.0/test_custom_app_production_recovery_aware_evidence_bound_journal_atomic.ps1
+      WORKFLOW: .github/workflows/validate-custom-app-production-recovery-aware-evidence-bound-journal-atomic-v010.yml
+    steps:
+      - name: Checkout exact head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify frozen main and validation-only scope
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $main=(git ls-remote origin refs/heads/main).Split("`t")[0]
+          if($main -cne $env:FROZEN_MAIN_SHA){ throw "production main moved: $main" }
+          git cat-file -e "$env:BASE_SHA^{commit}"
+          $changed=@(git diff --name-only $env:BASE_SHA HEAD)
+          if($changed.Count -lt 3){ throw "validation scope unexpectedly small: $($changed.Count)" }
+          foreach($p in $changed){
+            if($p -ceq $env:WORKFLOW){ continue }
+            if($p -notlike 'validation/custom-app-production-recovery-aware-evidence-bound-journal-atomic-v0.1.0/*'){ throw "out-of-scope change: $p" }
+          }
+          $pins=@{
+            'validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1'='55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'
+            'validation/custom-app-production-recovery-aware-permit-pre-apply-preparation-v0.1.0/custom-app-production-recovery-aware-permit-pre-apply-preparation.ps1'='eaad8a5f161f831bbbada1c1c0957a3dfc80edaa'
+            'validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1'='0273d7e28a56759b1d0ec9cbf037483b04d98d63'
+            'validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1'='5fec613c460619da5dbfe88fca5c7334e9e93f76'
+            'validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/recovery_worker.ps1'='ab94eac803e7124451a01f66b05c25bdac6d10a3'
+          }
+          foreach($kv in $pins.GetEnumerator()){
+            $actual=(git rev-parse "HEAD:$($kv.Key)").Trim()
+            if($actual -cne $kv.Value){ throw "inherited pin drift $($kv.Key): $actual" }
+          }
+          "FROZEN_MAIN_AND_SCOPE_PASS changed=$($changed.Count)" | Tee-Object -FilePath scope.log
+
+      - name: PowerShell 5.1 parse and static security audit
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($path in @($env:CORE,$env:TEST)){
+            $tokens=$null;$errors=$null
+            [Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){ $errors|ForEach-Object{Write-Host "PARSE_ERROR path=$path line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> message=$($_.Message)"}; throw "PS5.1 parse failed: $path" }
+          }
+          $text=[IO.File]::ReadAllText((Resolve-Path $env:CORE))
+          $atomicCalls=([regex]::Matches($text,'(?m)^\s*\$atomic\s*=\s*Invoke-CustomAppProductionEvidenceBoundJournalAtomicMutationV010\b')).Count
+          if($atomicCalls -ne 1){throw "qualified evidence-bound atomic call count $atomicCalls"}
+          foreach($marker in @('Resolve-CustomAppProductionRecoveryAwarePermitStageAcquisitionAdmissionV010','ConvertTo-CustomAppProductionRecoveryAwarePermitGenericPreparedResultV010','permit_lineage_transaction_id','journal_transaction_id','recovery-aware-evidence-bound-prior-recovery-store-must-differ-from-current-journal-store','crash_recovery_uses_journal_transaction_id')){if($text.IndexOf($marker,[StringComparison]::Ordinal)-lt0){throw "core marker missing: $marker"}}
+          foreach($forbidden in @('[IO.Directory]::Move','Start-Process','Invoke-WebRequest','Invoke-RestMethod','System.Net.Http','spicetify apply')){if($text.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "forbidden direct primitive in bridge core: $forbidden"}}
+          'PS51_PARSE_STATIC_SECURITY_PASS' | Tee-Object -FilePath static.log
+
+      - name: Replay inherited evidence-bound restart recovery integration
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/test_custom_app_production_evidence_bound_recovery_restore_integration.ps1' 2>&1 | Tee-Object -FilePath inherited-recovery.log
+          if($LASTEXITCODE){throw "inherited #191 integration failed exit=$LASTEXITCODE"}
+
+      - name: Run recovery-aware dual-ID journal atomic matrix
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $env:TEST 2>&1 | Tee-Object -FilePath dual-id.log
+          if($LASTEXITCODE){throw "dual-id matrix failed exit=$LASTEXITCODE"}
+          $out=[IO.File]::ReadAllText((Resolve-Path 'dual-id.log'))
+          if($out.IndexOf('CUSTOM_APP_PRODUCTION_RECOVERY_AWARE_EVIDENCE_BOUND_JOURNAL_ATOMIC_PASS cases=3 dual_id=true separate_process_recovery=true prior_current_store_separation=true',[StringComparison]::Ordinal)-lt0){throw 'dual-id success marker missing'}
+
+      - name: Verify protected inherited surface unchanged
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $changed=@(git diff --name-only $env:BASE_SHA HEAD)
+          $protected=@($changed|Where-Object{$_ -like 'src/*' -or $_ -like 'addon-manager/*' -or $_ -like 'spotify-control/*' -or $_ -like 'bin/*' -or $_ -like 'launch-managed.vbs' -or $_ -like '*Spotify*Managed*'})
+          if($protected.Count){throw "protected surface changed: $($protected -join ', ')"}
+          'PROTECTED_SURFACE_UNCHANGED_PASS' | Tee-Object -FilePath protected.log
+
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-aware-evidence-bound-journal-atomic-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            scope.log
+            static.log
+            inherited-recovery.log
+            dual-id.log
+            protected.log
+            validation/custom-app-production-recovery-aware-evidence-bound-journal-atomic-v0.1.0/*.ps1
