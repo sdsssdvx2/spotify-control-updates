@@ -28,7 +28,7 @@ jobs:
           if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
           $allowed=@('.github/workflows/validate-custom-app-production-real-pc-recovery-dispatcher-v010.yml','validation/custom-app-production-real-pc-recovery-dispatcher-v0.1.0/custom-app-production-real-pc-recovery-dispatcher.ps1','validation/custom-app-production-real-pc-recovery-dispatcher-v0.1.0/test_custom_app_production_real_pc_recovery_dispatcher.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_-notin$allowed});if($bad.Count){throw "scope escaped: $($bad-join', ')"};foreach($x in $allowed){if($x-notin$changed){throw "missing $x"}}
           $pins=@(
-            @($h,'validation/custom-app-production-real-pc-recovery-dispatcher-v0.1.0/custom-app-production-real-pc-recovery-dispatcher.ps1','5e18f2ad01483552245b42847cdfa470bad92013'),
+            @($h,'validation/custom-app-production-real-pc-recovery-dispatcher-v0.1.0/custom-app-production-real-pc-recovery-dispatcher.ps1','19045628a81d20fd0c2df5003c2243c2a6e8be4b'),
             @($h,'validation/custom-app-production-real-pc-recovery-dispatcher-v0.1.0/test_custom_app_production_real_pc_recovery_dispatcher.ps1','95a9e669f4909dc82f8664edb2b9fb00266be96e'),
             @('e4ff8ef949421152999515c5031744e352435f75','validation/custom-app-production-recovery-routing-admission-v0.1.0/custom-app-production-recovery-routing-admission.ps1','4225bb042aa8d240706e1f383e54f12894e74512'),
             @('e4ff8ef949421152999515c5031744e352435f75','validation/custom-app-production-recovery-routing-admission-v0.1.0/test_custom_app_production_recovery_routing_admission.ps1','791b5df714509a42ab0ab53340f450d3f8fd7ca0'),
