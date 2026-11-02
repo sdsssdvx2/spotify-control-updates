@@ -1,0 +1,51 @@
+name: Debug Journal-Aware Atomic Valid Denial v0.1.0
+
+on:
+  push:
+    branches: [debug/journal-aware-atomic-valid-denial-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/debug_valid_case.ps1'
+      - '.github/workflows/debug-journal-aware-atomic-valid-denial-v010.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  debug-windows:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.sha }}"
+      - name: Run exact valid-case diagnostic on pinned parent
+        shell: powershell
+        run: |
+          $src=(Get-Location).Path
+          $w=Join-Path $env:RUNNER_TEMP 'journal-aware-atomic-valid-debug'
+          git worktree add --detach $w e2b80822835bf5d59dc179e345e098b5bd79759e
+          if($LASTEXITCODE){throw 'debug worktree add failed'}
+          try {
+            $deps=@(
+              @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+              @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+              @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae')
+            )
+            foreach($q in $deps){
+              $out=Join-Path $w $q[1]
+              New-Item -ItemType Directory -Force -Path (Split-Path $out -Parent)|Out-Null
+              $env:S="$($q[0])`:$($q[1])";$env:O=$out
+              python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['S']]))"
+              if($LASTEXITCODE){throw "materialize failed $($q[1])"}
+              if((git hash-object $out).Trim() -cne $q[2]){throw "materialized blob drift $($q[1])"}
+            }
+            $d=Join-Path $w 'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0'
+            New-Item -ItemType Directory -Force -Path $d|Out-Null
+            Copy-Item (Join-Path $src 'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1') $d
+            Copy-Item (Join-Path $src 'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/debug_valid_case.ps1') $d
+            $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $d 'debug_valid_case.ps1')
+            if($LASTEXITCODE){throw 'valid-case diagnostic failed'}
+          } finally {
+            git worktree remove --force $w 2>$null
+          }
