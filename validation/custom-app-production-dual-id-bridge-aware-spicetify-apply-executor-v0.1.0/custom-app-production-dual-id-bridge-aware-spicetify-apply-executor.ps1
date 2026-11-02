@@ -22,7 +22,7 @@ function Invoke-CustomAppProductionDualIdBridgeAwareSpicetifyApplyExecutorValida
 }
 function Get-CustomAppProductionDualIdBridgeAwareSpicetifyApplyAppendTimeV010 {
     param([Parameter(Mandatory=$true)]$JournalEntry)
-    $recorded=[DateTimeOffset]::MinValue;if(-not[DateTimeOffset]::TryParse([string]$JournalEntry.recorded_at,[ref]$recorded)){throw'apply-journal-recorded-at-invalid'}
+    $recorded=[DateTimeOffset]::MinValue;if(-not[DateTimeOffset]::TryParse([string]$JournalEntry.recorded_at,[ref]$recorded)){throw 'apply-journal-recorded-at-invalid'}
     $now=[DateTimeOffset]::UtcNow;if($recorded-gt$now){$now=$recorded};return$now.AddMilliseconds(1)
 }
 function Test-CustomAppProductionDualIdBridgeAwareSpicetifyApplyAdmissionContinuityV010 {
