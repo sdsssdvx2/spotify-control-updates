@@ -2,9 +2,9 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 . (Join-Path $PSScriptRoot 'custom-app-production-real-pc-readiness-adapter.ps1')
 
-function Assert-RPTrue([bool]$v,[string]$m){if(-not$v){throw$m}}
-function Assert-RPFalse([bool]$v,[string]$m){if($v){throw$m}}
-function Assert-RPEq($a,$e,[string]$m){if([string]$a-cne[string]$e){throw"$m actual=<$a> expected=<$e>"}}
+function Assert-RPTrue([bool]$v,[string]$m){if(-not $v){throw $m}}
+function Assert-RPFalse([bool]$v,[string]$m){if($v){throw $m}}
+function Assert-RPEq($a,$e,[string]$m){if([string]$a-cne[string]$e){throw "$m actual=<$a> expected=<$e>"}}
 function Copy-RP($o){return (($o|ConvertTo-Json -Depth 60)|ConvertFrom-Json)}
 
 $CustomAppPromotionQualifiedShadowHead='22eb3561843fbe4016023d527186aa629512b67d'
