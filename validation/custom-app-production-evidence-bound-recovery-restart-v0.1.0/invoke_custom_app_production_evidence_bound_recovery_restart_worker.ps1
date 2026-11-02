@@ -89,6 +89,15 @@ $requiredFunctions=@(
 )
 foreach($fn in $requiredFunctions){if(-not (Get-Command $fn -CommandType Function -ErrorAction SilentlyContinue)){throw "recovery restart worker bootstrap function missing: $fn"}}
 
+# Observe the exact last #157 barrier reached without mutating any fixture state or
+# changing recovery decisions. This also proves whether a denial occurs before or
+# after the durable rollback-required barrier / exact restore / recovery apply.
+$script:ERLastRestoreCheckpoint='not-entered'
+function Invoke-CustomAppProductionRecoveryRestoreExecutorValidationHookV010 {
+    param([Parameter(Mandatory=$true)][string]$Checkpoint,[Parameter(Mandatory=$true)]$Context)
+    $script:ERLastRestoreCheckpoint=$Checkpoint
+}
+
 $out=[ordered]@{
     schema=1
     managed_by='custom-app-production-evidence-bound-recovery-restart-worker-v1'
@@ -105,6 +114,10 @@ $out=[ordered]@{
     admission_fingerprint=''
     executor_ok=$false
     executor_reason=''
+    executor_last_checkpoint=$script:ERLastRestoreCheckpoint
+    executor_output_count=0
+    executor_output_types=@()
+    executor_output_reasons=@()
     executor_started_phase=''
     rollback_required_was_appended=$false
     restore_performed=$false
@@ -148,7 +161,7 @@ try {
     $out.admission_fingerprint=[string]$admission.receipt.restore_resume_admission_fingerprint
     if([string]$admission.receipt.phase -cne [string]$state.expected_start_phase){throw "cross-process admission phase mismatch actual=$([string]$admission.receipt.phase) expected=$([string]$state.expected_start_phase)"}
 
-    $exec=Invoke-CustomAppProductionRecoveryRestoreExecutorV010 `
+    $execItems=@(Invoke-CustomAppProductionRecoveryRestoreExecutorV010 `
         -AllowedRoot ([string]$state.allowed_root) `
         -StoreDirectory ([string]$state.store_directory) `
         -ExpectedTransactionId ([string]$state.transaction_id) `
@@ -158,10 +171,18 @@ try {
         -SpicetifyPath ([string]$state.spicetify_path) `
         -ExpectedSpicetifySha256 ([string]$state.spicetify_sha256) `
         -Now ([DateTimeOffset]::UtcNow) `
-        -TimeoutSeconds 30
+        -TimeoutSeconds 30)
+    $out.executor_last_checkpoint=$script:ERLastRestoreCheckpoint
+    $out.executor_output_count=$execItems.Count
+    $out.executor_output_types=@($execItems|ForEach-Object{if($null -eq $_){'<null>'}else{$_.GetType().FullName}})
+    $out.executor_output_reasons=@($execItems|ForEach-Object{if($null -ne $_ -and $_.PSObject.Properties['reason']){[string]$_.reason}else{'<no-reason-property>'}})
+    if($execItems.Count -ne 1){
+        throw "cross-process restore executor output cardinality invalid count=$($execItems.Count) checkpoint=$script:ERLastRestoreCheckpoint types=$($out.executor_output_types -join ',') reasons=$($out.executor_output_reasons -join ',')"
+    }
+    $exec=$execItems[0]
     $out.executor_ok=[bool]$exec.ok
     $out.executor_reason=[string]$exec.reason
-    if(-not [bool]$exec.ok){throw ('cross-process restore executor denied: '+[string]$exec.reason)}
+    if(-not [bool]$exec.ok){throw "cross-process restore executor denied checkpoint=$script:ERLastRestoreCheckpoint reason=$([string]$exec.reason)"}
     $rc=Test-CustomAppProductionRecoveryRestoreExecutorResultV010 -Result $exec.result
     if(-not [bool]$rc.ok){throw ('cross-process restore executor result invalid: '+[string]$rc.reason)}
     foreach($f in @('result_is_authority','execution_authorized','restore_authorized','apply_authorized','cleanup_authorized','production_mutation_authorized')){
@@ -191,6 +212,7 @@ try {
     if([int]$out.apply_count -ne 1){throw "cross-process recovery apply count mismatch $($out.apply_count)"}
     $out.success=$true
 } catch {
+    $out.executor_last_checkpoint=$script:ERLastRestoreCheckpoint
     $out.error=[string]$_.Exception.Message
 } finally {
     foreach($name in @('SC_RX_COUNT','SC_RX_LIVE','SC_RX_APPLIED','SC_RX_MODE')){[Environment]::SetEnvironmentVariable($name,$null,'Process')}
@@ -198,4 +220,4 @@ try {
     [IO.File]::WriteAllText($ResultPath,$json,[Text.UTF8Encoding]::new($false))
 }
 if(-not [bool]$out.success){throw ('recovery restart worker failed: '+[string]$out.error)}
-Write-Output "CUSTOM_APP_PRODUCTION_EVIDENCE_BOUND_RECOVERY_RESTART_WORKER_PASS phase=$($out.executor_started_phase) pid=$PID bootstrap=$($out.bootstrap_dependency_count)"
+Write-Output "CUSTOM_APP_PRODUCTION_EVIDENCE_BOUND_RECOVERY_RESTART_WORKER_PASS phase=$($out.executor_started_phase) pid=$PID bootstrap=$($out.bootstrap_dependency_count) checkpoint=$($out.executor_last_checkpoint)"
