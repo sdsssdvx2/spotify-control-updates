@@ -5,8 +5,58 @@ param(
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$state=Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json
+
+# This validation worker intentionally starts in a brand-new powershell.exe process.
+# The production persistence core normally receives Test-PathSafe/Copy-TreeSafe from
+# the Addon Manager host. Recreate only those two host contracts here, bounded to the
+# fixture AllowedRoot, so restart validation cannot inherit parent-process helpers or
+# gain an unbounded filesystem surface.
+$script:ERAllowedRoot=[IO.Path]::GetFullPath([string]$state.allowed_root).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+if(-not (Test-Path -LiteralPath $script:ERAllowedRoot -PathType Container)){throw 'recovery restart worker allowed root missing'}
+
+function Test-ERWorkerPathWithinAllowedRootV010 {
+    param([Parameter(Mandatory=$true)][string]$Path,[bool]$AllowRoot=$true)
+    try{$p=[IO.Path]::GetFullPath($Path).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)}catch{return $false}
+    if($p.Equals($script:ERAllowedRoot,[StringComparison]::OrdinalIgnoreCase)){return $AllowRoot}
+    return $p.StartsWith($script:ERAllowedRoot+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)
+}
+function Test-PathSafe {
+    param([string]$Path,[ValidateSet('Leaf','Container')][string]$Kind)
+    if([string]::IsNullOrWhiteSpace($Path) -or -not (Test-ERWorkerPathWithinAllowedRootV010 -Path $Path)){return $false}
+    if($Kind -ceq 'Leaf'){return (Test-Path -LiteralPath $Path -PathType Leaf)}
+    return (Test-Path -LiteralPath $Path -PathType Container)
+}
+function Copy-TreeSafe {
+    param([Parameter(Mandatory=$true)][string]$Source,[Parameter(Mandatory=$true)][string]$Destination)
+    $src=[IO.Path]::GetFullPath($Source).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    $dst=[IO.Path]::GetFullPath($Destination).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    if(-not (Test-ERWorkerPathWithinAllowedRootV010 -Path $src) -or -not (Test-ERWorkerPathWithinAllowedRootV010 -Path $dst)){throw 'recovery-restart-copy-path-outside-allowed-root'}
+    if(-not (Test-Path -LiteralPath $src -PathType Container)){throw 'recovery-restart-copy-source-missing'}
+    if(Test-Path -LiteralPath $dst){throw 'recovery-restart-copy-destination-exists'}
+    $si=Get-Item -LiteralPath $src -Force -ErrorAction Stop
+    if(($si.Attributes -band [IO.FileAttributes]::ReparsePoint)-ne 0){throw 'recovery-restart-copy-source-reparse-point'}
+    [IO.Directory]::CreateDirectory($dst)|Out-Null
+    foreach($dir in @(Get-ChildItem -LiteralPath $src -Force -Directory -Recurse -ErrorAction Stop|Sort-Object FullName)){
+        if(($dir.Attributes -band [IO.FileAttributes]::ReparsePoint)-ne 0){throw 'recovery-restart-copy-source-contains-reparse-point'}
+        $rel=$dir.FullName.Substring($src.Length).TrimStart([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+        if(-not [string]::IsNullOrWhiteSpace($rel)){[IO.Directory]::CreateDirectory((Join-Path $dst $rel))|Out-Null}
+    }
+    foreach($file in @(Get-ChildItem -LiteralPath $src -Force -File -Recurse -ErrorAction Stop|Sort-Object FullName)){
+        if(($file.Attributes -band [IO.FileAttributes]::ReparsePoint)-ne 0){throw 'recovery-restart-copy-source-contains-reparse-point'}
+        $rel=$file.FullName.Substring($src.Length).TrimStart([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+        $target=Join-Path $dst $rel
+        $parent=[IO.Path]::GetDirectoryName($target)
+        if(-not [string]::IsNullOrWhiteSpace($parent)){[IO.Directory]::CreateDirectory($parent)|Out-Null}
+        [IO.File]::Copy($file.FullName,$target,$false)
+    }
+    return $dst
+}
 
 $load=@(
+    'validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1',
+    'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1',
+    'validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1',
     'validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1',
     'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1',
     'validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1',
@@ -28,7 +78,17 @@ foreach($relative in $load){
     . $p
 }
 
-$state=Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json
+# Fail at bootstrap with a precise dependency name instead of allowing a nested
+# admission/executor call to hide a parent-process dependency behind "term not recognized".
+$requiredFunctions=@(
+    'Test-PathSafe','Copy-TreeSafe','Test-CustomAppRemoteRelativePath','Get-CustomAppLocalRuntimeBaseline','Test-CustomAppLocalRuntimeBaselineMutationAuthority',
+    'Get-CustomAppStageWorkspaceRootV010','Get-CustomAppUpdateTreeSnapshotV010','Test-CustomAppProductionPersistenceBackupV010','Get-PathContentFingerprint','Get-SpotifyPersistenceSnapshot','Restore-SpotifyPersistenceBackup',
+    'Assert-CustomAppProductionRecoveryCleanupResumeNoReparseTreeV010','Read-CustomAppProductionCrashJournalV010','Append-CustomAppProductionCrashJournalPhaseV010','Read-CustomAppProductionRecoveryEvidenceV010',
+    'Resolve-CustomAppProductionRecoveryRestoreResumeAdmissionV010','Test-CustomAppProductionRecoveryRestoreResumeAdmissionReceiptV010','Restore-CustomAppProductionAtomicLiveSwapV010',
+    'Open-CustomAppProductionSpicetifyExecutableV010','Invoke-CustomAppProductionExactSpicetifyApplyProcessV010','Invoke-CustomAppProductionRecoveryRestoreExecutorV010','Test-CustomAppProductionRecoveryRestoreExecutorResultV010'
+)
+foreach($fn in $requiredFunctions){if(-not (Get-Command $fn -CommandType Function -ErrorAction SilentlyContinue)){throw "recovery restart worker bootstrap function missing: $fn"}}
+
 $out=[ordered]@{
     schema=1
     managed_by='custom-app-production-evidence-bound-recovery-restart-worker-v1'
@@ -37,6 +97,8 @@ $out=[ordered]@{
     process_id=$PID
     transaction_id=[string]$state.transaction_id
     expected_start_phase=[string]$state.expected_start_phase
+    bootstrap_dependency_count=$requiredFunctions.Count
+    bootstrap_dependencies_verified=$true
     admission_ok=$false
     admission_reason=''
     admission_phase=''
@@ -136,4 +198,4 @@ try {
     [IO.File]::WriteAllText($ResultPath,$json,[Text.UTF8Encoding]::new($false))
 }
 if(-not [bool]$out.success){throw ('recovery restart worker failed: '+[string]$out.error)}
-Write-Output "CUSTOM_APP_PRODUCTION_EVIDENCE_BOUND_RECOVERY_RESTART_WORKER_PASS phase=$($out.executor_started_phase) pid=$PID"
+Write-Output "CUSTOM_APP_PRODUCTION_EVIDENCE_BOUND_RECOVERY_RESTART_WORKER_PASS phase=$($out.executor_started_phase) pid=$PID bootstrap=$($out.bootstrap_dependency_count)"
