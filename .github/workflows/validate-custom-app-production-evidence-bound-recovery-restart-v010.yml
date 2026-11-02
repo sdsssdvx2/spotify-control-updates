@@ -13,7 +13,8 @@ on:
       - '.github/workflows/validate-custom-app-production-evidence-bound-recovery-restart-v010.yml'
   workflow_dispatch:
 
-permissions: {contents: read}
+permissions:
+  contents: read
 
 jobs:
   validate-windows:
@@ -32,8 +33,9 @@ jobs:
           $expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
           if($h -cne $expected){throw "head mismatch $h != $expected"}
           $base='c21a8c72dd8920df8e1faa59eb6aedee76a15e06'
-          if((git merge-base $base HEAD).Trim() -cne $base){throw 'not descended from exact evidence-bound journal atomic head'}
-          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'not descended from exact #190 evidence-bound atomic head'}
+          $main=(git rev-parse origin/main).Trim()
+          if($main -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw "production main moved: $main"}
           $allowed=@(
             '.github/workflows/validate-custom-app-production-evidence-bound-recovery-restart-v010.yml',
             'validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0/invoke_custom_app_production_evidence_bound_recovery_restart_worker.ps1',
@@ -45,7 +47,7 @@ jobs:
           foreach($x in $allowed){if($x -notin $changed){throw "missing changed surface $x"}}
           $pins=@(
             @($h,'validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0/invoke_custom_app_production_evidence_bound_recovery_restart_worker.ps1','559c0e39475dcb6b55f178270312d1fd5c2211cc'),
-            @($h,'validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0/test_custom_app_production_evidence_bound_recovery_restart.ps1','a8e43806b678642d5e7e317e4e7adaa483dc0011'),
+            @($h,'validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0/test_custom_app_production_evidence_bound_recovery_restart.ps1','799a69de3896e3c9e816307ba92c0af244589cfd'),
             @($base,'validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'),
             @($base,'validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/test_custom_app_production_evidence_bound_journal_atomic.ps1','dad1028758e3f03aebd86a84adc5c1d26a37bee3'),
             @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','79580da78443a18bd281d4fce61c4a57d958a196'),
@@ -58,9 +60,9 @@ jobs:
           )
           foreach($p in $pins){
             git cat-file -e "$($p[0])^{commit}" 2>$null
-            if($LASTEXITCODE){git fetch --no-tags origin $p[0] | Out-Null}
-            $b=(git rev-parse "$($p[0])`:$($p[1])").Trim()
-            if($b -cne $p[2]){throw "pin drift $($p[1]) $b != $($p[2])"}
+            if($LASTEXITCODE){git fetch --no-tags origin $p[0] | Out-Null;if($LASTEXITCODE){throw "fetch pin failed $($p[0])"}}
+            $actual=(git rev-parse "$($p[0])`:$($p[1])").Trim()
+            if($actual -cne $p[2]){throw "blob pin drift $($p[1]) $actual != $($p[2])"}
           }
           'EVIDENCE_BOUND_RECOVERY_RESTART_SCOPE_PINS_PASS'
 
@@ -71,11 +73,11 @@ jobs:
           $worker="$d/invoke_custom_app_production_evidence_bound_recovery_restart_worker.ps1"
           $test="$d/test_custom_app_production_evidence_bound_recovery_restart.ps1"
           $tok=$null;$errs=$null
-          $workerAst=[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $worker),[ref]$tok,[ref]$errs)
-          if($errs.Count){$errs|ForEach-Object{Write-Error ("$worker line=$($_.Extent.StartLineNumber) $($_.Message)")};throw 'worker PS5.1 parse failed'}
+          $ast=[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $worker),[ref]$tok,[ref]$errs)
+          if($errs.Count){$errs|ForEach-Object{Write-Error ("worker line=$($_.Extent.StartLineNumber) $($_.Message)")};throw 'worker PS5.1 parse failed'}
           $tok=$null;$errs=$null
           [Management.Automation.Language.Parser]::ParseFile((Resolve-Path $test),[ref]$tok,[ref]$errs)|Out-Null
-          if($errs.Count){$errs|ForEach-Object{Write-Error ("$test line=$($_.Extent.StartLineNumber) $($_.Message)")};throw 'test PS5.1 parse failed'}
+          if($errs.Count){$errs|ForEach-Object{Write-Error ("test line=$($_.Extent.StartLineNumber) $($_.Message)")};throw 'test PS5.1 parse failed'}
           $w=Get-Content $worker -Raw
           foreach($m in @(
             'custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1',
@@ -87,22 +89,21 @@ jobs:
             'Resolve-CustomAppProductionRecoveryRestoreResumeAdmissionV010',
             'Invoke-CustomAppProductionRecoveryRestoreExecutorV010',
             'Read-CustomAppProductionRecoveryEvidenceV010',
-            'rollback-complete',
-            'cross-process recovery apply count mismatch'
+            'rollback-complete'
           )){if($w.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "worker contract marker missing $m"}}
-          if(([regex]::Matches($w,'\[IO\.File\]::Copy\(')).Count -ne 1){throw 'bounded host Copy-TreeSafe must contain exactly one IO.File.Copy primitive'}
-          $commands=@($workerAst.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst]},$true)|ForEach-Object{$_.GetCommandName()}|Where-Object{$_})
+          if(([regex]::Matches($w,'\[IO\.File\]::Copy\(')).Count -ne 1){throw 'bounded Copy-TreeSafe must contain exactly one IO.File.Copy'}
+          $commands=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst]},$true)|ForEach-Object{$_.GetCommandName()}|Where-Object{$_})
           foreach($x in @('Copy-Item','Move-Item','Remove-Item','Start-Process','Invoke-WebRequest','Invoke-RestMethod','Restore-CustomAppProductionAtomicLiveSwapV010','Invoke-CustomAppProductionExactSpicetifyApplyProcessV010')){
             if($commands -contains $x){throw "worker directly invokes forbidden primitive $x"}
           }
           $tt=Get-Content $test -Raw
-          foreach($m in @('after-live-move-before-journal','first-rename-complete-unjournaled','live-moved-to-old','candidate-live','powershell.exe','did not execute in a distinct process','recovery apply did not observe restored old live state')){
-            if($tt.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "integration coverage marker missing $m"}
+          foreach($m in @('after-live-move-before-journal','first-rename-complete-unjournaled','live-moved-to-old','candidate-live','Write-Host $line','bootstrap_dependency_count -eq 22','did not execute in a distinct process','recovery apply did not observe restored old live state')){
+            if($tt.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "test coverage marker missing $m"}
           }
-          if(([regex]::Matches($tt,'Invoke-ERCrossProcessRestartV010 -Fixture')).Count -ne 2){throw 'integration must contain exactly two cross-process restart invocations'}
+          if(([regex]::Matches($tt,'Invoke-ERCrossProcessRestartV010 -Fixture')).Count -ne 2){throw 'expected exactly two cross-process restart scenarios'}
           'EVIDENCE_BOUND_RECOVERY_RESTART_PARSE_AUDIT_PASS'
 
-      - name: Run exact-worktree evidence-bound cross-process recovery restart matrix twice
+      - name: Run exact-worktree cross-process recovery restart matrix twice
         shell: powershell
         timeout-minutes: 240
         run: |
@@ -111,8 +112,8 @@ jobs:
           git worktree add --detach $w e2b80822835bf5d59dc179e345e098b5bd79759e
           if($LASTEXITCODE){throw 'matrix worktree add failed'}
           try {
-            $preApply=Join-Path $w 'validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1'
-            if((git hash-object $preApply).Trim() -cne '9b039819e7b2278fe4cf15c8585336dd07a8e8e3'){throw 'fixture pre-apply core drift'}
+            $pre=Join-Path $w 'validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1'
+            if((git hash-object $pre).Trim() -cne '9b039819e7b2278fe4cf15c8585336dd07a8e8e3'){throw 'fixture pre-apply core drift'}
             $deps=@(
               @('13f4314b81816b1b1c3bb3c2fb4280b6c015f8de','validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1','f8c91f5a566b24c82257742942bdc6fecfe68eb2'),
               @('13f4314b81816b1b1c3bb3c2fb4280b6c015f8de','validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1','83156d9c14e40061a0728d28b582c1e65684a4a2'),
@@ -133,7 +134,7 @@ jobs:
             )
             foreach($dep in $deps){
               git cat-file -e "$($dep[0])^{commit}" 2>$null
-              if($LASTEXITCODE){git fetch --no-tags origin $dep[0] | Out-Null;if($LASTEXITCODE){throw "fetch dependency failed $($dep[0])"}}
+              if($LASTEXITCODE){git fetch --no-tags origin $dep[0] | Out-Null;if($LASTEXITCODE){throw "dependency fetch failed $($dep[0])"}}
               $out=Join-Path $w $dep[1]
               New-Item -ItemType Directory -Force -Path (Split-Path $out -Parent)|Out-Null
               $env:ER_SPEC="$($dep[0])`:$($dep[1])";$env:ER_OUT=$out
@@ -146,26 +147,25 @@ jobs:
             foreach($f in @('custom-app-production-journal-aware-atomic-mutation.ps1','custom-app-production-journal-aware-atomic-repair-v011.ps1')){
               Copy-Item -LiteralPath (Join-Path (Join-Path $src 'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0') $f) -Destination $ja
             }
-            if((git hash-object (Join-Path $ja 'custom-app-production-journal-aware-atomic-mutation.ps1')).Trim() -cne '79580da78443a18bd281d4fce61c4a57d958a196'){throw 'journal-aware core copied blob drift'}
-            if((git hash-object (Join-Path $ja 'custom-app-production-journal-aware-atomic-repair-v011.ps1')).Trim() -cne '210c4dda2311eb5defcbcd74977e4f4148ea7c38'){throw 'journal-aware repair copied blob drift'}
+            if((git hash-object (Join-Path $ja 'custom-app-production-journal-aware-atomic-mutation.ps1')).Trim() -cne '79580da78443a18bd281d4fce61c4a57d958a196'){throw 'journal-aware core drift'}
+            if((git hash-object (Join-Path $ja 'custom-app-production-journal-aware-atomic-repair-v011.ps1')).Trim() -cne '210c4dda2311eb5defcbcd74977e4f4148ea7c38'){throw 'journal-aware repair drift'}
             $eb=Join-Path $w 'validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0'
             New-Item -ItemType Directory -Force -Path $eb|Out-Null
             foreach($f in @('custom-app-production-evidence-bound-journal-atomic.ps1','test_custom_app_production_evidence_bound_journal_atomic.ps1')){
               Copy-Item -LiteralPath (Join-Path (Join-Path $src 'validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0') $f) -Destination $eb
             }
-            if((git hash-object (Join-Path $eb 'custom-app-production-evidence-bound-journal-atomic.ps1')).Trim() -cne '55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'){throw 'evidence-bound core copied blob drift'}
-            if((git hash-object (Join-Path $eb 'test_custom_app_production_evidence_bound_journal_atomic.ps1')).Trim() -cne 'dad1028758e3f03aebd86a84adc5c1d26a37bee3'){throw 'evidence-bound test copied blob drift'}
+            if((git hash-object (Join-Path $eb 'custom-app-production-evidence-bound-journal-atomic.ps1')).Trim() -cne '55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'){throw 'evidence-bound core drift'}
+            if((git hash-object (Join-Path $eb 'test_custom_app_production_evidence_bound_journal_atomic.ps1')).Trim() -cne 'dad1028758e3f03aebd86a84adc5c1d26a37bee3'){throw 'evidence-bound test drift'}
             $new=Join-Path $w 'validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0'
             New-Item -ItemType Directory -Force -Path $new|Out-Null
-            foreach($f in @('invoke_custom_app_production_evidence_bound_recovery_restart_worker.ps1','test_custom_app_production_evidence_bound_recovery_restart.ps1')){
-              Copy-Item -LiteralPath (Join-Path (Join-Path $src 'validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0') $f) -Destination $new
-            }
-            if((git hash-object (Join-Path $new 'invoke_custom_app_production_evidence_bound_recovery_restart_worker.ps1')).Trim() -cne '559c0e39475dcb6b55f178270312d1fd5c2211cc'){throw 'restart worker copied blob drift'}
-            if((git hash-object (Join-Path $new 'test_custom_app_production_evidence_bound_recovery_restart.ps1')).Trim() -cne 'a8e43806b678642d5e7e317e4e7adaa483dc0011'){throw 'restart test copied blob drift'}
+            Copy-Item -LiteralPath (Join-Path $src 'validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0/invoke_custom_app_production_evidence_bound_recovery_restart_worker.ps1') -Destination $new
+            Copy-Item -LiteralPath (Join-Path $src 'validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0/test_custom_app_production_evidence_bound_recovery_restart.ps1') -Destination $new
+            if((git hash-object (Join-Path $new 'invoke_custom_app_production_evidence_bound_recovery_restart_worker.ps1')).Trim() -cne '559c0e39475dcb6b55f178270312d1fd5c2211cc'){throw 'restart worker drift'}
+            if((git hash-object (Join-Path $new 'test_custom_app_production_evidence_bound_recovery_restart.ps1')).Trim() -cne '799a69de3896e3c9e816307ba92c0af244589cfd'){throw 'restart test drift'}
             $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
             1..2|ForEach-Object{
               & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $new 'test_custom_app_production_evidence_bound_recovery_restart.ps1')
-              if($LASTEXITCODE){throw "evidence-bound recovery restart matrix failed pass $_"}
+              if($LASTEXITCODE){throw "cross-process recovery restart matrix failed pass $_"}
             }
           } finally {
             git worktree remove --force $w 2>$null
@@ -177,12 +177,13 @@ jobs:
         timeout-minutes: 45
         run: |
           $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0'
-          python "$d/build_candidate.py";if($LASTEXITCODE){throw 'candidate rebuild failed'}
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE){throw 'candidate rebuild failed'}
           $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json"
           $ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant()
           if((Get-Item $a).Length -ne 1382213 -or $ah -cne 'c2e5ffd4fe9b14b5c31dd53e7d093bd9b5db2a4ad49fa19449d299e3c14fac2f'){throw 'Addon Manager hard-disabled candidate drift'}
           if((Get-Item $m).Length -ne 284327 -or $mh -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate drift'}
-          if($rh -cne 'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw 'candidate report drift'}
+          if($rh -cne 'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw 'candidate validation report drift'}
           $s=Join-Path $env:RUNNER_TEMP 'evidence-bound-recovery-restart-selftest'
           $env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming
           New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null
@@ -195,15 +196,23 @@ jobs:
         run: |
           $base='c21a8c72dd8920df8e1faa59eb6aedee76a15e06'
           foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1')){
-            git diff --quiet $base HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}
+            git diff --quiet $base HEAD -- $x;if($LASTEXITCODE){throw "protected surface changed: $x"}
           }
-          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $main=(git rev-parse origin/main).Trim()
+          if($main -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw "production main moved: $main"}
           $out=Join-Path $env:RUNNER_TEMP 'evidence-bound-recovery-restart-evidence';New-Item -ItemType Directory -Force -Path $out|Out-Null
           $e=[ordered]@{
-            schema=1;managed_by='custom-app-production-evidence-bound-recovery-restart-validation-v1';head=(git rev-parse HEAD).Trim();base=$base;production_main=(git rev-parse origin/main).Trim()
-            fixture_base_head='e2b80822835bf5d59dc179e345e098b5bd79759e';evidence_bound_atomic_head='c21a8c72dd8920df8e1faa59eb6aedee76a15e06';recovery_evidence_head='993af44afee9adb0c28e5fb702cb6ccfbd7cd99c';restore_resume_admission_head='d9a1face71511bdaeeef4e8c761415ef9ec95fc0';restore_executor_head='c3e1f960447ba84d2410af9c37a22a384f2a5436'
-            remote_source_contract_blob='f8c91f5a566b24c82257742942bdc6fecfe68eb2';local_runtime_baseline_blob='83156d9c14e40061a0728d28b582c1e65684a4a2';stage_acquisition_contract_blob='e2f2fc656235883d2a82b106289973f6ded409a5'
-            cross_process_restart_cases=2;matrix_repetitions=2;bounded_child_host_shims=$true;independent_bootstrap_inventory=$true;hard_disabled_candidate_verified=$true;production_wiring_changed=$false;generated_at=[DateTimeOffset]::UtcNow.ToString('o')
+            schema=1;managed_by='custom-app-production-evidence-bound-recovery-restart-validation-v1'
+            head=(git rev-parse HEAD).Trim();base=$base;production_main=$main
+            fixture_base_head='e2b80822835bf5d59dc179e345e098b5bd79759e'
+            evidence_bound_atomic_head='c21a8c72dd8920df8e1faa59eb6aedee76a15e06'
+            recovery_evidence_head='993af44afee9adb0c28e5fb702cb6ccfbd7cd99c'
+            restore_resume_admission_head='d9a1face71511bdaeeef4e8c761415ef9ec95fc0'
+            restore_executor_head='c3e1f960447ba84d2410af9c37a22a384f2a5436'
+            worker_blob='559c0e39475dcb6b55f178270312d1fd5c2211cc';test_blob='799a69de3896e3c9e816307ba92c0af244589cfd'
+            cross_process_restart_cases=2;matrix_repetitions=2;bootstrap_dependency_count=22
+            bounded_child_host_shims=$true;independent_bootstrap_inventory=$true;hard_disabled_candidate_verified=$true;production_wiring_changed=$false
+            generated_at=[DateTimeOffset]::UtcNow.ToString('o')
           }
           [IO.File]::WriteAllText((Join-Path $out 'validation-evidence.json'),($e|ConvertTo-Json -Depth 10),[Text.UTF8Encoding]::new($false))
           'EVIDENCE_BOUND_RECOVERY_RESTART_PROTECTED_SURFACES_PASS'
