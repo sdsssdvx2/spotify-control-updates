@@ -34,6 +34,12 @@ jobs:
           $changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x -notin $changed){throw "missing $x"}}
           $localPins=@(@('validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/recovery_worker.ps1','997c5dcb2e6b52874bafbae933ae11eeceeccf33'),@('validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0/test_custom_app_production_evidence_bound_recovery_restore_integration.ps1','757a236306712e0f45c961cdd52cca054fa7758d'))
           foreach($q in $localPins){$b=(git hash-object $q[0]).Trim();if($b -cne $q[1]){throw "local pin drift $($q[0]) $b != $($q[1])"}}
+          $remoteHeads=@(
+            @('validate/custom-app-production-recovery-evidence-envelope-v0.1.0','993af44afee9adb0c28e5fb702cb6ccfbd7cd99c'),
+            @('validate/custom-app-production-recovery-cleanup-resume-admission-v0.1.0','d3969a746ed1736fe93586bd025116c2526fbff5'),
+            @('validate/custom-app-production-recovery-restore-resume-admission-v0.1.0','d9a1face71511bdaeeef4e8c761415ef9ec95fc0'),
+            @('validate/custom-app-production-recovery-restore-executor-v0.1.0','c3e1f960447ba84d2410af9c37a22a384f2a5436')
+          );foreach($r in $remoteHeads){git fetch --no-tags origin $r[0]|Out-Null;if($LASTEXITCODE){throw "fetch failed $($r[0])"};$got=(git rev-parse FETCH_HEAD).Trim();if($got -cne $r[1]){throw "validation branch head drift $($r[0]) $got != $($r[1])"}}
           $pins=@(
             @('c21a8c72dd8920df8e1faa59eb6aedee76a15e06','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'),
             @('c21a8c72dd8920df8e1faa59eb6aedee76a15e06','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/test_custom_app_production_evidence_bound_journal_atomic.ps1','dad1028758e3f03aebd86a84adc5c1d26a37bee3'),
@@ -66,7 +72,7 @@ jobs:
           $src=(Get-Location).Path;$w=Join-Path $env:RUNNER_TEMP 'evidence-bound-recovery-restore-integration';git worktree add --detach $w c3e1f960447ba84d2410af9c37a22a384f2a5436;if($LASTEXITCODE){throw 'integration worktree add failed'}
           try{
             $copyDirs=@('validation/custom-app-production-atomic-live-swap-mutation-v0.1.0','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0','validation/custom-app-production-evidence-bound-recovery-restore-integration-v0.1.0')
-            foreach($rel in $copyDirs){$from=Join-Path $src $rel;$to=Join-Path $w $rel;if(-not(Test-Path -LiteralPath $from -PathType Container)){throw "source dir missing $rel"};New-Item -ItemType Directory -Force -Path $to|Out-Null;Copy-Item -LiteralPath (Join-Path $from '*') -Destination $to -Recurse -Force}
+            foreach($rel in $copyDirs){$from=Join-Path $src $rel;$to=Join-Path $w $rel;if(-not(Test-Path -LiteralPath $from -PathType Container)){throw "source dir missing $rel"};New-Item -ItemType Directory -Force -Path $to|Out-Null;Copy-Item -Path (Join-Path $from '*') -Destination $to -Recurse -Force}
             $checks=@(
               @('validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/custom-app-production-atomic-live-swap-mutation.ps1','394e7bda96501f9ac320ceabe96b4cf96661fe2d'),
               @('validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','79580da78443a18bd281d4fce61c4a57d958a196'),
