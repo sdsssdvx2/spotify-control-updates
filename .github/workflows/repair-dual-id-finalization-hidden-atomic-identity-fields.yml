@@ -62,7 +62,15 @@ jobs:
             if($n -eq 1){ $fixed=$fixed.Replace($t,'') }
           }
           foreach($f in @('consumption_id','source_identity','remote_commit_sha')){ if($fixed.IndexOf(('EvidenceBoundAtomicResult.'+$f),[StringComparison]::OrdinalIgnoreCase) -ge 0){ throw "nonexistent #190 result field reference remains: $f" } }
-          foreach($required in @("@('durable-precommit',[string]`$DurableBridgeIntegrationResult.precommit_fingerprint,[string]`$pre.precommit_fingerprint)","@('durable-atomic',[string]`$DurableBridgeIntegrationResult.atomic_result_fingerprint,[string]`$EvidenceBoundAtomicResult.result_fingerprint)","@('atomic-journal',[string]`$EvidenceBoundAtomicResult.transaction_id,[string]`$journal)","@('atomic-name',[string]`$EvidenceBoundAtomicResult.name,[string]`$pre.name)","@('atomic-runtime',[string]`$EvidenceBoundAtomicResult.post_runtime_tree_sha256,[string]`$generic.stage_tree_sha256)","@('atomic-persistence',[string]`$EvidenceBoundAtomicResult.persistence_fingerprint,[string]`$generic.persistence_fingerprint)")){ if($fixed.IndexOf($required,[StringComparison]::Ordinal) -lt 0){ throw "required continuity guard missing after repair: $required" } }
+          $requiredMarkers=@(
+            "@('durable-precommit'",'DurableBridgeIntegrationResult.precommit_fingerprint',
+            "@('durable-atomic'",'EvidenceBoundAtomicResult.result_fingerprint',
+            "@('atomic-journal'",'EvidenceBoundAtomicResult.transaction_id',
+            "@('atomic-name'",'EvidenceBoundAtomicResult.name',
+            "@('atomic-runtime'",'EvidenceBoundAtomicResult.post_runtime_tree_sha256',
+            "@('atomic-persistence'",'EvidenceBoundAtomicResult.persistence_fingerprint'
+          )
+          foreach($required in $requiredMarkers){ if($fixed.IndexOf($required,[StringComparison]::Ordinal) -lt 0){ throw "required continuity marker missing after repair: $required" } }
           if($fixed -cne $raw){ [IO.File]::WriteAllText((Resolve-Path $path),$fixed,(New-Object Text.UTF8Encoding($false))) }
           $tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$errors);if($errors.Count){$errors|ForEach-Object{Write-Error $_};throw 'PS5.1 parse failed after hidden-field repair'}
           $diff=@(git diff --name-only)
