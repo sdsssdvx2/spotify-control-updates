@@ -11,10 +11,22 @@ function Assert-DBAPEq($Actual,$Expected,[string]$Message){if([string]$Actual-cn
 function Copy-DBAP($Value){return (($Value|ConvertTo-Json -Depth 80)|ConvertFrom-Json)}
 function Assert-DBAPNoAuthority($Value,[string]$Label){foreach($f in @('session_key_persisted','session_key_exposed','admission_is_authority','apply_execution_authorized','spicetify_apply_authorized','additional_mutation_authorized','live_destination_authorized','production_execution_authorized','production_mutation_authorized')){if($Value.PSObject.Properties[$f]){Assert-DBAPFalse ([bool]$Value.$f) "$Label escaped $f"}}}
 
+# The inherited permit harness uses a fixed 2026-10-28 logical clock and a matching
+# fixed remote-observation timestamp. This post-swap integration must instead prove a
+# permit that is still live at the durable crash-journal time. Preserve the exact
+# upstream permit constructor, but refresh only the fixture's observation timestamp
+# to the permit issuance clock before invoking it. No TTL or age policy is relaxed.
+$script:DBAPOriginalNewFixturePermit=${function:New-FixturePermit}
+function New-FixturePermit {
+    param($F,[string]$Nonce='0123456789abcdef0123456789abcdef',[DateTimeOffset]$IssuedAt=$now)
+    $F.binding.last_success=$IssuedAt.AddMinutes(-10).ToUniversalTime().ToString('o')
+    return & $script:DBAPOriginalNewFixturePermit $F $Nonce $IssuedAt
+}
+
 function New-DBAPFixtureV010 {
     param([Parameter(Mandatory=$true)][string]$Label)
-    # Upstream fixture harness intentionally keeps a shared logical clock. Refresh it here
-    # so the byte-real 5-minute permit TTL measures this admission stage, not prior matrix replay time.
+    # Use a fresh coherent logical clock for permit/reservation/consumption/staging.
+    # The durable bridge/journal keeps its independently monotonic UtcNow clock.
     $script:now=[DateTimeOffset]::UtcNow
     $f=New-DBAFFixtureV010 ('dbap-'+$Label)
     $final=Invoke-DBAFFinalizeV010 -F $f -Now ([DateTimeOffset]::UtcNow)
@@ -32,6 +44,8 @@ $count=0
 # 1. Byte-real success: exact finalized journal, recovery evidence, real permit/HMAC,
 # real persisted consumption ledger, live tree, retained stage/backups, persistence and binding.
 $q=New-DBAPFixtureV010 'success'
+$issued=[DateTimeOffset]::Parse([string]$q.f.x.fixture.q.x.permit.issued_at);$observed=[DateTimeOffset]::Parse([string]$q.f.x.fixture.q.x.f.binding.last_success)
+Assert-DBAPTrue ($observed-le$issued-and$observed-ge$issued.AddMinutes(-11)) 'fresh permit/remote-observation fixture clock drift'
 $r=Invoke-DBAPV010 $q
 Assert-DBAPTrue ([bool]$r.ok) ('byte-real admission denied: '+[string]$r.reason)
 Assert-DBAPNoAuthority $r 'success wrapper';Assert-DBAPNoAuthority $r.decision 'success decision'
@@ -82,4 +96,4 @@ $count++
 $fp=Copy-DBAP $r.decision;$fp.admission_fingerprint=('f'*64);$fc=Test-CustomAppProductionDualIdBridgeAwarePostSwapApplyAdmissionDecisionV010 $fp;Assert-DBAPFalse ([bool]$fc.ok) 'decision fingerprint tamper accepted';$count++
 
 if($count-ne10){throw "dual-ID post-swap admission matrix count mismatch $count"}
-Write-Output "CUSTOM_APP_PRODUCTION_DUAL_ID_BRIDGE_AWARE_POST_SWAP_APPLY_ADMISSION_PASS cases=$count byte_real=true real_permit_hmac=true durable_ledger=true journal_id_separate=true zero_authority=true"
+Write-Output "CUSTOM_APP_PRODUCTION_DUAL_ID_BRIDGE_AWARE_POST_SWAP_APPLY_ADMISSION_PASS cases=$count byte_real=true fresh_remote_observation=true real_permit_hmac=true durable_ledger=true journal_id_separate=true zero_authority=true"
