@@ -147,7 +147,8 @@ $candidateMutation=Invoke-EBFixtureV010 -Fixture $candidate -Nonce 'f2f2f2f2f2f2
 $candidateTxn=Get-EBTransactionRootV010 $candidateMutation
 try {
     Assert-ERTrueV010 ([bool]$candidateMutation.ok) ('candidate-live mutation denied: '+[string]$candidateMutation.reason)
-    Assert-EREqV010 $candidateMutation.result.journal_phase 'candidate-live' 'candidate-live mutation phase'
+    $candidateResultCheck=Test-CustomAppProductionEvidenceBoundJournalAtomicResultV010 -Result $candidateMutation.result
+    Assert-ERTrueV010 ([bool]$candidateResultCheck.ok) ('candidate-live mutation result invalid: '+[string]$candidateResultCheck.reason)
     $journal=Get-EBJournalV010 $candidate 'candidate-live-restart'
     Assert-EREqV010 $journal.entry.phase 'candidate-live' 'candidate-live durable phase before restart'
     $evidence=Get-EBEvidenceV010 $candidate 'candidate-live-restart' ([string]$journal.transaction_id)
