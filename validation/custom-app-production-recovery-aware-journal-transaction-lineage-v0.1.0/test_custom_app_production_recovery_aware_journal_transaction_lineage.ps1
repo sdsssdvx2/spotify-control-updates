@@ -78,8 +78,6 @@ function Get-LRInspectionArgsV010($F,[string]$CrashTransactionId){
 
 $count=0
 
-# 1. The recovery-aware generation id and the new crash/recovery generation id are
-# deliberately distinct, but a durable lineage sidecar binds them before journal init.
 $f=New-LRFixtureV010 -Label 'success' -PermitNonce '61616161616161616161616161616161' -TransactionNonce '71717171717171717171717171717171'
 $r=Invoke-LRFixtureV010 $f
 try{
@@ -92,9 +90,6 @@ try{
     $count++
 }finally{if($r.ok){Restore-LRSuccessV010 $f $r 'lineage success'}}
 
-# 2. Crash after durable lineage creation but before crash-journal initialization. No
-# transaction workspace/live side effect is allowed. Exact retry must replay the same
-# sidecar and then proceed normally.
 $f=New-LRFixtureV010 -Label 'pre-journal-replay' -PermitNonce '62626262626262626262626262626262' -TransactionNonce '72727272727272727272727272727272'
 $script:LRLineageFault='after-lineage-binding-before-journal-init';try{$first=Invoke-LRFixtureV010 $f}finally{$script:LRLineageFault='none'}
 Assert-LRFalse ([bool]$first.ok) 'pre-journal crash unexpectedly succeeded';Assert-LRTrue ([bool]$first.lineage_persisted) 'pre-journal lineage not persisted';Assert-LRFalse (Test-Path -LiteralPath ([string]$first.lineage.transaction_root)) 'pre-journal crash created transaction workspace'
@@ -102,8 +97,6 @@ $pre=Read-CustomAppProductionCrashJournalV010 -AllowedRoot (Get-LRTrustRootV010)
 $r=Invoke-LRFixtureV010 $f
 try{Assert-LRTrue ([bool]$r.ok) ('exact lineage replay denied: '+[string]$r.reason);Assert-LREq ([string]$r.lineage.lineage_fingerprint) ([string]$first.lineage.lineage_fingerprint) 'exact lineage replay fingerprint drift';$count++}finally{if($r.ok){Restore-LRSuccessV010 $f $r 'lineage replay'}}
 
-# 3. The same pre-journal crash followed by sidecar tampering must fail closed before
-# journal initialization or live mutation.
 $f=New-LRFixtureV010 -Label 'tamper' -PermitNonce '63636363636363636363636363636363' -TransactionNonce '73737373737373737373737373737373'
 $script:LRLineageFault='after-lineage-binding-before-journal-init';try{$first=Invoke-LRFixtureV010 $f}finally{$script:LRLineageFault='none'}
 Assert-LRFalse ([bool]$first.ok) 'tamper setup crash unexpectedly succeeded'
@@ -112,17 +105,11 @@ $r=Invoke-LRFixtureV010 $f
 Assert-LRFalse ([bool]$r.ok) 'tampered lineage sidecar accepted';Assert-LRTrue ([string]$r.reason -like '*transaction-lineage*') 'tampered lineage denial reason drift';Assert-LRFalse (Test-Path -LiteralPath ([string]$first.lineage.transaction_root)) 'tampered lineage created transaction workspace'
 $jr=Read-CustomAppProductionCrashJournalV010 -AllowedRoot (Get-LRTrustRootV010) -StoreDirectory $f.store;Assert-LRFalse ([bool]$jr.ok) 'tampered lineage initialized journal';$full=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$f.x.live_path);Assert-LREq ([string]$full.tree_sha256) ([string]$f.full.tree_sha256) 'tampered lineage changed live';$count++
 
-# 4. A forged upstream transaction id in the signed/fingerprinted recovery-aware result
-# is rejected before the lineage store is created.
 $f=New-LRFixtureV010 -Label 'upstream-tamper' -PermitNonce '64646464646464646464646464646464' -TransactionNonce '74747474747474747474747474747474'
 $bad=Copy-LR $f.prep;$bad.transaction_id=('0'*64)
 $r=Invoke-LRFixtureV010 -F $f -Prepared $bad
 Assert-LRFalse ([bool]$r.ok) 'forged upstream transaction id accepted';Assert-LRTrue ([string]$r.reason -like '*recovery-aware-prepared-invalid*') 'forged upstream transaction denial reason drift';Assert-LRFalse (Test-Path -LiteralPath $f.store) 'forged upstream transaction created lineage store';$count++
 
-# 5. After lineage is durable, crash exactly after live -> old-live but before the
-# journal records live-moved-to-old. Normalize the crash window, then recover in the
-# exact separate-process #191 worker using the *new crash id*. The lineage sidecar must
-# survive rollback-complete and still bind that crash id to the upstream permit id.
 $f=New-LRFixtureV010 -Label 'restart-recovery' -PermitNonce '65656565656565656565656565656565' -TransactionNonce '75757575757575757575757575757575'
 $script:EvidenceBoundAtomicFaultMode='after-live-move-before-journal';try{$r=Invoke-LRFixtureV010 $f}finally{$script:EvidenceBoundAtomicFaultMode='none'}
 Assert-LRFalse ([bool]$r.ok) 'restart-recovery crash unexpectedly succeeded';Assert-LRTrue ([bool]$r.lineage_persisted) 'restart-recovery lineage missing'
@@ -136,7 +123,7 @@ $lr=Resolve-CustomAppProductionRecoveryAwareJournalTransactionLineageV010 -Allow
 $jr=Read-CustomAppProductionCrashJournalV010 -AllowedRoot (Get-LRTrustRootV010) -StoreDirectory $f.store;Assert-LREq ([string]$jr.entry.phase) 'rollback-complete' 'restart-recovery final phase';Assert-LREq ([string]$jr.transaction_id) $crashTx 'restart-recovery crash id drift'
 $full=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$f.x.live_path);Assert-LREq ([string]$full.tree_sha256) ([string]$f.full.tree_sha256) 'restart-recovery live not restored'
 $persist=Get-SpotifyPersistenceSnapshot -LocalAppDataRoot ([string]$f.roots.local) -AppDataRoot ([string]$f.roots.roaming);Assert-LREq ([string]$persist.fingerprint) ([string]$f.persistence.fingerprint) 'restart-recovery persistence not restored'
-if(Test-Path -LiteralPath ([string]$r.lineage.transaction_root){Remove-CustomAppAtomicDirectoryV010 -Path ([string]$r.lineage.transaction_root) -ExpectedParent ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath([string]$f.x.live_path))) -ExpectedName ([IO.Path]::GetFileName([string]$r.lineage.transaction_root))}
+if(Test-Path -LiteralPath ([string]$r.lineage.transaction_root)){Remove-CustomAppAtomicDirectoryV010 -Path ([string]$r.lineage.transaction_root) -ExpectedParent ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath([string]$f.x.live_path))) -ExpectedName ([IO.Path]::GetFileName([string]$r.lineage.transaction_root))}
 $count++
 
 if($count-ne5){throw "recovery-aware journal transaction lineage matrix count mismatch $count"}
