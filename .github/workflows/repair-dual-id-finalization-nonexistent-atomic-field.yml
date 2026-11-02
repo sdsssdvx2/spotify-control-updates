@@ -56,8 +56,18 @@ jobs:
           if($q.IndexOf('[Parameter(Mandatory=$true)][string]$CallerAdmissionFingerprint',[StringComparison]::Ordinal) -lt 0){ throw '#190 caller admission input contract missing' }
           if($q.IndexOf('caller_admission_fingerprint',[StringComparison]::OrdinalIgnoreCase) -ge 0){ throw '#190 unexpectedly exposes caller admission fingerprint; repair premise invalid' }
 
-          $durable='validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/custom-app-production-durable-dual-transaction-id-bridge-integration.ps1'
-          $d=[IO.File]::ReadAllText((Resolve-Path $durable))
+          $durableHead='408e24ce7f66d1f5f23025a196b19cd8a42fcda7'
+          $durablePath='validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/custom-app-production-durable-dual-transaction-id-bridge-integration.ps1'
+          $durableBlob='c9a58a181d3c5f5a230fa895785c3a42a928c8cd'
+          git cat-file -e "$durableHead^{commit}" 2>$null
+          if($LASTEXITCODE){
+            git fetch --no-tags origin $durableHead | Out-Null
+            if($LASTEXITCODE){ throw 'durable bridge exact commit fetch failed' }
+          }
+          $actualDurableBlob=(git rev-parse "$durableHead`:$durablePath").Trim()
+          if($actualDurableBlob -cne $durableBlob){ throw "durable bridge pin drift: $actualDurableBlob != $durableBlob" }
+          $d=(git show "$durableHead`:$durablePath") -join "`n"
+          if($LASTEXITCODE){ throw 'durable bridge exact pin read failed' }
           $binding='-CallerAdmissionFingerprint ([string]$pre.precommit_fingerprint)'
           if($d.IndexOf($binding,[StringComparison]::Ordinal) -lt 0){ throw 'durable bridge no longer binds precommit fingerprint into #190 caller admission input' }
 
