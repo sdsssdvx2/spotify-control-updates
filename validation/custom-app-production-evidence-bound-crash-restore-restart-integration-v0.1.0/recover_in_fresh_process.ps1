@@ -8,6 +8,7 @@ $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
 . (Join-Path $root 'validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1')
 . (Join-Path $root 'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1')
+. (Join-Path $root 'validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1')
 . (Join-Path $root 'validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1')
 . (Join-Path $root 'validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1')
 . (Join-Path $root 'validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1')
