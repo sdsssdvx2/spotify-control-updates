@@ -132,6 +132,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
+          $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
           $log=Join-Path $env:GITHUB_WORKSPACE 'inherited-recovery.log'
           Push-Location $env:RAEB_RUNTIME_ROOT
           try{
@@ -143,6 +144,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
+          $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
           $log=Join-Path $env:GITHUB_WORKSPACE 'dual-id.log'
           Push-Location $env:RAEB_RUNTIME_ROOT
           try{
