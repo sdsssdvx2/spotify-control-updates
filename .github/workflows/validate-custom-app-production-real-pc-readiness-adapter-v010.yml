@@ -1,0 +1,93 @@
+name: Validate Custom App Production Real-PC Readiness Adapter v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-real-pc-readiness-adapter-v0.1.0]
+    paths: ['validation/custom-app-production-real-pc-readiness-adapter-v0.1.0/**','.github/workflows/validate-custom-app-production-real-pc-readiness-adapter-v010.yml']
+  pull_request:
+    branches: [validate/custom-app-production-recovery-aware-permit-post-apply-commit-cleanup-v0.1.0]
+    paths: ['validation/custom-app-production-real-pc-readiness-adapter-v0.1.0/**','.github/workflows/validate-custom-app-production-real-pc-readiness-adapter-v010.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact lineage scope pins and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h-cne$e){throw "head mismatch $h != $e"}
+          $p='e4ff8ef949421152999515c5031744e352435f75';if((git merge-base $p HEAD).Trim()-cne$p){throw 'not descended from exact validated recovery-aware cleanup head'}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $allowed=@('.github/workflows/validate-custom-app-production-real-pc-readiness-adapter-v010.yml','validation/custom-app-production-real-pc-readiness-adapter-v0.1.0/custom-app-production-real-pc-readiness-adapter.ps1','validation/custom-app-production-real-pc-readiness-adapter-v0.1.0/test_custom_app_production_real_pc_readiness_adapter.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_-notin$allowed});if($bad.Count){throw "scope escaped: $($bad-join', ')"};foreach($x in $allowed){if($x-notin$changed){throw "missing $x"}}
+          $pins=@(
+            @($h,'validation/custom-app-production-real-pc-readiness-adapter-v0.1.0/custom-app-production-real-pc-readiness-adapter.ps1','3729e5e13f5c997e7fe6fb6b83287d71fb2c82eb'),
+            @($h,'validation/custom-app-production-real-pc-readiness-adapter-v0.1.0/test_custom_app_production_real_pc_readiness_adapter.ps1','8cef4bd34e7d81d46fc5787e3015aaed2e2b7c90'),
+            @('979e9d6362ead31016b9532f98629d6bcc2bbb56','validation/custom-app-promotion-eligibility-gate-v0.1.0/custom-app-promotion-eligibility.ps1','94c1b0ba8f2454078252a723f89ccc0327cbc181'),
+            @('c128595c3ac7eab338f5d23d7041ae56a6822948','validation/custom-app-live-attested-production-admission-v0.1.0/custom-app-live-attested-production-admission.ps1','9bdcbf0a928539e5f3c4e28b7de1d68589e18525'),
+            @($p,'validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/build_candidate.py','18244f603b07d1c95c91ed1f1f2eb5828c4dc947')
+          );foreach($q in $pins){$b=(git rev-parse "$($q[0])`:$($q[1])").Trim();if($b-cne$q[2]){throw "pin drift $($q[1]) $b != $($q[2])"}}
+          'REAL_PC_READINESS_SCOPE_PINS_PASS'
+
+      - name: Parse and audit strict read-only zero-authority adapter
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-real-pc-readiness-adapter-v0.1.0';$core="$d/custom-app-production-real-pc-readiness-adapter.ps1";$test="$d/test_custom_app_production_real_pc_readiness_adapter.ps1"
+          foreach($f in @($core,$test)){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|ForEach-Object{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $c=Get-Content $core -Raw
+          foreach($m in @('Get-SpicetifyAssetRoots','Get-CustomAppLocalRuntimeBaseline','Get-CustomAppLocalProvenanceEvidence','Resolve-CustomAppLiveAttestedProductionAdmissionV010','Get-SpotifyPersistenceSnapshot','eligible_to_request_production_permit=$true','requires_fresh_admission_before_permit=$true','permit_issued=$false','production_mutation_authorized=$false')){if($c.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "core marker missing $m"}}
+          foreach($x in @('New-Item','Remove-Item','Copy-Item','Move-Item','Set-Content','Add-Content','Out-File','[IO.Directory]::CreateDirectory','[IO.Directory]::Delete','[IO.Directory]::Move','[IO.File]::Copy','[IO.File]::Write','Invoke-WebRequest','Invoke-RestMethod','Start-Process','Diagnostics.ProcessStartInfo','WaitForExit')){if($c.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "read-only adapter gained side effect primitive $x"}}
+          if($c-match 'permit_issued\s*=\s*\$true|result_is_authority\s*=\s*\$true|execution_authorized\s*=\s*\$true|restore_authorized\s*=\s*\$true|apply_authorized\s*=\s*\$true|cleanup_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'authority escaped adapter core'}
+          'REAL_PC_READINESS_PARSE_AUDIT_PASS'
+
+      - name: Run real-PC readiness synthetic matrix twice
+        shell: powershell
+        run: |
+          $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
+          1..2|ForEach-Object{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-real-pc-readiness-adapter-v0.1.0/test_custom_app_production_real_pc_readiness_adapter.ps1';if($LASTEXITCODE){throw "real-PC readiness matrix failed pass $_"}}
+          'REAL_PC_READINESS_MATRIX_REPEAT_PASS'
+
+      - name: Materialize and replay exact promotion and live-admission parents
+        shell: powershell
+        run: |
+          $deps=@(
+            @('979e9d6362ead31016b9532f98629d6bcc2bbb56','validation/custom-app-promotion-eligibility-gate-v0.1.0/custom-app-promotion-eligibility.ps1','94c1b0ba8f2454078252a723f89ccc0327cbc181'),
+            @('979e9d6362ead31016b9532f98629d6bcc2bbb56','validation/custom-app-promotion-eligibility-gate-v0.1.0/test_custom_app_promotion_eligibility.ps1','4644a2bd0fa2c3a047d532df898200ce950274e3'),
+            @('c128595c3ac7eab338f5d23d7041ae56a6822948','validation/custom-app-live-attested-production-admission-v0.1.0/custom-app-live-attested-production-admission.ps1','9bdcbf0a928539e5f3c4e28b7de1d68589e18525'),
+            @('c128595c3ac7eab338f5d23d7041ae56a6822948','validation/custom-app-live-attested-production-admission-v0.1.0/test_custom_app_live_attested_production_admission.ps1','3b2694e4786f470289ea0a64ad8d95da8810ebd2')
+          );foreach($d in $deps){$p=$d[1];New-Item -ItemType Directory -Force -Path(Split-Path $p -Parent)|Out-Null;$env:S="$($d[0])`:$p";$env:O=$p;python -c "import os,subprocess,pathlib;pathlib.Path(os.environ['O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['S']]))";if($LASTEXITCODE){throw "materialize failed $p"};if((git hash-object $p).Trim()-cne$d[2]){throw "materialized blob drift $p"}}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-promotion-eligibility-gate-v0.1.0/test_custom_app_promotion_eligibility.ps1';if($LASTEXITCODE){throw 'promotion parent regression failed'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-live-attested-production-admission-v0.1.0/test_custom_app_live_attested_production_admission.ps1';if($LASTEXITCODE){throw 'live admission parent regression failed'}
+          'REAL_PC_READINESS_PARENT_REPLAY_PASS'
+
+      - name: Rebuild exact hard-disabled candidate and run SelfTest
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'candidate build failed'}
+          $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json";if((Get-Item $a).Length-ne1382213-or(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant()-cne'c2e5ffd4fe9b14b5c31dd53e7d093bd9b5db2a4ad49fa19449d299e3c14fac2f'){throw 'addon candidate drift'};if((Get-Item $m).Length-ne284327-or(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant()-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'spotify candidate drift'};if((Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant()-cne'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw 'candidate report drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'real-pc-readiness-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'hard-disabled candidate SelfTest failed'}
+          'REAL_PC_READINESS_HARD_DISABLED_SELFTEST_PASS'
+
+      - name: Prove protected surfaces immutable and write evidence
+        shell: powershell
+        run: |
+          $p='e4ff8ef949421152999515c5031744e352435f75';foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0/build_candidate.py')){git diff --quiet $p HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $d='validation/custom-app-production-real-pc-readiness-adapter-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();parent=$p;read_only_adapter=$true;current_user_roots_revalidated=$true;spicetify_customapp_root_bound=$true;fresh_local_provenance_revalidated=$true;live_attested_admission_reused=$true;spotify_persistence_read_only_snapshot=$true;permit_issued=$false;requires_fresh_admission_before_permit=$true;production_mutation_authority=$false;production_main_changed=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'REAL_PC_READINESS_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: real-pc-readiness-adapter-v010-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            validation/custom-app-production-real-pc-readiness-adapter-v0.1.0/custom-app-production-real-pc-readiness-adapter.ps1
+            validation/custom-app-production-real-pc-readiness-adapter-v0.1.0/test_custom_app_production_real_pc_readiness_adapter.ps1
+            validation/custom-app-production-real-pc-readiness-adapter-v0.1.0/ci-evidence.json
