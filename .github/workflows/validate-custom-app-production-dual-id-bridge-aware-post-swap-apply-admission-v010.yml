@@ -77,7 +77,7 @@ jobs:
           $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json";$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant()
           if((Get-Item $a).Length-ne1382213-or$ah-cne'c2e5ffd4fe9b14b5c31dd53e7d093bd9b5db2a4ad49fa19449d299e3c14fac2f'){throw 'Addon Manager candidate drift'}
           if((Get-Item $m).Length-ne284327-or$mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate drift'}
-          if($rh-cne'e51d342014aa68d381945ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw 'candidate report drift'}
+          if($rh-cne'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw 'candidate report drift'}
           $s=Join-Path $env:RUNNER_TEMP 'dbap-v010-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'Addon Manager SelfTest failed'}
           'DUAL_ID_BRIDGE_AWARE_POST_SWAP_APPLY_ADMISSION_HARD_DISABLED_SELFTEST_PASS'
