@@ -1,0 +1,166 @@
+name: Validate Custom App Production Recovery Restore Monotonic Time v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-recovery-restore-monotonic-time-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-recovery-restore-monotonic-time-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-recovery-restore-monotonic-time-v010.yml'
+  pull_request:
+    branches: [validate/custom-app-production-evidence-bound-recovery-restart-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-recovery-restore-monotonic-time-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-recovery-restore-monotonic-time-v010.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 420
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope lineage patch pin and frozen production
+        shell: powershell
+        run: |
+          $head=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($head-cne$expected){throw "head mismatch $head != $expected"}
+          $base='9adc2d3f327a59349cb42fa17ad8d601a3b02197';if((git merge-base $base HEAD).Trim()-cne$base){throw 'not descended from exact recovery-restart validation head'}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $allowed=@('.github/workflows/validate-custom-app-production-recovery-restore-monotonic-time-v010.yml','validation/custom-app-production-recovery-restore-monotonic-time-v0.1.0/patch_recovery_restore_executor_monotonic_time.py')
+          $changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x -notin $changed){throw "missing $x"}}
+          $patchBlob=(git rev-parse 'HEAD:validation/custom-app-production-recovery-restore-monotonic-time-v0.1.0/patch_recovery_restore_executor_monotonic_time.py').Trim();if($patchBlob-cne'5d698f82aa60f56b1e90e4f5ad530a45879a31ab'){throw "patcher blob drift $patchBlob"}
+          $pins=@(
+            @('c3e1f960447ba84d2410af9c37a22a384f2a5436','validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1','5fec613c460619da5dbfe88fca5c7334e9e93f76'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+            @('9adc2d3f327a59349cb42fa17ad8d601a3b02197','validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0/invoke_custom_app_production_evidence_bound_recovery_restart_worker.ps1','9c039860ff0645153205691a11e89d8eb844d43c'),
+            @('115411ed1a16f66a168443fb03b6e164fd114c0d','validation/custom-app-production-dual-transaction-id-bridge-v0.1.0/custom-app-production-dual-transaction-id-bridge.ps1','ce018db8c13d569036ca378bbe3b4a2a84ab3bcd'),
+            @('234fef1e5c83395250ec97914579c55fee89cd21','validation/custom-app-production-dual-transaction-id-bridge-v0.1.0/test_custom_app_production_dual_transaction_id_bridge.ps1','1d0257aee38d0cc90d9a05d53caaf7c425bbcf96'),
+            @('63bf08db57bb0a1c2b75adc1eb65aa43352c34e6','validation/custom-app-production-lightweight-dual-id-restart-bridge-v0.1.0/test_custom_app_production_lightweight_dual_id_restart_bridge.ps1','af4b611855453991d7d0455f5fcc5a23c2e2c83e')
+          )
+          foreach($p in $pins){git cat-file -e "$($p[0])^{commit}" 2>$null;if($LASTEXITCODE){git fetch --no-tags origin $p[0]|Out-Null;if($LASTEXITCODE){throw "pin fetch failed $($p[0])"}};$blob=(git rev-parse "$($p[0])`:$($p[1])").Trim();if($blob-cne$p[2]){throw "pin drift $($p[1]) $blob != $($p[2])"}}
+          'RECOVERY_RESTORE_MONOTONIC_SCOPE_PINS_PASS'
+
+      - name: Static audit exact minimal monotonic patch contract
+        shell: powershell
+        run: |
+          $p='validation/custom-app-production-recovery-restore-monotonic-time-v0.1.0/patch_recovery_restore_executor_monotonic_time.py';python -m py_compile $p;if($LASTEXITCODE){throw 'patcher parse failed'}
+          $x=Get-Content -LiteralPath $p -Raw
+          foreach($m in @('BASE_HEAD = "c3e1f960447ba84d2410af9c37a22a384f2a5436"','BASE_BLOB = "5fec613c460619da5dbfe88fca5c7334e9e93f76"','$effectiveNow=$Now','if($effectiveNow -lt $clockAt0){$effectiveNow=$clockAt0}','if($effectiveNow -lt $clockAt1){$effectiveNow=$clockAt1}','recovery-restore-executor-monotonic-journal-head-changed-before-barrier','-Now $effectiveNow','$effectiveNow.AddMilliseconds(')){if($x.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "patch contract marker missing $m"}}
+          foreach($bad in @('Invoke-WebRequest','Invoke-RestMethod','production_mutation_authorized=$true','execution_authorized=$true','restore_authorized=$true','apply_authorized=$true')){if($x.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "forbidden patch primitive/authority marker $bad"}}
+          'RECOVERY_RESTORE_MONOTONIC_STATIC_AUDIT_PASS'
+
+      - name: Patch exact restore executor and replay its canonical regression
+        shell: powershell
+        timeout-minutes: 180
+        run: |
+          $src=(Get-Location).Path;$w=Join-Path $env:RUNNER_TEMP 'restore-monotonic-regression'
+          git worktree add --detach $w c3e1f960447ba84d2410af9c37a22a384f2a5436;if($LASTEXITCODE){throw 'restore worktree add failed'}
+          try{
+            $evidenceDeps=@(
+              @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+              @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/test_custom_app_production_recovery_evidence.ps1','de37d029e175dbec899445dbe983e506a14a1b0a'),
+              @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/probe_custom_app_production_recovery_evidence.ps1','84f73605526373652a4499b7f472537c8e2b5c03')
+            )
+            foreach($d in $evidenceDeps){$out=Join-Path $w $d[1];New-Item -ItemType Directory -Force -Path (Split-Path $out -Parent)|Out-Null;$env:MR_S="$($d[0])`:$($d[1])";$env:MR_O=$out;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['MR_O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['MR_S']]))";if($LASTEXITCODE){throw "evidence materialize failed $($d[1])"};if((git hash-object $out).Trim()-cne$d[2]){throw "evidence blob drift $($d[1])"}}
+            $core=Join-Path $w 'validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1';if((git hash-object $core).Trim()-cne'5fec613c460619da5dbfe88fca5c7334e9e93f76'){throw 'restore source core drift'}
+            $patched=Join-Path $env:RUNNER_TEMP 'restore-executor-monotonic-patched.ps1'
+            python (Join-Path $src 'validation/custom-app-production-recovery-restore-monotonic-time-v0.1.0/patch_recovery_restore_executor_monotonic_time.py') --source $core --output $patched;if($LASTEXITCODE){throw 'monotonic patch generation failed'}
+            $t=$null;$e=$null;[Management.Automation.Language.Parser]::ParseFile($patched,[ref]$t,[ref]$e)|Out-Null;if($e.Count){$e|ForEach-Object{Write-Error $_.Message};throw 'patched restore core PS5.1 parse failed'}
+            $px=Get-Content -LiteralPath $patched -Raw;foreach($m in @('custom-app-production-recovery-restore-executor-monotonic-time-v1','$effectiveNow=$Now','recovery-restore-executor-monotonic-journal-head-changed-before-barrier')){if($px.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "patched core marker missing $m"}}
+            if($px.IndexOf('$Now.AddMilliseconds(',[StringComparison]::Ordinal)-ge0){throw 'unpatched Now.AddMilliseconds remains in executor'}
+            Copy-Item -LiteralPath $patched -Destination $core -Force
+            $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $w 'validation/custom-app-production-recovery-restore-executor-v0.1.0/test_custom_app_production_recovery_restore_executor.ps1');if($LASTEXITCODE){throw 'patched exact restore executor regression failed'}
+            $hash=(Get-FileHash -LiteralPath $core -Algorithm SHA256).Hash.ToLowerInvariant();Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'monotonic-patched-sha256.txt') -Value $hash -Encoding ASCII
+            Write-Host "MONOTONIC_PATCHED_SHA256=$hash"
+          }finally{git worktree remove --force $w 2>$null}
+          'RECOVERY_RESTORE_MONOTONIC_CANONICAL_REGRESSION_PASS'
+
+      - name: Run corrected dual-ID fresh-process restart with forced stale caller clock twice
+        shell: powershell
+        timeout-minutes: 300
+        run: |
+          $src=(Get-Location).Path;$w=Join-Path $env:RUNNER_TEMP 'restore-monotonic-dual-id'
+          git worktree add --detach $w e2b80822835bf5d59dc179e345e098b5bd79759e;if($LASTEXITCODE){throw 'dual-id worktree add failed'}
+          try{
+            $deps=@(
+              @('13f4314b81816b1b1c3bb3c2fb4280b6c015f8de','validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1','f8c91f5a566b24c82257742942bdc6fecfe68eb2'),
+              @('13f4314b81816b1b1c3bb3c2fb4280b6c015f8de','validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1','83156d9c14e40061a0728d28b582c1e65684a4a2'),
+              @('c420a1df6f306c7ba74772b91241cb14abd04738','validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','e2f2fc656235883d2a82b106289973f6ded409a5'),
+              @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+              @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+              @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+              @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+              @('b266bad660d4b7bc87e7093c5b12f0cff1dc466f','validation/custom-app-production-recovery-plan-contract-v0.1.0/custom-app-production-recovery-plan.ps1','ae49409973164052d5830b981d804707f9d62b6c'),
+              @('ffb5aad4a605691ee7b80392498b0cb6fa4e4052','validation/custom-app-production-recovery-preflight-v0.1.0/custom-app-production-recovery-preflight.ps1','b1816a24849a559b4da2537aa1b2436124fbee50'),
+              @('ffb5aad4a605691ee7b80392498b0cb6fa4e4052','validation/custom-app-production-recovery-execution-admission-v0.1.0/custom-app-production-recovery-execution-admission.ps1','e8804a7c53ad0d3e5420e037d468d9c397e52529'),
+              @('5232e5adeb13e6942acb210b3cd13058e1eaaf05','validation/custom-app-production-recovery-evidence-admission-integration-v0.1.0/custom-app-production-recovery-evidence-admission-integration.ps1','c92c727b5a2217f5b84a1072608bfc4662e68926'),
+              @('d3969a746ed1736fe93586bd025116c2526fbff5','validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/custom-app-production-recovery-cleanup-resume-admission.ps1','387d97b10d493b3794b24fba2bac67cf39491444'),
+              @('d9a1face71511bdaeeef4e8c761415ef9ec95fc0','validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','0273d7e28a56759b1d0ec9cbf037483b04d98d63'),
+              @('574fe182168271fa3497d58e269e9af1f60d9033','validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1','e91fa6a125f77352907c1119f6d9f47be9682550'),
+              @('fe07d410531ea13c8fca379b01405631a3763e84','validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1','f7372b069fbfe6a0f8d8a0aad45312ffd33d9f0a'),
+              @('c3e1f960447ba84d2410af9c37a22a384f2a5436','validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1','5fec613c460619da5dbfe88fca5c7334e9e93f76'),
+              @('115411ed1a16f66a168443fb03b6e164fd114c0d','validation/custom-app-production-dual-transaction-id-bridge-v0.1.0/custom-app-production-dual-transaction-id-bridge.ps1','ce018db8c13d569036ca378bbe3b4a2a84ab3bcd'),
+              @('234fef1e5c83395250ec97914579c55fee89cd21','validation/custom-app-production-dual-transaction-id-bridge-v0.1.0/test_custom_app_production_dual_transaction_id_bridge.ps1','1d0257aee38d0cc90d9a05d53caaf7c425bbcf96'),
+              @('408e24ce7f66d1f5f23025a196b19cd8a42fcda7','validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/custom-app-production-durable-dual-transaction-id-bridge-integration.ps1','c9a58a181d3c5f5a230fa895785c3a42a928c8cd'),
+              @('9adc2d3f327a59349cb42fa17ad8d601a3b02197','validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0/invoke_custom_app_production_evidence_bound_recovery_restart_worker.ps1','9c039860ff0645153205691a11e89d8eb844d43c'),
+              @('63bf08db57bb0a1c2b75adc1eb65aa43352c34e6','validation/custom-app-production-lightweight-dual-id-restart-bridge-v0.1.0/test_custom_app_production_lightweight_dual_id_restart_bridge.ps1','af4b611855453991d7d0455f5fcc5a23c2e2c83e'),
+              @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','79580da78443a18bd281d4fce61c4a57d958a196'),
+              @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),
+              @('c21a8c72dd8920df8e1faa59eb6aedee76a15e06','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'),
+              @('c21a8c72dd8920df8e1faa59eb6aedee76a15e06','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/test_custom_app_production_evidence_bound_journal_atomic.ps1','dad1028758e3f03aebd86a84adc5c1d26a37bee3')
+            )
+            foreach($d in $deps){git cat-file -e "$($d[0])^{commit}" 2>$null;if($LASTEXITCODE){git fetch --no-tags origin $d[0]|Out-Null;if($LASTEXITCODE){throw "dep fetch failed $($d[0])"}};$out=Join-Path $w $d[1];New-Item -ItemType Directory -Force -Path (Split-Path $out -Parent)|Out-Null;$env:MR_S="$($d[0])`:$($d[1])";$env:MR_O=$out;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['MR_O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['MR_S']]))";if($LASTEXITCODE){throw "materialize failed $($d[1])"};if((git hash-object $out).Trim()-cne$d[2]){throw "materialized blob drift $($d[1])"}}
+
+            $restoreCore=Join-Path $w 'validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1';$patched=Join-Path $env:RUNNER_TEMP 'restore-executor-monotonic-dual-id.ps1'
+            python (Join-Path $src 'validation/custom-app-production-recovery-restore-monotonic-time-v0.1.0/patch_recovery_restore_executor_monotonic_time.py') --source $restoreCore --output $patched;if($LASTEXITCODE){throw 'dual-id restore patch generation failed'};Copy-Item $patched $restoreCore -Force
+            $t=$null;$e=$null;[Management.Automation.Language.Parser]::ParseFile($restoreCore,[ref]$t,[ref]$e)|Out-Null;if($e.Count){throw 'patched restore core parse failed in dual-id worktree'}
+
+            # Force the restart caller clock 30 seconds behind real time. The exact patched
+            # executor must normalize against the durable journal head instead of sleeping.
+            $worker=Join-Path $w 'validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0/invoke_custom_app_production_evidence_bound_recovery_restart_worker.ps1'
+            $workerText=[IO.File]::ReadAllText($worker,[Text.Encoding]::UTF8)
+            $needle='-ExpectedSpicetifySha256 $sha -Now ([DateTimeOffset]::UtcNow) -TimeoutSeconds'
+            $replacement='-ExpectedSpicetifySha256 $sha -Now ([DateTimeOffset]::UtcNow.AddSeconds(-30)) -TimeoutSeconds'
+            $count=([regex]::Matches($workerText,[regex]::Escape($needle))).Count;if($count-ne1){throw "worker stale-clock anchor count drift $count"};$workerText=$workerText.Replace($needle,$replacement);[IO.File]::WriteAllText($worker,$workerText,[Text.UTF8Encoding]::new($false))
+            if(([IO.File]::ReadAllText($worker)).IndexOf('UtcNow.AddSeconds(-30)',[StringComparison]::Ordinal)-lt0){throw 'forced stale caller clock marker missing'}
+
+            $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $w 'validation/custom-app-production-dual-transaction-id-bridge-v0.1.0/test_custom_app_production_dual_transaction_id_bridge.ps1');if($LASTEXITCODE){throw 'corrected dual-id canonical regression failed'}
+            1..2|ForEach-Object{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $w 'validation/custom-app-production-lightweight-dual-id-restart-bridge-v0.1.0/test_custom_app_production_lightweight_dual_id_restart_bridge.ps1');if($LASTEXITCODE){throw "forced-stale-clock dual-id restart matrix failed pass $_"}}
+          }finally{git worktree remove --force $w 2>$null}
+          'RECOVERY_RESTORE_MONOTONIC_FORCED_STALE_RESTART_PASS'
+
+      - name: Rebuild exact hard-disabled candidate and run Addon Manager SelfTest
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'candidate rebuild failed'}
+          $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json";$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant()
+          if((Get-Item $a).Length-ne1382213-or$ah-cne'c2e5ffd4fe9b14b5c31dd53e7d093bd9b5db2a4ad49fa19449d299e3c14fac2f'){throw 'Addon Manager candidate drift'}
+          if((Get-Item $m).Length-ne284327-or$mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate drift'}
+          if($rh-cne'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw 'candidate report drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'restore-monotonic-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'Addon Manager SelfTest failed'}
+          'RECOVERY_RESTORE_MONOTONIC_HARD_DISABLED_SELFTEST_PASS'
+
+      - name: Prove protected surfaces immutable and write evidence
+        shell: powershell
+        run: |
+          $base='9adc2d3f327a59349cb42fa17ad8d601a3b02197';if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json')){git diff --quiet $base HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          $out=Join-Path $env:RUNNER_TEMP 'restore-monotonic-evidence';New-Item -ItemType Directory -Force -Path $out|Out-Null
+          $patchedSha=(Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'monotonic-patched-sha256.txt') -Raw).Trim()
+          [pscustomobject]@{schema=1;managed_by='custom-app-production-recovery-restore-monotonic-time-v1';head=(git rev-parse HEAD).Trim();base=$base;production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2';qualified_restore_executor_head='c3e1f960447ba84d2410af9c37a22a384f2a5436';qualified_restore_executor_blob='5fec613c460619da5dbfe88fca5c7334e9e93f76';patcher_blob='5d698f82aa60f56b1e90e4f5ad530a45879a31ab';patched_file_sha256=$patchedSha;monotonic_rule='effectiveNow=max(callerNow,durableJournalRecordedAt)';forced_stale_caller_seconds=30;canonical_restore_regression=$true;corrected_dual_id_regression=$true;fresh_process_restart_repeat=2;production_mutation_authorized=$false;validated_at=[DateTimeOffset]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 10|Set-Content -LiteralPath (Join-Path $out 'recovery-restore-monotonic-time-validation.json') -Encoding UTF8
+          'RECOVERY_RESTORE_MONOTONIC_PROTECTED_SURFACES_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-recovery-restore-monotonic-time-v010-${{ github.run_id }}
+          path: ${{ runner.temp }}/restore-monotonic-evidence/recovery-restore-monotonic-time-validation.json
+          if-no-files-found: error
+          retention-days: 14
