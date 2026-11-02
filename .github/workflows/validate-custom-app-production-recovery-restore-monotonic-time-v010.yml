@@ -60,12 +60,16 @@ jobs:
           $src=(Get-Location).Path;$w=Join-Path $env:RUNNER_TEMP 'restore-monotonic-regression'
           git worktree add --detach $w c3e1f960447ba84d2410af9c37a22a384f2a5436;if($LASTEXITCODE){throw 'restore worktree add failed'}
           try{
-            $evidenceDeps=@(
+            # Reproduce the exact durable sibling closure from the validated #157 workflow.
+            $deps=@(
               @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
               @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/test_custom_app_production_recovery_evidence.ps1','de37d029e175dbec899445dbe983e506a14a1b0a'),
-              @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/probe_custom_app_production_recovery_evidence.ps1','84f73605526373652a4499b7f472537c8e2b5c03')
+              @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/probe_custom_app_production_recovery_evidence.ps1','84f73605526373652a4499b7f472537c8e2b5c03'),
+              @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+              @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+              @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae')
             )
-            foreach($d in $evidenceDeps){$out=Join-Path $w $d[1];New-Item -ItemType Directory -Force -Path (Split-Path $out -Parent)|Out-Null;$env:MR_S="$($d[0])`:$($d[1])";$env:MR_O=$out;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['MR_O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['MR_S']]))";if($LASTEXITCODE){throw "evidence materialize failed $($d[1])"};if((git hash-object $out).Trim()-cne$d[2]){throw "evidence blob drift $($d[1])"}}
+            foreach($d in $deps){$out=Join-Path $w $d[1];New-Item -ItemType Directory -Force -Path (Split-Path $out -Parent)|Out-Null;$env:MR_S="$($d[0])`:$($d[1])";$env:MR_O=$out;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['MR_O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['MR_S']]))";if($LASTEXITCODE){throw "dependency materialize failed $($d[1])"};if((git hash-object $out).Trim()-cne$d[2]){throw "dependency blob drift $($d[1])"}}
             $core=Join-Path $w 'validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1';if((git hash-object $core).Trim()-cne'5fec613c460619da5dbfe88fca5c7334e9e93f76'){throw 'restore source core drift'}
             $patched=Join-Path $env:RUNNER_TEMP 'restore-executor-monotonic-patched.ps1'
             python (Join-Path $src 'validation/custom-app-production-recovery-restore-monotonic-time-v0.1.0/patch_recovery_restore_executor_monotonic_time.py') --source $core --output $patched;if($LASTEXITCODE){throw 'monotonic patch generation failed'}
@@ -120,8 +124,8 @@ jobs:
             python (Join-Path $src 'validation/custom-app-production-recovery-restore-monotonic-time-v0.1.0/patch_recovery_restore_executor_monotonic_time.py') --source $restoreCore --output $patched;if($LASTEXITCODE){throw 'dual-id restore patch generation failed'};Copy-Item $patched $restoreCore -Force
             $t=$null;$e=$null;[Management.Automation.Language.Parser]::ParseFile($restoreCore,[ref]$t,[ref]$e)|Out-Null;if($e.Count){throw 'patched restore core parse failed in dual-id worktree'}
 
-            # Force the restart caller clock 30 seconds behind real time. The exact patched
-            # executor must normalize against the durable journal head instead of sleeping.
+            # Force the restart caller clock 30 seconds behind real time. The patched executor must
+            # normalize against the durable journal head instead of depending on runner delay.
             $worker=Join-Path $w 'validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0/invoke_custom_app_production_evidence_bound_recovery_restart_worker.ps1'
             $workerText=[IO.File]::ReadAllText($worker,[Text.Encoding]::UTF8)
             $needle='-ExpectedSpicetifySha256 $sha -Now ([DateTimeOffset]::UtcNow) -TimeoutSeconds'
