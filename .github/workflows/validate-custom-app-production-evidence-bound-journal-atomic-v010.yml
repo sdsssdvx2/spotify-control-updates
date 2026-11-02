@@ -1,0 +1,102 @@
+name: Validate Custom App Production Evidence-Bound Journal Atomic v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-evidence-bound-journal-atomic-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-evidence-bound-journal-atomic-v010.yml'
+  pull_request:
+    branches: [validate/custom-app-production-journal-aware-atomic-mutation-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-evidence-bound-journal-atomic-v010.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope lineage pins and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h -cne $e){throw "head mismatch $h != $e"}
+          $base='2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf';if((git merge-base $base HEAD).Trim() -cne $base){throw 'not descended from exact validated journal-aware atomic head'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $allowed=@('.github/workflows/validate-custom-app-production-evidence-bound-journal-atomic-v010.yml','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/test_custom_app_production_evidence_bound_journal_atomic.ps1')
+          $changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($x in $allowed){if($x -notin $changed){throw "missing $x"}}
+          $pins=@(@($h,'validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'),@($h,'validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/test_custom_app_production_evidence_bound_journal_atomic.ps1','dad1028758e3f03aebd86a84adc5c1d26a37bee3'),@('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'))
+          foreach($q in $pins){if($q[0] -ceq '993af44afee9adb0c28e5fb702cb6ccfbd7cd99c'){git fetch --no-tags origin validate/custom-app-production-recovery-evidence-envelope-v0.1.0 | Out-Null;if((git rev-parse FETCH_HEAD).Trim() -cne $q[0]){throw 'recovery evidence branch head drift'}};$b=(git rev-parse "$($q[0])`:$($q[1])").Trim();if($b -cne $q[2]){throw "pin drift $($q[1]) $b != $($q[2])"}}
+          'EVIDENCE_BOUND_JOURNAL_ATOMIC_SCOPE_PINS_PASS'
+
+      - name: Parse and audit evidence-before-atomic contract
+        shell: powershell
+        run: |
+          $d='validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0';$core="$d/custom-app-production-evidence-bound-journal-atomic.ps1";$test="$d/test_custom_app_production_evidence_bound_journal_atomic.ps1"
+          foreach($f in @($core,$test)){$t=$null;$er=$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f),[ref]$t,[ref]$er)|Out-Null;if($er.Count){$er|ForEach-Object{Write-Error ("$f line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $f"}}
+          $c=Get-Content $core -Raw
+          foreach($m in @('Write-CustomAppProductionRecoveryEvidenceV010','Read-CustomAppProductionRecoveryEvidenceV010','after-recovery-evidence-before-candidate-preparation',"-Phase 'atomic-mutation-starting'",'-Phase ''live-moved-to-old''','-Phase ''candidate-live''','recovery_evidence_bound_before_atomic_barrier=$true','qualified_recovery_evidence_head','Test-CustomAppProductionPreApplyPreparedResultV010')){if($c.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "core marker missing $m"}}
+          $eIdx=$c.IndexOf('Write-CustomAppProductionRecoveryEvidenceV010',[StringComparison]::OrdinalIgnoreCase);$aIdx=$c.IndexOf("-Phase 'atomic-mutation-starting'",[StringComparison]::OrdinalIgnoreCase);if($eIdx -lt 0 -or $aIdx -lt 0 -or $eIdx -ge $aIdx){throw 'recovery evidence write is not textually before atomic-mutation-starting barrier'}
+          if(([regex]::Matches($c,'\[IO\.Directory\]::Move\(')).Count -ne 2){throw 'evidence-bound atomic must contain exactly two same-parent directory moves'}
+          foreach($x in @('Invoke-WebRequest','Invoke-RestMethod','Start-Process','ProcessStartInfo','spicetify apply','spicetify config','Invoke-CustomAppProductionRecoveryAwarePermitIssuerV010','Invoke-CustomAppProductionRecoveryAwarePermitConsumptionV010')){if($c.IndexOf($x,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "forbidden authority/external primitive $x"}}
+          if($c -match 'result_is_authority\s*=\s*\$true|spicetify_apply_authorized\s*=\s*\$true|additional_mutation_authorized\s*=\s*\$true|production_execution_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'authority escaped'}
+          $tt=Get-Content $test -Raw;foreach($m in @('after-recovery-evidence-before-candidate-preparation','created transaction workspace before hook','evidence unreadable after repair phase advance','first-rename-complete-unjournaled','exact-app-and-persistence-recovery-required','tampered generic prepared result accepted','CUSTOM_APP_PRODUCTION_EVIDENCE_BOUND_JOURNAL_ATOMIC_MATRIX_PASS cases=$count')){if($tt.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "test coverage marker missing $m"}}
+          'EVIDENCE_BOUND_JOURNAL_ATOMIC_PARSE_AUDIT_PASS'
+
+      - name: Replay parent journal-aware matrix and run evidence-bound matrix twice
+        shell: powershell
+        timeout-minutes: 150
+        run: |
+          $src=(Get-Location).Path;$w=Join-Path $env:RUNNER_TEMP 'evidence-bound-journal-atomic-matrix';git worktree add --detach $w e2b80822835bf5d59dc179e345e098b5bd79759e;if($LASTEXITCODE){throw 'matrix worktree add failed'}
+          try{
+            $deps=@(@('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),@('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),@('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),@('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'))
+            foreach($q in $deps){$out=Join-Path $w $q[1];New-Item -ItemType Directory -Force -Path (Split-Path $out -Parent)|Out-Null;$env:S="$($q[0])`:$($q[1])";$env:O=$out;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['O']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['S']]))";if($LASTEXITCODE){throw "materialize failed $($q[1])"};if((git hash-object $out).Trim() -cne $q[2]){throw "materialized blob drift $($q[1])"}}
+            $parentDir=Join-Path $w 'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0';New-Item -ItemType Directory -Force -Path $parentDir|Out-Null
+            foreach($f in @('custom-app-production-journal-aware-atomic-mutation.ps1','custom-app-production-journal-aware-atomic-repair-v011.ps1','test_custom_app_production_journal_aware_atomic_mutation.ps1')){Copy-Item -LiteralPath (Join-Path (Join-Path $src 'validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0') $f) -Destination $parentDir}
+            foreach($p in @(@('custom-app-production-journal-aware-atomic-mutation.ps1','79580da78443a18bd281d4fce61c4a57d958a196'),@('custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),@('test_custom_app_production_journal_aware_atomic_mutation.ps1','c550723053a47f776762cd1508b72f2db8808dce'))){if((git hash-object (Join-Path $parentDir $p[0])).Trim() -cne $p[1]){throw "parent copied blob drift $($p[0])"}}
+            $newDir=Join-Path $w 'validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0';New-Item -ItemType Directory -Force -Path $newDir|Out-Null
+            foreach($f in @('custom-app-production-evidence-bound-journal-atomic.ps1','test_custom_app_production_evidence_bound_journal_atomic.ps1')){Copy-Item -LiteralPath (Join-Path (Join-Path $src 'validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0') $f) -Destination $newDir}
+            if((git hash-object (Join-Path $newDir 'custom-app-production-evidence-bound-journal-atomic.ps1')).Trim() -cne '55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'){throw 'new core copied blob drift'};if((git hash-object (Join-Path $newDir 'test_custom_app_production_evidence_bound_journal_atomic.ps1')).Trim() -cne 'dad1028758e3f03aebd86a84adc5c1d26a37bee3'){throw 'new test copied blob drift'}
+            $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $parentDir 'test_custom_app_production_journal_aware_atomic_mutation.ps1');if($LASTEXITCODE){throw 'parent journal-aware matrix failed'}
+            1..2|ForEach-Object{& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $newDir 'test_custom_app_production_evidence_bound_journal_atomic.ps1');if($LASTEXITCODE){throw "evidence-bound matrix failed pass $_"}}
+          } finally {git worktree remove --force $w 2>$null}
+          'EVIDENCE_BOUND_JOURNAL_ATOMIC_MATRIX_REPEAT_PASS'
+
+      - name: Rebuild exact hard-disabled candidate and run Addon Manager SelfTest
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'candidate rebuild failed'}
+          $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json";$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant()
+          if((Get-Item $a).Length -ne 1382213 -or $ah -cne 'c2e5ffd4fe9b14b5c31dd53e7d093bd9b5db2a4ad49fa19449d299e3c14fac2f'){throw 'Addon Manager hard-disabled candidate drift'}
+          if((Get-Item $m).Length -ne 284327 -or $mh -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate drift'}
+          if($rh -cne 'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw 'candidate report drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'evidence-bound-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'Addon Manager SelfTest failed'}
+          'EVIDENCE_BOUND_JOURNAL_ATOMIC_HARD_DISABLED_SELFTEST_PASS'
+
+      - name: Prove protected surfaces immutable and write evidence
+        shell: powershell
+        run: |
+          $base='2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf';$expected=@('.github/workflows/validate-custom-app-production-evidence-bound-journal-atomic-v010.yml','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/test_custom_app_production_evidence_bound_journal_atomic.ps1');$changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "unexpected changed surface $($bad -join ', ')"}
+          foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1')){git diff --quiet $base HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $d='validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0';[ordered]@{schema=1;head=(git rev-parse HEAD).Trim();base=$base;qualified_journal_aware_head='2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf';qualified_recovery_evidence_head='993af44afee9adb0c28e5fb702cb6ccfbd7cd99c';recovery_evidence_created_at_prepared_revision_zero=$true;recovery_evidence_readback_before_atomic_barrier=$true;evidence_before_candidate_workspace=$true;evidence_survives_atomic_starting_normalization=$true;evidence_survives_live_moved_normalization=$true;prepared_tamper_fail_closed=$true;parent_journal_aware_matrix_replayed=$true;hard_disabled_candidate_unchanged=$true;production_main_changed=$false;production_mutation_authority=$false}|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'EVIDENCE_BOUND_JOURNAL_ATOMIC_IMMUTABILITY_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-evidence-bound-journal-atomic-v010-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1
+            validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/test_custom_app_production_evidence_bound_journal_atomic.ps1
+            validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/ci-evidence.json
+          if-no-files-found: error
