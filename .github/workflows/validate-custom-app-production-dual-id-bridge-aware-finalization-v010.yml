@@ -1,0 +1,116 @@
+name: Validate Custom App Production Dual-ID Bridge-Aware Finalization v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-dual-id-bridge-aware-finalization-v010.yml'
+  pull_request:
+    branches: [validate/custom-app-production-clean-dual-id-restart-bridge-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-dual-id-bridge-aware-finalization-v010.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 420
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope lineage pins zero-authority and launcher boundary
+        shell: powershell
+        run: |
+          $head=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($head-cne$expected){throw "head mismatch $head != $expected"}
+          $base='2d46886f2dcaf28617e2aaae7bdeca1339fea4a9';if((git merge-base $base HEAD).Trim()-cne$base){throw 'not descended from exact clean dual-id restart validation head'}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $core='validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/custom-app-production-dual-id-bridge-aware-finalization.ps1';$test='validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/test_custom_app_production_dual_id_bridge_aware_finalization.ps1';$wf='.github/workflows/validate-custom-app-production-dual-id-bridge-aware-finalization-v010.yml'
+          $changed=@(git diff --name-only "$base...HEAD");$allowed=@($core,$test,$wf);$bad=@($changed|Where-Object{$_-notin$allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($p in $allowed){if($p-notin$changed){throw "missing changed surface $p"}}
+          if((git hash-object $core).Trim()-cne'6706aa554ca6f3fd7471b612c6017abd9c2c53b8'){throw 'bridge-aware finalization core drift'}
+          if((git hash-object $test).Trim()-cne'f477320f2a9c24a0d4624fc42088adddb4fb5249'){throw 'bridge-aware finalization test drift'}
+          foreach($p in @($core,$test)){$tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors);if($errors.Count){$errors|ForEach-Object{Write-Error $_};throw "PS5.1 parse failed $p"}}
+          $raw=Get-Content $core -Raw;foreach($m in @('permit_transaction_id','journal_transaction_id','forward_continuity_uses_permit_id','crash_recovery_uses_journal_id','candidate-live','transaction-finalized','same-app-newer-consumption','requires_recovery_if_post_cleanup_validation_fails')){if($raw.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "core marker missing $m"}}
+          foreach($badToken in @('Invoke-WebRequest','Invoke-RestMethod','Start-Process','System.Diagnostics.Process','launch-managed.vbs','Spotify-Managed-DomainVPN.vbs','CreateShortcut','TargetPath','WorkingDirectory =')){if($raw.IndexOf($badToken,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "forbidden core surface $badToken"}}
+          if($raw-match'result_is_authority\s*=\s*\$true|execution_authorized\s*=\s*\$true|finalization_authorized\s*=\s*\$true|spicetify_apply_authorized\s*=\s*\$true|cleanup_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'authority escaped in bridge-aware finalization core'}
+          'DUAL_ID_BRIDGE_AWARE_FINALIZATION_SCOPE_PARSE_AUTHORITY_PASS'
+
+      - name: Materialize exact qualified dependencies and monotonic recovery executor
+        shell: powershell
+        run: |
+          $deps=@(
+            @('13f4314b81816b1b1c3bb3c2fb4280b6c015f8de','validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1','f8c91f5a566b24c82257742942bdc6fecfe68eb2'),
+            @('13f4314b81816b1b1c3bb3c2fb4280b6c015f8de','validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1','83156d9c14e40061a0728d28b582c1e65684a4a2'),
+            @('c420a1df6f306c7ba74772b91241cb14abd04738','validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','e2f2fc656235883d2a82b106289973f6ded409a5'),
+            @('57be1dcd10e339e9da2b8f15b9910a2ae1b79c1b','validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1','86c715370021cc1f09c46424172e2163ad56f236'),
+            @('1a2461a6929e9cabd50d27f95e0744f83443b9e8','validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1','47b4d4bb08fe7b14ad43de4300556430eb638869'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+            @('b266bad660d4b7bc87e7093c5b12f0cff1dc466f','validation/custom-app-production-recovery-plan-contract-v0.1.0/custom-app-production-recovery-plan.ps1','ae49409973164052d5830b981d804707f9d62b6c'),
+            @('ffb5aad4a605691ee7b80392498b0cb6fa4e4052','validation/custom-app-production-recovery-preflight-v0.1.0/custom-app-production-recovery-preflight.ps1','b1816a24849a559b4da2537aa1b2436124fbee50'),
+            @('ffb5aad4a605691ee7b80392498b0cb6fa4e4052','validation/custom-app-production-recovery-execution-admission-v0.1.0/custom-app-production-recovery-execution-admission.ps1','e8804a7c53ad0d3e5420e037d468d9c397e52529'),
+            @('5232e5adeb13e6942acb210b3cd13058e1eaaf05','validation/custom-app-production-recovery-evidence-admission-integration-v0.1.0/custom-app-production-recovery-evidence-admission-integration.ps1','c92c727b5a2217f5b84a1072608bfc4662e68926'),
+            @('d3969a746ed1736fe93586bd025116c2526fbff5','validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/custom-app-production-recovery-cleanup-resume-admission.ps1','387d97b10d493b3794b24fba2bac67cf39491444'),
+            @('d9a1face71511bdaeeef4e8c761415ef9ec95fc0','validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','0273d7e28a56759b1d0ec9cbf037483b04d98d63'),
+            @('574fe182168271fa3497d58e269e9af1f60d9033','validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1','e91fa6a125f77352907c1119f6d9f47be9682550'),
+            @('e2b80822835bf5d59dc179e345e098b5bd79759e','validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/custom-app-production-atomic-live-swap-mutation.ps1','f568a26b123441161f11eb069e6f818b838cd851'),
+            @('fe07d410531ea13c8fca379b01405631a3763e84','validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1','f7372b069fbfe6a0f8d8a0aad45312ffd33d9f0a'),
+            @('c3e1f960447ba84d2410af9c37a22a384f2a5436','validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1','5fec613c460619da5dbfe88fca5c7334e9e93f76'),
+            @('11386815b91c71364fa7a67fabdc8c0386fbd982','validation/custom-app-production-recovery-restore-monotonic-time-v0.1.0/patch_recovery_restore_executor_monotonic_time.py','5d698f82aa60f56b1e90e4f5ad530a45879a31ab'),
+            @('115411ed1a16f66a168443fb03b6e164fd114c0d','validation/custom-app-production-dual-transaction-id-bridge-v0.1.0/custom-app-production-dual-transaction-id-bridge.ps1','ce018db8c13d569036ca378bbe3b4a2a84ab3bcd'),
+            @('234fef1e5c83395250ec97914579c55fee89cd21','validation/custom-app-production-dual-transaction-id-bridge-v0.1.0/test_custom_app_production_dual_transaction_id_bridge.ps1','1d0257aee38d0cc90d9a05d53caaf7c425bbcf96'),
+            @('408e24ce7f66d1f5f23025a196b19cd8a42fcda7','validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/custom-app-production-durable-dual-transaction-id-bridge-integration.ps1','c9a58a181d3c5f5a230fa895785c3a42a928c8cd'),
+            @('9adc2d3f327a59349cb42fa17ad8d601a3b02197','validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0/invoke_custom_app_production_evidence_bound_recovery_restart_worker.ps1','9c039860ff0645153205691a11e89d8eb844d43c'),
+            @('63bf08db57bb0a1c2b75adc1eb65aa43352c34e6','validation/custom-app-production-lightweight-dual-id-restart-bridge-v0.1.0/test_custom_app_production_lightweight_dual_id_restart_bridge.ps1','af4b611855453991d7d0455f5fcc5a23c2e2c83e'),
+            @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','79580da78443a18bd281d4fce61c4a57d958a196'),
+            @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),
+            @('c21a8c72dd8920df8e1faa59eb6aedee76a15e06','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'),
+            @('c21a8c72dd8920df8e1faa59eb6aedee76a15e06','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/test_custom_app_production_evidence_bound_journal_atomic.ps1','dad1028758e3f03aebd86a84adc5c1d26a37bee3'),
+            @('0c32a30cf61dc9f3e61725d30d5df1df9a73ef56','validation/custom-app-production-recovery-aware-permit-transaction-finalization-v0.1.0/custom-app-production-recovery-aware-permit-transaction-finalization.ps1','9c725e47d432addac24fe4a6cd59e37af393b6c7')
+          )
+          foreach($d in $deps){git cat-file -e "$($d[0])^{commit}" 2>$null;if($LASTEXITCODE){git fetch --no-tags origin $d[0]|Out-Null;if($LASTEXITCODE){throw "dependency fetch failed $($d[0])"}};$out=Join-Path $PWD $d[1];New-Item -ItemType Directory -Force -Path (Split-Path $out -Parent)|Out-Null;$env:DBAF_SRC="$($d[0])`:$($d[1])";$env:DBAF_OUT=$out;python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['DBAF_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['DBAF_SRC']]))";if($LASTEXITCODE){throw "materialize failed $($d[1])"};if((git hash-object $out).Trim()-cne$d[2]){throw "materialized blob drift $($d[1])"}}
+          $restore='validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1';$patcher='validation/custom-app-production-recovery-restore-monotonic-time-v0.1.0/patch_recovery_restore_executor_monotonic_time.py';$patched=Join-Path $env:RUNNER_TEMP 'dbaf-monotonic-restore.ps1';python $patcher --source $restore --output $patched;if($LASTEXITCODE){throw 'monotonic recovery patch failed'};$sha=(Get-FileHash $patched -Algorithm SHA256).Hash.ToLowerInvariant();if($sha-cne'1fa0f849682d4f8cbc37c35dc1474fc436a75ada064fa4912ae6951d4968aff3'){throw "patched recovery SHA drift $sha"};Copy-Item $patched $restore -Force
+          'DUAL_ID_BRIDGE_AWARE_FINALIZATION_DEPENDENCIES_MONOTONIC_PASS'
+
+      - name: Run byte-real bridge-aware finalization matrix twice
+        shell: powershell
+        timeout-minutes: 300
+        run: |
+          $outer=$env:RUNNER_TEMP;$test='validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/test_custom_app_production_dual_id_bridge_aware_finalization.ps1'
+          1..2|ForEach-Object{$pass=[int]$_;$r=Join-Path $outer ('dbaf-pass-'+$pass+'-'+[Guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Force -Path $r|Out-Null;$code=0;try{$env:RUNNER_TEMP=$r;$env:TEMP=$r;$env:TMP=$r;Write-Host "DBAF_ISOLATED_ROOT pass=$pass root=$r";& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test;$code=$LASTEXITCODE}finally{$env:RUNNER_TEMP=$outer;$env:TEMP=$outer;$env:TMP=$outer};if($code){throw "bridge-aware finalization matrix failed pass $pass"}}
+          'DUAL_ID_BRIDGE_AWARE_FINALIZATION_MATRIX_REPEAT_PASS'
+
+      - name: Rebuild exact hard-disabled candidate and run Addon Manager SelfTest
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'candidate rebuild failed'}
+          $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json";$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant()
+          if((Get-Item $a).Length-ne1382213-or$ah-cne'c2e5ffd4fe9b14b5c31dd53e7d093bd9b5db2a4ad49fa19449d299e3c14fac2f'){throw 'Addon Manager candidate drift'}
+          if((Get-Item $m).Length-ne284327-or$mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate drift'}
+          if($rh-cne'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw 'candidate report drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'dbaf-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'Addon Manager SelfTest failed'}
+          'DUAL_ID_BRIDGE_AWARE_FINALIZATION_HARD_DISABLED_SELFTEST_PASS'
+
+      - name: Prove protected surfaces and write evidence
+        shell: powershell
+        run: |
+          $base='2d46886f2dcaf28617e2aaae7bdeca1339fea4a9';if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          foreach($p in @('manifest.json','stable-version.json','addon-policy-registry.json','bin/spotify-control.ps1','bin/addon-manager.ps1','bin/spotify-control-agent.vbs')){git diff --quiet $base HEAD -- $p;if($LASTEXITCODE){throw "protected managed payload changed $p"}}
+          $changed=@(git diff --name-only "$base...HEAD");foreach($p in $changed){if($p-match'(?i)(\.lnk$|launch-managed\.vbs|domainvpn|launchers[/\\])'){throw "launcher/domainvpn boundary escaped: $p"}}
+          $out=Join-Path $env:RUNNER_TEMP 'dbaf-evidence';New-Item -ItemType Directory -Force -Path $out|Out-Null
+          [pscustomobject]@{schema=1;managed_by='custom-app-production-dual-id-bridge-aware-finalization-validation-v1';head=(git rev-parse HEAD).Trim();base=$base;production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2';core_blob='6706aa554ca6f3fd7471b612c6017abd9c2c53b8';test_blob='f477320f2a9c24a0d4624fc42088adddb4fb5249';durable_bridge_head='408e24ce7f66d1f5f23025a196b19cd8a42fcda7';atomic_head='c21a8c72dd8920df8e1faa59eb6aedee76a15e06';legacy_finalization_semantics_head='0c32a30cf61dc9f3e61725d30d5df1df9a73ef56';permit_id_forward_only=$true;journal_id_recovery_only=$true;transaction_finalized_journal_bound=$true;post_cleanup_failure_requires_recovery=$true;matrix_cases=7;matrix_repetitions=2;hard_disabled_candidate_unchanged=$true;managed_payload_changed=$false;launcher_or_shortcut_changed=$false;domainvpn_wrapper_changed=$false;production_main_changed=$false;production_mutation_authority=$false;validated_at=[DateTimeOffset]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $out 'dual-id-bridge-aware-finalization-validation.json') -Encoding UTF8
+          'DUAL_ID_BRIDGE_AWARE_FINALIZATION_PROTECTED_SURFACES_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-dual-id-bridge-aware-finalization-v010-${{ github.run_id }}
+          path: ${{ runner.temp }}/dbaf-evidence/dual-id-bridge-aware-finalization-validation.json
+          if-no-files-found: error
+          retention-days: 14
