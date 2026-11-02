@@ -47,7 +47,7 @@ jobs:
           foreach($x in $allowed){if($x -notin $changed){throw "missing changed surface $x"}}
           $pins=@(
             @($h,'validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0/invoke_custom_app_production_evidence_bound_recovery_restart_worker.ps1','9c039860ff0645153205691a11e89d8eb844d43c'),
-            @($h,'validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0/test_custom_app_production_evidence_bound_recovery_restart.ps1','b724f58d82d9b70c36309d909b22eb1c681893b9'),
+            @($h,'validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0/test_custom_app_production_evidence_bound_recovery_restart.ps1','9101560ab7d5d169ca4668be441671a3cbdaf551'),
             @($base,'validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'),
             @($base,'validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/test_custom_app_production_evidence_bound_journal_atomic.ps1','dad1028758e3f03aebd86a84adc5c1d26a37bee3'),
             @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','79580da78443a18bd281d4fce61c4a57d958a196'),
@@ -99,7 +99,7 @@ jobs:
             if($commands -contains $x){throw "worker directly invokes forbidden primitive $x"}
           }
           $tt=Get-Content $test -Raw
-          foreach($m in @('after-live-move-before-journal','first-rename-complete-unjournaled','live-moved-to-old','candidate-live','Write-Host $line','bootstrap_dependency_count -eq 22','did not execute in a distinct process','recovery apply did not observe restored old live state')){
+          foreach($m in @('after-live-move-before-journal','first-rename-complete-unjournaled','live-moved-to-old','candidate-live','Write-Host $line','bootstrap_dependency_count -eq 22','did not execute in a distinct process','recovery apply did not observe restored old live state','ER_RESTART_WORKER_DIAGNOSTIC')){
             if($tt.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "test coverage marker missing $m"}
           }
           if(([regex]::Matches($tt,'Invoke-ERCrossProcessRestartV010 -Fixture')).Count -ne 2){throw 'expected exactly two cross-process restart scenarios'}
@@ -163,7 +163,7 @@ jobs:
             Copy-Item -LiteralPath (Join-Path $src 'validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0/invoke_custom_app_production_evidence_bound_recovery_restart_worker.ps1') -Destination $new
             Copy-Item -LiteralPath (Join-Path $src 'validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0/test_custom_app_production_evidence_bound_recovery_restart.ps1') -Destination $new
             if((git hash-object (Join-Path $new 'invoke_custom_app_production_evidence_bound_recovery_restart_worker.ps1')).Trim() -cne '9c039860ff0645153205691a11e89d8eb844d43c'){throw 'restart worker drift'}
-            if((git hash-object (Join-Path $new 'test_custom_app_production_evidence_bound_recovery_restart.ps1')).Trim() -cne 'b724f58d82d9b70c36309d909b22eb1c681893b9'){throw 'restart test drift'}
+            if((git hash-object (Join-Path $new 'test_custom_app_production_evidence_bound_recovery_restart.ps1')).Trim() -cne '9101560ab7d5d169ca4668be441671a3cbdaf551'){throw 'restart test drift'}
             $env:TEMP=$env:RUNNER_TEMP;$env:TMP=$env:RUNNER_TEMP
             1..2|ForEach-Object{
               & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $new 'test_custom_app_production_evidence_bound_recovery_restart.ps1')
@@ -211,7 +211,7 @@ jobs:
             recovery_evidence_head='993af44afee9adb0c28e5fb702cb6ccfbd7cd99c'
             restore_resume_admission_head='d9a1face71511bdaeeef4e8c761415ef9ec95fc0'
             restore_executor_head='c3e1f960447ba84d2410af9c37a22a384f2a5436'
-            worker_blob='9c039860ff0645153205691a11e89d8eb844d43c';test_blob='b724f58d82d9b70c36309d909b22eb1c681893b9'
+            worker_blob='9c039860ff0645153205691a11e89d8eb844d43c';test_blob='9101560ab7d5d169ca4668be441671a3cbdaf551'
             cross_process_restart_cases=2;matrix_repetitions=2;bootstrap_dependency_count=22
             bounded_child_host_shims=$true;independent_bootstrap_inventory=$true;hard_disabled_candidate_verified=$true;production_wiring_changed=$false
             generated_at=[DateTimeOffset]::UtcNow.ToString('o')
