@@ -43,12 +43,25 @@ jobs:
             @('validation/custom-app-production-recovery-restore-executor-v0.1.0/test_custom_app_production_recovery_restore_executor.ps1','5f925d804a3561167f7d8b388a79239eee61fa3d'),
             @('validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','79580da78443a18bd281d4fce61c4a57d958a196'),
             @('validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),
-            @('validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
             @('validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
             @('validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1','f7372b069fbfe6a0f8d8a0aad45312ffd33d9f0a')
           )
           foreach($p in $pins){$b=(git rev-parse "HEAD`:$($p[0])").Trim();if($b -cne $p[1]){throw "pin drift $($p[0]) $b != $($p[1])"}}
+          $eHead='993af44afee9adb0c28e5fb702cb6ccfbd7cd99c';$ePath='validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1';$eBlob='910b1c500d33d6d6e0ad403c701f4c08f473f1a3'
+          git fetch --no-tags origin validate/custom-app-production-recovery-evidence-envelope-v0.1.0 | Out-Null;if($LASTEXITCODE){throw 'recovery evidence fetch failed'};if((git rev-parse FETCH_HEAD).Trim() -cne $eHead){throw 'recovery evidence branch head drift'}
+          $actual=(git rev-parse "$eHead`:$ePath").Trim();if($actual -cne $eBlob){throw "recovery evidence exact blob drift $actual != $eBlob"}
           'RESTART_RESTORE_SCOPE_LINEAGE_PINS_PASS'
+
+      - name: Materialize exact recovery evidence dependency
+        shell: powershell
+        run: |
+          $head='993af44afee9adb0c28e5fb702cb6ccfbd7cd99c';$path='validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1';$blob='910b1c500d33d6d6e0ad403c701f4c08f473f1a3'
+          New-Item -ItemType Directory -Force -Path (Split-Path $path -Parent)|Out-Null
+          $env:RRI_SPEC="$head`:$path";$env:RRI_OUT=$path
+          python -c "import os,subprocess,pathlib; pathlib.Path(os.environ['RRI_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['RRI_SPEC']]))"
+          if($LASTEXITCODE){throw 'recovery evidence materialization failed'}
+          $actual=(git hash-object $path).Trim();if($actual -cne $blob){throw "materialized recovery evidence blob drift $actual != $blob"}
+          'RESTART_RESTORE_RECOVERY_EVIDENCE_MATERIALIZATION_PASS'
 
       - name: Parse and audit process-boundary recovery contract
         shell: powershell
@@ -92,7 +105,7 @@ jobs:
           $base='c21a8c72dd8920df8e1faa59eb6aedee76a15e06';$expected=@('.github/workflows/validate-custom-app-production-restart-restore-integration-v010.yml','validation/custom-app-production-restart-restore-integration-v0.1.0/test_custom_app_production_restart_restore_integration.ps1');$changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "unexpected changed surface $($bad -join ', ')"}
           foreach($x in @('manifest.json','stable-version.json','addon-policy-registry.json','validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1','validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1')){git diff --quiet $base HEAD -- $x;if($LASTEXITCODE){throw "protected changed $x"}}
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
-          $e=[ordered]@{schema=1;kind='custom-app-production-restart-restore-integration';head=(git rev-parse HEAD).Trim();base=$base;production_main=(git rev-parse origin/main).Trim();integration_test_blob=(git hash-object 'validation/custom-app-production-restart-restore-integration-v0.1.0/test_custom_app_production_restart_restore_integration.ps1').Trim();evidence_bound_atomic_head='c21a8c72dd8920df8e1faa59eb6aedee76a15e06';restore_resume_admission_head='d9a1face71511bdaeeef4e8c761415ef9ec95fc0';restore_executor_head='c3e1f960447ba84d2410af9c37a22a384f2a5436';process_boundary_restart=$true;production_mutation=$false;managed_entrypoint_changed=$false;domainvpn_wrapper_changed=$false}
+          $e=[ordered]@{schema=1;kind='custom-app-production-restart-restore-integration';head=(git rev-parse HEAD).Trim();base=$base;production_main=(git rev-parse origin/main).Trim();integration_test_blob=(git hash-object 'validation/custom-app-production-restart-restore-integration-v0.1.0/test_custom_app_production_restart_restore_integration.ps1').Trim();recovery_evidence_blob=(git hash-object 'validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1').Trim();evidence_bound_atomic_head='c21a8c72dd8920df8e1faa59eb6aedee76a15e06';restore_resume_admission_head='d9a1face71511bdaeeef4e8c761415ef9ec95fc0';restore_executor_head='c3e1f960447ba84d2410af9c37a22a384f2a5436';process_boundary_restart=$true;production_mutation=$false;managed_entrypoint_changed=$false;domainvpn_wrapper_changed=$false}
           $e|ConvertTo-Json -Depth 10|Set-Content -LiteralPath 'restart-restore-validation-evidence.json' -Encoding UTF8
           'RESTART_RESTORE_PROTECTED_SURFACES_PASS'
 
