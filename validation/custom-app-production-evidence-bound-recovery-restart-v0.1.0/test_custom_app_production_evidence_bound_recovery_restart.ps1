@@ -69,12 +69,14 @@ function Invoke-ERCrossProcessRestartV010 {
     [IO.File]::WriteAllText($statePath,($state|ConvertTo-Json -Depth 20),[Text.UTF8Encoding]::new($false))
     $childOutput=& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $worker -StatePath $statePath -ResultPath $resultPath 2>&1
     $childExit=$LASTEXITCODE
-    foreach($line in @($childOutput)){Write-Output $line}
+    foreach($line in @($childOutput)){Write-Host $line}
     Assert-ERTrueV010 (Test-Path -LiteralPath $resultPath -PathType Leaf) "$Label worker result missing"
     $result=Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
     if($childExit -ne 0){throw "$Label cross-process worker failed exit=$childExit error=$([string]$result.error)"}
     Assert-ERTrueV010 ([bool]$result.success) "$Label worker success flag false: $([string]$result.error)"
     Assert-ERTrueV010 ([int]$result.process_id -ne $PID) "$Label did not execute in a distinct process"
+    Assert-ERTrueV010 ([bool]$result.bootstrap_dependencies_verified) "$Label bootstrap dependency inventory was not verified"
+    Assert-ERTrueV010 ([int]$result.bootstrap_dependency_count -eq 22) "$Label bootstrap dependency count"
     Assert-EREqV010 $result.transaction_id $TransactionId "$Label transaction id"
     Assert-ERTrueV010 ([bool]$result.admission_ok) "$Label admission failed"
     Assert-EREqV010 $result.admission_phase $ExpectedStartPhase "$Label admission phase"
