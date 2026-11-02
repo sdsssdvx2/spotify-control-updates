@@ -2,6 +2,7 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $root 'validation/custom-app-production-dual-id-bridge-aware-finalization-v0.1.0/test_custom_app_production_dual_id_bridge_aware_finalization.ps1')
+. (Join-Path $root 'validation/custom-app-remote-binding-observer-v0.4.0/custom-app-remote-binding-state.ps1')
 . (Join-Path $root 'validation/custom-app-production-post-swap-apply-admission-v0.1.0/custom-app-production-post-swap-apply-admission.ps1')
 . (Join-Path $PSScriptRoot 'custom-app-production-dual-id-bridge-aware-post-swap-apply-admission.ps1')
 
@@ -103,4 +104,4 @@ $count++
 $fp=Copy-DBAP $r.decision;$fp.admission_fingerprint=('f'*64);$fc=Test-CustomAppProductionDualIdBridgeAwarePostSwapApplyAdmissionDecisionV010 $fp;Assert-DBAPFalse ([bool]$fc.ok) 'decision fingerprint tamper accepted';$count++
 
 if($count-ne10){throw "dual-ID post-swap admission matrix count mismatch $count"}
-Write-Output "CUSTOM_APP_PRODUCTION_DUAL_ID_BRIDGE_AWARE_POST_SWAP_APPLY_ADMISSION_PASS cases=$count byte_real=true fresh_remote_observation=true explicit_ephemeral_session_key=true real_permit_hmac=true durable_ledger=true journal_id_separate=true zero_authority=true"
+Write-Output "CUSTOM_APP_PRODUCTION_DUAL_ID_BRIDGE_AWARE_POST_SWAP_APPLY_ADMISSION_PASS cases=$count byte_real=true remote_binding_v040_pinned=true fresh_remote_observation=true explicit_ephemeral_session_key=true real_permit_hmac=true durable_ledger=true journal_id_separate=true zero_authority=true"
