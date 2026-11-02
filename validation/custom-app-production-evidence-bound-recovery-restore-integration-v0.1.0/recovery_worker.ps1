@@ -7,13 +7,11 @@ Set-StrictMode -Version 2.0
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $state=(Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json)
 
-# Load the exact validated dependency chain without importing test harness side effects.
-. (Join-Path $root 'validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1')
-. (Join-Path $root 'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1')
-. (Join-Path $root 'validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1')
-. (Join-Path $root 'validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1')
-. (Join-Path $root 'validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/custom-app-production-recovery-cleanup-resume-admission.ps1')
-. (Join-Path $root 'validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1')
+# The exact #156 test harness is used only as a dependency loader/regression replay in
+# this isolated validation worker. It recursively loads the complete historical
+# recovery-plan/preflight/evidence/runtime dependency graph without inventing a new
+# production loader. The actual recovery below uses the #156/#157 core functions.
+. (Join-Path $root 'validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/test_custom_app_production_recovery_restore_resume_admission.ps1')
 . (Join-Path $root 'validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1')
 . (Join-Path $root 'validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1')
 . (Join-Path $root 'validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1')
@@ -53,6 +51,7 @@ if(([string]$evidence.evidence_fingerprint).Trim().ToLowerInvariant() -cne ([str
 
 $out=[pscustomobject]@{
     ok=$true
+    worker_pid=[int]$PID
     initial_phase=[string]$admission.receipt.phase
     initial_live_state=[string]$admission.receipt.live_state
     initial_transaction_status=[string]$admission.receipt.transaction_status
