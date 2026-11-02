@@ -26,7 +26,7 @@ $journal=Get-EBJournalV010 $fixture 'restart-seed'
 Assert-SeedTrue ([bool]$journal.ok) 'restart seed journal unreadable after normalization'
 Assert-SeedEq $journal.entry.phase 'live-moved-to-old' 'restart seed durable journal phase'
 $tx=([string]$journal.transaction_id).Trim().ToLowerInvariant()
-$evidence=Get-EBEvidenceV010 $fixture 'restart-seed' $tx
+$evidence=Read-CustomAppProductionRecoveryEvidenceV010 -AllowedRoot (Get-EBTrustRootV010) -StoreDirectory (Get-EBStoreV010 $fixture 'restart-seed') -ExpectedTransactionId $tx
 Assert-SeedTrue ([bool]$evidence.ok) ('restart seed evidence unreadable: '+[string]$evidence.reason)
 
 $prepared=$fixture.prepared.result
