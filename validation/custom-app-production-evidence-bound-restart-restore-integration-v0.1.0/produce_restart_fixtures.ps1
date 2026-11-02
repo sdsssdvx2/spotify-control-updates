@@ -18,6 +18,7 @@ function Write-EBRRHandoffV010 {
         [Parameter(Mandatory=$true)]$Fixture,
         [Parameter(Mandatory=$true)][string]$Label,
         [Parameter(Mandatory=$true)][string]$ExpectedPhase,
+        [Parameter(Mandatory=$true)][string]$TransactionRoot,
         [Parameter(Mandatory=$true)][string]$FileName
     )
     $jr=Get-EBJournalV010 -Fixture $Fixture -Label $Label
@@ -25,6 +26,11 @@ function Write-EBRRHandoffV010 {
     Assert-EBRREq ([string]$jr.entry.phase) $ExpectedPhase "$Label durable phase"
     $ev=Get-EBEvidenceV010 -Fixture $Fixture -Label $Label -TransactionId ([string]$jr.transaction_id)
     Assert-EBRRTrue ([bool]$ev.ok) "$Label evidence unreadable: $([string]$ev.reason)"
+    $txn=[IO.Path]::GetFullPath($TransactionRoot).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+    Assert-EBRRTrue (Test-Path -LiteralPath $txn -PathType Container) "$Label transaction root missing before handoff"
+    $liveParent=[IO.Path]::GetDirectoryName([IO.Path]::GetFullPath([string]$Fixture.q.x.live))
+    Assert-EBRREq ([IO.Path]::GetDirectoryName($txn)) $liveParent "$Label transaction root parent"
+    Assert-EBRRTrue ([IO.Path]::GetFileName($txn) -cmatch '^\.spotify-control-txn-[0-9a-f]{32}$') "$Label transaction root name invalid"
     $p=$Fixture.prepared.result
     $state=[ordered]@{
         schema=1
@@ -46,7 +52,7 @@ function Write-EBRRHandoffV010 {
         consumption_id=([string]$p.consumption_id).Trim().ToLowerInvariant()
         preparation_fingerprint=([string]$p.preparation_fingerprint).Trim().ToLowerInvariant()
         live_path=[string]$Fixture.q.x.live
-        transaction_root=[string]$jr.entry.identity.transaction_root
+        transaction_root=$txn
         stage_workspace_path=[string]$p.stage_workspace_path
         stage_path=[string]$p.stage_path
         stage_tree_sha256=([string]$p.stage_tree_sha256).Trim().ToLowerInvariant()
@@ -73,6 +79,8 @@ $firstResult=Invoke-EBFixtureV010 -Fixture $first -Nonce 'f1f1f1f1f1f1f1f1f1f1f1
 Assert-EBRRTrue (-not [bool]$firstResult.ok) 'first-rename crash unexpectedly succeeded'
 Assert-EBRRTrue ([bool]$firstResult.live_move_started) 'first-rename crash did not perform live rename'
 Assert-EBRRTrue ([bool]$firstResult.recovery_evidence_persisted) 'first-rename crash lost durable recovery evidence'
+$firstTxn=Get-EBTransactionRootV010 $firstResult
+Assert-EBRRTrue (-not [string]::IsNullOrWhiteSpace($firstTxn)) 'first-rename result lost transaction root'
 $inspectArgs=Get-EBInspectionArgsV010 -Fixture $first -Label $firstLabel
 $inspection=Resolve-CustomAppProductionJournalAwareAtomicStartingInspectionV010 @inspectArgs
 Assert-EBRRTrue ([bool]$inspection.ok) "first-rename inspection denied: $([string]$inspection.reason)"
@@ -80,7 +88,7 @@ Assert-EBRREq ([string]$inspection.receipt.state) 'first-rename-complete-unjourn
 $repair=Invoke-CustomAppProductionJournalAwareAtomicStartingRepairV010 @inspectArgs -Now ([DateTimeOffset]::UtcNow.AddMinutes(-1))
 Assert-EBRRTrue ([bool]$repair.ok) "first-rename normalization denied: $([string]$repair.reason)"
 Assert-EBRREq ([string]$repair.phase) 'live-moved-to-old' 'first-rename normalized phase'
-$firstPath=Write-EBRRHandoffV010 -Fixture $first -Label $firstLabel -ExpectedPhase 'live-moved-to-old' -FileName 'restart-first-rename.json'
+$firstPath=Write-EBRRHandoffV010 -Fixture $first -Label $firstLabel -ExpectedPhase 'live-moved-to-old' -TransactionRoot $firstTxn -FileName 'restart-first-rename.json'
 
 # Case 2: the evidence-bound atomic step reached candidate-live and then the owning process died
 # before transaction finalization/apply. Leave the exact live candidate + old-live transaction tree
@@ -91,6 +99,8 @@ $candidateResult=Invoke-EBFixtureV010 -Fixture $candidate -Nonce 'f2f2f2f2f2f2f2
 Assert-EBRRTrue ([bool]$candidateResult.ok) "candidate-live production denied: $([string]$candidateResult.reason)"
 Assert-EBRRTrue ([bool]$candidateResult.result.recovery_evidence_persisted) 'candidate-live durable evidence flag false'
 Assert-EBRRTrue ([bool]$candidateResult.result.recovery_evidence_bound_before_atomic_barrier) 'candidate-live evidence ordering flag false'
-$candidatePath=Write-EBRRHandoffV010 -Fixture $candidate -Label $candidateLabel -ExpectedPhase 'candidate-live' -FileName 'restart-candidate-live.json'
+$candidateTxn=Get-EBTransactionRootV010 $candidateResult
+Assert-EBRRTrue (-not [string]::IsNullOrWhiteSpace($candidateTxn)) 'candidate-live result lost transaction root'
+$candidatePath=Write-EBRRHandoffV010 -Fixture $candidate -Label $candidateLabel -ExpectedPhase 'candidate-live' -TransactionRoot $candidateTxn -FileName 'restart-candidate-live.json'
 
 Write-Output "CUSTOM_APP_PRODUCTION_EVIDENCE_BOUND_RESTART_FIXTURE_PASS first=$firstPath candidate=$candidatePath producer_pid=$PID"
