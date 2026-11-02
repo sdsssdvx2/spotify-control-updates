@@ -49,7 +49,7 @@ function New-DTIBJournalV010 {
     [pscustomobject]@{ok=$true;reason='fixture-journal';transaction_id=$tx;revision=3;entry=[pscustomobject]@{phase=$phase;entry_sha256=$script:JournalEntrySha}}
 }
 function New-DTIBEvidenceV010 {
-    $fp=$(if($script:DTIBMode -ceq 'evidence-fingerprint-drift'){('dd'*32)}else{$script:EvidenceFp})
+    $fp=$(if($script:DTIBMode -ceq 'evidence-fingerprint-drift'){('de'*32)}else{$script:EvidenceFp})
     $commit=$(if($script:DTIBMode -ceq 'prepared-evidence-drift'){('f'*40)}else{$script:Commit})
     $app=$(if($script:DTIBMode -ceq 'path-drift'){'C:\fixture\other-app-backup'}else{$script:AppBackup})
     [pscustomobject]@{
