@@ -38,6 +38,12 @@ function Test-CustomAppProductionRealPcRecoveryDispatcherNoReparseV010 {
         return (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0)
     }catch{return $false}
 }
+function Get-CustomAppProductionRealPcRecoveryDispatcherSafeReasonV010 {
+    param([AllowNull()]$Value,[string]$NullReason='null',[string]$MissingReason='reason-missing')
+    if($null-eq$Value){return $NullReason}
+    if($Value.PSObject.Properties['reason']){return [string]$Value.reason}
+    return $MissingReason
+}
 function New-CustomAppProductionRealPcRecoveryDispatcherDeniedV010 {
     param([Parameter(Mandatory=$true)][string]$Reason,[bool]$ExecutorInvoked=$false,[AllowNull()]$GenericResult=$null)
     return [pscustomobject]@{
@@ -121,8 +127,8 @@ function Invoke-CustomAppProductionRealPcRecoveryDispatcherV010 {
     $matches=@($roots|Where-Object{$liveParent.Equals($_,[StringComparison]::OrdinalIgnoreCase)})
     if($matches.Count-ne1 -or -not (Test-CustomAppProductionRealPcRecoveryDispatcherNoReparseV010 -Path ([string]$matches[0])) -or -not (Test-CustomAppProductionRealPcRecoveryDispatcherNoReparseV010 -Path $live -RequireExisting:$false)){return & $deny 'real-pc-recovery-live-path-not-bound-to-safe-spicetify-root'}
     $routing=Resolve-CustomAppProductionRecoveryRoutingAdmissionV010 -AllowedRoot $profile -StoreDirectory $store -ExpectedTransactionId $tx -Now $Now
-    if($null-eq$routing -or -not [bool]$routing.ok -or $null-eq$routing.receipt){return & $deny ('real-pc-recovery-routing-denied:'+[string]$routing.reason)}
-    $rc=Test-CustomAppProductionRecoveryRoutingAdmissionReceiptV010 -Receipt $routing.receipt -Now $Now;if($null-eq$rc -or -not [bool]$rc.ok){return & $deny ('real-pc-recovery-routing-invalid:'+[string]$rc.reason)}
+    if($null-eq$routing -or -not [bool]$routing.ok -or $null-eq$routing.receipt){return & $deny ('real-pc-recovery-routing-denied:'+(Get-CustomAppProductionRealPcRecoveryDispatcherSafeReasonV010 $routing))}
+    $rc=Test-CustomAppProductionRecoveryRoutingAdmissionReceiptV010 -Receipt $routing.receipt -Now $Now;if($null-eq$rc -or -not [bool]$rc.ok){return & $deny ('real-pc-recovery-routing-invalid:'+(Get-CustomAppProductionRealPcRecoveryDispatcherSafeReasonV010 $rc))}
     foreach($f in @('routing_is_authority','execution_authorized','restore_authorized','apply_authorized','cleanup_authorized','permit_issued','production_mutation_authorized')){if([bool]$routing.receipt.$f){return & $deny ('real-pc-recovery-routing-authority-drift-'+$f)}}
     if([int64]$routing.receipt.journal_revision-ne[int64]$pre.revision -or ([string]$routing.receipt.journal_entry_sha256).Trim().ToLowerInvariant()-cne([string]$pre.entry.entry_sha256).Trim().ToLowerInvariant()){return & $deny 'real-pc-recovery-routing-stale-vs-pre-read'}
     if([bool]$routing.receipt.requires_manual_resolution){return & $deny ('real-pc-recovery-manual-resolution-required:'+[string]$routing.receipt.route)}
@@ -133,14 +139,14 @@ function Invoke-CustomAppProductionRealPcRecoveryDispatcherV010 {
         try{$persist=Get-SpotifyPersistenceSnapshot -LocalAppDataRoot $local -AppDataRoot $app}catch{return & $deny ('real-pc-recovery-terminal-persistence-read-failed:'+[string]$_.Exception.Message)}
         if($null-eq$persist -or -not (Test-CustomAppProductionRealPcRecoveryDispatcherSha256V010 ([string]$persist.fingerprint))){return & $deny 'real-pc-recovery-terminal-persistence-invalid'}
         $result=New-CustomAppProductionRealPcRecoveryDispatcherResultV010 -Status 'real-pc-recovery-terminal-handoff-required' -Reason 'terminal-journal-reverified-no-executor-invoked' -TransactionId $tx -Name ([string]$e.name) -InitialPhase ([string]$e.phase) -Route ([string]$routing.receipt.route) -InitialJournalRevision ([int64]$pre.revision) -InitialJournalSha256 (([string]$pre.entry.entry_sha256).Trim().ToLowerInvariant()) -FinalPhase ([string]$e.phase) -FinalJournalRevision ([int64]$pre.revision) -FinalJournalSha256 (([string]$pre.entry.entry_sha256).Trim().ToLowerInvariant()) -GenericResultFingerprint $CustomAppProductionRealPcRecoveryDispatcherZeroHash -GenericFixtureContractVerified:$false -ExecutorInvoked:$false -SpicetifyPath $sp -SpicetifyExecutableSha256 $actualSha -LivePath $live -LiveTreeSha256 (([string]$liveBaseline.tree_sha256).Trim().ToLowerInvariant()) -PersistenceFingerprint (([string]$persist.fingerprint).Trim().ToLowerInvariant()) -TerminalHandoffRequired:$true -ArtifactRetirementRequired:([string]$e.phase-ceq'rollback-complete') -NewPermitReadinessRequired:$true
-        $check=Test-CustomAppProductionRealPcRecoveryDispatcherResultV010 -Result $result;if(-not [bool]$check.ok){return & $deny ('real-pc-recovery-terminal-self-invalid:'+[string]$check.reason)}
+        $check=Test-CustomAppProductionRealPcRecoveryDispatcherResultV010 -Result $result;if(-not [bool]$check.ok){return & $deny ('real-pc-recovery-terminal-self-invalid:'+(Get-CustomAppProductionRealPcRecoveryDispatcherSafeReasonV010 $check))}
         return [pscustomobject]@{ok=$true;reason=[string]$result.reason;result=$result;executor_invoked=$false;terminal_handoff_required=$true;production_mutation_authorized=$false}
     }
     if(-not ([bool]$routing.receipt.requires_bounded_recovery_executor -or [bool]$routing.receipt.requires_bounded_housekeeping)){return & $deny 'real-pc-recovery-route-not-executable-by-bounded-dispatcher'}
     $generic=Invoke-CustomAppProductionBoundedRecoveryExecutorV010 -AllowedRoot $profile -StoreDirectory $store -ExpectedTransactionId $tx -LocalAppDataRoot $local -AppDataRoot $app -SpicetifyAllowedRoot $spRoot -SpicetifyPath $sp -ExpectedSpicetifySha256 $actualSha -TimeoutSeconds $TimeoutSeconds -Now $Now
     if($null-eq$generic){return & $deny 'real-pc-recovery-bounded-executor-null' $true}
-    if(-not [bool]$generic.ok -or $null-eq$generic.result){return & $deny ('real-pc-recovery-bounded-executor-denied:'+[string]$generic.reason) $true $generic}
-    $gc=Test-CustomAppProductionBoundedRecoveryExecutorResultV010 -Result $generic.result;if($null-eq$gc -or -not [bool]$gc.ok -or -not [bool]$generic.result.fixture_only_contract){return & $deny ('real-pc-recovery-bounded-result-invalid:'+[string]$gc.reason) $true $generic}
+    if(-not [bool]$generic.ok -or $null-eq$generic.result){return & $deny ('real-pc-recovery-bounded-executor-denied:'+(Get-CustomAppProductionRealPcRecoveryDispatcherSafeReasonV010 $generic)) $true $generic}
+    $gc=Test-CustomAppProductionBoundedRecoveryExecutorResultV010 -Result $generic.result;if($null-eq$gc -or -not [bool]$gc.ok -or -not [bool]$generic.result.fixture_only_contract){return & $deny ('real-pc-recovery-bounded-result-invalid:'+(Get-CustomAppProductionRealPcRecoveryDispatcherSafeReasonV010 $gc)) $true $generic}
     try{$post=Read-CustomAppProductionCrashJournalV010 -AllowedRoot $profile -StoreDirectory $store}catch{return & $deny ('real-pc-recovery-post-journal-read-failed:'+[string]$_.Exception.Message) $true $generic}
     if($null-eq$post -or -not [bool]$post.ok -or ([string]$post.transaction_id).Trim().ToLowerInvariant()-cne$tx -or [string]$post.entry.phase-notin@('rollback-complete','committed-clean')){return & $deny 'real-pc-recovery-post-journal-not-terminal' $true $generic}
     if([int64]$post.revision-lt[int64]$pre.revision -or [string]$generic.result.final_phase-cne[string]$post.entry.phase -or [int64]$generic.result.journal_end_revision-ne[int64]$post.revision -or ([string]$generic.result.journal_end_sha256).Trim().ToLowerInvariant()-cne([string]$post.entry.entry_sha256).Trim().ToLowerInvariant()){return & $deny 'real-pc-recovery-post-journal-generic-continuity-drift' $true $generic}
@@ -150,6 +156,6 @@ function Invoke-CustomAppProductionRealPcRecoveryDispatcherV010 {
     if($null-eq$persistAfter -or ([string]$persistAfter.fingerprint).Trim().ToLowerInvariant()-cne([string]$generic.result.persistence_fingerprint).Trim().ToLowerInvariant()){return & $deny 'real-pc-recovery-post-persistence-drift' $true $generic}
     $status=if([string]$post.entry.phase-ceq'rollback-complete'){'real-pc-recovery-rollback-complete'}else{'real-pc-recovery-housekeeping-committed-clean'}
     $result=New-CustomAppProductionRealPcRecoveryDispatcherResultV010 -Status $status -Reason 'bounded-recovery-executor-completed-under-real-pc-attestation' -TransactionId $tx -Name ([string]$e.name) -InitialPhase ([string]$e.phase) -Route ([string]$routing.receipt.route) -InitialJournalRevision ([int64]$pre.revision) -InitialJournalSha256 (([string]$pre.entry.entry_sha256).Trim().ToLowerInvariant()) -FinalPhase ([string]$post.entry.phase) -FinalJournalRevision ([int64]$post.revision) -FinalJournalSha256 (([string]$post.entry.entry_sha256).Trim().ToLowerInvariant()) -GenericResultFingerprint (([string]$generic.result.result_fingerprint).Trim().ToLowerInvariant()) -GenericFixtureContractVerified:$true -ExecutorInvoked:$true -SpicetifyPath $sp -SpicetifyExecutableSha256 $actualSha -LivePath $live -LiveTreeSha256 (([string]$liveAfter.tree_sha256).Trim().ToLowerInvariant()) -PersistenceFingerprint (([string]$persistAfter.fingerprint).Trim().ToLowerInvariant()) -TerminalHandoffRequired:$true -ArtifactRetirementRequired:([string]$post.entry.phase-ceq'rollback-complete') -NewPermitReadinessRequired:$true
-    $check=Test-CustomAppProductionRealPcRecoveryDispatcherResultV010 -Result $result;if(-not [bool]$check.ok){return & $deny ('real-pc-recovery-self-invalid:'+[string]$check.reason) $true $generic}
+    $check=Test-CustomAppProductionRealPcRecoveryDispatcherResultV010 -Result $result;if(-not [bool]$check.ok){return & $deny ('real-pc-recovery-self-invalid:'+(Get-CustomAppProductionRealPcRecoveryDispatcherSafeReasonV010 $check)) $true $generic}
     return [pscustomobject]@{ok=$true;reason=[string]$result.reason;result=$result;executor_invoked=$true;terminal_handoff_required=$true;production_mutation_authorized=$false}
 }
