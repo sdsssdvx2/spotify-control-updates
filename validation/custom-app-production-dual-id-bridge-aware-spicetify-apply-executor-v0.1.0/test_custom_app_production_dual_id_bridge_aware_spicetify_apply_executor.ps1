@@ -5,10 +5,10 @@ $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $root 'validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1')
 . (Join-Path $PSScriptRoot 'custom-app-production-dual-id-bridge-aware-spicetify-apply-executor.ps1')
 
-function Assert-DBAXTrue([bool]$Value,[string]$Message){if(-not$Value){throw$Message}}
-function Assert-DBAXFalse([bool]$Value,[string]$Message){if($Value){throw$Message}}
-function Assert-DBAXEq($Actual,$Expected,[string]$Message){if([string]$Actual-cne[string]$Expected){throw"$Message actual=<$Actual> expected=<$Expected>"}}
-function Copy-DBAX($Value){return(($Value|ConvertTo-Json -Depth 80)|ConvertFrom-Json)}
+function Assert-DBAXTrue([bool]$Value,[string]$Message){if(-not$Value){throw $Message}}
+function Assert-DBAXFalse([bool]$Value,[string]$Message){if($Value){throw $Message}}
+function Assert-DBAXEq($Actual,$Expected,[string]$Message){if([string]$Actual-cne[string]$Expected){throw "$Message actual=<$Actual> expected=<$Expected>"}}
+function Copy-DBAX($Value){return (($Value|ConvertTo-Json -Depth 80)|ConvertFrom-Json)}
 function Assert-DBAXNoAuthority($Value,[string]$Label){foreach($f in @('result_is_authority','apply_execution_authorized','spicetify_apply_authorized','cleanup_authorized','additional_mutation_authorized','production_execution_authorized','production_mutation_authorized')){if($Value.PSObject.Properties[$f]){Assert-DBAXFalse([bool]$Value.$f)("$Label escaped $f")}}}
 
 $fakeDir=Join-Path $env:RUNNER_TEMP ('dbax-fake-'+[Guid]::NewGuid().ToString('N'));[IO.Directory]::CreateDirectory($fakeDir)|Out-Null
@@ -35,14 +35,14 @@ $fakeSha=(Get-FileHash -LiteralPath $fakeExe -Algorithm SHA256).Hash.ToLowerInva
 $script:DBAXFault=$null
 function Invoke-CustomAppProductionDualIdBridgeAwareSpicetifyApplyExecutorValidationHookV010 {
     param([Parameter(Mandatory=$true)][string]$Checkpoint,[Parameter(Mandatory=$true)]$Context)
-    if(-not[string]::IsNullOrWhiteSpace([string]$script:DBAXFault)-and$Checkpoint-ceq$script:DBAXFault){throw('DBAX_SIMULATED_PROCESS_DEATH_'+$Checkpoint)}
+    if(-not[string]::IsNullOrWhiteSpace([string]$script:DBAXFault)-and$Checkpoint-ceq$script:DBAXFault){throw ('DBAX_SIMULATED_PROCESS_DEATH_'+$Checkpoint)}
 }
 function New-DBAXFixtureV010 {
     param([Parameter(Mandatory=$true)][string]$Label)
     $q=New-DBAPFixtureV010 ('dbax-'+$Label)
     $prior=Invoke-DBAPV010 $q
-    Assert-DBAXTrue($null-ne$prior-and[bool]$prior.ok)("prior dual-ID admission denied $Label: $([string]$prior.reason)")
-    return[pscustomobject]@{q=$q;prior=$prior}
+    Assert-DBAXTrue($null-ne$prior-and[bool]$prior.ok)("prior dual-ID admission denied ${Label}: $([string]$prior.reason)")
+    return [pscustomobject]@{q=$q;prior=$prior}
 }
 function Invoke-DBAXV010 {
     param([Parameter(Mandatory=$true)]$X,[Parameter(Mandatory=$true)][string]$CountPath,[string]$Mode='success',[string]$ExpectedSha=$fakeSha,[AllowNull()]$Prior=$null)
@@ -52,7 +52,7 @@ function Invoke-DBAXV010 {
         return Invoke-CustomAppProductionDualIdBridgeAwareSpicetifyApplyExecutorV010 -PriorAdmissionDecision $Prior -DualIdFinalizationResult $q.final.result -DurableBridgeIntegrationResult $f.bridge.result -EvidenceBoundAtomicResult $f.atomic -RecoveryAwarePreparedResult $f.x.carrier -RecoveryAwareStageExecutorResult $f.x.stage -GenericPreparedResult $f.x.generic -GenericStageExecutorResult $f.x.fixture.q.stage.result -Permit $f.x.fixture.q.x.permit -Name $f.name -LifecycleRow $f.x.fixture.q.x.f.lifecycle -ProvenanceRow $f.x.fixture.q.x.f.provenance -BindingRow $f.x.fixture.q.x.f.binding -AllowedRoot $f.trust -JournalStoreDirectory $f.store -ConsumptionStoreDirectory $f.x.fixture.q.x.store.store -SessionKey $script:DBAPSessionKey -LocalAppDataRoot ([string]$f.x.fixture.q.persistence.local) -AppDataRoot ([string]$f.x.fixture.q.persistence.roaming) -SpicetifyExecutablePath $fakeExe -ExpectedSpicetifySha256 $ExpectedSha -Now ([DateTimeOffset]::UtcNow) -TimeoutSeconds 15
     } finally {Remove-Item Env:DBAX_COUNT -ErrorAction SilentlyContinue;Remove-Item Env:DBAX_MODE -ErrorAction SilentlyContinue}
 }
-function Get-DBAXCountV010([string]$Path){$n=0;if(Test-Path -LiteralPath $Path -PathType Leaf){[void][int]::TryParse(([IO.File]::ReadAllText($Path)).Trim(),[ref]$n)};return$n}
+function Get-DBAXCountV010([string]$Path){$n=0;if(Test-Path -LiteralPath $Path -PathType Leaf){[void][int]::TryParse(([IO.File]::ReadAllText($Path)).Trim(),[ref]$n)};return $n}
 function Read-DBAXJournalV010($X){return Read-CustomAppProductionCrashJournalV010 -AllowedRoot $X.q.f.trust -StoreDirectory $X.q.f.store}
 function Assert-DBAXCrashPhaseV010($X,[string]$Expected,[int]$ExpectedCount,[string]$CountPath){$j=Read-DBAXJournalV010 $X;Assert-DBAXTrue($null-ne$j-and[bool]$j.ok)"$Expected journal unreadable";Assert-DBAXEq([string]$j.entry.phase)$Expected "$Expected journal phase";Assert-DBAXEq([string]$j.transaction_id).Trim().ToLowerInvariant()([string]$X.q.final.result.journal_transaction_id).Trim().ToLowerInvariant() "$Expected journal id";Assert-DBAXTrue(Test-CustomAppProductionCrashJournalTransitionV010 -From $Expected -To 'rollback-required')"$Expected cannot transition to rollback-required";Assert-DBAXTrue((Get-DBAXCountV010 $CountPath)-eq$ExpectedCount)"$Expected fake apply count drift"}
 
@@ -95,5 +95,5 @@ $x7=New-DBAXFixtureV010 'prior-id-drift';$bad=Copy-DBAX $x7.prior.decision;$bad.
 $c7=Join-Path $fakeDir 'prior-drift-count.txt';$r7=Invoke-DBAXV010 -X $x7 -CountPath $c7 -Prior $bad;Assert-DBAXFalse([bool]$r7.ok)'prior ID drift accepted';Assert-DBAXTrue([string]$r7.reason-like'*admission-continuity-mismatch-permit_transaction_id*')('prior drift reason changed: '+[string]$r7.reason);Assert-DBAXTrue((Get-DBAXCountV010 $c7)-eq0)'prior drift launched process';$j7=Read-DBAXJournalV010 $x7;Assert-DBAXEq([string]$j7.entry.phase)'transaction-finalized' 'prior drift changed journal phase';$count++
 
 $script:DBAXFault=$null
-if($count-ne7){throw"dual-ID journal-aware apply executor matrix count mismatch $count"}
+if($count-ne7){throw "dual-ID journal-aware apply executor matrix count mismatch $count"}
 Write-Output "CUSTOM_APP_PRODUCTION_DUAL_ID_BRIDGE_AWARE_SPICETIFY_APPLY_EXECUTOR_PASS cases=$count exact_fake_apply=true success_count_one=true apply_starting_barrier=true pending_barrier=true apply_verified_barrier=true crash_windows_recoverable=true rollback_required_before_restore=true rollback_complete_after_recovery_apply=true permit_id_forward_only=true journal_id_recovery_only=true zero_authority=true"
