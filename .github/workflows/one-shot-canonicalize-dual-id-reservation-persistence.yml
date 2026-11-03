@@ -1,0 +1,79 @@
+name: One-shot canonicalize dual-ID reservation persistence
+
+on:
+  push:
+    branches: [validate/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0]
+    paths: ['.github/workflows/one-shot-canonicalize-dual-id-reservation-persistence.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  canonicalize:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: validate/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0
+      - name: Canonicalize only the validation core and matrix count
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $branch='validate/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          if((git rev-parse --abbrev-ref HEAD).Trim() -cne $branch){throw 'unexpected branch'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $core='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0/custom-app-production-dual-id-new-permit-reservation-persistence.ps1'
+          $test='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0/test_custom_app_production_dual_id_new_permit_reservation_persistence.ps1'
+          @'
+          import pathlib,re
+          core=pathlib.Path(r'validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0/custom-app-production-dual-id-new-permit-reservation-persistence.ps1')
+          text=core.read_text(encoding='utf-8')
+          original=text
+          text=re.sub(r'\breturn\[', 'return [', text)
+          text=re.sub(r'\bthrow\'', "throw '", text)
+          text=re.sub(r'\bthrow\(', 'throw (', text)
+          text=re.sub(r'\breturn\(', 'return (', text)
+          text=text.replace("$deny'", "$deny '")
+          if text==original:
+              raise SystemExit('core lexical canonicalizer made no changes')
+          core.write_text(text,encoding='utf-8',newline='\n')
+          test=pathlib.Path(r'validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0/test_custom_app_production_dual_id_new_permit_reservation_persistence.ps1')
+          t=test.read_text(encoding='utf-8')
+          needle='if($count -ne 11)'
+          if t.count(needle)!=1:
+              raise SystemExit(f'unexpected matrix count marker occurrences={t.count(needle)}')
+          test.write_text(t.replace(needle,'if($count -ne 12)'),encoding='utf-8',newline='\n')
+          '@ | python -
+          if($LASTEXITCODE){throw 'canonicalizer failed'}
+          foreach($p in @($core,$test)){
+            $tokens=$null;$errors=$null;$ast=[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|ForEach-Object{Write-Error ("$p line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $p"}
+            $bad=@($ast.FindAll({param($node)if($node-isnot[Management.Automation.Language.CommandAst]){return $false};$n=$node.GetCommandName();return(-not[string]::IsNullOrWhiteSpace($n)-and$n-match'^(?i:return|throw).+')},$true))
+            if($bad.Count){$bad|ForEach-Object{Write-Error ("lexical command $p line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)>")};throw "PS5.1 lexical boundary failed $p"}
+          }
+          $testRaw=Get-Content $test -Raw
+          if($testRaw.IndexOf('if($count -ne 12)',[StringComparison]::Ordinal)-lt0){throw 'matrix count was not corrected to 12'}
+          git diff --check
+          if($LASTEXITCODE){throw 'git diff check failed'}
+          $changed=@(git diff --name-only)
+          $expected=@($core,$test)
+          $bad=@($changed|Where-Object{$_ -notin $expected})
+          if($bad.Count){throw "canonicalizer scope escaped: $($bad -join ', ')"}
+          foreach($p in $expected){if($p -notin $changed){throw "expected canonicalized file missing: $p"}}
+      - name: Commit exact canonicalized sources and remove this one-shot workflow
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $branch='validate/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm '.github/workflows/one-shot-canonicalize-dual-id-reservation-persistence.yml'
+          git add 'validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0/custom-app-production-dual-id-new-permit-reservation-persistence.ps1' 'validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0/test_custom_app_production_dual_id_new_permit_reservation_persistence.ps1'
+          git diff --cached --check
+          if($LASTEXITCODE){throw 'cached diff check failed'}
+          git commit -m 'validation: canonicalize persistence lexical boundaries and matrix count'
+          git push origin "HEAD:$branch"
