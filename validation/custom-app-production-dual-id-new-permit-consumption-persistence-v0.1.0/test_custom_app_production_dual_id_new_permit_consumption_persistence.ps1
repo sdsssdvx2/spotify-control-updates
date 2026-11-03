@@ -28,7 +28,7 @@ function Invoke-DNCPV010 {
     param(
         [Parameter(Mandatory=$true)]$F,[AllowNull()]$Candidate=$null,[AllowNull()]$Bundle=$null,[AllowNull()]$Issuer=$null,
         [AllowNull()]$ReservationPersistence=$null,[AllowNull()][string]$Store=$null,[AllowNull()][string]$NewId=$null,
-        [AllowNull()][string]$JournalId=$null,[DateTimeOffset]$At=[DateTimeOffset]::MinValue,
+        [AllowNull()][string]$JournalId=$null,[AllowNull()][byte[]]$Key=$null,[DateTimeOffset]$At=[DateTimeOffset]::MinValue,
         [ValidateSet('none','after-history-before-current')][string]$FailurePoint='none'
     )
     $p=$F.p;$i=$p.q.i;$x=$i.f;$q=$x.q
@@ -40,7 +40,8 @@ function Invoke-DNCPV010 {
     if([string]::IsNullOrWhiteSpace($NewId)){$NewId=[string]$x.new_id}
     if([string]::IsNullOrWhiteSpace($JournalId)){$JournalId=[string]$q.house.result.journal_transaction_id}
     if($At-eq[DateTimeOffset]::MinValue){$At=$F.at}
-    return Invoke-DualIdNewConsumptionPersistenceV010 -Name ([string]$Bundle.lifecycle.name) -LifecycleRow $Bundle.lifecycle -ProvenanceRow $Bundle.provenance -BindingRow $Bundle.binding -StageResult $Bundle.stage -ShadowResult $Bundle.shadow -HousekeepingResult $q.house.result -AllowedRoot $q.x.f.trust -RecoveryStoreDirectory $q.x.f.store -ReservationPersistenceStoreDirectory $p.store -ConsumptionStoreDirectory $Store -HistoricalPermitTransactionId ([string]$q.house.result.permit_transaction_id) -HistoricalJournalTransactionId $JournalId -NewPermitTransactionId $NewId -LocalAppDataRoot ([string]$q.x.f.x.fixture.q.persistence.local) -AppDataRoot ([string]$q.x.f.x.fixture.q.persistence.roaming) -CurrentBaseline $x.live.baseline -ShadowProtocolQualification $x.live.shadow -LiveAttestedQualification $x.live.live -PriorReadinessReceipt $x.prior -IssuerResult $Issuer -ReservationPersistenceResult $ReservationPersistence -ConsumptionResult $Candidate -Now $At -FailurePoint $FailurePoint
+    if($null-eq$Key){$Key=$script:DINPIKey}
+    return Invoke-DualIdNewConsumptionPersistenceV010 -Name ([string]$Bundle.lifecycle.name) -LifecycleRow $Bundle.lifecycle -ProvenanceRow $Bundle.provenance -BindingRow $Bundle.binding -StageResult $Bundle.stage -ShadowResult $Bundle.shadow -HousekeepingResult $q.house.result -AllowedRoot $q.x.f.trust -RecoveryStoreDirectory $q.x.f.store -ReservationPersistenceStoreDirectory $p.store -ConsumptionStoreDirectory $Store -HistoricalPermitTransactionId ([string]$q.house.result.permit_transaction_id) -HistoricalJournalTransactionId $JournalId -NewPermitTransactionId $NewId -LocalAppDataRoot ([string]$q.x.f.x.fixture.q.persistence.local) -AppDataRoot ([string]$q.x.f.x.fixture.q.persistence.roaming) -CurrentBaseline $x.live.baseline -ShadowProtocolQualification $x.live.shadow -LiveAttestedQualification $x.live.live -PriorReadinessReceipt $x.prior -IssuerResult $Issuer -ReservationPersistenceResult $ReservationPersistence -ConsumptionResult $Candidate -SessionKey $Key -Now $At -FailurePoint $FailurePoint
 }
 
 $count=0
@@ -128,5 +129,11 @@ $ck=Test-DualIdNewConsumptionPersistenceReceiptV010 -Receipt $badFingerprint
 Assert-DNCPFalse ([bool]$ck.ok) 'fingerprint tamper accepted'
 $count++
 
-if($count-ne11){throw "dual-ID new consumption persistence matrix count mismatch $count"}
+$wrongKey=New-DNCPFixtureV010 'wrong-session-key'
+$r=Invoke-DNCPV010 -F $wrongKey -Key ([byte[]](0..31))
+Assert-DNCPDenied $r 'issuer HMAC with wrong ephemeral session key'
+Assert-DNCPTrue ([string]$r.reason-like'issuer-invalid:*') ('wrong key reason '+[string]$r.reason)
+$count++
+
+if($count-ne12){throw "dual-ID new consumption persistence matrix count mismatch $count"}
 Write-Host "CUSTOM_APP_PRODUCTION_DUAL_ID_NEW_PERMIT_CONSUMPTION_PERSISTENCE_MATRIX_PASS cases=$count triple_ids_distinct=true durable_cas=true replay_idempotent=true readback_attested=true no_session_key_persisted=true zero_authority=true"
