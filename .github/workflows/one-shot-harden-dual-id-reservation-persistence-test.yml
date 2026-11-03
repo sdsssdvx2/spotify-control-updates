@@ -1,0 +1,60 @@
+name: One-shot harden dual-ID reservation persistence test
+
+on:
+  push:
+    branches: [validate/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0]
+    paths: ['.github/workflows/one-shot-harden-dual-id-reservation-persistence-test.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: validate/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0
+      - name: Patch only the two pre-CI fixture defects and repin workflow
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $branch='validate/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          if((git rev-parse --abbrev-ref HEAD).Trim() -cne $branch){throw 'unexpected branch'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          @'
+          import pathlib
+          test=pathlib.Path(r'validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0/test_custom_app_production_dual_id_new_permit_reservation_persistence.ps1')
+          text=test.read_text(encoding='utf-8')
+          old1="Assert-DINPPFalse ($serialized -match '(?i)session.?key') 'serialized durable envelope contains session-key field'"
+          new1="$keyHex=(-join ($script:DINPIKey|ForEach-Object{$_.ToString('x2')}));$keyB64=[Convert]::ToBase64String($script:DINPIKey);Assert-DINPPFalse ($serialized.Contains($keyHex) -or $serialized.Contains($keyB64)) 'serialized durable envelope contains session-key material'"
+          old2="$script:DINPPPost.current_remote_commit_sha=('d'*40);$script:DINPPPost.issuance_admission_fingerprint=Get-CustomAppProductionDualIdNewPermitIssuanceAdmissionSha256V010(Get-CustomAppProductionDualIdNewPermitIssuanceAdmissionMaterialV010 $script:DINPPPost)"
+          new2="$script:DINPPPost.checked_at=([DateTimeOffset]::Parse([string]$script:DINPPPost.checked_at).AddMilliseconds(1)).ToUniversalTime().ToString('o');$script:DINPPPost.issuance_admission_fingerprint=Get-CustomAppProductionDualIdNewPermitIssuanceAdmissionSha256V010(Get-CustomAppProductionDualIdNewPermitIssuanceAdmissionMaterialV010 $script:DINPPPost)"
+          if text.count(old1)!=1:
+              raise SystemExit(f'session-key fixture marker occurrences={text.count(old1)}')
+          if text.count(old2)!=1:
+              raise SystemExit(f'post-write drift fixture marker occurrences={text.count(old2)}')
+          text=text.replace(old1,new1).replace(old2,new2)
+          test.write_text(text,encoding='utf-8',newline='\n')
+          '@ | python -
+          if($LASTEXITCODE){throw 'test hardener failed'}
+          $test='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0/test_custom_app_production_dual_id_new_permit_reservation_persistence.ps1'
+          $wf='.github/workflows/validate-custom-app-production-dual-id-new-permit-reservation-persistence-v010.yml'
+          $tokens=$null;$errors=$null;$ast=[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $test),[ref]$tokens,[ref]$errors);if($errors.Count){$errors|ForEach-Object{Write-Error ("test line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw 'PS5.1 test parse failed'}
+          $newBlob=(git hash-object $test).Trim();if($newBlob -notmatch '^[0-9a-f]{40}$'){throw 'new test blob invalid'}
+          $wfRaw=[IO.File]::ReadAllText((Resolve-Path $wf));$oldBlob='0f8f957d24a1ebc1aff86fcc59c1d978733c7ee0';if(($wfRaw.Split($oldBlob).Count-1) -ne 2){throw 'unexpected old test blob pin count'};$wfRaw=$wfRaw.Replace($oldBlob,$newBlob);[IO.File]::WriteAllText((Resolve-Path $wf),$wfRaw,[Text.UTF8Encoding]::new($false))
+          $raw=Get-Content $test -Raw;if($raw.IndexOf('serialized durable envelope contains session-key material',[StringComparison]::Ordinal)-lt0){throw 'session-key material assertion missing'};if($raw.IndexOf('DINPPPost.checked_at=',[StringComparison]::Ordinal)-lt0){throw 'post-write fingerprint-only drift fixture missing'}
+          git diff --check;if($LASTEXITCODE){throw 'git diff check failed'}
+          $changed=@(git diff --name-only);$expected=@($test,$wf);$bad=@($changed|Where-Object{$_ -notin $expected});if($bad.Count){throw "test hardener scope escaped: $($bad -join ', ')"};foreach($p in $expected){if($p -notin $changed){throw "expected hardened file missing: $p"}}
+      - name: Commit hardened matrix and remove this one-shot workflow
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop';$branch='validate/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          git config user.name 'github-actions[bot]';git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm '.github/workflows/one-shot-harden-dual-id-reservation-persistence-test.yml'
+          git add 'validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0/test_custom_app_production_dual_id_new_permit_reservation_persistence.ps1' '.github/workflows/validate-custom-app-production-dual-id-new-permit-reservation-persistence-v010.yml'
+          git diff --cached --check;if($LASTEXITCODE){throw 'cached diff check failed'}
+          git commit -m 'test: harden persistence session-key and post-write drift fixtures'
+          git push origin "HEAD:$branch"
