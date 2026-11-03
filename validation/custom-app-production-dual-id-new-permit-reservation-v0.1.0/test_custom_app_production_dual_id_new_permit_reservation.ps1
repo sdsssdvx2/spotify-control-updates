@@ -59,5 +59,5 @@ $tampered=Copy-DINPR $validResult.receipt;$tampered.post_reservation_issuance_ad
 
 $until=[DateTimeOffset]::Parse([string]$validResult.receipt.persistence_eligible_until);$c=Test-CustomAppProductionDualIdNewPermitReservationReceiptV010 -Receipt $validResult.receipt -Now $until;Assert-DINPRFalse ([bool]$c.ok) 'expired persistence window accepted';Assert-DINPREq $c.reason 'dual-id-new-permit-reservation-persistence-window-expired' 'persistence expiry reason';$count++
 
-if($count -ne 12){throw "dual-ID new permit reservation matrix count mismatch $count"}
+if($count -ne 13){throw "dual-ID new permit reservation matrix count mismatch $count"}
 Write-Host "CUSTOM_APP_PRODUCTION_DUAL_ID_NEW_PERMIT_RESERVATION_MATRIX_PASS cases=$count generic_reservation_wire_unchanged=true transaction_binding_revalidated=true ids_pairwise_distinct=true replay_denied=true post_drift_discards_state=true reservation_persisted=false zero_authority=true"
