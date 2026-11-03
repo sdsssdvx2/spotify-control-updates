@@ -4,6 +4,23 @@ $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $root 'validation/custom-app-production-dual-id-new-permit-reservation-v0.1.0/test_custom_app_production_dual_id_new_permit_reservation.ps1')
 . (Join-Path $PSScriptRoot 'custom-app-production-dual-id-new-permit-reservation-persistence.ps1')
 
+# The inherited validation stack intentionally reuses short helper names across isolated
+# test harnesses. Dot-sourcing the full reservation regression chain into this process can
+# therefore leave New-LDFixtureV010 rebound to a later helper with a SessionKey parameter.
+# Restore the exact lightweight dual-ID fixture contract qualified by the finalization
+# lineage before creating any persistence fixtures; this changes test scope only.
+function New-LDFixtureV010 {
+    param([Parameter(Mandatory=$true)][string]$Label,[Parameter(Mandatory=$true)][string]$FixtureNonce,[Parameter(Mandatory=$true)][string]$PermitSeed)
+    $f=New-AtomicFixtureV010 ('lightweight-dual-id-'+$Label) -Nonce $FixtureNonce
+    $g=$f.prepared.result
+    $permit=Get-CustomAppProductionDurableDualTransactionIdBridgeIntegrationSha256V010 ('permit|'+$PermitSeed+'|'+[string]$g.preparation_fingerprint)
+    $stageFp=Get-CustomAppProductionDurableDualTransactionIdBridgeIntegrationSha256V010 ('stage|'+$PermitSeed+'|'+[string]$g.stage_result_fingerprint)
+    return [pscustomobject]@{fixture=$f;generic=$g;permit_id=$permit;stage_fingerprint=$stageFp;carrier=(New-LDCarrierV010 -Generic $g -PermitId $permit -StageFingerprint $stageFp);stage=(New-LDStageV010 -PermitId $permit -StageFingerprint $stageFp)}
+}
+$ldHelper=Get-Command New-LDFixtureV010 -CommandType Function -ErrorAction Stop
+foreach($p in @('Label','FixtureNonce','PermitSeed')){if(-not$ldHelper.Parameters.ContainsKey($p)){throw ('lightweight dual-ID fixture helper contract missing '+$p)}}
+if($ldHelper.Parameters.ContainsKey('SessionKey')){throw 'lightweight dual-ID fixture helper remained rebound to SessionKey variant'}
+
 function Assert-DINPPTrue([bool]$v,[string]$m){if(-not $v){throw $m}}
 function Assert-DINPPFalse([bool]$v,[string]$m){if($v){throw $m}}
 function Assert-DINPPEq($a,$b,[string]$m){if([string]$a -cne [string]$b){throw "$m actual=<$a> expected=<$b>"}}
