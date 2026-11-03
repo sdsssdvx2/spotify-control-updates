@@ -14,6 +14,7 @@ on:
   workflow_dispatch:
 permissions: {contents: read}
 
+# The temporary one-shot hardener is intentionally retired; only the bounded validation surface remains.
 jobs:
   validate-windows:
     runs-on: windows-2025
