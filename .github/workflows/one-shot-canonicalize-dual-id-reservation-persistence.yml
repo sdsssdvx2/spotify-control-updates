@@ -31,10 +31,18 @@ jobs:
           core=pathlib.Path(r'validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0/custom-app-production-dual-id-new-permit-reservation-persistence.ps1')
           text=core.read_text(encoding='utf-8')
           original=text
-          text=re.sub(r'\breturn\[', 'return [', text)
-          text=re.sub(r'\bthrow\'', "throw '", text)
-          text=re.sub(r'\bthrow\(', 'throw (', text)
-          text=re.sub(r'\breturn\(', 'return (', text)
+          replacements=(
+              (r'\breturn\[','return ['),
+              (r'\breturn\(','return ('),
+              (r'\bthrow\'',"throw '"),
+              (r'\bthrow\(','throw ('),
+              (r'\bcatch\[','catch ['),
+              (r'\bcatch\{','catch {'),
+              (r'\btry\{','try {'),
+              (r'\bfinally\{','finally {'),
+          )
+          for pattern,replacement in replacements:
+              text=re.sub(pattern,replacement,text)
           text=text.replace("$deny'", "$deny '")
           if text==original:
               raise SystemExit('core lexical canonicalizer made no changes')
