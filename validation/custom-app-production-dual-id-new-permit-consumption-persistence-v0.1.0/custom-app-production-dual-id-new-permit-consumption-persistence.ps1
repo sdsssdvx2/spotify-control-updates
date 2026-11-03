@@ -17,7 +17,7 @@ function Get-DualIdNewConsumptionPersistenceShaV010 {
 }
 function Test-DualIdNewConsumptionPersistenceHashV010 {
     param([AllowNull()][string]$Value)
-    return (-not[string]::IsNullOrWhiteSpace($Value)-and$Value-cmatch'^[0-9a-f]{64}$')
+    return (-not [string]::IsNullOrWhiteSpace($Value)-and$Value-cmatch'^[0-9a-f]{64}$')
 }
 function New-DualIdNewConsumptionPersistenceDeniedV010 {
     param([string]$Reason,[bool]$Persisted=$false)
@@ -41,14 +41,14 @@ function Get-DualIdNewConsumptionPersistenceMaterialV010 {
         'requires_persisted_consumption_before_executor','requires_fresh_permit_revalidation_at_executor_start','requires_fresh_revalidation_after_stage','requires_fresh_revalidation_before_apply',
         'persistence_is_authority','executor_may_start','executor_may_stage','executor_may_apply','production_execution_authorized','production_mutation_authorized','checked_at'
     )
-    return (($fields|ForEach-Object{[string]$Receipt.$_})-join([string][char]10))
+    return (($fields|ForEach-Object{[string]$Receipt.PSObject.Properties[[string]$_].Value})-join([string][char]10))
 }
 function Test-DualIdNewConsumptionPersistenceReceiptV010 {
     param([AllowNull()]$Receipt)
     if($null-eq$Receipt){return [pscustomobject]@{ok=$false;reason='dual-id-consumption-persistence-receipt-null'}}
     $keys=@('schema','managed_by','qualified_consumption_head','qualified_consumption_blob','qualified_store_blob','qualified_store_contract_blob','qualified_admission_head','qualified_admission_blob','name','source_identity','historical_permit_transaction_id','historical_journal_transaction_id','new_permit_transaction_id','transaction_id_namespaces_pairwise_distinct','consumption_id','consumption_candidate_fingerprint','issuer_fingerprint','reservation_persistence_fingerprint','reservation_persistence_envelope_sha256','persisted_reservation_revision','pre_persistence_admission_fingerprint','post_persistence_admission_fingerprint','consumption_state_revision_before','consumption_state_revision_after','persistence_envelope_sha256','persisted_revision','current_store_revision_at_attestation','consumption_persisted','read_after_write_verified','persisted_consumption_barrier_attested','fresh_admission_revalidated','write_performed','recovered_existing_persistence','session_key_accepted','session_key_persisted','session_key_exposed','requires_persisted_consumption_before_executor','requires_fresh_permit_revalidation_at_executor_start','requires_fresh_revalidation_after_stage','requires_fresh_revalidation_before_apply','persistence_is_authority','executor_may_start','executor_may_stage','executor_may_apply','production_execution_authorized','production_mutation_authorized','checked_at','persistence_fingerprint')
     foreach($k in $keys){if(-not$Receipt.PSObject.Properties[$k]){return [pscustomobject]@{ok=$false;reason=('dual-id-consumption-persistence-missing-'+$k)}}}
-    if([int]$Receipt.schema-ne$DualIdNewConsumptionPersistenceSchema-or[string]$Receipt.managed_by-cne$DualIdNewConsumptionPersistenceManagedBy){return [pscustomobject]@{ok=$false;reason='dual-id-consumption-persistence-owner-invalid'}}
+    if([int]$Receipt.schema-ne$DualIdNewConsumptionPersistenceSchema-or [string]$Receipt.managed_by-cne$DualIdNewConsumptionPersistenceManagedBy){return [pscustomobject]@{ok=$false;reason='dual-id-consumption-persistence-owner-invalid'}}
     foreach($pin in @(
         @('qualified_consumption_head',$DualIdNewConsumptionPersistenceQualifiedConsumptionHead),
         @('qualified_consumption_blob',$DualIdNewConsumptionPersistenceQualifiedConsumptionBlob),
@@ -56,38 +56,38 @@ function Test-DualIdNewConsumptionPersistenceReceiptV010 {
         @('qualified_store_contract_blob',$DualIdNewConsumptionPersistenceQualifiedStoreContractBlob),
         @('qualified_admission_head',$DualIdNewConsumptionPersistenceQualifiedAdmissionHead),
         @('qualified_admission_blob',$DualIdNewConsumptionPersistenceQualifiedAdmissionBlob)
-    )){if([string]$Receipt.($pin[0])-cne[string]$pin[1]){return [pscustomobject]@{ok=$false;reason=('dual-id-consumption-persistence-lineage-'+$pin[0])}}}
+    )){if([string]$Receipt.($pin[0])-cne [string]$pin[1]){return [pscustomobject]@{ok=$false;reason=('dual-id-consumption-persistence-lineage-'+$pin[0])}}}
     foreach($f in @('historical_permit_transaction_id','historical_journal_transaction_id','new_permit_transaction_id','consumption_id','consumption_candidate_fingerprint','issuer_fingerprint','reservation_persistence_fingerprint','reservation_persistence_envelope_sha256','pre_persistence_admission_fingerprint','post_persistence_admission_fingerprint','persistence_envelope_sha256','persistence_fingerprint')){
         if(-not(Test-DualIdNewConsumptionPersistenceHashV010 ([string]$Receipt.$f))){return [pscustomobject]@{ok=$false;reason=('dual-id-consumption-persistence-hash-'+$f)}}
     }
     $a=[string]$Receipt.historical_permit_transaction_id;$b=[string]$Receipt.historical_journal_transaction_id;$c=[string]$Receipt.new_permit_transaction_id
-    if($a-ceq$b-or$a-ceq$c-or$b-ceq$c-or-not[bool]$Receipt.transaction_id_namespaces_pairwise_distinct){return [pscustomobject]@{ok=$false;reason='dual-id-consumption-persistence-transaction-ids-conflated'}}
+    if($a-ceq$b-or$a-ceq$c-or$b-ceq$c-or-not [bool]$Receipt.transaction_id_namespaces_pairwise_distinct){return [pscustomobject]@{ok=$false;reason='dual-id-consumption-persistence-transaction-ids-conflated'}}
     foreach($f in @('consumption_persisted','read_after_write_verified','persisted_consumption_barrier_attested','fresh_admission_revalidated','requires_persisted_consumption_before_executor','requires_fresh_permit_revalidation_at_executor_start','requires_fresh_revalidation_after_stage','requires_fresh_revalidation_before_apply')){
-        if(-not[bool]$Receipt.$f){return [pscustomobject]@{ok=$false;reason=('dual-id-consumption-persistence-required-flag-'+$f)}}
+        if(-not [bool]$Receipt.$f){return [pscustomobject]@{ok=$false;reason=('dual-id-consumption-persistence-required-flag-'+$f)}}
     }
     foreach($f in @('session_key_accepted','session_key_persisted','session_key_exposed','persistence_is_authority','executor_may_start','executor_may_stage','executor_may_apply','production_execution_authorized','production_mutation_authorized')){
         if([bool]$Receipt.$f){return [pscustomobject]@{ok=$false;reason=('dual-id-consumption-persistence-authority-escaped-'+$f)}}
     }
-    if([bool]$Receipt.write_performed-eq[bool]$Receipt.recovered_existing_persistence){return [pscustomobject]@{ok=$false;reason='dual-id-consumption-persistence-write-recovery-flags-invalid'}}
+    if([bool]$Receipt.write_performed-eq [bool]$Receipt.recovered_existing_persistence){return [pscustomobject]@{ok=$false;reason='dual-id-consumption-persistence-write-recovery-flags-invalid'}}
     try{
         $before=[int64]$Receipt.consumption_state_revision_before;$after=[int64]$Receipt.consumption_state_revision_after
         $stored=[int64]$Receipt.persisted_revision;$current=[int64]$Receipt.current_store_revision_at_attestation
         [void][DateTimeOffset]::Parse([string]$Receipt.checked_at)
     }catch{return [pscustomobject]@{ok=$false;reason='dual-id-consumption-persistence-revision-or-time-invalid'}}
     if($before-lt0-or$after-ne($before+1)-or$stored-ne$after-or$current-lt$stored){return [pscustomobject]@{ok=$false;reason='dual-id-consumption-persistence-revision-chain-invalid'}}
-    if([string]$Receipt.pre_persistence_admission_fingerprint-cne[string]$Receipt.post_persistence_admission_fingerprint){return [pscustomobject]@{ok=$false;reason='dual-id-consumption-persistence-admission-drift'}}
+    if([string]$Receipt.pre_persistence_admission_fingerprint-cne [string]$Receipt.post_persistence_admission_fingerprint){return [pscustomobject]@{ok=$false;reason='dual-id-consumption-persistence-admission-drift'}}
     if([string]$Receipt.persistence_fingerprint-cne(Get-DualIdNewConsumptionPersistenceShaV010 (Get-DualIdNewConsumptionPersistenceMaterialV010 -Receipt $Receipt))){return [pscustomobject]@{ok=$false;reason='dual-id-consumption-persistence-fingerprint-invalid'}}
     return [pscustomobject]@{ok=$true;reason='dual-id-new-consumption-durable-barrier-valid-zero-authority';consumption_id=[string]$Receipt.consumption_id;executor_may_start=$false}
 }
 function Test-DualIdNewConsumptionPersistenceCandidateV010 {
     param([AllowNull()]$Result)
-    if($null-eq$Result-or-not[bool]$Result.ok-or$null-eq$Result.receipt-or$null-eq$Result.next_state){return [pscustomobject]@{ok=$false;reason='consumption-result-invalid'}}
+    if($null-eq$Result-or-not [bool]$Result.ok-or$null-eq$Result.receipt-or$null-eq$Result.next_state){return [pscustomobject]@{ok=$false;reason='consumption-result-invalid'}}
     $r=$Result.receipt;$c=Test-CustomAppProductionDualIdNewPermitConsumptionReceiptV010 -Receipt $r
-    if(-not[bool]$c.ok){return [pscustomobject]@{ok=$false;reason=('consumption-receipt-invalid:'+[string]$c.reason)}}
+    if(-not [bool]$c.ok){return [pscustomobject]@{ok=$false;reason=('consumption-receipt-invalid:'+[string]$c.reason)}}
     $s=Test-CustomAppProductionExecutorConsumptionStateV010 -State $Result.next_state
-    if(-not[bool]$s.ok){return [pscustomobject]@{ok=$false;reason=('consumption-next-state-invalid:'+[string]$s.reason)}}
+    if(-not [bool]$s.ok){return [pscustomobject]@{ok=$false;reason=('consumption-next-state-invalid:'+[string]$s.reason)}}
     try{$before=[int64]$r.consumption_state_revision_before;$after=[int64]$r.consumption_state_revision_after}catch{return [pscustomobject]@{ok=$false;reason='consumption-revision-invalid'}}
-    if($before-lt0-or$after-ne($before+1)-or[int64]$Result.next_state.revision-ne$after){return [pscustomobject]@{ok=$false;reason='consumption-revision-mismatch'}}
+    if($before-lt0-or$after-ne($before+1)-or [int64]$Result.next_state.revision-ne$after){return [pscustomobject]@{ok=$false;reason='consumption-revision-mismatch'}}
     $rows=@($Result.next_state.consumptions)
     if($rows.Count-ne$after-or$rows.Count-lt1){return [pscustomobject]@{ok=$false;reason='consumption-row-count-mismatch'}}
     $last=$rows[-1]
@@ -97,7 +97,7 @@ function Test-DualIdNewConsumptionPersistenceCandidateV010 {
     )){
         if(([string]$last.($p[0])).Trim().ToLowerInvariant()-cne([string]$r.($p[1])).Trim().ToLowerInvariant()){return [pscustomobject]@{ok=$false;reason=('consumption-row-'+$p[0]+'-mismatch')}}
     }
-    if(-not[bool]$r.consumption_created-or[bool]$r.consumption_persisted-or[bool]$r.executor_may_start){return [pscustomobject]@{ok=$false;reason='consumption-candidate-authority-escaped'}}
+    if(-not [bool]$r.consumption_created-or [bool]$r.consumption_persisted-or [bool]$r.executor_may_start){return [pscustomobject]@{ok=$false;reason='consumption-candidate-authority-escaped'}}
     return [pscustomobject]@{ok=$true;reason='dual-id-consumption-next-state-bound';receipt=$r;next_state=$Result.next_state;before=$before;after=$after}
 }
 function Test-DualIdNewConsumptionPersistenceContinuityV010 {
@@ -134,56 +134,56 @@ function Invoke-DualIdNewConsumptionPersistenceV010 {
     )
     $deny={param([string]$Reason,[bool]$Persisted=$false)New-DualIdNewConsumptionPersistenceDeniedV010 -Reason $Reason -Persisted:$Persisted}
     $candidate=Test-DualIdNewConsumptionPersistenceCandidateV010 -Result $ConsumptionResult
-    if(-not[bool]$candidate.ok){return (& $deny ('candidate-invalid:'+[string]$candidate.reason))}
+    if(-not [bool]$candidate.ok){return (& $deny ('candidate-invalid:'+[string]$candidate.reason))}
     $r=$candidate.receipt
     $ids=@($HistoricalPermitTransactionId.Trim().ToLowerInvariant(),$HistoricalJournalTransactionId.Trim().ToLowerInvariant(),$NewPermitTransactionId.Trim().ToLowerInvariant())
     foreach($id in $ids){if(-not(Test-DualIdNewConsumptionPersistenceHashV010 $id)){return (& $deny 'transaction-id-invalid')}}
     if($ids[0]-ceq$ids[1]-or$ids[0]-ceq$ids[2]-or$ids[1]-ceq$ids[2]){return (& $deny 'transaction-id-conflation')}
     if(([string]$r.name).Trim().ToLowerInvariant()-cne$Name.Trim().ToLowerInvariant()){return (& $deny 'consumption-name-mismatch')}
     foreach($p in @(@('historical_permit_transaction_id',$ids[0]),@('historical_journal_transaction_id',$ids[1]),@('new_permit_transaction_id',$ids[2]))){
-        if(([string]$r.($p[0])).Trim().ToLowerInvariant()-cne[string]$p[1]){return (& $deny ('consumption-'+$p[0]+'-mismatch'))}
+        if(([string]$r.($p[0])).Trim().ToLowerInvariant()-cne [string]$p[1]){return (& $deny ('consumption-'+$p[0]+'-mismatch'))}
     }
     $issuerCheck=Test-CustomAppProductionDualIdNewPermitIssuerReceiptV010 -Receipt $IssuerResult.receipt -Now $Now
-    if(-not[bool]$issuerCheck.ok){return (& $deny ('issuer-invalid:'+[string]$issuerCheck.reason))}
+    if(-not [bool]$issuerCheck.ok){return (& $deny ('issuer-invalid:'+[string]$issuerCheck.reason))}
     $reserveCheck=Test-CustomAppProductionDualIdNewPermitReservationPersistenceReceiptV010 -Receipt $ReservationPersistenceResult.receipt
-    if(-not[bool]$reserveCheck.ok){return (& $deny ('reservation-persistence-invalid:'+[string]$reserveCheck.reason))}
+    if(-not [bool]$reserveCheck.ok){return (& $deny ('reservation-persistence-invalid:'+[string]$reserveCheck.reason))}
     $runAdmission={
         Resolve-CustomAppProductionDualIdNewPermitIssuanceAdmissionV010 -Name $Name -LifecycleRow $LifecycleRow -ProvenanceRow $ProvenanceRow -BindingRow $BindingRow -StageResult $StageResult -ShadowResult $ShadowResult -HousekeepingResult $HousekeepingResult -AllowedRoot $AllowedRoot -StoreDirectory $RecoveryStoreDirectory -HistoricalPermitTransactionId $ids[0] -HistoricalJournalTransactionId $ids[1] -NewPermitTransactionId $ids[2] -LocalAppDataRoot $LocalAppDataRoot -AppDataRoot $AppDataRoot -CurrentBaseline $CurrentBaseline -ShadowProtocolQualification $ShadowProtocolQualification -LiveAttestedQualification $LiveAttestedQualification -PriorReadinessReceipt $PriorReadinessReceipt -Now $Now -MaxRemoteObservationAgeHours $MaxRemoteObservationAgeHours
     }
     $pre=& $runAdmission
-    if($null-eq$pre-or-not[bool]$pre.ok){return (& $deny ('pre-admission-denied:'+[string]$pre.reason))}
+    if($null-eq$pre-or-not [bool]$pre.ok){return (& $deny ('pre-admission-denied:'+[string]$pre.reason))}
     $pc=Test-CustomAppProductionDualIdNewPermitIssuanceAdmissionReceiptV010 -Receipt $pre.receipt -Now $Now
-    if(-not[bool]$pc.ok){return (& $deny ('pre-admission-invalid:'+[string]$pc.reason))}
+    if(-not [bool]$pc.ok){return (& $deny ('pre-admission-invalid:'+[string]$pc.reason))}
     $continuity=Test-DualIdNewConsumptionPersistenceContinuityV010 -CandidateReceipt $r -IssuerReceipt $IssuerResult.receipt -ReservationReceipt $ReservationPersistenceResult.receipt -FreshAdmission $pre.receipt
-    if(-not[bool]$continuity.ok){return (& $deny ([string]$continuity.reason)}
+    if(-not [bool]$continuity.ok){return (& $deny ([string]$continuity.reason)}
     try{$store=Read-CustomAppProductionConsumptionStoreV010 -AllowedRoot $AllowedRoot -StoreDirectory $ConsumptionStoreDirectory}catch{return (& $deny ('store-read-denied:'+[string]$_.Exception.Message))}
-    if(-not[bool]$store.ok){
-        if([string]$store.reason-cne'consumption-store-uninitialized'-or[int64]$candidate.before-ne0){return (& $deny ('store-not-ready:'+[string]$store.reason))}
+    if(-not [bool]$store.ok){
+        if([string]$store.reason-cne'consumption-store-uninitialized'-or [int64]$candidate.before-ne0){return (& $deny ('store-not-ready:'+[string]$store.reason))}
         try{$store=Initialize-CustomAppProductionConsumptionStoreV010 -AllowedRoot $AllowedRoot -StoreDirectory $ConsumptionStoreDirectory -Now $Now}catch{return (& $deny ('initialize-denied:'+[string]$_.Exception.Message))}
-        if(-not[bool]$store.ok){return (& $deny ('initialize-failed:'+[string]$store.reason))}
+        if(-not [bool]$store.ok){return (& $deny ('initialize-failed:'+[string]$store.reason))}
     }
     $written=$false;$recovered=$false
-    if([int64]$store.revision-eq[int64]$candidate.before){
+    if([int64]$store.revision-eq [int64]$candidate.before){
         $saved=Save-CustomAppProductionConsumptionStateV010 -AllowedRoot $AllowedRoot -StoreDirectory $ConsumptionStoreDirectory -NextState $candidate.next_state -ExpectedCurrentRevision ([int64]$candidate.before) -Now $Now -FailurePoint $FailurePoint
-        if($null-eq$saved-or-not[bool]$saved.ok){return (& $deny ('save-denied:'+[string]$saved.reason))}
+        if($null-eq$saved-or-not [bool]$saved.ok){return (& $deny ('save-denied:'+[string]$saved.reason))}
         $written=$true
-    }elseif([int64]$store.revision-eq[int64]$candidate.after){
+    }elseif([int64]$store.revision-eq [int64]$candidate.after){
         $recovered=$true
     }else{return (& $deny 'store-revision-conflict')}
     try{$verify=Read-CustomAppProductionConsumptionStoreV010 -AllowedRoot $AllowedRoot -StoreDirectory $ConsumptionStoreDirectory}catch{return (& $deny ('readback-denied:'+[string]$_.Exception.Message) $written)}
-    if($null-eq$verify-or-not[bool]$verify.ok){return (& $deny 'readback-invalid' $written)}
-    if([int64]$verify.revision-ne[int64]$candidate.after){return (& $deny 'readback-revision-mismatch' $written)}
+    if($null-eq$verify-or-not [bool]$verify.ok){return (& $deny 'readback-invalid' $written)}
+    if([int64]$verify.revision-ne [int64]$candidate.after){return (& $deny 'readback-revision-mismatch' $written)}
     $expectedJson=$candidate.next_state|ConvertTo-Json -Depth 60 -Compress;$actualJson=$verify.state|ConvertTo-Json -Depth 60 -Compress
     if($expectedJson-cne$actualJson){return (& $deny 'readback-state-drift' $written)}
     $barrier=Test-CustomAppProductionConsumptionPersistedExecutorBarrierV011 -StoreRead $verify -ExpectedConsumptionId ([string]$r.consumption_id)
-    if($null-eq$barrier-or-not[bool]$barrier.ok){return (& $deny ('barrier-denied:'+[string]$barrier.reason) $true)}
+    if($null-eq$barrier-or-not [bool]$barrier.ok){return (& $deny ('barrier-denied:'+[string]$barrier.reason) $true)}
     $post=& $runAdmission
-    if($null-eq$post-or-not[bool]$post.ok){return (& $deny ('post-admission-denied:'+[string]$post.reason) $true)}
+    if($null-eq$post-or-not [bool]$post.ok){return (& $deny ('post-admission-denied:'+[string]$post.reason) $true)}
     $postCheck=Test-CustomAppProductionDualIdNewPermitIssuanceAdmissionReceiptV010 -Receipt $post.receipt -Now $Now
-    if(-not[bool]$postCheck.ok){return (& $deny ('post-admission-invalid:'+[string]$postCheck.reason) $true)}
+    if(-not [bool]$postCheck.ok){return (& $deny ('post-admission-invalid:'+[string]$postCheck.reason) $true)}
     $postC=Test-DualIdNewConsumptionPersistenceContinuityV010 -CandidateReceipt $r -IssuerReceipt $IssuerResult.receipt -ReservationReceipt $ReservationPersistenceResult.receipt -FreshAdmission $post.receipt
-    if(-not[bool]$postC.ok){return (& $deny ('post-'+[string]$postC.reason) $true)}
-    if([string]$pre.receipt.issuance_admission_fingerprint-cne[string]$post.receipt.issuance_admission_fingerprint){return (& $deny 'admission-drift-during-persistence' $true)}
+    if(-not [bool]$postC.ok){return (& $deny ('post-'+[string]$postC.reason) $true)}
+    if([string]$pre.receipt.issuance_admission_fingerprint-cne [string]$post.receipt.issuance_admission_fingerprint){return (& $deny 'admission-drift-during-persistence' $true)}
     $receipt=[pscustomobject]@{
         schema=$DualIdNewConsumptionPersistenceSchema;managed_by=$DualIdNewConsumptionPersistenceManagedBy
         qualified_consumption_head=$DualIdNewConsumptionPersistenceQualifiedConsumptionHead;qualified_consumption_blob=$DualIdNewConsumptionPersistenceQualifiedConsumptionBlob
@@ -205,7 +205,7 @@ function Invoke-DualIdNewConsumptionPersistenceV010 {
     }
     $receipt.persistence_fingerprint=Get-DualIdNewConsumptionPersistenceShaV010(Get-DualIdNewConsumptionPersistenceMaterialV010 -Receipt $receipt)
     $ck=Test-DualIdNewConsumptionPersistenceReceiptV010 -Receipt $receipt
-    if(-not[bool]$ck.ok){return (& $deny ('output-receipt-invalid:'+[string]$ck.reason) $true)}
+    if(-not [bool]$ck.ok){return (& $deny ('output-receipt-invalid:'+[string]$ck.reason) $true)}
     return [pscustomobject]@{
         ok=$true;reason='dual-id-new-consumption-durably-persisted-zero-authority';receipt=$receipt;persisted_snapshot=$verify
         consumption_persisted=$true;read_after_write_verified=$true;persisted_consumption_barrier_attested=$true
