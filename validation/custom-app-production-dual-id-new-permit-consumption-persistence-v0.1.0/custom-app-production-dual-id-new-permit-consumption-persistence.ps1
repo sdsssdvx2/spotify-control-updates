@@ -155,7 +155,7 @@ function Invoke-DualIdNewConsumptionPersistenceV010 {
     $pc=Test-CustomAppProductionDualIdNewPermitIssuanceAdmissionReceiptV010 -Receipt $pre.receipt -Now $Now
     if(-not [bool]$pc.ok){return (& $deny ('pre-admission-invalid:'+[string]$pc.reason))}
     $continuity=Test-DualIdNewConsumptionPersistenceContinuityV010 -CandidateReceipt $r -IssuerReceipt $IssuerResult.receipt -ReservationReceipt $ReservationPersistenceResult.receipt -FreshAdmission $pre.receipt
-    if(-not [bool]$continuity.ok){return (& $deny ([string]$continuity.reason)}
+    if(-not [bool]$continuity.ok){return (& $deny ([string]$continuity.reason))}
     try{$store=Read-CustomAppProductionConsumptionStoreV010 -AllowedRoot $AllowedRoot -StoreDirectory $ConsumptionStoreDirectory}catch{return (& $deny ('store-read-denied:'+[string]$_.Exception.Message))}
     if(-not [bool]$store.ok){
         if([string]$store.reason-cne'consumption-store-uninitialized'-or [int64]$candidate.before-ne0){return (& $deny ('store-not-ready:'+[string]$store.reason))}
