@@ -94,7 +94,12 @@ function Test-CustomAppProductionDualIdNewPermitConsumptionAdmissionContinuityV0
     foreach($f in @('name','source_identity','historical_permit_transaction_id','historical_journal_transaction_id','new_permit_transaction_id')){
         if(([string]$PersistenceReceipt.$f).Trim().ToLowerInvariant()-cne([string]$FreshAdmission.$f).Trim().ToLowerInvariant()){return [pscustomobject]@{ok=$false;reason=('dual-id-new-consumption-persistence-admission-'+$f+'-mismatch')}}
     }
-    if(([string]$PersistenceReceipt.post_persistence_admission_fingerprint).Trim().ToLowerInvariant()-cne([string]$FreshAdmission.issuance_admission_fingerprint).Trim().ToLowerInvariant()){return [pscustomobject]@{ok=$false;reason='dual-id-new-consumption-admission-fingerprint-drift'}}
+    if(([string]$PersistenceReceipt.pre_persistence_admission_fingerprint).Trim().ToLowerInvariant()-cne([string]$PersistenceReceipt.post_persistence_admission_fingerprint).Trim().ToLowerInvariant()){return [pscustomobject]@{ok=$false;reason='dual-id-new-consumption-prior-persistence-admission-drift'}}
+    # The fresh admission receipt embeds checked_at and eligible_until; do not incorrectly
+    # demand cross-clock fingerprint equality. Recheck immutable/current identity instead.
+    foreach($f in @('housekeeping_cleanup_fingerprint','recovery_evidence_fingerprint','stable_live_tree_sha256','stable_persistence_fingerprint','current_remote_tree_sha256','current_remote_commit_sha','current_binding_fingerprint','current_provenance_fingerprint','current_remote_observed_at','live_admission_fingerprint','current_eligibility_fingerprint','live_attested_qualification_fingerprint')){
+        if(([string]$IssuerReceipt.$f).Trim().ToLowerInvariant()-cne([string]$FreshAdmission.$f).Trim().ToLowerInvariant()){return [pscustomobject]@{ok=$false;reason=('dual-id-new-consumption-fresh-current-identity-'+$f+'-mismatch')}}
+    }
     foreach($f in @('name','source_identity','historical_permit_transaction_id','historical_journal_transaction_id','new_permit_transaction_id','issuer_fingerprint')){
         if(([string]$IssuerReceipt.$f).Trim().ToLowerInvariant()-cne([string]$PersistenceReceipt.$f).Trim().ToLowerInvariant()){return [pscustomobject]@{ok=$false;reason=('dual-id-new-consumption-persistence-issuer-'+$f+'-mismatch')}}
     }
