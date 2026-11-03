@@ -123,7 +123,9 @@ function Resolve-CustomAppProductionDualIdNewPermitReadinessV010 {
     $remoteAt=[DateTimeOffset]::MinValue;if(-not[DateTimeOffset]::TryParse([string]$pe.remote_observed_at,[ref]$remoteAt)){return & $deny 'dual-id-readiness-current-remote-time-invalid'}
     if($remoteAt-gt$Now.AddSeconds(5)-or$remoteAt-lt$Now.AddMinutes(-10)){return & $deny 'dual-id-readiness-current-remote-observation-not-fresh'}
     foreach($f in @('remote_tree_sha256','binding_fingerprint','provenance_fingerprint')){if(-not(Test-CustomAppProductionDualIdNewPermitReadinessSha256V010 ([string]$pe.$f))){return & $deny ('dual-id-readiness-current-promotion-invalid-'+$f)}}
-    if(([string]$pe.binding_fingerprint).Trim().ToLowerInvariant()-cne([string]$BindingRow.binding_fingerprint).Trim().ToLowerInvariant()){return & $deny 'dual-id-readiness-current-binding-fingerprint-drift'}
+    $currentBindingFingerprint=(Get-CustomAppPromotionBindingFingerprintV010 -BindingRow $BindingRow)
+    if(-not(Test-CustomAppProductionDualIdNewPermitReadinessSha256V010 $currentBindingFingerprint)){return & $deny 'dual-id-readiness-current-binding-fingerprint-invalid'}
+    if(([string]$pe.binding_fingerprint).Trim().ToLowerInvariant()-cne$currentBindingFingerprint.Trim().ToLowerInvariant()){return & $deny 'dual-id-readiness-current-binding-fingerprint-drift'}
     if(([string]$pe.provenance_fingerprint).Trim().ToLowerInvariant()-cne([string]$ProvenanceRow.evidence_fingerprint).Trim().ToLowerInvariant()){return & $deny 'dual-id-readiness-current-provenance-fingerprint-drift'}
 
     $receipt=[ordered]@{
