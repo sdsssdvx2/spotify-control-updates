@@ -4,23 +4,6 @@ $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $root 'validation/custom-app-production-dual-id-new-permit-reservation-v0.1.0/test_custom_app_production_dual_id_new_permit_reservation.ps1')
 . (Join-Path $PSScriptRoot 'custom-app-production-dual-id-new-permit-reservation-persistence.ps1')
 
-# The inherited validation stack intentionally reuses short helper names across isolated
-# test harnesses. Dot-sourcing the full reservation regression chain into this process can
-# therefore leave New-LDFixtureV010 rebound to a later helper with a SessionKey parameter.
-# Restore the exact lightweight dual-ID fixture contract qualified by the finalization
-# lineage before creating any persistence fixtures; this changes test scope only.
-function New-LDFixtureV010 {
-    param([Parameter(Mandatory=$true)][string]$Label,[Parameter(Mandatory=$true)][string]$FixtureNonce,[Parameter(Mandatory=$true)][string]$PermitSeed)
-    $f=New-AtomicFixtureV010 ('lightweight-dual-id-'+$Label) -Nonce $FixtureNonce
-    $g=$f.prepared.result
-    $permit=Get-CustomAppProductionDurableDualTransactionIdBridgeIntegrationSha256V010 ('permit|'+$PermitSeed+'|'+[string]$g.preparation_fingerprint)
-    $stageFp=Get-CustomAppProductionDurableDualTransactionIdBridgeIntegrationSha256V010 ('stage|'+$PermitSeed+'|'+[string]$g.stage_result_fingerprint)
-    return [pscustomobject]@{fixture=$f;generic=$g;permit_id=$permit;stage_fingerprint=$stageFp;carrier=(New-LDCarrierV010 -Generic $g -PermitId $permit -StageFingerprint $stageFp);stage=(New-LDStageV010 -PermitId $permit -StageFingerprint $stageFp)}
-}
-$ldHelper=Get-Command New-LDFixtureV010 -CommandType Function -ErrorAction Stop
-foreach($p in @('Label','FixtureNonce','PermitSeed')){if(-not$ldHelper.Parameters.ContainsKey($p)){throw ('lightweight dual-ID fixture helper contract missing '+$p)}}
-if($ldHelper.Parameters.ContainsKey('SessionKey')){throw 'lightweight dual-ID fixture helper remained rebound to SessionKey variant'}
-
 function Assert-DINPPTrue([bool]$v,[string]$m){if(-not $v){throw $m}}
 function Assert-DINPPFalse([bool]$v,[string]$m){if($v){throw $m}}
 function Assert-DINPPEq($a,$b,[string]$m){if([string]$a -cne [string]$b){throw "$m actual=<$a> expected=<$b>"}}
@@ -28,14 +11,32 @@ function Copy-DINPP($x){return (($x|ConvertTo-Json -Depth 100)|ConvertFrom-Json)
 function Assert-DINPPZeroAuthority($r,[string]$label){foreach($f in @('session_key_persisted','session_key_exposed','permit_consumed','persistence_is_authority','executor_may_start','production_execution_authorized','production_mutation_authorized')){if($r.PSObject.Properties[$f]){Assert-DINPPFalse ([bool]$r.$f) "$label authority escaped $f"}}}
 function Assert-DINPPDenied($r,[string]$label){Assert-DINPPFalse ([bool]$r.ok) "$label unexpectedly persisted";Assert-DINPPZeroAuthority $r $label}
 
+# The qualified #203 reservation test above already produced two independently valid,
+# byte-real reservation fixtures before this child validation starts: $valid/$validResult
+# and $replay/$first. Reuse those proven seeds and allocate only a fresh persistence
+# store per case. Re-entering New-DINPRFixtureV010 after the entire inherited test stack
+# has finished would re-enter old globally-named fixture helpers whose names intentionally
+# collide across historical isolated test harnesses; those collisions are irrelevant to
+# the production cores and must not be allowed to contaminate this persistence matrix.
+if($null-eq$valid-or$null-eq$validResult-or$null-eq$replay-or$null-eq$first){throw 'qualified reservation seed fixtures were not retained by parent test'}
+$script:DINPPPrimaryQ=$valid
+$script:DINPPPrimaryReservation=$validResult
+$script:DINPPSecondaryQ=$replay
+$script:DINPPSecondaryReservation=$first
+Assert-DINPPTrue ([bool]$script:DINPPPrimaryReservation.ok) 'primary qualified reservation seed invalid'
+Assert-DINPPTrue ([bool]$script:DINPPSecondaryReservation.ok) 'secondary qualified reservation seed invalid'
+Assert-DINPPFalse (([string]$script:DINPPPrimaryReservation.receipt.new_permit_transaction_id)-ceq([string]$script:DINPPSecondaryReservation.receipt.new_permit_transaction_id)) 'qualified reservation seeds did not provide distinct new transaction IDs'
+
 function New-DINPPFixtureV010 {
-    param([Parameter(Mandatory=$true)][string]$Label)
-    $q=New-DINPRFixtureV010 ('persistence-'+$Label)
-    $reservation=Invoke-DINPRV010 $q
-    Assert-DINPPTrue ([bool]$reservation.ok) ("$Label reservation setup denied: $([string]$reservation.reason)")
+    param([Parameter(Mandatory=$true)][string]$Label,[switch]$SecondarySeed)
+    $q=$(if($SecondarySeed){$script:DINPPSecondaryQ}else{$script:DINPPPrimaryQ})
+    $reservation=$(if($SecondarySeed){$script:DINPPSecondaryReservation}else{$script:DINPPPrimaryReservation})
+    $at=$q.at.AddMilliseconds(500)
+    $rc=Test-CustomAppProductionDualIdNewPermitReservationReceiptV010 -Receipt $reservation.receipt -Now $at
+    Assert-DINPPTrue ([bool]$rc.ok) ("$Label qualified reservation seed receipt invalid: $([string]$rc.reason)")
     $store=Join-Path $q.i.f.q.x.f.trust ('dual-id-reservation-store-'+[Guid]::NewGuid().ToString('N'))
     $history=Join-Path $store 'history';[IO.Directory]::CreateDirectory($history)|Out-Null
-    return [pscustomobject]@{q=$q;reservation=$reservation;store=$store;at=$q.at.AddMilliseconds(500)}
+    return [pscustomobject]@{q=$q;reservation=$reservation;store=$store;at=$at}
 }
 function Invoke-DINPPV010 {
     param([Parameter(Mandatory=$true)]$P,[AllowNull()]$ReservationResult=$null,[AllowNull()]$IssuerResult=$null,[AllowNull()][byte[]]$Key=$null,[AllowNull()]$Bundle=$null,[AllowNull()]$CurrentBaseline=$null,[AllowNull()][string]$PersistenceStore=$null,[DateTimeOffset]$At=[DateTimeOffset]::MinValue,[ValidateSet('none','after-history-before-current')][string]$FailurePoint='none')
@@ -67,7 +68,7 @@ Assert-DINPPTrue ([bool]$pre.ok) 'post-write drift fixture admission failed';$sc
 try{Set-Item -Path Function:\Resolve-CustomAppProductionDualIdNewPermitIssuanceAdmissionV010 -Value {param($Name,$LifecycleRow,$ProvenanceRow,$BindingRow,$StageResult,$ShadowResult,$HousekeepingResult,$AllowedRoot,$StoreDirectory,$HistoricalPermitTransactionId,$HistoricalJournalTransactionId,$NewPermitTransactionId,$LocalAppDataRoot,$AppDataRoot,$CurrentBaseline,$ShadowProtocolQualification,$LiveAttestedQualification,$PriorReadinessReceipt,$Now,$MaxRemoteObservationAgeHours);$script:DINPPCalls++;if($script:DINPPCalls -eq 1){return [pscustomobject]@{ok=$true;reason='fixture-pre';receipt=$script:DINPPPre}};return [pscustomobject]@{ok=$true;reason='fixture-post';receipt=$script:DINPPPost}};$x=Invoke-DINPPV010 $post}finally{Set-Item -Path Function:\Resolve-CustomAppProductionDualIdNewPermitIssuanceAdmissionV010 -Value $orig;$script:DINPPCalls=0}
 Assert-DINPPDenied $x 'post-write drift';Assert-DINPPTrue ([bool]$x.reservation_persisted) 'post-write drift lost durable write state';Assert-DINPPEq $x.reason 'dual-id-reservation-persistence-admission-drift-after-durable-write' 'post-write drift reason';$retry=Invoke-DINPPV010 -P $post -At $post.at.AddMilliseconds(200);Assert-DINPPTrue ([bool]$retry.ok) ('post-write drift recovery retry denied: '+[string]$retry.reason);Assert-DINPPTrue ([bool]$retry.store.recovered_existing_persistence) 'post-write drift retry not recovered';$count++
 
-$conflictA=New-DINPPFixtureV010 'conflict-a';$okA=Invoke-DINPPV010 $conflictA;Assert-DINPPTrue ([bool]$okA.ok) 'conflict setup persist failed';$conflictB=New-DINPPFixtureV010 'conflict-b';$conflictB.store=$conflictA.store;$x=Invoke-DINPPV010 $conflictB;Assert-DINPPDenied $x 'same revision different state conflict';Assert-DINPPTrue ([string]$x.reason -like '*existing-revision-conflict*') ('conflict reason '+[string]$x.reason);$count++
+$conflictA=New-DINPPFixtureV010 'conflict-a';$okA=Invoke-DINPPV010 $conflictA;Assert-DINPPTrue ([bool]$okA.ok) 'conflict setup persist failed';$conflictB=New-DINPPFixtureV010 'conflict-b' -SecondarySeed;$conflictB.store=$conflictA.store;$x=Invoke-DINPPV010 $conflictB;Assert-DINPPDenied $x 'same revision different state conflict';Assert-DINPPTrue ([string]$x.reason -like '*existing-revision-conflict*') ('conflict reason '+[string]$x.reason);$count++
 
 $envTamper=New-DINPPFixtureV010 'envelope-tamper';$ok=Invoke-DINPPV010 $envTamper;Assert-DINPPTrue ([bool]$ok.ok) 'envelope tamper setup failed';$ep=Get-CustomAppProductionDualIdNewPermitReservationPersistencePathsV010 -AllowedRoot $envTamper.q.i.f.q.x.f.trust -PersistenceStoreDirectory $envTamper.store;$historyFile=@(Get-ChildItem -LiteralPath $ep.history -File -Filter '*.json')[0];$raw=[IO.File]::ReadAllText($historyFile.FullName,[Text.UTF8Encoding]::new($false));$obj=$raw|ConvertFrom-Json;$obj.new_permit_transaction_id=('f'*64);[IO.File]::WriteAllText($historyFile.FullName,($obj|ConvertTo-Json -Depth 100 -Compress),[Text.UTF8Encoding]::new($false));$denied=$false;try{[void](Read-CustomAppProductionDualIdNewPermitReservationStoreV010 -AllowedRoot $envTamper.q.i.f.q.x.f.trust -PersistenceStoreDirectory $envTamper.store)}catch{$denied=$true;Assert-DINPPTrue ([string]$_.Exception.Message -like '*envelope*invalid*') ('tamper read reason '+[string]$_.Exception.Message)};Assert-DINPPTrue $denied 'tampered durable envelope was accepted';$count++
 
