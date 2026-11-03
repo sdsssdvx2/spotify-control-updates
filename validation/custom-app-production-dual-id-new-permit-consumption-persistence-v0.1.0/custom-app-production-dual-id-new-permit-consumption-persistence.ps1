@@ -128,11 +128,12 @@ function Invoke-DualIdNewConsumptionPersistenceV010 {
         [Parameter(Mandatory=$true)][string]$LocalAppDataRoot,[Parameter(Mandatory=$true)][string]$AppDataRoot,
         [AllowNull()]$CurrentBaseline,[AllowNull()]$ShadowProtocolQualification,[AllowNull()]$LiveAttestedQualification,
         [Parameter(Mandatory=$true)]$PriorReadinessReceipt,[Parameter(Mandatory=$true)]$IssuerResult,
-        [Parameter(Mandatory=$true)]$ReservationPersistenceResult,[Parameter(Mandatory=$true)]$ConsumptionResult,
+        [Parameter(Mandatory=$true)]$ReservationPersistenceResult,[Parameter(Mandatory=$true)]$ConsumptionResult,[Parameter(Mandatory=$true)][byte[]]$SessionKey,
         [DateTimeOffset]$Now=[DateTimeOffset]::UtcNow,[int]$MaxRemoteObservationAgeHours=36,
         [ValidateSet('none','after-history-before-current')][string]$FailurePoint='none'
     )
     $deny={param([string]$Reason,[bool]$Persisted=$false)New-DualIdNewConsumptionPersistenceDeniedV010 -Reason $Reason -Persisted:$Persisted}
+    if($SessionKey.Length-lt32){return (& $deny 'session-key-too-short')}
     $candidate=Test-DualIdNewConsumptionPersistenceCandidateV010 -Result $ConsumptionResult
     if(-not [bool]$candidate.ok){return (& $deny ('candidate-invalid:'+[string]$candidate.reason))}
     $r=$candidate.receipt
@@ -143,7 +144,7 @@ function Invoke-DualIdNewConsumptionPersistenceV010 {
     foreach($p in @(@('historical_permit_transaction_id',$ids[0]),@('historical_journal_transaction_id',$ids[1]),@('new_permit_transaction_id',$ids[2]))){
         if(([string]$r.($p[0])).Trim().ToLowerInvariant()-cne [string]$p[1]){return (& $deny ('consumption-'+$p[0]+'-mismatch'))}
     }
-    $issuerCheck=Test-CustomAppProductionDualIdNewPermitIssuerReceiptV010 -Receipt $IssuerResult.receipt -Now $Now
+    $issuerCheck=Test-CustomAppProductionDualIdNewPermitIssuerReceiptV010 -Receipt $IssuerResult.receipt -SessionKey $SessionKey -Now $Now
     if(-not [bool]$issuerCheck.ok){return (& $deny ('issuer-invalid:'+[string]$issuerCheck.reason))}
     $reserveCheck=Test-CustomAppProductionDualIdNewPermitReservationPersistenceReceiptV010 -Receipt $ReservationPersistenceResult.receipt
     if(-not [bool]$reserveCheck.ok){return (& $deny ('reservation-persistence-invalid:'+[string]$reserveCheck.reason))}
