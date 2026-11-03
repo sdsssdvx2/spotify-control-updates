@@ -1,0 +1,87 @@
+name: Validate Custom App Production Dual-ID New Permit Issuance Admission v0.1.0
+
+on:
+  push:
+    branches: [validate/custom-app-production-dual-id-new-permit-issuance-admission-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-dual-id-new-permit-issuance-admission-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-dual-id-new-permit-issuance-admission-v010.yml'
+  pull_request:
+    branches: [validate/custom-app-production-dual-id-new-permit-readiness-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-dual-id-new-permit-issuance-admission-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-dual-id-new-permit-issuance-admission-v010.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 480
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope lineage PS5.1 zero-authority and launcher boundary
+        shell: powershell
+        run: |
+          $head=(git rev-parse HEAD).Trim();$expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($head-cne$expected){throw "head mismatch $head != $expected"}
+          $base='29129bff0a6cc8560b9052a1d213f602f73f76a7';if((git merge-base $base HEAD).Trim()-cne$base){throw 'not descended from exact dual-ID new-permit readiness head'}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $d='validation/custom-app-production-dual-id-new-permit-issuance-admission-v0.1.0';$core="$d/custom-app-production-dual-id-new-permit-issuance-admission.ps1";$test="$d/test_custom_app_production_dual_id_new_permit_issuance_admission.ps1";$wf='.github/workflows/validate-custom-app-production-dual-id-new-permit-issuance-admission-v010.yml'
+          $allowed=@($core,$test,$wf);$changed=@(git diff --name-only "$base...HEAD");$bad=@($changed|Where-Object{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"};foreach($p in $allowed){if($p -notin $changed){throw "missing changed surface $p"}}
+          $pins=@(@($core,'76e6b1a5da6d8b3564785b5bc970e982e808d70f'),@($test,'4fa6503fd3f8ed8821164a72ddd5842c3ecb2398'),@('validation/custom-app-production-dual-id-new-permit-readiness-v0.1.0/custom-app-production-dual-id-new-permit-readiness.ps1','a6734b92b3c529fe81ab9c0f947956b425833998'),@('validation/custom-app-live-attested-production-admission-v0.1.0/custom-app-live-attested-production-admission.ps1','9bdcbf0a928539e5f3c4e28b7de1d68589e18525'),@('validation/custom-app-production-permit-v0.1.0/custom-app-production-permit.ps1','2aff85ca092848ea254423bf5441b1a077dea5b7'))
+          foreach($p in $pins){$actual=(git hash-object $p[0]).Trim();if($actual-cne$p[1]){throw "validation blob drift $($p[0]) $actual != $($p[1])"}}
+          foreach($p in @($core,$test)){$tokens=$null;$errors=$null;$ast=[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors);if($errors.Count){$errors|ForEach-Object{Write-Error ("$p line=$($_.Extent.StartLineNumber) text=<$($_.Extent.Text)> $($_.Message)")};throw "PS5.1 parse failed $p"};$badCommands=@($ast.FindAll({param($node)if($node-isnot[Management.Automation.Language.CommandAst]){return $false};$name=$node.GetCommandName();return(-not[string]::IsNullOrWhiteSpace($name)-and$name-match'^(?i:return|throw).+')},$true));if($badCommands.Count){throw "PS5.1 keyword lexical boundary failed $p"}}
+          $raw=Get-Content $core -Raw;foreach($m in @('historical_permit_transaction_id','historical_journal_transaction_id','new_permit_transaction_id','transaction_id_namespaces_pairwise_distinct','Resolve-CustomAppProductionDualIdNewPermitReadinessV010','Resolve-CustomAppLiveAttestedProductionAdmissionV010','permit_issuance_eligible=$true','requires_fresh_permit_creation_revalidation=$true','permit_issued=$false','session_key_accepted=$false','nonce_reserved=$false','production_mutation_authorized=$false')){if($raw.IndexOf($m,[StringComparison]::Ordinal)-lt0){throw "core marker missing $m"}}
+          foreach($badToken in @('[IO.Directory]::Delete','[IO.Directory]::Move','[IO.File]::Copy','[IO.File]::Write','Copy-Item','Move-Item','Remove-Item','Set-Content','Add-Content','Out-File','Invoke-WebRequest','Invoke-RestMethod','Start-Process','Diagnostics.ProcessStartInfo','Append-CustomAppProductionCrashJournalPhaseV010','Invoke-CustomAppProductionExactSpicetifyApplyProcessV010','HMACSHA256','SessionKey','CreateShortcut','TargetPath','WorkingDirectory =')){if($raw.IndexOf($badToken,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "issuance admission core gained forbidden side effect/secret/surface $badToken"}}
+          if($raw-match'issuance_admission_is_authority\s*=\s*\$true|permit_issued\s*=\s*\$true|session_key_accepted\s*=\s*\$true|nonce_reserved\s*=\s*\$true|execution_authorized\s*=\s*\$true|restore_authorized\s*=\s*\$true|apply_authorized\s*=\s*\$true|cleanup_authorized\s*=\s*\$true|production_mutation_authorized\s*=\s*\$true'){throw 'authority escaped in issuance admission core'}
+          $testRaw=Get-Content $test -Raw;foreach($m in @('cases=$count','reuse historical permit','reuse journal','bad new id','prior readiness authority tamper','prior id drift','live admission runtime drift','live qualification authority drift','remote changed after prior readiness','provenance changed after prior readiness','expired issuance receipt','permit_issued=false','zero_authority=true')){if($testRaw.IndexOf($m,[StringComparison]::OrdinalIgnoreCase)-lt0){throw "test marker missing $m"}}
+          foreach($p in @($core,$test)){foreach($badToken in @('launch-managed.vbs','Spotify-Managed-DomainVPN.vbs','CreateShortcut','TargetPath','WorkingDirectory =')){if(([IO.File]::ReadAllText((Resolve-Path $p))).IndexOf($badToken,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "managed/domainvpn boundary escaped in $p via $badToken"}}}
+          'DUAL_ID_NEW_PERMIT_ISSUANCE_ADMISSION_SCOPE_AST_AUTHORITY_PASS'
+
+      - name: Materialize exact qualified dependency chain
+        shell: powershell
+        timeout-minutes: 90
+        run: |
+          $prep='validation/custom-app-production-dual-id-new-permit-readiness-v0.1.0/prepare_custom_app_production_dual_id_new_permit_readiness.ps1';& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $prep -RepoRoot $PWD.Path -RunnerTemp $env:RUNNER_TEMP;if($LASTEXITCODE){throw 'parent dependency preparation failed'}
+          $pins=@(@('validation/custom-app-production-dual-id-new-permit-readiness-v0.1.0/custom-app-production-dual-id-new-permit-readiness.ps1','a6734b92b3c529fe81ab9c0f947956b425833998'),@('validation/custom-app-live-attested-production-admission-v0.1.0/custom-app-live-attested-production-admission.ps1','9bdcbf0a928539e5f3c4e28b7de1d68589e18525'),@('validation/custom-app-live-attested-production-admission-v0.1.0/test_custom_app_live_attested_production_admission.ps1','3b2694e4786f470289ea0a64ad8d95da8810ebd2'),@('validation/custom-app-production-permit-v0.1.0/custom-app-production-permit.ps1','2aff85ca092848ea254423bf5441b1a077dea5b7'))
+          foreach($p in $pins){$actual=(git hash-object $p[0]).Trim();if($actual-cne$p[1]){throw "qualified dependency drift $($p[0]) $actual != $($p[1])"}}
+          'DUAL_ID_NEW_PERMIT_ISSUANCE_ADMISSION_DEPENDENCY_CHAIN_PASS'
+
+      - name: Run inherited readiness and new issuance-admission matrix twice
+        shell: powershell
+        timeout-minutes: 360
+        run: |
+          $outer=$env:RUNNER_TEMP;$test='validation/custom-app-production-dual-id-new-permit-issuance-admission-v0.1.0/test_custom_app_production_dual_id_new_permit_issuance_admission.ps1'
+          1..2|ForEach-Object{$pass=[int]$_;$runtime=Join-Path $outer ('dinpia-v010-pass-'+$pass+'-'+[Guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Force -Path $runtime|Out-Null;$exit=0;try{$env:RUNNER_TEMP=$runtime;$env:TEMP=$runtime;$env:TMP=$runtime;Write-Host "DINPIA_V010_ISOLATED_ROOT pass=$pass root=$runtime";& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test;$exit=$LASTEXITCODE}finally{$env:RUNNER_TEMP=$outer;$env:TEMP=$outer;$env:TMP=$outer};if($exit){throw "dual-ID new permit issuance admission matrix failed pass $pass"}}
+          'DUAL_ID_NEW_PERMIT_ISSUANCE_ADMISSION_MATRIX_REPEAT_PASS'
+
+      - name: Rebuild exact hard-disabled candidate and run Addon Manager SelfTest
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $d='validation/custom-app-production-recovery-readiness-hard-disabled-integration-v0.1.0';python "$d/build_candidate.py";if($LASTEXITCODE){throw 'candidate rebuild failed'}
+          $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json";$ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();if((Get-Item $a).Length-ne1382213-or$ah-cne'c2e5ffd4fe9b14b5c31dd53e7d093bd9b5db2a4ad49fa19449d299e3c14fac2f'){throw 'Addon Manager candidate drift'};if((Get-Item $m).Length-ne284327-or$mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate drift'};if($rh-cne'e51d342014aa68d381045ce5404bc049405d71f00b1a45c70b6dc54287153255'){throw 'candidate report drift'}
+          $s=Join-Path $env:RUNNER_TEMP 'dinpia-v010-selftest';$env:LOCALAPPDATA=Join-Path $s Local;$env:APPDATA=Join-Path $s Roaming;New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA Spotify)|Out-Null;& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest;if($LASTEXITCODE){throw 'Addon Manager SelfTest failed'}
+          'DUAL_ID_NEW_PERMIT_ISSUANCE_ADMISSION_HARD_DISABLED_SELFTEST_PASS'
+
+      - name: Prove protected surfaces main freeze and write evidence
+        shell: powershell
+        run: |
+          $base='29129bff0a6cc8560b9052a1d213f602f73f76a7';if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          foreach($p in @('manifest.json','stable-version.json','addon-policy-registry.json','bin/spotify-control.ps1','bin/addon-manager.ps1','bin/spotify-control-agent.vbs')){git diff --quiet $base HEAD -- $p;if($LASTEXITCODE){throw "protected managed payload changed $p"}}
+          $changed=@(git diff --name-only "$base...HEAD");foreach($p in $changed){if($p-match'(?i)(\.lnk$|launch-managed\.vbs|domainvpn|launchers[/\\])'){throw "launcher/domainvpn boundary escaped: $p"}}
+          $out=Join-Path $env:RUNNER_TEMP 'dinpia-v010-evidence';New-Item -ItemType Directory -Force -Path $out|Out-Null
+          [pscustomobject]@{schema=1;managed_by='custom-app-production-dual-id-new-permit-issuance-admission-validation-v1';head=(git rev-parse HEAD).Trim();base=$base;production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2';core_blob='76e6b1a5da6d8b3564785b5bc970e982e808d70f';test_blob='4fa6503fd3f8ed8821164a72ddd5842c3ecb2398';readiness_head='29129bff0a6cc8560b9052a1d213f602f73f76a7';readiness_core_blob='a6734b92b3c529fe81ab9c0f947956b425833998';historical_ids_preserved=$true;new_permit_transaction_namespace_distinct=$true;fresh_readiness_required=$true;fresh_live_admission_required=$true;permit_issued=$false;session_key_accepted=$false;nonce_reserved=$false;zero_authority=$true;managed_entrypoint_unchanged=$true;domainvpn_wrapper_boundary_unchanged=$true}|ConvertTo-Json -Depth 10|Set-Content -LiteralPath (Join-Path $out 'validation-evidence.json') -Encoding UTF8
+          Copy-Item 'validation/custom-app-production-dual-id-new-permit-issuance-admission-v0.1.0/custom-app-production-dual-id-new-permit-issuance-admission.ps1' $out
+          Copy-Item 'validation/custom-app-production-dual-id-new-permit-issuance-admission-v0.1.0/test_custom_app_production_dual_id_new_permit_issuance_admission.ps1' $out
+          'DUAL_ID_NEW_PERMIT_ISSUANCE_ADMISSION_PROTECTED_SURFACES_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-dual-id-new-permit-issuance-admission-v010-${{ github.run_id }}
+          path: ${{ runner.temp }}/dinpia-v010-evidence
+          if-no-files-found: error
