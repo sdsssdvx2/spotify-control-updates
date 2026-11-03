@@ -56,5 +56,5 @@ $envTamper=New-DINPPFixtureV010 'envelope-tamper';$ok=Invoke-DINPPV010 $envTampe
 
 $receiptTamper=Copy-DINPP $validResult.receipt;$receiptTamper.permit_consumed=$true;$receiptTamper.persistence_fingerprint=Get-CustomAppProductionDualIdNewPermitReservationPersistenceSha256V010(Get-CustomAppProductionDualIdNewPermitReservationPersistenceReceiptMaterialV010 -Receipt $receiptTamper);$ck=Test-CustomAppProductionDualIdNewPermitReservationPersistenceReceiptV010 -Receipt $receiptTamper;Assert-DINPPFalse ([bool]$ck.ok) 'consumed persistence receipt tamper accepted';Assert-DINPPTrue ([string]$ck.reason -like '*authority-escaped-permit_consumed') 'consumed receipt tamper reason';$count++
 
-if($count -ne 11){throw "dual-ID reservation persistence matrix count mismatch $count"}
+if($count -ne 12){throw "dual-ID reservation persistence matrix count mismatch $count"}
 Write-Host "CUSTOM_APP_PRODUCTION_DUAL_ID_NEW_PERMIT_RESERVATION_PERSISTENCE_MATRIX_PASS cases=$count durable_history=true crash_pointer_repair=true triple_id_evidence=true transaction_hmac_durable=true session_key_persisted=false permit_consumed=false zero_authority=true"
