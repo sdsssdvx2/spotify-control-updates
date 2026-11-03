@@ -4,6 +4,7 @@ $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $root 'validation/custom-app-production-dual-id-bridge-aware-spicetify-apply-executor-v0.1.0/test_custom_app_production_dual_id_bridge_aware_spicetify_apply_executor.ps1')
 . (Join-Path $root 'validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1')
 . (Join-Path $PSScriptRoot 'custom-app-production-dual-id-bridge-aware-post-apply-commit-cleanup.ps1')
+. (Join-Path $PSScriptRoot 'custom-app-production-dual-id-bridge-aware-post-apply-commit-cleanup-now-compat-v0.1.1.ps1')
 
 function Assert-DBACTrue([bool]$Value,[string]$Message){if(-not$Value){throw $Message}}
 function Assert-DBACFalse([bool]$Value,[string]$Message){if($Value){throw $Message}}
@@ -24,9 +25,9 @@ function New-DBACFixtureV010 {
     return [pscustomobject]@{x=$x;f=$f;apply=$apply.result;count_path=$countPath;stage_workspace=[string]$f.x.generic.stage_workspace_path;app_container=[IO.Path]::GetDirectoryName([string]$f.x.generic.app_backup_path);persistence_backup=[string]$f.x.generic.persistence_backup_path}
 }
 function Invoke-DBACV010 {
-    param([Parameter(Mandatory=$true)]$X,[AllowNull()]$Apply=$null)
+    param([Parameter(Mandatory=$true)]$X,[AllowNull()]$Apply=$null,[DateTimeOffset]$Now=[DateTimeOffset]::UtcNow)
     if($null-eq$Apply){$Apply=$X.apply};$f=$X.f
-    return Invoke-CustomAppProductionDualIdBridgeAwarePostApplyCommitCleanupV010 -DualIdApplyResult $Apply -DualIdFinalizationResult $X.x.q.final.result -DurableBridgeIntegrationResult $f.bridge.result -EvidenceBoundAtomicResult $f.atomic -GenericPreparedResult $f.x.generic -GenericStageExecutorResult $f.x.fixture.q.stage.result -Permit $f.x.fixture.q.x.permit -Name $f.name -LifecycleRow $f.x.fixture.q.x.f.lifecycle -ProvenanceRow $f.x.fixture.q.x.f.provenance -BindingRow $f.x.fixture.q.x.f.binding -AllowedRoot $f.trust -JournalStoreDirectory $f.store -ConsumptionStoreDirectory $f.x.fixture.q.x.store.store -SessionKey $script:DBAPSessionKey -LocalAppDataRoot ([string]$f.x.fixture.q.persistence.local) -AppDataRoot ([string]$f.x.fixture.q.persistence.roaming)
+    return Invoke-CustomAppProductionDualIdBridgeAwarePostApplyCommitCleanupV010 -DualIdApplyResult $Apply -DualIdFinalizationResult $X.x.q.final.result -DurableBridgeIntegrationResult $f.bridge.result -EvidenceBoundAtomicResult $f.atomic -GenericPreparedResult $f.x.generic -GenericStageExecutorResult $f.x.fixture.q.stage.result -Permit $f.x.fixture.q.x.permit -Name $f.name -LifecycleRow $f.x.fixture.q.x.f.lifecycle -ProvenanceRow $f.x.fixture.q.x.f.provenance -BindingRow $f.x.fixture.q.x.f.binding -AllowedRoot $f.trust -JournalStoreDirectory $f.store -ConsumptionStoreDirectory $f.x.fixture.q.x.store.store -SessionKey $script:DBAPSessionKey -LocalAppDataRoot ([string]$f.x.fixture.q.persistence.local) -AppDataRoot ([string]$f.x.fixture.q.persistence.roaming) -Now $Now
 }
 function Read-DBACJournalV010($X){return Read-CustomAppProductionCrashJournalV010 -AllowedRoot $X.f.trust -StoreDirectory $X.f.store}
 function Assert-DBACApplyVerifiedUntouchedV010($X,[string]$Label){$j=Read-DBACJournalV010 $X;Assert-DBACEq([string]$j.entry.phase)'apply-verified' "$Label journal phase";Assert-DBACTrue(Test-Path -LiteralPath $X.stage_workspace)"$Label stage workspace removed";Assert-DBACTrue(Test-Path -LiteralPath $X.app_container)"$Label app backup removed";Assert-DBACTrue(Test-Path -LiteralPath $X.persistence_backup)"$Label persistence backup removed";Assert-DBACTrue((Get-DBAXCountV010 $X.count_path)-eq1)"$Label executed extra apply"}
@@ -34,7 +35,7 @@ function Assert-DBACCommittedV010($X,$Result,[string]$Label){Assert-DBACTrue([bo
 
 $count=0
 
-# 1. Normal success: cleanup-starting is durable before any delete, all bounded artifacts disappear, committed-clean is durable, no extra apply.
+# 1. Normal success: cleanup-starting is durable before any delete, all bounded artifacts disappear, committed-clean is durable, no extra apply. Explicit -Now is exercised by every cleanup call.
 $script:DBACFault=$null;$x1=New-DBACFixtureV010 'success'
 $stageSibling=Join-Path ([IO.Path]::GetDirectoryName($x1.stage_workspace)) ('keep-stage-'+[Guid]::NewGuid().ToString('N'));$appSibling=Join-Path ([IO.Path]::GetDirectoryName($x1.app_container)) ('keep-app-'+[Guid]::NewGuid().ToString('N'));$persistSibling=Join-Path ([IO.Path]::GetDirectoryName($x1.persistence_backup)) ('keep-persist-'+[Guid]::NewGuid().ToString('N'));[IO.Directory]::CreateDirectory($stageSibling)|Out-Null;[IO.Directory]::CreateDirectory($appSibling)|Out-Null;[IO.Directory]::CreateDirectory($persistSibling)|Out-Null
 $r1=Invoke-DBACV010 $x1;Assert-DBACCommittedV010 $x1 $r1 'success';Assert-DBACTrue(Test-Path -LiteralPath $stageSibling)'success stage sibling deleted';Assert-DBACTrue(Test-Path -LiteralPath $appSibling)'success app sibling deleted';Assert-DBACTrue(Test-Path -LiteralPath $persistSibling)'success persistence sibling deleted';$count++
@@ -62,4 +63,4 @@ $x8=New-DBACFixtureV010 'apply-evidence-drift';$bad8=Copy-DBAC $x8.apply;$bad8.a
 
 $script:DBACFault=$null
 if($count-ne8){throw "dual-ID post-apply cleanup matrix count mismatch $count"}
-Write-Output "CUSTOM_APP_PRODUCTION_DUAL_ID_BRIDGE_AWARE_POST_APPLY_COMMIT_CLEANUP_PASS cases=$count parent_apply_matrix_replayed=true cleanup_starting_before_delete=true bounded_stage_app_persistence_delete=true partial_cleanup_resume=true committed_clean_durable=true no_extra_spicetify_apply=true permit_id_forward_only=true journal_id_recovery_only=true recovery_evidence_retained=true zero_authority=true"
+Write-Output "CUSTOM_APP_PRODUCTION_DUAL_ID_BRIDGE_AWARE_POST_APPLY_COMMIT_CLEANUP_PASS cases=$count parent_apply_matrix_replayed=true cleanup_starting_before_delete=true bounded_stage_app_persistence_delete=true partial_cleanup_resume=true committed_clean_durable=true explicit_now_contract=true no_extra_spicetify_apply=true permit_id_forward_only=true journal_id_recovery_only=true recovery_evidence_retained=true zero_authority=true"
