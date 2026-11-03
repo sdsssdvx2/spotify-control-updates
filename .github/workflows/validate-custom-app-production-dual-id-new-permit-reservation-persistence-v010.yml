@@ -56,8 +56,8 @@ jobs:
         shell: powershell
         timeout-minutes: 420
         run: |
-          $outer=$env:RUNNER_TEMP;$test='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0/test_custom_app_production_dual_id_new_permit_reservation_persistence.ps1'
-          1..2|ForEach-Object{$pass=[int]$_;$runtime=Join-Path $outer ('dinpp-v010-pass-'+$pass+'-'+[Guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Force -Path $runtime|Out-Null;$exit=0;try{$env:RUNNER_TEMP=$runtime;$env:TEMP=$runtime;$env:TMP=$runtime;Write-Host "DINPP_V010_ISOLATED_ROOT pass=$pass root=$runtime";& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test;$exit=$LASTEXITCODE}finally{$env:RUNNER_TEMP=$outer;$env:TEMP=$outer;$env:TMP=$outer};if($exit){throw "dual-ID reservation persistence matrix failed pass $pass"}}
+          $outer=$env:RUNNER_TEMP;$outerTemp=$env:TEMP;$outerTmp=$env:TMP;$test='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0/test_custom_app_production_dual_id_new_permit_reservation_persistence.ps1'
+          1..2|ForEach-Object{$pass=[int]$_;$runtime=Join-Path $outer ('dinpp-v010-pass-'+$pass+'-'+[Guid]::NewGuid().ToString('N'));$osTemp=Join-Path $outer ('dinpp-v010-os-temp-'+$pass+'-'+[Guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Force -Path $runtime,$osTemp|Out-Null;$exit=0;try{$env:RUNNER_TEMP=$runtime;$env:TEMP=$osTemp;$env:TMP=$osTemp;Write-Host "DINPP_V010_ISOLATED_ROOT pass=$pass root=$runtime temp=$osTemp";& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test;$exit=$LASTEXITCODE}finally{$env:RUNNER_TEMP=$outer;$env:TEMP=$outerTemp;$env:TMP=$outerTmp};if($exit){throw "dual-ID reservation persistence matrix failed pass $pass"}}
           'DUAL_ID_NEW_PERMIT_RESERVATION_PERSISTENCE_MATRIX_REPEAT_PASS'
 
       - name: Rebuild exact hard-disabled candidate and run Addon Manager SelfTest
