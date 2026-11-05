@@ -147,7 +147,7 @@ jobs:
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-production-triple-id-apply-crash-restart-v0.1.0/test_triple_id_ambiguous_apply_restart.ps1'
           if($LASTEXITCODE -ne 0){throw ('Independent ambiguous apply restart matrix failed, exit '+$LASTEXITCODE)}
           $evidence=Get-Content -LiteralPath 'validation/custom-app-production-triple-id-apply-crash-restart-v0.1.0/evidence.json' -Raw|ConvertFrom-Json
-          if([string]$evidence.status -cne 'PASS' -or [int]$evidence.new_scenario_count -ne 5 -or -not[bool]$evidence.independent_windows_process_restored_old_code -or -not[bool]$evidence.original_baseline_denied_while_old_live_retained -or -not[bool]$evidence.replay_and_wrong_id_denied){throw 'Ambiguous apply independent recovery evidence incomplete'}
+          if([string]$evidence.status -cne 'PASS' -or [int]$evidence.new_scenario_count -ne 7 -or -not[bool]$evidence.independent_windows_process_restored_old_code -or -not[bool]$evidence.original_baseline_denied_while_old_live_retained -or -not[bool]$evidence.replay_and_wrong_id_denied){throw 'Ambiguous apply independent recovery evidence incomplete'}
           Write-Host 'TRIPLE_ID_APPLY_CRASH_INDEPENDENT_TWO_PHASE_WINDOWS_EVIDENCE_PASS'
       - name: Upload non-production evidence
         if: always()
