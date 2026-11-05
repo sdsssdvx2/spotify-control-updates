@@ -1,0 +1,137 @@
+name: Validate Byte-Real Pre-Staged ZIP to Signed Triple-ID Permit Handoff
+
+on:
+  push:
+    branches: [validate/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-byte-real-prepared-stage-handoff-v010.yml'
+  pull_request:
+    branches: [validate/custom-app-production-new-permit-integration-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-byte-real-prepared-stage-handoff-v010.yml'
+  workflow_dispatch:
+
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Validate fixed source scope, PowerShell syntax and zero-authority core
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $h=(git rev-parse HEAD).Trim()
+          if($h -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'HEAD checkout mismatch'}
+          $base='67e39fd170079e4b1bce920466b5e46365af6050'
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'PR #208 exact base not ancestor'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved'}
+          $d='validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0'
+          $core="$d/custom-app-production-byte-real-prepared-stage-handoff.ps1"
+          $test="$d/test_custom_app_production_byte_real_prepared_stage_handoff.ps1"
+          $wf='.github/workflows/validate-custom-app-production-byte-real-prepared-stage-handoff-v010.yml'
+          $allowed=@($core,$test,$wf)
+          $changed=@(git diff --name-only "$base...HEAD")
+          $escaped=@($changed|Where-Object{$_ -notin $allowed})
+          if($escaped.Count -ne 0){throw "Validation scope escaped: $($escaped -join ',')"}
+          foreach($p in $allowed){if($p -notin $changed){throw "Expected reviewed file missing: $p"}}
+          foreach($pin in @(@($core,'7b034d43f61819ff27c508505b3a1819a358b627'),@($test,'2d526ead4cc9453968a2e55635b8e91dac0ccf4c'),@('validation/custom-app-production-dual-id-new-permit-executor-start-gate-v0.1.0/custom-app-production-dual-id-new-permit-executor-start-gate.ps1','23ddf1bb5a922791bb0f20fee07dc99d0de44629'),@('validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','e2f2fc656235883d2a82b106289973f6ded409a5'))){
+            $actual=(git rev-parse "HEAD:$($pin[0])").Trim()
+            if($actual -cne $pin[1]){throw "Qualified source blob changed: $($pin[0]) $actual"}
+          }
+          foreach($p in @($core,$test)){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|ForEach-Object{Write-Host "$p line=$($_.Extent.StartLineNumber): $($_.Message)"};throw 'PowerShell 5.1 parse failed'}
+          }
+          $coretext=[IO.File]::ReadAllText((Resolve-Path $core))
+          foreach($unsafe in @('Invoke-WebRequest','Invoke-RestMethod','Start-Process','Remove-Item','Copy-Item','Move-Item','Set-Content','AppendAllText','WriteAllBytes','CreateShortcut','launch-managed.vbs','Spotify-Managed-DomainVPN.vbs','spicetify apply')){
+            if($coretext.IndexOf($unsafe,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "Read-only handoff core side effect/surface: $unsafe"}
+          }
+          if($coretext -match '(?i)(ready_to_apply|stage_authorized|executor_may_start|production_mutation_authorized)\s*=\s*\$true'){throw 'New handoff core granted mutation authority'}
+          'BYTE_REAL_TRIPLE_ID_HANDOFF_SCOPE_AND_PS51_PASS'
+
+      - name: Materialize exact qualified historical dependency files
+        shell: powershell
+        timeout-minutes: 50
+        run: |
+          $ErrorActionPreference='Stop'
+          $prep='validation/custom-app-production-dual-id-new-permit-readiness-v0.1.0/prepare_custom_app_production_dual_id_new_permit_readiness.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $prep -RepoRoot $PWD.Path -RunnerTemp $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'Exact historical dependency setup failed'}
+          foreach($pin in @(
+            @('validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1','3350cd974bb9f9ae7345e490449c4875d571bf95'),
+            @('validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1','224b9df9d020b74bd4d99c85ca6d06e28999101b')
+          )){
+            if((git hash-object $pin[0]).Trim() -cne $pin[1]){throw "Historical dependency override blob drift: $($pin[0])"}
+          }
+          'BYTE_REAL_TRIPLE_ID_HANDOFF_DEPENDENCIES_PASS'
+
+      - name: Compose qualified reservation overlays and verify one real-ZIP Triple-ID handoff
+        shell: powershell
+        timeout-minutes: 210
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          $core="$d/custom-app-production-dual-id-new-permit-reservation-persistence.ps1"
+          $parts=@($core,"$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1","$d/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1")
+          $composed=($parts|ForEach-Object{[IO.File]::ReadAllText((Resolve-Path $_).Path)}) -join [Environment]::NewLine
+          [IO.File]::WriteAllText((Resolve-Path $core).Path,$composed,[Text.UTF8Encoding]::new($false))
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $core).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw 'Composed historic fix PS5.1 parse failed'}
+          $outer=$env:RUNNER_TEMP
+          $oldTemp=$env:TEMP;$oldTmp=$env:TMP
+          $runtime=Join-Path $outer ('byte-real-handoff-'+[Guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Force -Path $runtime|Out-Null
+          $code=0
+          try {
+            $env:RUNNER_TEMP=$runtime;$env:TEMP=$runtime;$env:TMP=$runtime
+            $test='validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/test_custom_app_production_byte_real_prepared_stage_handoff.ps1'
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test
+            $code=$LASTEXITCODE
+          } finally {
+            $env:RUNNER_TEMP=$outer;$env:TEMP=$oldTemp;$env:TMP=$oldTmp
+          }
+          if($code -ne 0){throw "Same real-ZIP signed-permit handoff failed exit=$code"}
+          'BYTE_REAL_TRIPLE_ID_PREPARED_STAGE_SAME_TRANSACTION_PASS'
+
+      - name: Verify protected production freeze and write CI evidence
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='67e39fd170079e4b1bce920466b5e46365af6050'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Protected main changed'}
+          foreach($p in @('bin/spotify-control.ps1','bin/addon-manager.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
+            git diff --quiet $base HEAD -- $p
+            if($LASTEXITCODE -ne 0){throw "Protected production file changed: $p"}
+          }
+          $d='validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0'
+          [ordered]@{
+            schema=1;qualified_base=$base;head=(git rev-parse HEAD).Trim()
+            production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+            historical_gates_reused=$true;actual_zip_tree_bound_to_new_permit=$true
+            durable_reservation_and_consumption=$true;no_spotify_install=$true
+            actual_apply_or_rollback_tested=$false
+            placeholder_remote_commit=$true
+            source_fully_online_attested=$false
+            production_pipeline_enabled=$false;production_mutation_authorized=$false
+          }|ConvertTo-Json -Depth 8|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'BYTE_REAL_TRIPLE_ID_HANDOFF_PROTECTED_MAIN_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: byte-real-prepared-stage-triple-id-handoff-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/custom-app-production-byte-real-prepared-stage-handoff.ps1
+            validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/test_custom_app_production_byte_real_prepared_stage_handoff.ps1
+            validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/ci-evidence.json
+          if-no-files-found: error
