@@ -1,0 +1,188 @@
+name: Validate fresh authorized third-ID journal atomic bridge and independent process recovery
+on:
+  push:
+    branches:
+      - validate/custom-app-production-triple-id-authorized-journal-bridge-v0.1.0
+    paths:
+      - 'validation/custom-app-production-triple-id-authorized-journal-bridge-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-triple-id-authorized-journal-bridge-v010.yml'
+  pull_request:
+    branches:
+      - validate/custom-app-production-retained-old-live-hard-disabled-bundle-v0.1.0
+    paths:
+      - 'validation/custom-app-production-triple-id-authorized-journal-bridge-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-triple-id-authorized-journal-bridge-v010.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  isolated-triple-id-authorized-journal-bridge:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Guard exact parent, frozen main, three-file scope, and qualified bridge sources
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='8184e300678a6fc717ed8a83ebd395e51f6d74ff'
+          $production='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'Event head mismatch'}
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'PR 219 independently qualified frozen head not ancestor'}
+          if((git rev-parse origin/main).Trim() -cne $production){throw 'Frozen main changed'}
+          $test='validation/custom-app-production-triple-id-authorized-journal-bridge-v0.1.0/custom-app-production-triple-id-authorized-journal-bridge.ps1'
+          $generator='validation/custom-app-production-triple-id-authorized-journal-bridge-v0.1.0/derive_bridge_e2e.py'
+          $workflow='.github/workflows/validate-custom-app-production-triple-id-authorized-journal-bridge-v010.yml'
+          $allowed=@($test,$generator,$workflow)
+          $changed=@(git diff --name-only "$base...HEAD")
+          $unexpected=@($changed|Where-Object{$_ -notin $allowed})
+          if($unexpected.Count){throw ('Unreviewed scope: '+($unexpected -join ','))}
+          foreach($p in $allowed){if($p -notin $changed){throw ('Expected file absent: '+$p)}}
+          $fixed=@{
+            'validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1'='e91fa6a125f77352907c1119f6d9f47be9682550'
+            'validation/custom-app-production-pre-permit-backups-bridge-v0.1.0/custom-app-production-pre-permit-backups-bridge.ps1'='2b91297b72d1b223fffe2428b75ed4de8771b8eb'
+            'validation/custom-app-production-prepared-stage-executor-bridge-v0.1.0/custom-app-production-prepared-stage-executor-bridge.ps1'='04226ed6595049a2fcb3ac355150e9cd62940b58'
+            'validation/custom-app-production-transaction-finalization-v0.1.0/custom-app-production-transaction-finalization.ps1'='2958ae3f92173215d32ef8bf284a9433c52caa61'
+            'validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1'='f7372b069fbfe6a0f8d8a0aad45312ffd33d9f0a'
+            'validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1'='3b14280d727287252f71611e4424d78e5705c2f1'
+            'validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup-finalization-receipt-v011.ps1'='31da8fa6253679f22edc07a6b5c00a47eb26c64d'
+            'validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1'='55ca1e3c8d56b2e86a98d8b47e8ac1cc4ccbb6d0'
+            'validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0/invoke_custom_app_production_evidence_bound_recovery_restart_worker.ps1'='9c039860ff0645153205691a11e89d8eb844d43c'
+          }
+          foreach($p in $fixed.Keys){
+            if((git rev-parse "HEAD:$p").Trim() -cne $fixed[$p]){throw ('Qualified source drift: '+$p)}
+          }
+          if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows'){throw 'Not Windows Actions'}
+          if((git hash-object $test).Trim() -cne 'dcff9e27edc12268be8afcf795478bdaeac5bd1e'){throw 'strict bridge source changed'}
+          if((git hash-object $generator).Trim() -cne '68a499af508b1b24d30854c628c1a3f9783c6d9a'){throw 'fixture derivation changed'}
+          Write-Host 'TRIPLE_ID_AUTHORIZED_JOURNAL_BRIDGE_FROZEN_MAIN_AND_SCOPE_PASS'
+      - name: Restore qualified historical Windows fixture dependencies and overlays
+        shell: powershell
+        timeout-minutes: 50
+        run: |
+          $ErrorActionPreference='Stop'
+          $prep='validation/custom-app-production-dual-id-new-permit-readiness-v0.1.0/prepare_custom_app_production_dual_id_new_permit_readiness.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $prep -RepoRoot $PWD.Path -RunnerTemp $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'Qualified historical fixture dependency restoration failed'}
+          $d='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          $pins=@(
+            @("$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1",'3350cd974bb9f9ae7345e490449c4875d571bf95'),
+            @("$d/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1",'224b9df9d020b74bd4d99c85ca6d06e28999101b')
+          )
+          foreach($pin in $pins){if((git hash-object $pin[0]).Trim() -cne [string]$pin[1]){throw ('Qualified overlay SHA drift: '+$pin[0])}}
+          # Pinned historical-only dependencies: materialize into ephemeral checkout.
+          $historical=@(
+            @('e2b80822835bf5d59dc179e345e098b5bd79759e','validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/test_custom_app_production_atomic_live_swap_mutation.ps1','d15e0768162b0659c57602eaf0242b035b48b0c7'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+            @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','79580da78443a18bd281d4fce61c4a57d958a196'),
+            @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),
+            @('b266bad660d4b7bc87e7093c5b12f0cff1dc466f','validation/custom-app-production-recovery-plan-contract-v0.1.0/custom-app-production-recovery-plan.ps1','ae49409973164052d5830b981d804707f9d62b6c'),
+            @('ffb5aad4a605691ee7b80392498b0cb6fa4e4052','validation/custom-app-production-recovery-preflight-v0.1.0/custom-app-production-recovery-preflight.ps1','b1816a24849a559b4da2537aa1b2436124fbee50'),
+            @('ffb5aad4a605691ee7b80392498b0cb6fa4e4052','validation/custom-app-production-recovery-execution-admission-v0.1.0/custom-app-production-recovery-execution-admission.ps1','e8804a7c53ad0d3e5420e037d468d9c397e52529'),
+            @('5232e5adeb13e6942acb210b3cd13058e1eaaf05','validation/custom-app-production-recovery-evidence-admission-integration-v0.1.0/custom-app-production-recovery-evidence-admission-integration.ps1','c92c727b5a2217f5b84a1072608bfc4662e68926'),
+            @('d3969a746ed1736fe93586bd025116c2526fbff5','validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/custom-app-production-recovery-cleanup-resume-admission.ps1','387d97b10d493b3794b24fba2bac67cf39491444'),
+            @('d9a1face71511bdaeeef4e8c761415ef9ec95fc0','validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','0273d7e28a56759b1d0ec9cbf037483b04d98d63')
+          )
+          foreach($dep in $historical){
+            $commit=[string]$dep[0];$p=[string]$dep[1];$blob=[string]$dep[2]
+            if(-not(Test-Path -LiteralPath $p -PathType Leaf)){
+              git cat-file -e ($commit+'^{commit}') 2>$null
+              if($LASTEXITCODE){git fetch --no-tags origin $commit | Out-Null;if($LASTEXITCODE){throw ('historical fetch failed '+$commit)}}
+              New-Item -ItemType Directory -Force -Path (Split-Path $p -Parent)|Out-Null
+              $env:TJR_SPEC=($commit+':'+$p);$env:TJR_OUT=$p
+              python -c "import os,subprocess,pathlib;pathlib.Path(os.environ['TJR_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['TJR_SPEC']]))"
+              if($LASTEXITCODE){throw ('historical materialize failed '+$p)}
+            }
+            if((git hash-object $p).Trim() -cne $blob){throw ('historical recovery blob drift '+$p)}
+          }
+          # The parent preparer intentionally applies its separately qualified
+          # monotonic restore-executor patch. Do not overwrite it with its old blob.
+          if(-not(Test-Path -LiteralPath 'validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1' -PathType Leaf)){throw 'qualified monotonic restore executor absent'}
+          Write-Host 'TRIPLE_ID_AUTHORIZED_JOURNAL_BRIDGE_HISTORICAL_RECOVERY_MODULES_PINNED_PASS'
+          Write-Host 'TRIPLE_ID_AUTHORIZED_JOURNAL_BRIDGE_PINNED_FIXTURES_PASS'
+      - name: Parse Windows PS5.1 raw atomic, original worker and newly signed bridge
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=@(
+            'validation/custom-app-production-triple-id-journaled-restart-e2e-v0.1.0/test_triple_id_journaled_restart_e2e.ps1',
+            'validation/custom-app-production-triple-id-authorized-journal-bridge-v0.1.0/custom-app-production-triple-id-authorized-journal-bridge.ps1',
+            'validation/custom-app-production-post-swap-apply-admission-v0.1.0/custom-app-production-post-swap-apply-admission.ps1',
+            'validation/custom-app-production-triple-id-prepared-atomic-e2e-v0.1.0/test_triple_id_prepared_atomic_e2e.ps1',
+            'validation/custom-app-production-transaction-finalization-v0.1.0/custom-app-production-transaction-finalization.ps1',
+            'validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1',
+            'validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1',
+            'validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup-finalization-receipt-v011.ps1',
+            'validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/test_custom_app_production_evidence_bound_journal_atomic.ps1',
+            'validation/custom-app-production-evidence-bound-journal-atomic-v0.1.0/custom-app-production-evidence-bound-journal-atomic.ps1',
+            'validation/custom-app-production-evidence-bound-recovery-restart-v0.1.0/invoke_custom_app_production_evidence_bound_recovery_restart_worker.ps1',
+            'validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1',
+            'validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1',
+            'validation/custom-app-production-pre-permit-backups-bridge-v0.1.0/test_custom_app_production_pre_permit_backups_bridge.ps1',
+            'validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1'
+          )
+          foreach($p in $files){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Select-Object -First 12|ForEach-Object{Write-Host "$p $($_.Extent.StartLineNumber): $($_.Message)"};throw ('PS5.1 parse failed: '+$p)}
+          }
+          Write-Host 'TRIPLE_ID_AUTHORIZED_JOURNAL_BRIDGE_PS51_SOURCE_PARSE_PASS'
+      - name: Run signed HMAC and persisted consumption gate, actual journal swap, and independent rollback
+        shell: powershell
+        timeout-minutes: 90
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir='validation/custom-app-production-triple-id-authorized-journal-bridge-v0.1.0'
+          $d='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          $core="$d/custom-app-production-dual-id-new-permit-reservation-persistence.ps1"
+          $parts=@($core,"$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1","$d/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1")
+          $composed=($parts|ForEach-Object{[IO.File]::ReadAllText((Resolve-Path $_).Path)}) -join [Environment]::NewLine
+          [IO.File]::WriteAllText((Resolve-Path $core).Path,$composed,[Text.UTF8Encoding]::new($false))
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $core).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw 'Pinned historical reservation fixture overlay parse failed'}
+          python "$dir/derive_bridge_e2e.py"
+          if($LASTEXITCODE -ne 0){throw 'original qualified real ZIP restart fixture derivation failed'}
+          $derived='validation/custom-app-production-triple-id-journaled-restart-e2e-v0.1.0/ci_derived_authorized_bridge_restart.ps1'
+          $tokens=$null;$parseErrors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $derived).Path,[ref]$tokens,[ref]$parseErrors)
+          if($parseErrors.Count){$parseErrors|Select-Object -First 8|ForEach-Object{Write-Host $_.Message};throw 'derived Windows PS5.1 runner syntax invalid'}
+          $previousRoot=$env:RUNNER_TEMP;$previousTemp=$env:TEMP;$previousTmp=$env:TMP
+          $isolatedRoot=Join-Path $previousRoot ('triple-id-journal-restart-'+[Guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Force -Path $isolatedRoot|Out-Null
+          $exitCode=1
+          try{
+            $env:RUNNER_TEMP=$isolatedRoot;$env:TEMP=$isolatedRoot;$env:TMP=$isolatedRoot
+            $ErrorActionPreference='Continue'
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $derived *>&1 | Tee-Object -FilePath "$dir/windows-ci.log"
+            $exitCode=$LASTEXITCODE
+          }finally{
+            $ErrorActionPreference='Stop'
+            $env:RUNNER_TEMP=$previousRoot;$env:TEMP=$previousTemp;$env:TMP=$previousTmp
+          }
+          if($exitCode -ne 0){throw "Triple-ID durable journaled restart recovery test failed code=$exitCode"}
+          $log=Get-Content -LiteralPath "$dir/windows-ci.log" -Raw
+          if($log -notmatch 'TRIPLE_ID_JOURNALED_RESTART_E2E_PASS cases=7 real_zip=true third_permit_revalidated=true durable_single_use_consumption=true recovery_evidence_before_first_mutation=true journal_candidate_live=true separate_process=true resume_admission=true rollback_required_and_complete_durable=true exact_app_git_spotify_settings_restored=true fake_old_apply_count=1 wrong_identity_and_replay_denied=true no_session_key_persisted=true installed_spotify_untouched=true'){throw 'Full integration evidence absent'}
+          if($log -notmatch 'TRIPLE_ID_AUTHORIZED_BRIDGE_NEGATIVE_PREMUTATION_PASS bad_hmac=true bad_consumption=true bad_nonce=true overlapping_store=true all_read_only=true' -or $log -notmatch 'TRIPLE_ID_AUTHORIZED_BRIDGE_REAL_ZIP_SWAP_PASS fresh_hmac=true durable_single_use=true journaling_before_first_move=true no_persisted_key=true zero_apply_authority=true' -or $log -notmatch 'TRIPLE_ID_AUTHORIZED_BRIDGE_INDEPENDENT_RESTART_E2E_PASS real_zip=true third_hmac_freshly_checked_inside_bridge=true latest_durable_consumption_checked=true journal_before_mutation=true independent_process_restore=true rollback_complete=true replay_denied=true no_real_spicetify=true'){throw 'strict bridge missing end-to-end pass markers'}
+          [ordered]@{
+            schema=1;status='PASS';new_case_count=7;negative_bridge_preflight_classes=4;prior_atomic_case_count=8;prior_evidence_atomic_case_count=5;validation_only=$true;actual_isolated_swap=$true
+            source_stage_prepared_before_permit=$true;durable_consumption=$true;durable_journal_before_mutation=$true;independent_process_restore=$true;replay_denied=$true
+            fake_recovery_apply_invocation_count=1;real_spicetify_executed=$false;production_mutated=$false
+            parent='8184e300678a6fc717ed8a83ebd395e51f6d74ff'
+            production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+            tested_commit=(git rev-parse HEAD).Trim()
+          }|ConvertTo-Json -Depth 5|Set-Content -LiteralPath "$dir/evidence.json" -Encoding UTF8
+          Write-Host 'TRIPLE_ID_AUTHORIZED_JOURNAL_BRIDGE_ALL_EVIDENCE_PASS'
+      - name: Upload non-production evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: triple-id-authorized-journal-bridge-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-triple-id-authorized-journal-bridge-v0.1.0/windows-ci.log
+            validation/custom-app-production-triple-id-authorized-journal-bridge-v0.1.0/evidence.json
+          if-no-files-found: warn
+          retention-days: 14
