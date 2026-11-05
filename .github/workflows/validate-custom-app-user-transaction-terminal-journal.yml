@@ -32,10 +32,10 @@ jobs:
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main changed'}
           $d='validation/custom-app-user-transaction-terminal-journal'
           $pins=@{
-            "$d/verified-terminal-adapter.ps1"='50805081407967798cf0a30e51f59fba79048dfc'
+            "$d/verified-terminal-adapter.ps1"='8a18de8c49d1c32b1c53ca48518af07aa7a617ad'
             "$d/terminal-readback-child.ps1"='fd5465330d84e874a0b594a66ad1d5fa611273c4'
-            "$d/derive_real_zip_terminal_e2e.py"='044ae7210f3b4073e4bdae85591f79b33c634bbd'
-            "$d/build_candidate.py"='a8338207c4d0ba523925d946ae1f3f58950f7083'
+            "$d/derive_real_zip_terminal_e2e.py"='68615bf6fc52aece4e251fce7926482dd0e61049'
+            "$d/build_candidate.py"='0b188387676deda47a058e8e11331766976cf62f'
           }
           $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-user-transaction-terminal-journal.yml')
           $changed=@(git diff --name-only "$parent...HEAD")

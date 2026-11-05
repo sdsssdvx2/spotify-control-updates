@@ -14,7 +14,7 @@ PARENT_BLOB='9909e07ea21046df1804ac2bff45d66c66291a9d'
 DERIVED=ROOT/'validation/custom-app-production-triple-id-journaled-restart-e2e-v0.1.0/ci_derived_exclusive_gate_restart.ps1'
 OUTPUT=HERE/'ci_derived_user_verified_terminal.ps1'
 PINS={
-    'validation/custom-app-user-transaction-terminal-journal/verified-terminal-adapter.ps1':'50805081407967798cf0a30e51f59fba79048dfc',
+    'validation/custom-app-user-transaction-terminal-journal/verified-terminal-adapter.ps1':'8a18de8c49d1c32b1c53ca48518af07aa7a617ad',
     'validation/custom-app-user-transaction-terminal-journal/terminal-readback-child.ps1':'fd5465330d84e874a0b594a66ad1d5fa611273c4',
 }
 def only(s,old,new,label):

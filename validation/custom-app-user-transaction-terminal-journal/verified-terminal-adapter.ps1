@@ -73,9 +73,21 @@ function Test-CustomAppUserTxnTerminalJournalEvidenceV010 {
     }
     $phase=[string]$j.entry.phase
     if($phase -ceq 'rollback-complete'){
-        $live=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$p.live)
-        if($null -eq $live -or [string]$live.tree_sha256 -cne [string]$e.envelope.live_tree_sha256){
-            throw 'user-terminal-rollback-live-tree-not-original'
+        # The preparation envelope's live_tree_sha256 is a RUNTIME hash,
+        # whereas app_backup_tree_sha256 is the FULL tree snapshot including
+        # original .git and preserved files. These are deliberately different
+        # hash domains. Reverify BOTH before clearing the durable claim.
+        $originalRuntime=Get-CustomAppLocalRuntimeBaseline -Name ([string]$p.name) -AppPath ([string]$p.live)
+        $originalFull=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$p.live)
+        if($null -eq $originalRuntime -or -not[bool]$originalRuntime.safe -or -not[bool]$originalRuntime.installable -or
+           [string]$originalRuntime.tree_sha256 -cne [string]$e.envelope.live_tree_sha256){
+            throw 'user-terminal-rollback-runtime-not-original'
+        }
+        if($null -eq $originalFull -or
+           [string]$originalFull.tree_sha256 -cne [string]$e.envelope.app_backup_tree_sha256 -or
+           [int]$originalFull.file_count -ne [int]$e.envelope.app_backup_file_count -or
+           [int64]$originalFull.total_bytes -ne [int64]$e.envelope.app_backup_total_bytes){
+            throw 'user-terminal-rollback-full-tree-not-original-backup'
         }
     }else{
         $runtime=Get-CustomAppLocalRuntimeBaseline -Name ([string]$p.name) -AppPath ([string]$p.live)
