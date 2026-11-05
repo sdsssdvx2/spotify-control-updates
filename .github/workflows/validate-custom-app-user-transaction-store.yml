@@ -1,0 +1,139 @@
+name: Validate DPAPI user transaction registry in hard-disabled Addon Manager
+on:
+  push:
+    branches: [validate/custom-app-user-transaction-store-bundle]
+    paths:
+      - 'validation/custom-app-user-transaction-store-bundle/**'
+      - '.github/workflows/validate-custom-app-user-transaction-store.yml'
+  pull_request:
+    branches: [validate/custom-app-journal-lock-integration]
+    paths:
+      - 'validation/custom-app-user-transaction-store-bundle/**'
+      - '.github/workflows/validate-custom-app-user-transaction-store.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  private-user-store-windows:
+    runs-on: windows-2025
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Exact source closure and protected main freeze
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='194ae24fc1a56ba76bfb8d401b4dbe50f95f1d6b'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'wrong workflow checkout SHA'}
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'not descended from validated journal-lock parent'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main advanced'}
+          $d='validation/custom-app-user-transaction-store-bundle'
+          $pins=@{
+            "$d/user-transaction-store.ps1"='b547fa00cc0da4368e4943eba6f475f95a8b0622'
+            "$d/test_user_transaction_store.ps1"='b06b699a987e838563d3f00f2f9b2e48c4e9d6d3'
+            "$d/build_candidate.py"='d6ae90df9ad0808fa0d268700a327ecd298b0ff1'
+          }
+          $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-user-transaction-store.yml')
+          $changed=@(git diff --name-only "$parent...HEAD")
+          if($changed.Count -ne 4 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('changed-file-scope-escaped '+($changed -join ','))}
+          foreach($p in $pins.Keys){
+            if((git hash-object $p).Trim() -cne $pins[$p]){throw ('unqualified source '+$p)}
+          }
+          foreach($p in @('bin/spotify-control.ps1','bin/addon-manager.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
+            git diff --quiet $parent HEAD -- $p
+            if($LASTEXITCODE -ne 0){throw ('operating file changed '+$p)}
+          }
+          Write-Host 'PRIVATE_USER_STORE_SOURCE_MAIN_FROZEN_PASS'
+      - name: Build actual candidate, PS5.1 parsers and immutable FullChain proof
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-user-transaction-store-bundle'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'candidate builder failed'}
+          $report=Get-Content "$d/candidate-validation.json" -Raw | ConvertFrom-Json
+          $addon="$d/out/bin/addon-manager.ps1"
+          $hash=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -cne [string]$report.candidate_addon_sha256 -or (Get-Item $addon).Length -ne [int64]$report.candidate_addon_size){throw 'candidate report mismatch'}
+          if((Get-FileHash "$d/out/bin/spotify-control.ps1" -Algorithm SHA256).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'spotify-control changed'}
+          foreach($flag in @('production_mutation_authorized','production_execution_authorized','normal_auto_update_wired','real_spicetify_executed')){if([bool]$report.$flag){throw ('unexpected prod authority '+$flag)}}
+          if(-not[bool]$report.preexisting_full_chain_unchanged -or -not[bool]$report.parent_exact_inverse -or [int]$report.new_module_function_count -ne 13){throw 'source integrity proof missing'}
+          foreach($f in @($addon,"$d/user-transaction-store.ps1","$d/test_user_transaction_store.ps1")){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Select-Object -First 8 | ForEach-Object{Write-Host $_.Message};throw ('PS5.1 syntax error in '+$f)}
+          }
+          "CANDIDATE_HASH=$hash" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "CANDIDATE_SIZE=$((Get-Item $addon).Length)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "PRIVATE_USER_STORE_REAL_ADDON_BUNDLE_PARSER_PASS sha256=$hash"
+      - name: Run real Addon Manager SelfTest in sandbox without live mutation
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-user-transaction-store-bundle'
+          $sandbox=Join-Path $env:RUNNER_TEMP ('addon-user-state-test-'+[Guid]::NewGuid().ToString('N'))
+          $env:LOCALAPPDATA=Join-Path $sandbox 'Local'
+          $env:APPDATA=Join-Path $sandbox 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/out/bin/addon-manager.ps1" -Action SelfTest *>&1 | Tee-Object -FilePath "$d/addon-selftest.log" | Out-Null
+          $code=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($code -ne 0){throw ('Addon Manager SelfTest failed with '+$code)}
+          $log=Get-Content -LiteralPath "$d/addon-selftest.log" -Raw
+          if(-not $log.Contains('CUSTOM_APP_USER_TRANSACTION_STORE_BUNDLED_SELFTEST_PASS DPAPI=true no_production_authority=true terminal_retirement_not_wired=true')){throw 'user store bundle not exercised'}
+          if(-not $log.Contains('CUSTOM_APP_JOURNAL_LOCK_BUNDLED_SELFTEST_PASS')){throw 'parent bundle SelfTest missing'}
+          Write-Host 'PRIVATE_USER_STORE_ACTUAL_ADDON_SELFTEST_PASS'
+      - name: Durable DPAPI reservation, ACL, cross-process locking and injected interruption
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-user-transaction-store-bundle'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/test_user_transaction_store.ps1" -Phase bootstrap *>&1 | Tee-Object -FilePath "$d/bootstrap.log"
+          if($LASTEXITCODE -ne 0){throw 'user store first process failed'}
+          if(-not (Get-Content "$d/bootstrap.log" -Raw).Contains('CUSTOM_USER_STORE_BOOTSTRAP_PASS')){throw 'first process did not prove the required cases'}
+          Write-Host 'PRIVATE_USER_STORE_FIRST_PROCESS_PASS'
+      - name: Fresh process restart, replay denial and DPAPI corruption refusal
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-user-transaction-store-bundle'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/test_user_transaction_store.ps1" -Phase restart *>&1 | Tee-Object -FilePath "$d/restart.log"
+          if($LASTEXITCODE -ne 0){throw 'user store second process failed'}
+          if(-not (Get-Content "$d/restart.log" -Raw).Contains('CUSTOM_USER_STORE_FRESH_PROCESS_RESTART_PASS')){throw 'fresh process persisted state proof missing'}
+          Write-Host 'PRIVATE_USER_STORE_FRESH_PROCESS_RESTART_PASS'
+      - name: Deterministic candidate, no output to operating branch
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-user-transaction-store-bundle'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'rebuild failure'}
+          $addon="$d/out/bin/addon-manager.ps1"
+          $hash=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -cne $env:CANDIDATE_HASH -or (Get-Item $addon).Length -ne [int64]$env:CANDIDATE_SIZE){throw 'candidate not reproducible'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main advanced'}
+          [ordered]@{
+            schema=1;result='PASS';commit=(git rev-parse HEAD).Trim()
+            actual_candidate_sha256=$hash;candidate_bytes=(Get-Item $addon).Length
+            dpapi_and_acl='verified_on_isolated_windows_runner'
+            cross_process_lock='verified';fresh_process_restart='verified'
+            interruption_pending_recovery='verified';replay_denied='verified'
+            terminal_retirement='intentionally_not_implemented'
+            operating_main_changed=$false;real_spicetify_executed=$false
+          }|ConvertTo-Json|Set-Content -LiteralPath "$d/ci-evidence.json" -Encoding UTF8
+          Write-Host "PRIVATE_USER_STORE_DETERMINISTIC_MAIN_FROZEN_PASS sha256=$hash"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: private-user-store-acceptance-${{ github.run_id }}
+          path: |
+            validation/custom-app-user-transaction-store-bundle/candidate-validation.json
+            validation/custom-app-user-transaction-store-bundle/ci-evidence.json
+            validation/custom-app-user-transaction-store-bundle/addon-selftest.log
+            validation/custom-app-user-transaction-store-bundle/bootstrap.log
+            validation/custom-app-user-transaction-store-bundle/restart.log
+          retention-days: 14
+          if-no-files-found: warn
