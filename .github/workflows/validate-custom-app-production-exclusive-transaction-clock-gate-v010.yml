@@ -43,9 +43,9 @@ jobs:
           $unexpected=@($changed|Where-Object{$_-notin$allowed})
           if($unexpected.Count){throw ('unapproved scope '+($unexpected -join ','))}
           foreach($p in $allowed){if($p-notin$changed){throw ('expected new file missing '+$p)}}
-          if((git hash-object $module).Trim()-cne'0f65897e03e28e0e29376c3b36361d174fe02a56'){throw 'module code under test changed'}
-          if((git hash-object $test).Trim()-cne'c7e4125f637b312a7e2f639d0c4204861c51da93'){throw 'test code under review changed'}
-          if((git hash-object $generator).Trim()-cne'41f99e9ba108c51bc9085cdc1061a8b0f12c35a7'){throw 'SHA-pinned original fixture transformation changed'}
+          if((git hash-object $module).Trim()-cne'9928385a7eebda0d5156f491bbdbd1ef360c46d4'){throw 'module code under test changed'}
+          if((git hash-object $test).Trim()-cne'8d48424d4c252713656d3f863b0c0b457d27b686'){throw 'test code under review changed'}
+          if((git hash-object $generator).Trim()-cne'699246d891dda5bdd8c96485b2c99cf4a33f762a'){throw 'SHA-pinned original fixture transformation changed'}
           foreach($p in @('bin/spotify-control.ps1','bin/addon-manager.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
             git diff --quiet $parent HEAD -- $p
             if($LASTEXITCODE){throw ('production protected path modified '+$p)}
@@ -75,10 +75,10 @@ jobs:
           $ErrorActionPreference='Stop'
           if($exitCode -ne 0){throw ('exclusive gate Windows test failed '+$exitCode)}
           $logText=Get-Content -LiteralPath $log -Raw
-          if($logText -notmatch 'EXCLUSIVE_APP_CLOCK_AND_CRASH_GATE_MATRIX_PASS cases=17 current_utc=true stale_and_future_denied=true same_app_cross_process_lock=true other_app_allowed=true crash_retains_blocking_marker=true corrupt_marker_fail_closed=true no_journal_no_retirement=true installed_spotify_untouched=true'){throw 'independent process and clock evidence missing'}
+          if($logText -notmatch 'EXCLUSIVE_APP_CLOCK_AND_CRASH_GATE_MATRIX_PASS cases=19 current_utc=true stale_and_future_denied=true same_app_cross_process_lock=true other_app_allowed=true crash_retains_blocking_marker=true corrupt_marker_fail_closed=true no_journal_no_retirement=true retired_consumption_replay_denied=true installed_spotify_untouched=true'){throw 'independent process and clock evidence missing'}
           [ordered]@{
             schema=1;status='PASS';source='exclusive-app-transaction-clock-gate-validation'
-            test_count=17;windows_process_cross_lock=$true;crash_retains_active_record=$true
+            test_count=19;windows_process_cross_lock=$true;crash_retains_active_record=$true
             stale_and_future_utc_denied=$true;corrupt_record_denied=$true;missing_terminal_journal_denied=$true
             production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
             full_chain_enabled=$false;tested_sha=(git rev-parse HEAD).Trim()
@@ -167,13 +167,13 @@ jobs:
           foreach($marker in @(
             'TRIPLE_ID_EXCLUSIVE_REAL_WALLCLOCK_VERIFIED_PASS synthetic_old_now_denied=true fixture_now_current=true',
             'TRIPLE_ID_EXCLUSIVE_REAL_JOURNALED_SWAP_PASS active_claim_persisted=true fresh_hmac_and_current_utc=true recovery_possible=true',
-            'TRIPLE_ID_EXCLUSIVE_REAL_TERMINAL_RETIREMENT_PASS wrong_consumption_denied=true wrong_transaction_denied=true durable_rollback_complete_required=true active_claim_retired=true',
+            'TRIPLE_ID_EXCLUSIVE_REAL_TERMINAL_RETIREMENT_PASS wrong_consumption_denied=true wrong_transaction_denied=true durable_rollback_complete_required=true active_claim_retired=true archived_consumption_replay_denied=true',
             'TRIPLE_ID_EXCLUSIVE_REAL_ZIP_END_TO_END_PASS third_hmac_real_zip=true current_utc=true active_claim_before_swap=true independent_process_old_code_restore=true terminal_lock_retirement=true replay_denied=true production_disabled=true'
           )){
             if(-not $text.Contains($marker)){throw ('real ZIP guard missing verified proof '+$marker)}
           }
           [ordered]@{
-            schema=1;status='PASS';case_matrix=17
+            schema=1;status='PASS';case_matrix=19
             real_zip_third_hmac=true;true_utc_freshness=true;single_active_transaction_per_app=true
             durable_claim_survived_process_crash=true;terminal_rollback_required_for_claim_retirement=true
             independent_exact_old_app_settings_restored=true;wrong_id_rejected=true;replay_denied=true
