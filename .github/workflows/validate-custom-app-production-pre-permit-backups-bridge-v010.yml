@@ -43,10 +43,10 @@ jobs:
           if($unapproved.Count){throw "Scoped files escaped: $($unapproved -join ',')"}
           foreach($p in $allowed){if($p -notin $changed){throw "Expected validation file missing: $p"}}
           $pins=@(
-            @($core,'d26dd85ef68cc452dd555912336b4e9dcfbd4392')
-            @($test,'3beb9c38dfc22e57b9332f32e2355d48584f1313')
-            @('validation/custom-app-production-prepared-stage-executor-bridge-v0.1.0/custom-app-production-prepared-stage-executor-bridge.ps1','04226ed6595049a2fcb3ac355150e9cd62940b58')
-            @('validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1','9b039819e7b2278fe4cf15c8585336dd07a8e8e3')
+            @($core,'d26dd85ef68cc452dd555912336b4e9dcfbd4392'),
+            @($test,'3beb9c38dfc22e57b9332f32e2355d48584f1313'),
+            @('validation/custom-app-production-prepared-stage-executor-bridge-v0.1.0/custom-app-production-prepared-stage-executor-bridge.ps1','04226ed6595049a2fcb3ac355150e9cd62940b58'),
+            @('validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1','9b039819e7b2278fe4cf15c8585336dd07a8e8e3'),
             @('validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/custom-app-production-byte-real-prepared-stage-handoff.ps1','c53eead027e8f48f9777e5c70ae2f011016bb851')
           )
           foreach($pin in $pins){
