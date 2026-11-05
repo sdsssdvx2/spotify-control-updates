@@ -10,7 +10,7 @@ $CustomAppByteRealHandoffQualifiedStageBlob='e2f2fc656235883d2a82b106289973f6ded
 function New-CustomAppByteRealHandoffDeniedV010 {
     param([Parameter(Mandatory=$true)][string]$Reason)
     return [pscustomobject]@{
-        ok=$false;reason=$Reason;byte_real_stage_attested=$false;new_permit_bound=$false
+        ok=$false;reason=$Reason;byte_real_stage_attested=$false;new_permit_bound=$false;consumption_store_reloaded=$false
         fresh_start_attested=$false;ready_for_fresh_post_stage_revalidation=$false
         ready_to_apply=$false;staging_only=$true;stage_authorized=$false
         executor_may_start=$false;executor_may_stage=$false;executor_may_apply=$false
@@ -36,6 +36,8 @@ function Test-CustomAppProductionByteRealPreparedStageHandoffV010 {
         [AllowNull()]$IssuerResult=$null,
         [AllowNull()]$ExecutorStartResult=$null,
         [AllowNull()][byte[]]$SessionKey=$null,
+        [AllowNull()][string]$AllowedRoot=$null,
+        [AllowNull()][string]$ConsumptionStoreDirectory=$null,
         [DateTimeOffset]$Now=[DateTimeOffset]::UtcNow
     )
     $deny={param([string]$Reason)New-CustomAppByteRealHandoffDeniedV010 -Reason $Reason}
@@ -139,7 +141,8 @@ function Test-CustomAppProductionByteRealPreparedStageHandoffV010 {
        [int64]$current.total_bytes-ne[int64]$ExtractedStageResult.baseline.total_bytes){
         return (& $deny 'byte-real-handoff-stage-file-inventory-drift')
     }
-    $afterPermit=($null-ne$IssuerResult-or$null-ne$ExecutorStartResult-or$null-ne$SessionKey)
+    $afterPermit=($null-ne$IssuerResult-or$null-ne$ExecutorStartResult-or$null-ne$SessionKey-or
+        -not[string]::IsNullOrWhiteSpace($AllowedRoot)-or-not[string]::IsNullOrWhiteSpace($ConsumptionStoreDirectory))
     $issuerId=$null;$startId=$null
     if($afterPermit){
         if($null-eq$IssuerResult-or$null-eq$IssuerResult.receipt-or-not[bool]$IssuerResult.ok-or
@@ -178,12 +181,37 @@ function Test-CustomAppProductionByteRealPreparedStageHandoffV010 {
                 return (& $deny ('byte-real-handoff-transaction-id-mismatch-'+$field))
             }
         }
+        # The plain-SHA start receipt cannot replace a fresh, path-constrained
+        # append-only consumption store read. Require the physical latest
+        # envelope/revision to match the start-time attestation byte-for-byte.
+        if([string]::IsNullOrWhiteSpace($AllowedRoot)-or
+           [string]::IsNullOrWhiteSpace($ConsumptionStoreDirectory)){
+            return (& $deny 'byte-real-handoff-consumption-store-context-missing')
+        }
+        try {
+            $physical=Read-CustomAppProductionConsumptionStoreV010 -AllowedRoot $AllowedRoot -StoreDirectory $ConsumptionStoreDirectory
+        }catch{return (& $deny ('byte-real-handoff-consumption-store-read-denied:'+[string]$_.Exception.Message))}
+        if($null-eq$physical-or-not[bool]$physical.ok-or
+           -not[bool]$physical.current_matches_history-or
+           -not[bool]$physical.reloaded_from_persistent_store-or
+           $null-eq$physical.envelope){
+            return (& $deny 'byte-real-handoff-consumption-store-current-invalid')
+        }
+        $barrier=Test-CustomAppProductionConsumptionPersistedExecutorBarrierV011 -StoreRead $physical -ExpectedConsumptionId ([string]$sr.consumption_id)
+        if($null-eq$barrier-or-not[bool]$barrier.ok){
+            return (& $deny ('byte-real-handoff-consumption-barrier-invalid:'+[string]$barrier.reason))
+        }
+        if([int64]$physical.revision-ne[int64]$sr.current_consumption_store_revision-or
+           ([string]$physical.envelope.envelope_sha256).Trim().ToLowerInvariant()-cne([string]$sr.current_persistence_envelope_sha256).Trim().ToLowerInvariant()-or
+           [int64]$physical.revision-lt[int64]$sr.persisted_consumption_revision){
+            return (& $deny 'byte-real-handoff-consumption-store-revision-or-envelope-drift')
+        }
         $issuerId=[string]$ir.new_permit_transaction_id
         $startId=[string]$sr.consumption_id
     }
     return [pscustomobject]@{
         ok=$true;reason=$(if($afterPermit){'byte-real-stage-matches-fresh-signed-new-permit-staging-only'}else{'byte-real-stage-prepared-before-new-permit-zero-authority'})
-        byte_real_stage_attested=$true;new_permit_bound=$afterPermit;fresh_start_attested=$afterPermit
+        byte_real_stage_attested=$true;new_permit_bound=$afterPermit;fresh_start_attested=$afterPermit;consumption_store_reloaded=$afterPermit
         archive_sha256=$zipHash;stage_tree_sha256=$tree;stage_file_count=[int]$current.file_count
         stage_total_bytes=[int64]$current.total_bytes;new_permit_transaction_id=$issuerId
         consumption_id=$startId;ready_for_fresh_post_stage_revalidation=$afterPermit
