@@ -1,0 +1,95 @@
+name: Validate real isolated Triple-ID prepared atomic swap and exact rollback
+on:
+  push:
+    branches:
+      - validate/custom-app-production-triple-id-prepared-atomic-e2e-v0.1.0
+    paths:
+      - 'validation/custom-app-production-triple-id-prepared-atomic-e2e-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-triple-id-prepared-atomic-e2e-v010.yml'
+  pull_request:
+    branches:
+      - validate/custom-app-production-prepared-handoff-single-candidate-v0.1.0
+    paths:
+      - 'validation/custom-app-production-triple-id-prepared-atomic-e2e-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-triple-id-prepared-atomic-e2e-v010.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  isolated-prepared-atomic-and-rollback:
+    runs-on: windows-2025
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Guard exact parent, frozen main, two-file scope and qualified sources
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='6dbed42e14bfa1905cac49cf577fe36070f8293e'
+          $production='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'Event head mismatch'}
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'PR 212 frozen head not ancestor'}
+          if((git rev-parse origin/main).Trim() -cne $production){throw 'Frozen main changed'}
+          $test='validation/custom-app-production-triple-id-prepared-atomic-e2e-v0.1.0/test_triple_id_prepared_atomic_e2e.ps1'
+          $workflow='.github/workflows/validate-custom-app-production-triple-id-prepared-atomic-e2e-v010.yml'
+          $allowed=@($test,$workflow)
+          $changed=@(git diff --name-only "$base...HEAD")
+          $unexpected=@($changed|Where-Object{$_ -notin $allowed})
+          if($unexpected.Count){throw ('Unreviewed scope: '+($unexpected -join ','))}
+          foreach($p in $allowed){if($p -notin $changed){throw ('Expected file absent: '+$p)}}
+          $fixed=@{
+            'validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1'='e91fa6a125f77352907c1119f6d9f47be9682550'
+            'validation/custom-app-production-pre-permit-backups-bridge-v0.1.0/custom-app-production-pre-permit-backups-bridge.ps1'='2b91297b72d1b223fffe2428b75ed4de8771b8eb'
+            'validation/custom-app-production-prepared-stage-executor-bridge-v0.1.0/custom-app-production-prepared-stage-executor-bridge.ps1'='04226ed6595049a2fcb3ac355150e9cd62940b58'
+          }
+          foreach($p in $fixed.Keys){
+            if((git rev-parse "HEAD:$p").Trim() -cne $fixed[$p]){throw ('Qualified source drift: '+$p)}
+          }
+          if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows'){throw 'Not Windows Actions'}
+          Write-Host 'TRIPLE_ID_ATOMIC_SCOPE_AND_FROZEN_PRODUCTION_PASS'
+      - name: Parse Windows PowerShell 5.1 test and real atomic core
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=@(
+            'validation/custom-app-production-triple-id-prepared-atomic-e2e-v0.1.0/test_triple_id_prepared_atomic_e2e.ps1',
+            'validation/custom-app-production-pre-permit-backups-bridge-v0.1.0/test_custom_app_production_pre_permit_backups_bridge.ps1',
+            'validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1'
+          )
+          foreach($p in $files){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Select-Object -First 12|ForEach-Object{Write-Host "$p $($_.Extent.StartLineNumber): $($_.Message)"};throw ('PS5.1 parse failed: '+$p)}
+          }
+          Write-Host 'TRIPLE_ID_ATOMIC_PS51_PARSE_PASS'
+      - name: Execute real ZIP and new Permit to isolated swap, fault rollback and exact recovery
+        shell: powershell
+        timeout-minutes: 90
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir='validation/custom-app-production-triple-id-prepared-atomic-e2e-v0.1.0'
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$dir/test_triple_id_prepared_atomic_e2e.ps1" *>&1 | Tee-Object -FilePath "$dir/windows-ci.log"
+          if($LASTEXITCODE -ne 0){throw 'Real isolated new-Permit atomic/rollback test failed'}
+          $log=Get-Content -LiteralPath "$dir/windows-ci.log" -Raw
+          if($log -notmatch 'TRIPLE_ID_PREPARED_ATOMIC_E2E_PASS cases=8 actual_isolated_swap=true new_permit=true durable_consumption=true prepermit_backup=true no_redownload=true fault_rollback=true exact_code_git_persistence_restore=true spicetify_not_executed=true'){throw 'Full integration evidence absent'}
+          [ordered]@{
+            schema=1;status='PASS';case_count=8;validation_only=$true;actual_isolated_swap=$true
+            source_stage_prepared_before_permit=$true;durable_consumption=$true;exact_rollback=$true
+            spicetify_executed=$false;production_mutated=$false
+            parent='6dbed42e14bfa1905cac49cf577fe36070f8293e'
+            production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+            tested_commit=(git rev-parse HEAD).Trim()
+          }|ConvertTo-Json -Depth 5|Set-Content -LiteralPath "$dir/evidence.json" -Encoding UTF8
+          Write-Host 'TRIPLE_ID_PREPARED_ATOMIC_ALL_EVIDENCE_PASS'
+      - name: Upload non-production evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: triple-id-prepared-atomic-e2e-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-triple-id-prepared-atomic-e2e-v0.1.0/windows-ci.log
+            validation/custom-app-production-triple-id-prepared-atomic-e2e-v0.1.0/evidence.json
+          if-no-files-found: warn
+          retention-days: 14
