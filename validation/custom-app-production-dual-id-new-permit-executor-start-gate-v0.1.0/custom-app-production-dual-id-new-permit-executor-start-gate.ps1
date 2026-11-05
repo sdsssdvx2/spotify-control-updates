@@ -121,9 +121,23 @@ function Test-DualIdNewExecutorStartContinuityV010 {
         }
     }
     if([string]$PersistenceReceipt.issuer_fingerprint-cne[string]$IssuerReceipt.issuer_fingerprint){return [pscustomobject]@{ok=$false;reason='triple-id-start-issuer-fingerprint-mismatch'}}
-    if([string]$PersistenceReceipt.pre_persistence_admission_fingerprint-cne[string]$FreshAdmission.issuance_admission_fingerprint-or
-       [string]$PersistenceReceipt.post_persistence_admission_fingerprint-cne[string]$FreshAdmission.issuance_admission_fingerprint){
-        return [pscustomobject]@{ok=$false;reason='triple-id-start-issuance-admission-drift'}
+    # The persistence admission receipt is an earlier point-in-time event. Its
+    # fingerprint includes checked_at/eligible_until and MUST NOT equal the
+    # fresh executor-start admission fingerprint across distinct evaluations.
+    if([string]$PersistenceReceipt.pre_persistence_admission_fingerprint-cne[string]$PersistenceReceipt.post_persistence_admission_fingerprint){
+        return [pscustomobject]@{ok=$false;reason='triple-id-start-historical-admission-drift'}
+    }
+    # Compare immutable/current admission evidence across time, excluding the
+    # timestamped fingerprint. Pre/post admission in THIS gate still must match.
+    foreach($f in @(
+        'stable_live_tree_sha256','stable_persistence_fingerprint','current_remote_tree_sha256',
+        'current_remote_commit_sha','current_binding_fingerprint','current_provenance_fingerprint',
+        'current_remote_observed_at','live_admission_fingerprint','current_eligibility_fingerprint',
+        'live_attested_qualification_fingerprint','housekeeping_cleanup_fingerprint','recovery_evidence_fingerprint'
+    )){
+        if(([string]$IssuerReceipt.$f).Trim().ToLowerInvariant()-cne([string]$FreshAdmission.$f).Trim().ToLowerInvariant()){
+            return [pscustomobject]@{ok=$false;reason=('triple-id-start-current-evidence-drift-'+$f)}
+        }
     }
     if($null-ne$Decision){
         foreach($f in @('github_repo_id','surface_kind')){
