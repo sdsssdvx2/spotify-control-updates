@@ -67,7 +67,16 @@ Assert-TJR (-not[bool]$wrongTerminal.ok -and (Test-Path -LiteralPath $paths.reco
 $complete=Complete-CustomAppProductionExclusiveGateAfterTerminalJournalV010 -Name 'tagify' -LivePath $script:TIDLive -ExpectedConsumptionId ([string]$p.consumption_id) -ExpectedTransactionId ([string]$mutation.result.transaction_id)
 Assert-TJR ([bool]$complete.ok -and [string]$complete.phase -ceq 'rollback-complete') ('correct terminal rollback was not safely retired '+[string]$complete.reason)
 Assert-TJR (-not(Test-Path -LiteralPath $paths.record)) 'retired active transaction record still exists'
-Write-Host 'TRIPLE_ID_EXCLUSIVE_REAL_TERMINAL_RETIREMENT_PASS wrong_consumption_denied=true wrong_transaction_denied=true durable_rollback_complete_required=true active_claim_retired=true'
+$archive=Test-CustomAppProductionExclusiveGateRetiredReceiptV010 -Path ([string]$complete.retired_record_path) -Paths $paths -ConsumptionId ([string]$p.consumption_id)
+Assert-TJR ([bool]$archive.ok -and [string]$archive.receipt.transaction_id -ceq [string]$mutation.result.transaction_id -and [string]$archive.receipt.terminal_phase -ceq 'rollback-complete') 'terminal retirement record not bound to original signed transaction'
+$replayGate=Open-CustomAppProductionExclusiveGateLockV010 -Name 'tagify' -LivePath $script:TIDLive
+Assert-TJR ([bool]$replayGate.ok) 'completed OS lock was not released'
+try{
+    $repeat=Write-CustomAppProductionExclusiveGateActiveRecordV010 -Lock $replayGate -ConsumptionId ([string]$p.consumption_id) -JournalStoreDirectory (Join-Path $script:TJRRoot ('new-journal-'+[Guid]::NewGuid().ToString('N'))) -TransactionNonce ([Guid]::NewGuid().ToString('N'))
+    Assert-TJR (-not[bool]$repeat.ok -and [string]$repeat.reason -match 'consumption-already-retired') 'same consumed third-ID was reauthorized after archived terminal rollback'
+    Assert-TJR (-not(Test-Path -LiteralPath $paths.record)) 'retired-ID replay created a new active claim'
+}finally{$replayGate.lock_handle.Dispose()}
+Write-Host 'TRIPLE_ID_EXCLUSIVE_REAL_TERMINAL_RETIREMENT_PASS wrong_consumption_denied=true wrong_transaction_denied=true durable_rollback_complete_required=true active_claim_retired=true archived_consumption_replay_denied=true'
 """
     s=once(s,needle,terminal+needle,"terminal after independent rollback")
     s+="\nWrite-Host 'TRIPLE_ID_EXCLUSIVE_REAL_ZIP_END_TO_END_PASS third_hmac_real_zip=true current_utc=true active_claim_before_swap=true independent_process_old_code_restore=true terminal_lock_retirement=true replay_denied=true production_disabled=true'\n"
