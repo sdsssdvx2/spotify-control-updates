@@ -107,13 +107,13 @@ jobs:
           try{
             $env:RUNNER_TEMP=$isolatedRoot;$env:TEMP=$isolatedRoot;$env:TMP=$isolatedRoot
             $ErrorActionPreference='Continue'
-            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$dir/test_triple_id_prepared_atomic_e2e.ps1" *>&1 | Tee-Object -FilePath "$dir/windows-ci.log"
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$dir/test_triple_id_apply_cleanup_e2e.ps1" *>&1 | Tee-Object -FilePath "$dir/windows-ci.log"
             $exitCode=$LASTEXITCODE
           }finally{
             $ErrorActionPreference='Stop'
             $env:RUNNER_TEMP=$previousRoot;$env:TEMP=$previousTemp;$env:TMP=$previousTmp
           }
-          if($exitCode -ne 0){throw "Real isolated Triple-ID atomic/rollback test failed code=$exitCode"}
+          if($exitCode -ne 0){throw "Triple-ID fake apply/committed cleanup end-to-end test failed code=$exitCode"}
           $log=Get-Content -LiteralPath "$dir/windows-ci.log" -Raw
           if($log -notmatch 'TRIPLE_ID_REAL_ZIP_FAKE_APPLY_CLEANUP_E2E_PASS cases=9 third_permit=true real_isolated_swap=true finalization=true fake_apply_count=1 persisted_consumption=true wrong_key_and_exe_denied=true stage_app_and_persistence_cleanup=true git_and_spotify_persistence_unchanged=true no_actual_spicetify=true production_untouched=true'){throw 'Full integration evidence absent'}
           [ordered]@{
@@ -124,7 +124,7 @@ jobs:
             production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
             tested_commit=(git rev-parse HEAD).Trim()
           }|ConvertTo-Json -Depth 5|Set-Content -LiteralPath "$dir/evidence.json" -Encoding UTF8
-          Write-Host 'TRIPLE_ID_PREPARED_ATOMIC_ALL_EVIDENCE_PASS'
+          Write-Host 'TRIPLE_ID_FAKE_APPLY_AND_COMMITTED_CLEANUP_EVIDENCE_PASS'
       - name: Upload non-production evidence
         if: always()
         uses: actions/upload-artifact@v4
