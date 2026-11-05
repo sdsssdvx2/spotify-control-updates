@@ -63,6 +63,7 @@ jobs:
           if($main.Length -ne 284327 -or (Get-FileHash -Algorithm SHA256 -LiteralPath $main.FullName).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Exact parent Spotify Control bytes changed'}
           if($addon.Length -ne $j.candidate_addon.size -or (Get-FileHash -Algorithm SHA256 -LiteralPath $addon.FullName).Hash.ToLowerInvariant() -cne $j.candidate_addon.sha256){throw 'Candidate Addon Manager bytes drifted'}
           Write-Host "INTEGRATED_NEW_PERMIT_DEPENDENCY_INVENTORY unresolved=$(@($j.new_permit_external_function_dependencies_unresolved).Count)"
+          Write-Host ('INTEGRATED_NEW_PERMIT_UNRESOLVED_EXTERNALS='+(@($j.new_permit_external_function_dependencies_unresolved) -join ','))
           'NEW_PERMIT_HARD_DISABLED_INTEGRATED_BUILD_AND_HASH_PASS'
 
       - name: Parse exact Windows PowerShell 5.1 candidate and run Addon Manager SelfTest
@@ -75,6 +76,10 @@ jobs:
             [Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$tokens,[ref]$errors)|Out-Null
             if($errors.Count){$errors|ForEach-Object{Write-Host "PS5.1 parse error $($_.Extent.StartLineNumber): $($_.Message)"};throw "Candidate PS5.1 parse failed: $p"}
           }
+          $sandbox=Join-Path $env:RUNNER_TEMP 'new-permit-integration-selftest'
+          $env:LOCALAPPDATA=Join-Path $sandbox 'Local'
+          $env:APPDATA=Join-Path $sandbox 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/addon-manager.ps1" -Action SelfTest
           if($LASTEXITCODE -ne 0){throw 'Integrated Addon Manager read-only SelfTest failed'}
           'NEW_PERMIT_INTEGRATED_WINDOWS_PS51_AND_SELFTEST_PASS'
