@@ -1,0 +1,98 @@
+name: Validate retained old-live compatibility in hard-disabled Addon Manager candidate
+
+on:
+  push:
+    branches: [validate/custom-app-production-retained-old-live-hard-disabled-bundle-v0.1.0]
+    paths: ['validation/custom-app-production-retained-old-live-hard-disabled-bundle-v0.1.0/**','.github/workflows/validate-custom-app-production-retained-old-live-hard-disabled-bundle-v010.yml','validation/custom-app-production-retained-old-live-compat-v0.1.1/**']
+  pull_request:
+    branches: [validate/custom-app-production-triple-id-apply-crash-restart-v0.1.0]
+    paths: ['validation/custom-app-production-retained-old-live-hard-disabled-bundle-v0.1.0/**','.github/workflows/validate-custom-app-production-retained-old-live-hard-disabled-bundle-v010.yml','validation/custom-app-production-retained-old-live-compat-v0.1.1/**']
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact scope lineage and frozen production
+        shell: powershell
+        run: |
+          $h=(git rev-parse HEAD).Trim();$e='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}';if($h-cne$e){throw "head mismatch $h != $e"}
+          $p='07ca418a6356a4966783480c5200aab123836987';if((git merge-base $p HEAD).Trim()-cne$p){throw 'not descended from exact hard-disabled recovery stack head'}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $allowed=@('.github/workflows/validate-custom-app-production-retained-old-live-hard-disabled-bundle-v010.yml','validation/custom-app-production-retained-old-live-hard-disabled-bundle-v0.1.0/build_candidate.py','validation/custom-app-production-retained-old-live-compat-v0.1.1/custom-app-production-retained-old-live-compat.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_-notin$allowed});if($bad.Count){throw "scope escaped: $($bad-join', ')"};foreach($x in $allowed){if($x-notin$changed){throw "missing $x"}}
+          $blob=(git rev-parse "HEAD:validation/custom-app-production-retained-old-live-hard-disabled-bundle-v0.1.0/build_candidate.py").Trim();if($blob-cne'1440d16fd55b268efbf1fdd4efe714cd80c35e39'){throw "builder pin drift $blob"}
+          'CUSTOM_APP_PRODUCTION_RETAINED_OLD_LIVE_BUNDLE_HARD_DISABLED_SCOPE_PASS'
+
+      - name: Build exact hard-disabled parent and retained old-live v011 add-on
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-production-retained-old-live-hard-disabled-bundle-v0.1.0'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE){throw 'candidate build failed'}
+          $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json"
+          $ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$mh=(Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();$as=(Get-Item $a).Length
+          if((Get-Item $m).Length-ne284327-or$mh-cne'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate changed'}
+          $report=Get-Content -LiteralPath $r -Raw | ConvertFrom-Json
+          if([int]$report.parent_addon_size -ne 1307828 -or [string]$report.parent_addon_sha256 -cne 'd0bce3c8c4684838cd19cb2bd8bf70a44f8cbba323a853893e5497a854e96afc'){throw 'pinned parent addon drift'}
+          if([string]$report.candidate_addon_sha256 -cne $ah -or [int64]$report.candidate_addon_size -ne $as){throw 'candidate report differs from bytes'}
+          if(-not[bool]$report.candidate_reduces_exactly_to_parent -or -not[bool]$report.full_chain_function_unchanged -or -not[bool]$report.preexisting_restore_resume_admission_single_call_replaced -or [int]$report.new_mapping_function_count -ne 2){throw 'candidate narrow one-call proof failed'}
+          foreach($x in @('pipeline_enabled','pipeline_enablement_implemented','normal_update_path_wiring_added','generic_auto_authority_expanded','production_main_changed')){if([bool]$report.$x){throw ('unexpected production authority '+$x)}}
+          if(@($report.preexisting_parent_functions_changed).Count -ne 0){throw 'unexpected parent function changed'}
+          "BUNDLE_SHA=$ah" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "BUNDLE_SIZE=$as" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "REPORT_SHA=$rh" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "RETAINED_OLD_LIVE_BUNDLE_FIRST_BUILD_PASS sha256=$ah size=$as"
+
+      - name: Windows PS5.1 candidate parse and actual isolated Addon Manager SelfTest
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-production-retained-old-live-hard-disabled-bundle-v0.1.0'
+          $a="$d/out/bin/addon-manager.ps1";$tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $a).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|Select-Object -First 12|ForEach-Object{Write-Host ('PS5.1 parse error '+$_.Extent.StartLineNumber+': '+$_.Message)};throw 'candidate parse error'}
+          $raw=Get-Content -LiteralPath $a -Raw
+          foreach($required in @('$script:CustomAppProductionPipelineEnabled = $false','Custom App production full-chain execution is intentionally unavailable in integration-only candidate.','Test-CustomAppProductionRecoveryRestoreResumeFilesystemMappingV011','Test-CustomAppProductionRetainedOldLiveCompatibilitySelfTestV011')){if($raw.IndexOf($required,[StringComparison]::Ordinal) -lt 0){throw ('hard-disable or mapper missing '+$required)}}
+          $root=Join-Path $env:RUNNER_TEMP ('old-live-compat-'+[Guid]::NewGuid().ToString('N'))
+          $env:LOCALAPPDATA=Join-Path $root 'Local';$env:APPDATA=Join-Path $root 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          $log="$d/addon-selftest.log"
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest *>&1|Tee-Object -FilePath $log|Out-Null
+          $exitCode=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($exitCode -ne 0){throw ('actual Addon Manager SelfTest failed exit '+$exitCode)}
+          if((Get-Content -LiteralPath $log -Raw) -notmatch 'CUSTOM_APP_PRODUCTION_RETAINED_OLD_LIVE_COMPAT_SELFTEST_V011_PASS cases=11 only_two_apply_phases_extended=true other_original_mappings_unchanged=true authority=false'){throw 'actual Addon Manager v011 11-case selftest missing'}
+          Write-Host 'RETAINED_OLD_LIVE_BUNDLE_REAL_ADDON_SELFTEST_PASS cases=11 pipeline_enabled=false'
+
+      - name: Rebuild deterministically, audit production freeze and export proof
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-production-retained-old-live-hard-disabled-bundle-v0.1.0'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE){throw 'candidate second deterministic build failed'}
+          $a="$d/out/bin/addon-manager.ps1";$r="$d/candidate-validation.json"
+          $ah=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant();$rh=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant();$as=(Get-Item $a).Length
+          if($ah-cne$env:BUNDLE_SHA -or $rh-cne$env:REPORT_SHA -or $as-ne[int64]$env:BUNDLE_SIZE){throw 'non-deterministic candidate rebuild'}
+          if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main changed'}
+          [ordered]@{schema=1;status='PASS';head=(git rev-parse HEAD).Trim();candidate_size=$as;candidate_sha256=$ah;report_sha256=$rh;baseline_sha256='d0bce3c8c4684838cd19cb2bd8bf70a44f8cbba323a853893e5497a854e96afc';qualified_original_sha1='0273d7e28a56759b1d0ec9cbf037483b04d98d63';new_mapping_cases=11;single_line_mapper_wiring=true;baseline_reverse_exact=true;full_chain_enabled=false;production_main_unchanged=true;real_spicetify_executed=false}|ConvertTo-Json | Set-Content -LiteralPath "$d/ci-evidence.json" -Encoding UTF8
+          Write-Host "RETAINED_OLD_LIVE_BUNDLE_DETERMINISTIC_AND_MAIN_FROZEN_PASS sha256=$ah"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: retained-old-live-hard-disabled-bundle-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-retained-old-live-hard-disabled-bundle-v0.1.0/candidate-validation.json
+            validation/custom-app-production-retained-old-live-hard-disabled-bundle-v0.1.0/ci-evidence.json
+            validation/custom-app-production-retained-old-live-hard-disabled-bundle-v0.1.0/addon-selftest.log
+          retention-days: 14
+          if-no-files-found: warn
