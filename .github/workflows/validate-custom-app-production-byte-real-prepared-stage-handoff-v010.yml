@@ -43,7 +43,7 @@ jobs:
           $escaped=@($changed|Where-Object{$_ -notin $allowed})
           if($escaped.Count -ne 0){throw "Validation scope escaped: $($escaped -join ',')"}
           foreach($p in $allowed){if($p -notin $changed){throw "Expected reviewed file missing: $p"}}
-          foreach($pin in @(@($core,'a5f6eb6b4f8b8223b410cde83835547adecbe39f'),@($test,'44ee0d2977dc50d0e9b6040667374c080d0839ce'),@('validation/custom-app-production-dual-id-new-permit-executor-start-gate-v0.1.0/custom-app-production-dual-id-new-permit-executor-start-gate.ps1','23ddf1bb5a922791bb0f20fee07dc99d0de44629'),@('validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','e2f2fc656235883d2a82b106289973f6ded409a5'))){
+          foreach($pin in @(@($core,'db4a6521d8d4cd5d5c83776dc683a8a83c29c9aa'),@($test,'44ee0d2977dc50d0e9b6040667374c080d0839ce'),@('validation/custom-app-production-dual-id-new-permit-executor-start-gate-v0.1.0/custom-app-production-dual-id-new-permit-executor-start-gate.ps1','23ddf1bb5a922791bb0f20fee07dc99d0de44629'),@('validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1','e2f2fc656235883d2a82b106289973f6ded409a5'))){
             $actual=(git rev-parse "HEAD:$($pin[0])").Trim()
             if($actual -cne $pin[1]){throw "Qualified source blob changed: $($pin[0]) $actual"}
           }
