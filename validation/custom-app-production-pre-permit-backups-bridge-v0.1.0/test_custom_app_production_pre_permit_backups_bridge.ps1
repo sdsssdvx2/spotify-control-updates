@@ -6,6 +6,40 @@ $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 # stage executor output. This test creates a THIRD distinct permit AFTER its
 # backup copies, never forging a "prepared before" provenance.
 . (Join-Path $root 'validation/custom-app-production-prepared-stage-executor-bridge-v0.1.0/test_custom_app_production_prepared_stage_executor_bridge.ps1')
+# Historical pre-apply fixtures use the same sandboxed helper contracts. They
+# are required by the installed Spotify persistence-backup core; redefine
+# nothing if the parent regression matrix has already provided them.
+if(-not (Get-Command Test-PathSafe -CommandType Function -ErrorAction SilentlyContinue)){
+    function global:Test-PathSafe {
+        param([string]$Path,[ValidateSet('Leaf','Container')][string]$Kind)
+        if([string]::IsNullOrWhiteSpace($Path)){return $false}
+        if($Kind -ceq 'Leaf'){return (Test-Path -LiteralPath $Path -PathType Leaf)}
+        return (Test-Path -LiteralPath $Path -PathType Container)
+    }
+}
+if(-not (Get-Command Copy-TreeSafe -CommandType Function -ErrorAction SilentlyContinue)){
+    function global:Copy-TreeSafe {
+        param([Parameter(Mandatory=$true)][string]$Source,[Parameter(Mandatory=$true)][string]$Destination)
+        $src=[IO.Path]::GetFullPath($Source).TrimEnd([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+        if(-not(Test-Path -LiteralPath $src -PathType Container)){throw 'Copy-TreeSafe source missing'}
+        $si=Get-Item -LiteralPath $src -Force
+        if(($si.Attributes -band [IO.FileAttributes]::ReparsePoint)-ne0){throw 'Copy-TreeSafe source reparse'}
+        if(Test-Path -LiteralPath $Destination){throw 'Copy-TreeSafe destination exists'}
+        [IO.Directory]::CreateDirectory($Destination)|Out-Null
+        foreach($item in @(Get-ChildItem -LiteralPath $src -Recurse -Force -ErrorAction Stop)){
+            if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint)-ne0){throw 'Copy-TreeSafe source tree reparse'}
+            $rel=$item.FullName.Substring($src.Length).TrimStart([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)
+            $dst=Join-Path $Destination $rel
+            if($item.PSIsContainer){[IO.Directory]::CreateDirectory($dst)|Out-Null;continue}
+            $parent=[IO.Path]::GetDirectoryName($dst)
+            if(-not[string]::IsNullOrWhiteSpace($parent)){[IO.Directory]::CreateDirectory($parent)|Out-Null}
+            [IO.File]::Copy($item.FullName,$dst,$false)
+        }
+        return $Destination
+    }
+}
+$global:Version='0.6.5-r17'
+$global:DataBackupRoot=Join-Path $env:RUNNER_TEMP 'prepermit-unused-default-persistence-backup'
 . (Join-Path $root 'validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1')
 . (Join-Path $root 'validation/marketplace-lifecycle-settings-core-v0.1.0/lifecycle-settings-core.ps1')
 . (Join-Path $root 'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1')
