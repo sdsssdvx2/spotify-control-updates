@@ -158,8 +158,8 @@ try{
 $count++
 
 $badBinding=Copy-PPB $q.bundle.binding
-$badBinding.user_removed=$true
-Assert-PPBDenied (Invoke-PPBHandoff -Overrides @{BindingRow=$badBinding}) 'binding removed after backup'
+$badBinding.auto_install_authorized=$true
+Assert-PPBDenied (Invoke-PPBHandoff -Overrides @{BindingRow=$badBinding}) 'binding auto-install authority escalated after backup'
 $count++
 
 $again=Invoke-PPBHandoff
@@ -167,5 +167,5 @@ Assert-PPB ([bool]$again.ok) ('post-tamper backup restore did not recover: '+[st
 Assert-PPB ([string]$again.result.preparation_fingerprint -ceq [string]$script:PPBValid.result.preparation_fingerprint) 'read-only revalidation changed standard prepared fingerprint'
 $count++
 
-if($count-ne13){throw "pre-permit backup bridge proof count=$count expected=13"}
+if($count-ne15){throw "pre-permit backup bridge proof count=$count expected=15"}
 Write-Host "CUSTOM_APP_PRODUCTION_PRE_PERMIT_BACKUPS_BRIDGE_PASS cases=$count byte_real_backup_before_new_permit=true app_and_Spotify_persistence_snapshot_exact=true old_generic_preapply_receipt_compatible=true no_post_permit_copy=true changed_live_backup_and_signing_key_denied=true zero_authority=true"
