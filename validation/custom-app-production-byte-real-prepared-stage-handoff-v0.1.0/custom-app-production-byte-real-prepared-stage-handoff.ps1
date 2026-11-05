@@ -44,6 +44,15 @@ function Test-CustomAppProductionByteRealPreparedStageHandoffV010 {
     if($null-eq$LifecycleRow-or$null-eq$BindingRow-or$null-eq$BindingRow.binding){
         return (& $deny 'byte-real-handoff-state-null')
     }
+    foreach($f in @('name','present','user_removed','ambiguous')){
+        if(-not$LifecycleRow.PSObject.Properties[$f]){return (& $deny ('byte-real-handoff-lifecycle-field-missing-'+$f))}
+    }
+    foreach($f in @('name','active','user_removed','requires_reenrollment','source_identity','last_remote_tree_sha256','last_remote_commit_sha','last_success','mutation_mode','auto_update_authorized','auto_install_authorized')){
+        if(-not$BindingRow.PSObject.Properties[$f]){return (& $deny ('byte-real-handoff-binding-field-missing-'+$f))}
+    }
+    foreach($f in @('surface_kind','source_identity','github_repo_id','manifest_name','last_verified_remote_tree_sha256','mutation_mode','auto_update_authorized','auto_install_authorized')){
+        if(-not$BindingRow.binding.PSObject.Properties[$f]){return (& $deny ('byte-real-handoff-immutable-field-missing-'+$f))}
+    }
     if(-not[bool]$LifecycleRow.present-or[bool]$LifecycleRow.user_removed-or[bool]$LifecycleRow.ambiguous-or
        -not[bool]$BindingRow.active-or[bool]$BindingRow.user_removed-or[bool]$BindingRow.requires_reenrollment){
         return (& $deny 'byte-real-handoff-user-removed-inactive-or-ambiguous')
@@ -63,7 +72,7 @@ function Test-CustomAppProductionByteRealPreparedStageHandoffV010 {
     $immutable=([string]$BindingRow.binding.last_verified_remote_tree_sha256).Trim().ToLowerInvariant()
     $manifest=([string]$BindingRow.binding.manifest_name).Trim()
     if(-not(Test-CustomAppByteRealHandoffShaV010 $remote)-or$immutable-cne$remote-or
-       [string]::IsNullOrWhiteSpace($manifest)-or[bool]$BindingRow.binding.user_removed){
+       [string]::IsNullOrWhiteSpace($manifest)){
         return (& $deny 'byte-real-handoff-binding-invalid-or-drift')
     }
     if(-not(Test-CustomAppByteRealHandoffShaV010 $ArchiveSha256)){
@@ -84,8 +93,14 @@ function Test-CustomAppProductionByteRealPreparedStageHandoffV010 {
             return (& $deny 'byte-real-handoff-frozen-remote-asset-id-invalid')
         }
     }
-    if($null-eq$ExtractedStageResult-or$null-eq$ExtractedStageResult.baseline){
+    if($null-eq$ExtractedStageResult-or-not$ExtractedStageResult.PSObject.Properties['baseline']-or$null-eq$ExtractedStageResult.baseline){
         return (& $deny 'byte-real-handoff-extraction-result-missing')
+    }
+    foreach($f in @('tree_sha256')){
+        if(-not$ExtractedStageResult.PSObject.Properties[$f]){return (& $deny ('byte-real-handoff-extraction-field-missing-'+$f))}
+    }
+    foreach($f in @('tree_sha256','file_count','total_bytes')){
+        if(-not$ExtractedStageResult.baseline.PSObject.Properties[$f]){return (& $deny ('byte-real-handoff-extraction-baseline-field-missing-'+$f))}
     }
     # Read-only path proofs: all candidate files must be confined to a dedicated,
     # non-reparse workspace under the stage-acquisition TEMP root. No live tree
