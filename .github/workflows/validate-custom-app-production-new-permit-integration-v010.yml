@@ -1,0 +1,127 @@
+name: Validate Custom App Production New Permit Stack Hard-Disabled Integration
+
+on:
+  push:
+    branches: [validate/custom-app-production-new-permit-integration-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-new-permit-integration-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-new-permit-integration-v010.yml'
+  pull_request:
+    branches: [validate/custom-app-production-dual-id-new-permit-executor-start-gate-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-new-permit-integration-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-new-permit-integration-v010.yml'
+  workflow_dispatch:
+
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Prove exact lineage and validation-only two-file scope
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $head=(git rev-parse HEAD).Trim()
+          $expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          if($head -cne $expected){throw "Checkout head drift $head != $expected"}
+          $p='0948a31cd46aedc3f0af5262feff37e07c6855a0'
+          if((git merge-base $p HEAD).Trim() -cne $p){throw 'Not descendant of exact independently CI-qualified PR #207'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved'}
+          $builder='validation/custom-app-production-new-permit-integration-v0.1.0/build_candidate.py'
+          $wf='.github/workflows/validate-custom-app-production-new-permit-integration-v010.yml'
+          $allow=@($builder,$wf)
+          $changed=@(git diff --name-only "$p...HEAD")
+          if((@($changed|Where-Object{$_ -notin $allow})).Count -ne 0){throw "Scope escaped: $($changed -join ',')"}
+          foreach($path in $allow){if($path -notin $changed){throw "Missing exact reviewed file: $path"}}
+          $actual=(git rev-parse "HEAD:$builder").Trim()
+          if($actual -cne '4674c96a7f06dbf356f3e9c0e664fbf79690861b'){throw "Builder Git blob pin drift: $actual"}
+          'NEW_PERMIT_INTEGRATION_VALIDATION_ONLY_SCOPE_PASS'
+
+      - name: Build byte-exact parent and integrate eight qualified new-permit modules
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/custom-app-production-new-permit-integration-v0.1.0/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw "New permit hard-disabled integration builder failed: $LASTEXITCODE"}
+          $d='validation/custom-app-production-new-permit-integration-v0.1.0'
+          $j=Get-Content "$d/candidate-validation.json" -Raw | ConvertFrom-Json
+          if($j.schema -ne 1 -or $j.new_permit_module_count -ne 8 -or $j.new_permit_export_count -ne 74){throw 'Module or export inventory drift'}
+          if([string]$j.new_permit_qualified_head -cne '0948a31cd46aedc3f0af5262feff37e07c6855a0'){throw 'Qualified PR #207 pin drift'}
+          if(-not $j.candidate_reduces_exactly_to_parent -or -not $j.full_chain_implementation_unchanged){throw 'Exact parent reduction/full-chain invariants not proved'}
+          foreach($field in @('pipeline_enabled','pipeline_enablement_implemented','new_permit_normal_path_wiring_added','production_main_changed')){if([bool]$j.$field){throw "Unexpected production authority: $field"}}
+          if(@($j.modules).Count -ne 8){throw 'Missing module provenance rows'}
+          $main=Get-Item "$d/out/bin/spotify-control.ps1"
+          $addon=Get-Item "$d/out/bin/addon-manager.ps1"
+          if($main.Length -ne 284327 -or (Get-FileHash -Algorithm SHA256 -LiteralPath $main.FullName).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Exact parent Spotify Control bytes changed'}
+          if($addon.Length -ne $j.candidate_addon.size -or (Get-FileHash -Algorithm SHA256 -LiteralPath $addon.FullName).Hash.ToLowerInvariant() -cne $j.candidate_addon.sha256){throw 'Candidate Addon Manager bytes drifted'}
+          Write-Host "INTEGRATED_NEW_PERMIT_DEPENDENCY_INVENTORY unresolved=$(@($j.new_permit_external_function_dependencies_unresolved).Count)"
+          'NEW_PERMIT_HARD_DISABLED_INTEGRATED_BUILD_AND_HASH_PASS'
+
+      - name: Parse exact Windows PowerShell 5.1 candidate and run Addon Manager SelfTest
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-production-new-permit-integration-v0.1.0/out/bin'
+          foreach($p in @("$d/spotify-control.ps1","$d/addon-manager.ps1")){
+            $tokens=$null;$errors=$null
+            [Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|ForEach-Object{Write-Host "PS5.1 parse error $($_.Extent.StartLineNumber): $($_.Message)"};throw "Candidate PS5.1 parse failed: $p"}
+          }
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/addon-manager.ps1" -Action SelfTest
+          if($LASTEXITCODE -ne 0){throw 'Integrated Addon Manager read-only SelfTest failed'}
+          'NEW_PERMIT_INTEGRATED_WINDOWS_PS51_AND_SELFTEST_PASS'
+
+      - name: Verify real offline ZIP extraction contract without live mutation
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-stage-acquisition-contract-v0.1.0/test_custom_app_stage_acquisition.ps1'
+          if($LASTEXITCODE -ne 0){throw 'Existing byte-real isolated ZIP staging contract failed'}
+          'NEW_PERMIT_INTEGRATION_REAL_ZIP_STAGING_CONTRACT_PASS'
+
+      - name: Freeze candidate lineage scope and evidence (no release/activation)
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-production-new-permit-integration-v0.1.0'
+          $j=Get-Content "$d/candidate-validation.json" -Raw|ConvertFrom-Json
+          $json=[ordered]@{
+            schema=1
+            head=(git rev-parse HEAD).Trim()
+            exact_parent='0948a31cd46aedc3f0af5262feff37e07c6855a0'
+            production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+            qualified_new_permit_module_count=8
+            qualified_export_count=74
+            candidate_sha256=$j.candidate_addon.sha256
+            missing_external_dependencies=@($j.new_permit_external_function_dependencies_unresolved)
+            dependency_graph_closed=[bool]$j.new_permit_external_dependencies_fully_resolved
+            source_reduction_exact=[bool]$j.candidate_reduces_exactly_to_parent
+            ps51_parse_passed=$true
+            addon_selftest_passed=$true
+            zip_stage_contract_passed=$true
+            normal_path_wiring_added=$false
+            pipeline_enabled=$false
+            production_mutation_authority_granted=$false
+            production_main_changed=$false
+          }
+          $json|ConvertTo-Json -Depth 8|Set-Content -LiteralPath "$d/ci-evidence.json" -Encoding UTF8
+          git diff --exit-code -- manifest.json bin packages bootstrap
+          if($LASTEXITCODE -ne 0){throw 'Protected production surfaces changed'}
+          'NEW_PERMIT_HARD_DISABLED_INTEGRATION_FREEZE_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: custom-app-production-new-permit-integration-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-new-permit-integration-v0.1.0/build_candidate.py
+            validation/custom-app-production-new-permit-integration-v0.1.0/candidate-validation.json
+            validation/custom-app-production-new-permit-integration-v0.1.0/ci-evidence.json
+          if-no-files-found: error
