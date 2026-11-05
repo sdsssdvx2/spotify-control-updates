@@ -105,7 +105,7 @@ Assert-JF ([string]$binding.remote_tree_sha256 -ceq [string]$stageResult.remote_
 $lastSuccess=[DateTimeOffset]::MinValue
 Assert-JF ([DateTimeOffset]::TryParse([string]$binding.last_success,[ref]$lastSuccess)) 'remote binding freshness timestamp invalid'
 Assert-JF ($now -ge $lastSuccess.AddMinutes(-5) -and $now -le $lastSuccess.AddHours(36)) 'remote binding observation stale/future'
-$before=Snapshot-JF $true
+$preApplyJournalState=Snapshot-JF $true
 $stageArtifact=Test-CustomAppProductionPostApplyStageCleanupArtifactV010 -PreparedResult $p -StageExecutorResult $script:PPBStageResult.stage_result -Name 'tagify'
 $appArtifact=Test-CustomAppProductionPostApplyAppBackupCleanupArtifactV010 -PreparedResult $p
 $persistArtifact=Test-CustomAppProductionPostApplyPersistenceCleanupArtifactV010 -PreparedResult $p
@@ -144,7 +144,7 @@ Assert-JF ([string]$pin.sha256 -ceq $sha) 'fake exe pin did not match'
 # Preserve the SHA-verified read-only file handle until the process has exited:
 # closing it before launch would permit a TOCTOU replacement of the executable.
 $script:JFCases++
-$finalFp=Hash-JF ((@('journaled-forward-fixture','actual-third-id',$script:JFTx,[string]$atomic.result.result_fingerprint,[string]$p.preparation_fingerprint,[string]$before.runtime.tree_sha256,[string]$before.git.tree_sha256,[string]$before.persistence.fingerprint,'old-live-retained-for-rollback') -join [Environment]::NewLine))
+$finalFp=Hash-JF ((@('journaled-forward-fixture','actual-third-id',$script:JFTx,[string]$atomic.result.result_fingerprint,[string]$p.preparation_fingerprint,[string]$preApplyJournalState.runtime.tree_sha256,[string]$preApplyJournalState.git.tree_sha256,[string]$preApplyJournalState.persistence.fingerprint,'old-live-retained-for-rollback') -join [Environment]::NewLine))
 $jr=Append-JF 'candidate-live' 'transaction-finalized' $finalFp
 Assert-JF ([string]$jr.entry.finalization_fingerprint -ceq $finalFp) 'finalization evidence mismatch'
 $script:JFCases++
