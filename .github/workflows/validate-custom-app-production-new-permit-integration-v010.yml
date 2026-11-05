@@ -42,7 +42,7 @@ jobs:
           if((@($changed|Where-Object{$_ -notin $allow})).Count -ne 0){throw "Scope escaped: $($changed -join ',')"}
           foreach($path in $allow){if($path -notin $changed){throw "Missing exact reviewed file: $path"}}
           $actual=(git rev-parse "HEAD:$builder").Trim()
-          if($actual -cne 'b6d0a0e157f84cddd9853fb03e85147ac87ee2f1'){throw "Builder Git blob pin drift: $actual"}
+          if($actual -cne '964ac16138767e7bc3e465611597de232fa960b7'){throw "Builder Git blob pin drift: $actual"}
           'NEW_PERMIT_INTEGRATION_VALIDATION_ONLY_SCOPE_PASS'
 
       - name: Build byte-exact parent and integrate eight qualified new-permit modules
@@ -57,7 +57,7 @@ jobs:
           if([string]$j.new_permit_qualified_head -cne '0948a31cd46aedc3f0af5262feff37e07c6855a0'){throw 'Qualified PR #207 pin drift'}
           if(-not $j.candidate_reduces_exactly_to_parent -or -not $j.full_chain_implementation_unchanged){throw 'Exact parent reduction/full-chain invariants not proved'}
           foreach($field in @('pipeline_enabled','pipeline_enablement_implemented','new_permit_normal_path_wiring_added','production_main_changed')){if([bool]$j.$field){throw "Unexpected production authority: $field"}}
-          if(@($j.modules).Count -ne 8 -or [int]$j.support_module_count -ne 3 -or @($j.support_modules).Count -ne 3){throw 'Missing qualified or support module rows'}
+          if(@($j.modules).Count -ne 8 -or [int]$j.support_module_count -ne 5 -or @($j.support_modules).Count -ne 5){throw 'Missing qualified or support module rows'}
           $main=Get-Item "$d/out/bin/spotify-control.ps1"
           $addon=Get-Item "$d/out/bin/addon-manager.ps1"
           if($main.Length -ne 284327 -or (Get-FileHash -Algorithm SHA256 -LiteralPath $main.FullName).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Exact parent Spotify Control bytes changed'}
@@ -65,6 +65,7 @@ jobs:
           Write-Host "INTEGRATED_NEW_PERMIT_DEPENDENCY_INVENTORY unresolved=$(@($j.new_permit_external_function_dependencies_unresolved).Count)"
           Write-Host ('INTEGRATED_NEW_PERMIT_UNRESOLVED_EXTERNALS='+(@($j.new_permit_external_function_dependencies_unresolved) -join ','))
           Write-Host ('INTEGRATED_NEW_PERMIT_PARENT_OVERLAP_DIFFERENCES='+(@($j.support_overlapping_parent_function_bodies_different) -join ','))
+          Write-Host ('INTEGRATED_NEW_PERMIT_REACHABLE_SUPPORT_UNRESOLVED='+(@($j.support_source_closure_unresolved) -join ','))
           'NEW_PERMIT_HARD_DISABLED_INTEGRATED_BUILD_AND_HASH_PASS'
 
       - name: Parse exact Windows PowerShell 5.1 candidate and run Addon Manager SelfTest
@@ -109,6 +110,7 @@ jobs:
             support_module_count=[int]$j.support_module_count
             support_added_export_count=[int]$j.support_added_export_count
             inherited_dependency_function_conflicts=@($j.support_overlapping_parent_function_bodies_different)
+            support_reachable_unresolved=@($j.support_source_closure_unresolved)
             candidate_sha256=$j.candidate_addon.sha256
             missing_external_dependencies=@($j.new_permit_external_function_dependencies_unresolved)
             dependency_graph_closed=[bool]$j.new_permit_external_dependencies_fully_resolved
