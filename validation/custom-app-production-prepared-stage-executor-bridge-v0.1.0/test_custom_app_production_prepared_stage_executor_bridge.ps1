@@ -19,11 +19,44 @@ function Copy-PSB($Object){return ($Object|ConvertTo-Json -Depth 100|ConvertFrom
 $script:PSBWorkspace=New-CustomAppStageWorkspaceV010
 $script:PSBZip=Join-Path $script:PSBWorkspace 'remote.zip'
 $script:PSBStage=Join-Path $script:PSBWorkspace 'stage'
-[IO.File]::Copy($script:BRHZip,$script:PSBZip,$false)
+# Historical synthetic app and downloaded app must share an exact manifest name.
+# Do NOT weaken the normal executor's case-sensitive manifest check. Build a
+# fresh byte-real archive that takes its identity from the actual existing
+# fixture's live manifest, then issue a distinct new Permit only afterward.
+$script:PSBLive=Get-CustomAppLocalRuntimeBaseline -Name 'tagify' -AppPath ([string]$q.bundle.lifecycle.locations[0])
+Assert-PSB ([bool]$script:PSBLive.safe -and [bool]$script:PSBLive.installable -and -not[string]::IsNullOrWhiteSpace([string]$script:PSBLive.manifest_name)) 'historical fixture live identity unavailable'
+$script:PSBManifest=[string]$script:PSBLive.manifest_name
+Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+$fs=[IO.File]::Open($script:PSBZip,[IO.FileMode]::CreateNew,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+$archive=New-Object IO.Compression.ZipArchive($fs,[IO.Compression.ZipArchiveMode]::Create,$false)
+try{
+    $manifestJson=ConvertTo-Json -InputObject ([ordered]@{name=$script:PSBManifest}) -Compress
+    foreach($entryInfo in @(
+        [pscustomobject]@{path='index.js';value="console.log('prepared-stage-standard-executor-v2')"},
+        [pscustomobject]@{path='manifest.json';value=$manifestJson},
+        [pscustomobject]@{path='assets/check.txt';value='prepared second transaction real bytes'}
+    )){
+        $entry=$archive.CreateEntry([string]$entryInfo.path,[IO.Compression.CompressionLevel]::Optimal)
+        $bytes=[Text.Encoding]::UTF8.GetBytes([string]$entryInfo.value)
+        $output=$entry.Open();try{$output.Write($bytes,0,$bytes.Length)}finally{$output.Dispose()}
+    }
+}finally{$archive.Dispose();$fs.Dispose()}
 $script:PSBZipSha=(Get-FileHash -LiteralPath $script:PSBZip -Algorithm SHA256).Hash.ToLowerInvariant()
-Assert-PSB ($script:PSBZipSha -ceq $script:BRHZipHash) 'reused ZIP differs from signed archive'
-$script:PSBExtract=Expand-CustomAppStageArchiveV010 -ZipPath $script:PSBZip -Destination $script:PSBStage -ValidationRoot $script:PSBWorkspace -WrapperMode auto -Name 'tagify' -ExpectedTreeSha256 ([string]$script:BRHExtract.tree_sha256) -ExpectedManifestName 'tagify'
-Assert-PSB ([string]$script:PSBExtract.tree_sha256 -ceq [string]$script:BRHExtract.tree_sha256) 'prepared stage byte identity drift'
+$script:PSBZipEvidence=Get-CustomAppObserverZipEvidence -ZipPath $script:PSBZip -WrapperMode auto
+Assert-PSB ([bool]$script:PSBZipEvidence.manifest_valid -and [string]$script:PSBZipEvidence.manifest_name -ceq $script:PSBManifest) 'new remote ZIP manifest must equal actual local fixture manifest'
+$script:PSBExtract=Expand-CustomAppStageArchiveV010 -ZipPath $script:PSBZip -Destination $script:PSBStage -ValidationRoot $script:PSBWorkspace -WrapperMode auto -Name 'tagify' -ExpectedTreeSha256 ([string]$script:PSBZipEvidence.tree_sha256) -ExpectedManifestName $script:PSBManifest
+Assert-PSB ([string]$script:PSBExtract.tree_sha256 -ceq [string]$script:PSBZipEvidence.tree_sha256) 'prepared stage byte tree mismatch'
+$q.bundle=New-DINPPromotionBundleV010 -X $q.x -HousekeepingResult $q.house.result -At $q.at -RemoteTree ([string]$script:PSBExtract.tree_sha256)
+$q.bundle.binding.binding.manifest_name=$script:PSBManifest
+$q.bundle.binding.last_local_manifest_name=$script:PSBManifest
+$q.bundle.binding.binding.last_observed_asset_digest_sha256=$script:PSBZipSha
+[void](Sync-PromotionBundleFingerprints -Bundle $q.bundle)
+$live.lifecycle=$q.bundle.lifecycle
+$live.provenance=$q.bundle.provenance
+$live.binding=$q.bundle.binding
+$live.baseline.manifest_name=$script:PSBManifest
+Assert-PSB ([string]$q.bundle.binding.last_remote_tree_sha256 -ceq [string]$script:PSBExtract.tree_sha256) 'new immutable binding remote tree SHA mismatch'
+Assert-PSB ([string]$script:PSBLive.tree_sha256 -ceq [string]$live.baseline.tree_sha256) 'historical local code changed while preparing new remote ZIP'
 # Prove the SECOND transaction's file existed and had its exact verified
 # release ZIP and tree hash BEFORE this new transaction was ever issued.
 $preNew=Test-CustomAppProductionByteRealPreparedStageHandoffV010 -Name 'tagify' -WorkspacePath $script:PSBWorkspace -ArchivePath $script:PSBZip -ArchiveSha256 $script:PSBZipSha -StagePath $script:PSBStage -ExtractedStageResult $script:PSBExtract -LifecycleRow $q.bundle.lifecycle -BindingRow $q.bundle.binding -Now $q.at
