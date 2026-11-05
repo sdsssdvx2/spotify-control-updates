@@ -182,5 +182,5 @@ try{[void](Append-JF 'candidate-live' 'transaction-finalized' $finalFp)}catch{$r
 Assert-JF ($replayDenied -and [int]([IO.File]::ReadAllText($countPath).Trim()) -eq 1) 'committed transaction replayed or relaunched fake'
 Assert-JF ([string](Read-JF 'committed-clean').entry.entry_sha256 -ceq [string]$jr.entry.entry_sha256) 'terminal journal mutated on replay'
 $script:JFCases++
-Assert-JF ($script:JFCases -eq 12) ('new case count '+$script:JFCases)
-Write-Host 'TRIPLE_ID_REAL_ZIP_JOURNALED_FORWARD_COMMIT_PASS cases=12 third_permit=true durable_consumption=true evidence_before_atomic=true same_journal_history=10 normal_finalization_without_receipt_forgery=true fake_apply_once=true rollback_source_retained_until_cleanup=true cleanup_barrier_before_four_deletions=true committed_clean=true git_and_spotify_persistence_unchanged=true terminal_replay_denied=true user_spotify_untouched=true'
+Assert-JF ($script:JFCases -eq 13) ('new case count '+$script:JFCases)
+Write-Host 'TRIPLE_ID_REAL_ZIP_JOURNALED_FORWARD_COMMIT_PASS cases=13 third_permit=true durable_consumption=true evidence_before_atomic=true same_journal_history=10 normal_finalization_without_receipt_forgery=true fake_apply_once=true rollback_source_retained_until_cleanup=true cleanup_barrier_before_four_deletions=true committed_clean=true git_and_spotify_persistence_unchanged=true terminal_replay_denied=true user_spotify_untouched=true'
