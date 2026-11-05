@@ -15,6 +15,10 @@ $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $root 'validation/custom-app-production-post-swap-apply-admission-v0.1.0/custom-app-production-post-swap-apply-admission.ps1')
 . (Join-Path $root 'validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1')
 . (Join-Path $root 'validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1')
+# Qualified v0.1.1 finalization receipt reader must be the LAST definition:
+# after committed cleanup, the stage/backup paths intentionally no longer exist.
+# Full assembled Addon Manager already incorporates this exact override.
+. (Join-Path $root 'validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup-finalization-receipt-v011.ps1')
 function Assert-E2E([bool]$Yes,[string]$Why){if(-not$Yes){throw ('TRIPLE_ID_APPLY_CLEANUP_E2E_FAIL: '+$Why)}}
 function Check-E2ENoAuthority($Obj,[string]$Label){
     foreach($f in @('result_is_authority','spicetify_apply_authorized','additional_mutation_authorized','production_execution_authorized','production_mutation_authorized')){
