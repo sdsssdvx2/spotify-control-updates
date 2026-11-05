@@ -43,8 +43,8 @@ jobs:
           $unexpected=@($changed|Where-Object{$_-notin$allowed})
           if($unexpected.Count){throw ('unapproved scope '+($unexpected -join ','))}
           foreach($p in $allowed){if($p-notin$changed){throw ('expected new file missing '+$p)}}
-          if((git hash-object $module).Trim()-cne'5085eab4fa12ac1c16b37e0493f82b5e6ec78372'){throw 'module code under test changed'}
-          if((git hash-object $test).Trim()-cne'8d48424d4c252713656d3f863b0c0b457d27b686'){throw 'test code under review changed'}
+          if((git hash-object $module).Trim()-cne'6f4ead463a46824d0e55792d452fe2572790b5b2'){throw 'module code under test changed'}
+          if((git hash-object $test).Trim()-cne'b4810d20b2718a3584446d45ee20a24b1f54473f'){throw 'test code under review changed'}
           if((git hash-object $generator).Trim()-cne'14f912412ecd21baad9d72d9d0e4ebb8f853760e'){throw 'SHA-pinned original fixture transformation changed'}
           foreach($p in @('bin/spotify-control.ps1','bin/addon-manager.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
             git diff --quiet $parent HEAD -- $p
@@ -75,10 +75,10 @@ jobs:
           $ErrorActionPreference='Stop'
           if($exitCode -ne 0){throw ('exclusive gate Windows test failed '+$exitCode)}
           $logText=Get-Content -LiteralPath $log -Raw
-          if($logText -notmatch 'EXCLUSIVE_APP_CLOCK_AND_CRASH_GATE_MATRIX_PASS cases=19 current_utc=true stale_and_future_denied=true same_app_cross_process_lock=true other_app_allowed=true crash_retains_blocking_marker=true corrupt_marker_fail_closed=true no_journal_no_retirement=true retired_consumption_replay_denied=true installed_spotify_untouched=true'){throw 'independent process and clock evidence missing'}
+          if($logText -notmatch 'EXCLUSIVE_APP_CLOCK_AND_CRASH_GATE_MATRIX_PASS cases=20 current_utc=true stale_and_future_denied=true same_app_cross_process_lock=true same_live_alias_denied=true other_app_allowed=true crash_retains_blocking_marker=true corrupt_marker_fail_closed=true no_journal_no_retirement=true retired_consumption_replay_denied=true installed_spotify_untouched=true'){throw 'independent process and clock evidence missing'}
           [ordered]@{
             schema=1;status='PASS';source='exclusive-app-transaction-clock-gate-validation'
-            test_count=19;windows_process_cross_lock=$true;crash_retains_active_record=$true
+            test_count=20;windows_process_cross_lock=$true;crash_retains_active_record=$true
             stale_and_future_utc_denied=$true;corrupt_record_denied=$true;missing_terminal_journal_denied=$true
             production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
             full_chain_enabled=$false;tested_sha=(git rev-parse HEAD).Trim()
@@ -173,7 +173,7 @@ jobs:
             if(-not $text.Contains($marker)){throw ('real ZIP guard missing verified proof '+$marker)}
           }
           [ordered]@{
-            schema=1;status='PASS';case_matrix=19
+            schema=1;status='PASS';case_matrix=20
             real_zip_third_hmac=true;true_utc_freshness=true;single_active_transaction_per_app=true
             durable_claim_survived_process_crash=true;terminal_rollback_required_for_claim_retirement=true
             independent_exact_old_app_settings_restored=true;wrong_id_rejected=true;replay_denied=true
