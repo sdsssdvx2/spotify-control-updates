@@ -156,8 +156,13 @@ Assert-TJR ($stateJson -notmatch '(?i)session_key|token_secret|hmac_key|DINPIKey
 $badState=($stateJson|ConvertFrom-Json)
 $badState.transaction_id=('0'*64)
 [IO.File]::WriteAllText($badStatePath,($badState|ConvertTo-Json -Depth 20),[Text.UTF8Encoding]::new($false))
-$badOutput=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $worker -StatePath $badStatePath -ResultPath $badResultPath 2>&1)
-Assert-TJR ($LASTEXITCODE -ne 0) 'wrong durable transaction ID was accepted across restart'
+$previousEAP=$ErrorActionPreference
+try{
+    $ErrorActionPreference='Continue'
+    $badOutput=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $worker -StatePath $badStatePath -ResultPath $badResultPath 2>&1)
+    $badExit=$LASTEXITCODE
+}finally{$ErrorActionPreference=$previousEAP}
+Assert-TJR ($badExit -ne 0) 'wrong durable transaction ID was accepted across restart'
 Assert-TJR (Test-Path -LiteralPath $badResultPath -PathType Leaf) 'wrong-ID worker denial evidence absent'
 $badWorker=Get-Content -LiteralPath $badResultPath -Raw|ConvertFrom-Json
 Assert-TJR (-not[bool]$badWorker.admission_ok -and -not[bool]$badWorker.executor_ok) 'wrong-ID worker progressed past preflight'
@@ -190,8 +195,12 @@ $script:TJRCases++
 
 # Replaying a fully completed rollback is not another apply authorization.
 $secondPath=Join-Path $control 'replay-result.json'
-$replayOutput=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $worker -StatePath $statePath -ResultPath $secondPath 2>&1)
-Assert-TJR ($LASTEXITCODE -ne 0) 'finished rollback unexpectedly admitted replay'
+try{
+    $ErrorActionPreference='Continue'
+    $replayOutput=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $worker -StatePath $statePath -ResultPath $secondPath 2>&1)
+    $replayExit=$LASTEXITCODE
+}finally{$ErrorActionPreference=$previousEAP}
+Assert-TJR ($replayExit -ne 0) 'finished rollback unexpectedly admitted replay'
 Assert-TJR (Test-Path -LiteralPath $secondPath -PathType Leaf) 'replay denial output absent'
 $replay=Get-Content -LiteralPath $secondPath -Raw|ConvertFrom-Json
 Assert-TJR (-not[bool]$replay.executor_ok) 'duplicate recovery executor invoked'
