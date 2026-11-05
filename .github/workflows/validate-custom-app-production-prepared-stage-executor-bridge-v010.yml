@@ -4,12 +4,12 @@ on:
   push:
     branches: [validate/custom-app-production-prepared-stage-executor-bridge-v0.1.0]
     paths:
-      - 'validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/**'
+      - 'validation/custom-app-production-prepared-stage-executor-bridge-v0.1.0/**'
       - '.github/workflows/validate-custom-app-production-prepared-stage-executor-bridge-v010.yml'
   pull_request:
     branches: [validate/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0]
     paths:
-      - 'validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/**'
+      - 'validation/custom-app-production-prepared-stage-executor-bridge-v0.1.0/**'
       - '.github/workflows/validate-custom-app-production-prepared-stage-executor-bridge-v010.yml'
   workflow_dispatch:
 
@@ -34,7 +34,7 @@ jobs:
           $base='065acbb3b0b8b641ad2468f9738e98905ffac44e'
           if((git merge-base $base HEAD).Trim() -cne $base){throw 'PR #209 exact base not ancestor'}
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved'}
-          $d='validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0'
+          $d='validation/custom-app-production-prepared-stage-executor-bridge-v0.1.0'
           $core="$d/custom-app-production-prepared-stage-executor-bridge.ps1"
           $test="$d/test_custom_app_production_prepared_stage_executor_bridge.ps1"
           $wf='.github/workflows/validate-custom-app-production-prepared-stage-executor-bridge-v010.yml'
@@ -95,7 +95,7 @@ jobs:
           $code=0
           try {
             $env:RUNNER_TEMP=$runtime;$env:TEMP=$runtime;$env:TMP=$runtime
-            $test='validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/test_custom_app_production_prepared_stage_executor_bridge.ps1'
+            $test='validation/custom-app-production-prepared-stage-executor-bridge-v0.1.0/test_custom_app_production_prepared_stage_executor_bridge.ps1'
             & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test
             $code=$LASTEXITCODE
           } finally {
@@ -114,7 +114,7 @@ jobs:
             git diff --quiet $base HEAD -- $p
             if($LASTEXITCODE -ne 0){throw "Protected production file changed: $p"}
           }
-          $d='validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0'
+          $d='validation/custom-app-production-prepared-stage-executor-bridge-v0.1.0'
           [ordered]@{
             schema=1;qualified_base=$base;head=(git rev-parse HEAD).Trim()
             production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
@@ -131,7 +131,7 @@ jobs:
         with:
           name: prepared-stage-existing-executor-bridge-${{ github.run_id }}
           path: |
-            validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/custom-app-production-prepared-stage-executor-bridge.ps1
-            validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/test_custom_app_production_prepared_stage_executor_bridge.ps1
-            validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/ci-evidence.json
+            validation/custom-app-production-prepared-stage-executor-bridge-v0.1.0/custom-app-production-prepared-stage-executor-bridge.ps1
+            validation/custom-app-production-prepared-stage-executor-bridge-v0.1.0/test_custom_app_production_prepared_stage_executor_bridge.ps1
+            validation/custom-app-production-prepared-stage-executor-bridge-v0.1.0/ci-evidence.json
           if-no-files-found: error
