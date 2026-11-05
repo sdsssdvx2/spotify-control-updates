@@ -34,7 +34,9 @@ function Get-CustomAppProductionExclusiveGatePathsV010 {
     if(-not $live.StartsWith(($root+[IO.Path]::DirectorySeparatorChar),[StringComparison]::OrdinalIgnoreCase)){throw 'exclusive-gate-live-not-under-hosted-runner'}
     $dir=Join-Path $root 'custom-app-exclusive-transactions'
     if($live.StartsWith(($dir+[IO.Path]::DirectorySeparatorChar),[StringComparison]::OrdinalIgnoreCase)){throw 'exclusive-gate-live-overlaps-registry'}
-    $key=Get-CustomAppProductionExclusiveGateSha256V010 (($Name.ToLowerInvariant())+'|'+($live.ToLowerInvariant()))
+    # Lock identity is the canonical live directory, NOT a caller-selected app alias.
+    # Distinct names pointing at the same physical app directory must contend.
+    $key=Get-CustomAppProductionExclusiveGateSha256V010 ($live.ToLowerInvariant())
     return [pscustomobject]@{name=$Name.ToLowerInvariant();live=$live;root=$root;directory=$dir;key=$key;lock=(Join-Path $dir ($key+'.lock'));record=(Join-Path $dir ($key+'.json'))}
 }
 function Assert-CustomAppProductionExclusiveGateNoReparseV010 {
