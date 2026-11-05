@@ -178,6 +178,12 @@ function Invoke-CustomAppProductionExclusiveThirdIdJournalBridgeV010 {
             exclusive_claim_persisted=$true;claim_path=[string]$lock.paths.record
             journal_phase=[string]$result.journal_phase
             transaction_id=[string]$result.transaction_id
+            # Preserve the independently verified bridge receipt fields.  This
+            # guarded wrapper adds a claim, it must not erase the source proof.
+            journal_revision=$(if([bool]$result.ok){[int64]$result.journal_revision}else{[int64]0})
+            durable_consumption_envelope_sha256=$(if([bool]$result.ok){[string]$result.durable_consumption_envelope_sha256}else{''})
+            recovery_evidence_fingerprint=$(if([bool]$result.ok){[string]$result.recovery_evidence_fingerprint}else{''})
+            result_is_authority=$false
             session_key_not_serialized=$true
             production_execution_authorized=$false;production_mutation_authorized=$false
             spicetify_apply_authorized=$false;additional_mutation_authorized=$false

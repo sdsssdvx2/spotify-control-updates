@@ -43,7 +43,7 @@ jobs:
           $unexpected=@($changed|Where-Object{$_-notin$allowed})
           if($unexpected.Count){throw ('unapproved scope '+($unexpected -join ','))}
           foreach($p in $allowed){if($p-notin$changed){throw ('expected new file missing '+$p)}}
-          if((git hash-object $module).Trim()-cne'6f4ead463a46824d0e55792d452fe2572790b5b2'){throw 'module code under test changed'}
+          if((git hash-object $module).Trim()-cne'7f41179bf67428aa736b438ec1185a4f0bc1e831'){throw 'module code under test changed'}
           if((git hash-object $test).Trim()-cne'b4810d20b2718a3584446d45ee20a24b1f54473f'){throw 'test code under review changed'}
           if((git hash-object $generator).Trim()-cne'9909e07ea21046df1804ac2bff45d66c66291a9d'){throw 'SHA-pinned original fixture transformation changed'}
           foreach($p in @('bin/spotify-control.ps1','bin/addon-manager.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
