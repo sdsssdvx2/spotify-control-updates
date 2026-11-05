@@ -43,7 +43,7 @@ jobs:
           $unexpected=@($changed | Where-Object {$_ -notin $allowed})
           if($unexpected.Count){throw "Scope escaped: $($unexpected -join ',')"}
           foreach($p in $allowed){if($p -notin $changed){throw "Required source absent from diff: $p"}}
-          if((git rev-parse "HEAD:$builder").Trim() -cne '09e03f8d7e49f65c58c1e79f90b10d3dd9e2b52d'){throw 'Reviewed candidate builder Git blob drift'}
+          if((git rev-parse "HEAD:$builder").Trim() -cne 'd871ea08eed74c1dab479b3764d5654a3d8a18b4'){throw 'Reviewed candidate builder Git blob drift'}
           if((git rev-parse 'HEAD:validation/custom-app-production-new-permit-integration-v0.1.0/build_candidate.py').Trim() -cne '1b69372cbe0bd3b3eb58fa2e242ad470d200dbf4'){throw 'Frozen new-permit parent builder drift'}
           'ONE_CANDIDATE_SCOPE_GIT_BLOB_AND_PRODUCTION_FREEZE_PASS'
 
