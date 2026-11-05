@@ -154,9 +154,9 @@ jobs:
           }
           if($exitCode -ne 0){throw "Triple-ID normal journaled forward commit test failed code=$exitCode"}
           $log=Get-Content -LiteralPath "$dir/windows-ci.log" -Raw
-          if($log -notmatch 'TRIPLE_ID_REAL_ZIP_JOURNALED_FORWARD_COMMIT_PASS cases=12 third_permit=true durable_consumption=true evidence_before_atomic=true same_journal_history=10 normal_finalization_without_receipt_forgery=true fake_apply_once=true rollback_source_retained_until_cleanup=true cleanup_barrier_before_four_deletions=true committed_clean=true git_and_spotify_persistence_unchanged=true terminal_replay_denied=true user_spotify_untouched=true'){throw 'Full integration evidence absent'}
+          if($log -notmatch 'TRIPLE_ID_REAL_ZIP_JOURNALED_FORWARD_COMMIT_PASS cases=13 third_permit=true durable_consumption=true evidence_before_atomic=true same_journal_history=10 normal_finalization_without_receipt_forgery=true fake_apply_once=true rollback_source_retained_until_cleanup=true cleanup_barrier_before_four_deletions=true committed_clean=true git_and_spotify_persistence_unchanged=true terminal_replay_denied=true user_spotify_untouched=true'){throw 'Full integration evidence absent'}
           [ordered]@{
-            schema=1;status='PASS';new_case_count=12;prior_atomic_case_count=8;validation_only=$true;actual_isolated_swap=$true
+            schema=1;status='PASS';new_case_count=13;prior_atomic_case_count=8;validation_only=$true;actual_isolated_swap=$true
             source_stage_prepared_before_permit=$true;durable_consumption=$true;durable_journal_before_mutation=$true;normal_apply_verified=$true;committed_clean_no_rollback=$true;replay_denied=$true
             fake_normal_apply_invocation_count=1;real_spicetify_executed=$false;production_mutated=$false
             parent='1ef322c754cb8d77bb8aea7cb1f15f3da7d7bcd4'
