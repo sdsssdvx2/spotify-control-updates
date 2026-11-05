@@ -6,6 +6,7 @@ validation. All generated files remain inside the disposable Windows checkout.
 from __future__ import annotations
 import hashlib
 import runpy
+import subprocess
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[2]
@@ -13,7 +14,7 @@ BASEGEN=ROOT / "validation/custom-app-production-triple-id-authorized-journal-br
 HERE=Path(__file__).resolve().parent
 DERIVED=ROOT / "validation/custom-app-production-triple-id-journaled-restart-e2e-v0.1.0/ci_derived_authorized_bridge_restart.ps1"
 OUTPUT=DERIVED.with_name("ci_derived_exclusive_gate_restart.ps1")
-EXPECTED_BASEGEN_SHA256=""
+EXPECTED_BASEGEN_GIT_BLOB="68a499af508b1b24d30854c628c1a3f9783c6d9a"
 
 def once(s,old,new,label):
     n=s.count(old)
@@ -23,8 +24,9 @@ def once(s,old,new,label):
 def main():
     data=BASEGEN.read_bytes()
     hash256=hashlib.sha256(data).hexdigest()
-    if hash256!=EXPECTED_BASEGEN_SHA256:
-        raise RuntimeError(f"qualified PR220 generator sha256 drift {hash256}")
+    blob=subprocess.check_output(["git","hash-object",str(BASEGEN)],cwd=ROOT,text=True).strip()
+    if blob!=EXPECTED_BASEGEN_GIT_BLOB:
+        raise RuntimeError(f"qualified PR220 generator git blob drift {blob}")
     if DERIVED.exists() or OUTPUT.exists():
         raise RuntimeError("refusing to overwrite prior derived test")
     source=runpy.run_path(str(BASEGEN),run_name="validation-import")
