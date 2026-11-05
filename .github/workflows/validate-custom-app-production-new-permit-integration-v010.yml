@@ -42,7 +42,7 @@ jobs:
           if((@($changed|Where-Object{$_ -notin $allow})).Count -ne 0){throw "Scope escaped: $($changed -join ',')"}
           foreach($path in $allow){if($path -notin $changed){throw "Missing exact reviewed file: $path"}}
           $actual=(git rev-parse "HEAD:$builder").Trim()
-          if($actual -cne '964ac16138767e7bc3e465611597de232fa960b7'){throw "Builder Git blob pin drift: $actual"}
+          if($actual -cne '1b69372cbe0bd3b3eb58fa2e242ad470d200dbf4'){throw "Builder Git blob pin drift: $actual"}
           'NEW_PERMIT_INTEGRATION_VALIDATION_ONLY_SCOPE_PASS'
 
       - name: Build byte-exact parent and integrate eight qualified new-permit modules
@@ -58,6 +58,9 @@ jobs:
           if(-not $j.candidate_reduces_exactly_to_parent -or -not $j.full_chain_implementation_unchanged){throw 'Exact parent reduction/full-chain invariants not proved'}
           foreach($field in @('pipeline_enabled','pipeline_enablement_implemented','new_permit_normal_path_wiring_added','production_main_changed')){if([bool]$j.$field){throw "Unexpected production authority: $field"}}
           if(@($j.modules).Count -ne 8 -or [int]$j.support_module_count -ne 5 -or @($j.support_modules).Count -ne 5){throw 'Missing qualified or support module rows'}
+          if(-not [bool]$j.new_permit_external_dependencies_fully_resolved -or @($j.new_permit_external_function_dependencies_unresolved).Count -ne 0 -or @($j.support_source_closure_unresolved).Count -ne 0){throw 'Qualified new-permit support dependency graph is not closed'}
+          if(-not [bool]$j.inherited_promotion_helper_strict_superset_proven){throw 'Promotion strict-deny provenance not attested'}
+          'NEW_PERMIT_INTEGRATION_COMPLETE_STATIC_DEPENDENCY_CLOSURE_PASS'
           $main=Get-Item "$d/out/bin/spotify-control.ps1"
           $addon=Get-Item "$d/out/bin/addon-manager.ps1"
           if($main.Length -ne 284327 -or (Get-FileHash -Algorithm SHA256 -LiteralPath $main.FullName).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Exact parent Spotify Control bytes changed'}
@@ -111,6 +114,7 @@ jobs:
             support_added_export_count=[int]$j.support_added_export_count
             inherited_dependency_function_conflicts=@($j.support_overlapping_parent_function_bodies_different)
             support_reachable_unresolved=@($j.support_source_closure_unresolved)
+            inherited_promotion_helper_strict_superset_proven=[bool]$j.inherited_promotion_helper_strict_superset_proven
             candidate_sha256=$j.candidate_addon.sha256
             missing_external_dependencies=@($j.new_permit_external_function_dependencies_unresolved)
             dependency_graph_closed=[bool]$j.new_permit_external_dependencies_fully_resolved
