@@ -5,12 +5,12 @@ on:
     branches: [validate/custom-app-production-dual-id-new-permit-executor-start-gate-v0.1.0]
     paths:
       - 'validation/custom-app-production-dual-id-new-permit-executor-start-gate-v0.1.0/**'
-      - '.github/workflows/validate-custom-app-production-dual-id-new-permit-consumption-persistence-v010.yml'
+      - '.github/workflows/validate-custom-app-production-triple-id-new-permit-executor-start-v010.yml'
   pull_request:
     branches: [validate/custom-app-production-dual-id-new-permit-consumption-persistence-v0.1.0]
     paths:
       - 'validation/custom-app-production-dual-id-new-permit-executor-start-gate-v0.1.0/**'
-      - '.github/workflows/validate-custom-app-production-dual-id-new-permit-consumption-persistence-v010.yml'
+      - '.github/workflows/validate-custom-app-production-triple-id-new-permit-executor-start-v010.yml'
   workflow_dispatch:
 permissions: {contents: read}
 
@@ -31,7 +31,7 @@ jobs:
           $base='33100251692a2486313456643842095a163267d6'
           if((git merge-base $base HEAD).Trim()-cne$base){throw 'not descended from exact new-permit consumption parent'}
           if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main changed'}
-          $d='validation/custom-app-production-dual-id-new-permit-consumption-persistence-v0.1.0';$core="$d/custom-app-production-dual-id-new-permit-executor-start-gate.ps1";$test="$d/test_custom_app_production_dual_id_new_permit_executor_start_gate.ps1";$wf='.github/workflows/validate-custom-app-production-dual-id-new-permit-consumption-persistence-v010.yml'
+          $d='validation/custom-app-production-dual-id-new-permit-executor-start-gate-v0.1.0';$core="$d/custom-app-production-dual-id-new-permit-executor-start-gate.ps1";$test="$d/test_custom_app_production_dual_id_new_permit_executor_start_gate.ps1";$wf='.github/workflows/validate-custom-app-production-triple-id-new-permit-executor-start-v010.yml'
           $allowed=@($core,$test,$wf);$changed=@(git diff --name-only "$base...HEAD")
           $bad=@($changed|Where-Object{$_ -notin $allowed});if($bad.Count){throw "scope escaped: $($bad -join ', ')"}
           foreach($p in $allowed){if($p -notin $changed){throw "missing exact validation file $p"}}
