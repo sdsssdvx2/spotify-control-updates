@@ -29,6 +29,20 @@ MODULES = [
     ("consumption-persistence", "validation/custom-app-production-dual-id-new-permit-consumption-persistence-v0.1.0/custom-app-production-dual-id-new-permit-consumption-persistence.ps1", "65799d084ea7fb18ac735c08c2f6b09abe7fd0ee"),
     ("executor-start", "validation/custom-app-production-dual-id-new-permit-executor-start-gate-v0.1.0/custom-app-production-dual-id-new-permit-executor-start-gate.ps1", "23ddf1bb5a922791bb0f20fee07dc99d0de44629"),
 ]
+# Frozen ancestors supplying four missing new-cycle entry points. These are
+# imported only for symbols absent from the exact pinned parent, never as
+# overrides of any existing function.
+SUPPORT_MODULES = [
+    ("durable-housekeeping", "0948a31cd46aedc3f0af5262feff37e07c6855a0", "validation/custom-app-production-dual-id-housekeeping-resume-executor-v0.1.0/custom-app-production-dual-id-housekeeping-resume-executor.ps1", "6cf870e37b2ad4afc6b4d7eec0538afda595ddb1"),
+    ("historical-consumption-reader", "0948a31cd46aedc3f0af5262feff37e07c6855a0", "validation/custom-app-production-recovery-aware-permit-consumption-persistence-v0.1.0/custom-app-production-recovery-aware-permit-consumption-persistence.ps1", "5712edc5a5c8720d3254d9f3a9f151042e8c5187"),
+    ("promotion-eligibility", "6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c", "validation/custom-app-production-promotion-gate-v0.1.0/custom-app-production-promotion-gate.ps1", "1164c197405eac2295f789256e2886068611dd94"),
+]
+REQUIRED_SUPPORT_EXPORTS = [
+    "Get-CustomAppProductionDualIdHousekeepingResumeDurableIdentityV010",
+    "Get-CustomAppProductionRecoveryAwarePermitConsumptionPersistedTargetV010",
+    "Resolve-CustomAppProductionPromotionEligibilityV010",
+    "Test-CustomAppProductionDualIdHousekeepingResumeResultV010",
+]
 REQUIRED_EXPORTS = [
     "Resolve-CustomAppProductionDualIdNewPermitReadinessV010",
     "Resolve-CustomAppProductionDualIdNewPermitIssuanceAdmissionV010",
@@ -135,6 +149,10 @@ def integrate(parent_addon: bytes) -> tuple[bytes, dict]:
     seen_new: set[str] = set()
     module_records = []
     module_source = []
+    support_parts = []
+    support_exports: set[str] = set()
+    support_records = []
+    support_overlap_body_differences = []
     for label, path, expected in MODULES:
         if git_blob(QUALIFIED_NEW_PERMIT_HEAD, path) != expected or git_blob("HEAD", path) != expected:
             raise RuntimeError(f"{label} frozen source Git blob mismatch")
@@ -152,6 +170,51 @@ def integrate(parent_addon: bytes) -> tuple[bytes, dict]:
         module_source.append(text)
         payloads.append(text)
         module_records.append({"label": label, "path": path, "git_blob": expected, "export_count": len(names)})
+    # This is a hard-disabled packaging candidate, not permission to call new
+    # code from the normal mutation path. Preserve old parent helpers exactly,
+    # import only absent qualified dependency exports, and record any helper
+    # body differences instead of silently overriding a released implementation.
+    for label, lineage, path, expected in SUPPORT_MODULES:
+        if git_blob(lineage, path) != expected:
+            raise RuntimeError(f"qualified support module lineage drift: {label}")
+        if lineage == QUALIFIED_NEW_PERMIT_HEAD and git_blob("HEAD", path) != expected:
+            raise RuntimeError(f"qualified support module current blob drift: {label}")
+        src = git_bytes(expected).decode("utf-8-sig").replace("\r\n", "\n").strip()
+        if "$script:CustomAppProductionPipelineEnabled" in src or PIPELINE_TRUE_PATTERN.search(src):
+            raise RuntimeError(f"support module attempted pipeline assignment: {label}")
+        nms = functions(src)
+        if not nms or len(nms) != len(set(nms)):
+            raise RuntimeError(f"support module malformed function inventory: {label}")
+        first_fn = re.search(r"(?im)^[ \t]*function\s+[A-Za-z0-9_-]+\s*\{", src)
+        if not first_fn:
+            raise RuntimeError(f"support module has no function definition: {label}")
+        prelude = src[:first_fn.start()].strip()
+        chunks = [prelude] if prelude else []
+        missing_names = []
+        overlapping = []
+        for nm in nms:
+            if nm in seen_new or nm in support_exports:
+                raise RuntimeError(f"support module would shadow qualified new-cycle function: {nm}")
+            if nm in baseline:
+                overlapping.append(nm)
+                if function_block(parent, nm).strip() != function_block(src, nm).strip():
+                    support_overlap_body_differences.append(f"{label}:{nm}")
+                continue
+            chunks.append(function_block(src, nm).strip())
+            support_exports.add(nm)
+            missing_names.append(nm)
+        # Every newly introduced global is scoped to the supporting module and
+        # the fully reversible source reduction below catches any silent edits.
+        support_parts.append("\n\n".join(chunks).rstrip())
+        module_source.append(src)
+        support_records.append({
+            "label": label, "lineage": lineage, "path": path,
+            "git_blob": expected, "imported_exports": missing_names,
+            "inherited_exports_preserved": overlapping,
+        })
+    for nm in REQUIRED_SUPPORT_EXPORTS:
+        if nm not in (baseline | seen_new | support_exports):
+            raise RuntimeError(f"qualified support function missing: {nm}")
     for name in REQUIRED_EXPORTS:
         if name not in seen_new:
             raise RuntimeError(f"required new permit export missing: {name}")
@@ -160,7 +223,7 @@ def integrate(parent_addon: bytes) -> tuple[bytes, dict]:
     first = re.search(r"(?im)^[ \t]*function\s+[A-Za-z0-9_-]+\s*\{", parent)
     if not first:
         raise RuntimeError("frozen parent function boundary missing")
-    payload = "\n\n".join(payloads) + "\n\n" + SELFTEST.rstrip() + "\n\n"
+    payload = "\n\n".join(support_parts + payloads) + "\n\n" + SELFTEST.rstrip() + "\n\n"
     candidate = parent[:first.start()] + payload + parent[first.start():]
     original_hook = (
         '    try { Invoke-CustomAppProductionBoundedRecoveryStackHardDisabledSelfTestV010 } '
@@ -200,6 +263,10 @@ def integrate(parent_addon: bytes) -> tuple[bytes, dict]:
         "new_permit_module_count": len(MODULES),
         "new_permit_export_count": len(seen_new),
         "modules": module_records,
+        "support_module_count": len(SUPPORT_MODULES),
+        "support_added_export_count": len(support_exports),
+        "support_modules": support_records,
+        "support_overlapping_parent_function_bodies_different": sorted(support_overlap_body_differences),
         "new_permit_external_function_dependencies_unresolved": missing,
         "new_permit_external_dependencies_fully_resolved": not bool(missing),
         "preexisting_functions_changed": changed,
