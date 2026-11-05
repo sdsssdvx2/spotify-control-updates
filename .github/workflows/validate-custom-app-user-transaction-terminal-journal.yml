@@ -1,0 +1,161 @@
+name: Validate user DPAPI terminal retirement against real signed ZIP rollback journal
+on:
+  push:
+    branches: [validate/custom-app-user-transaction-terminal-journal]
+    paths:
+      - 'validation/custom-app-user-transaction-terminal-journal/**'
+      - '.github/workflows/validate-custom-app-user-transaction-terminal-journal.yml'
+  pull_request:
+    branches: [validate/custom-app-user-transaction-transition-guard]
+    paths:
+      - 'validation/custom-app-user-transaction-terminal-journal/**'
+      - '.github/workflows/validate-custom-app-user-transaction-terminal-journal.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  real-triple-id-terminal-rollback-windows:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Pin qualified review source and freeze operating main
+        shell: powershell
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='22c31dc7e1a73d91a13f957a68706c4e8d698d2f'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'wrong review checkout SHA'}
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'not descended from qualified user transition guard'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main changed'}
+          $d='validation/custom-app-user-transaction-terminal-journal'
+          $pins=@{
+            "$d/verified-terminal-adapter.ps1"='50805081407967798cf0a30e51f59fba79048dfc'
+            "$d/terminal-readback-child.ps1"='fd5465330d84e874a0b594a66ad1d5fa611273c4'
+            "$d/derive_real_zip_terminal_e2e.py"='044ae7210f3b4073e4bdae85591f79b33c634bbd'
+            "$d/build_candidate.py"='a8338207c4d0ba523925d946ae1f3f58950f7083'
+          }
+          $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-user-transaction-terminal-journal.yml')
+          $changed=@(git diff --name-only "$parent...HEAD")
+          if($changed.Count -ne 5 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('unexpected production or test scope '+($changed -join ','))}
+          foreach($p in $pins.Keys){if((git hash-object $p).Trim() -cne $pins[$p]){throw ('unqualified source '+$p)}}
+          foreach($p in @('bin/spotify-control.ps1','bin/addon-manager.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
+            git diff --quiet $parent HEAD -- $p
+            if($LASTEXITCODE -ne 0){throw ('operating source modified '+$p)}
+          }
+          Write-Host 'USER_TERMINAL_SOURCE_SCOPE_MAIN_FROZEN_PASS'
+      - name: Generate exact old hard-disabled candidate plus terminal module
+        shell: powershell
+        timeout-minutes: 40
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-user-transaction-terminal-journal'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'real-addon terminal bundle build failed'}
+          $report=Get-Content -LiteralPath "$d/candidate-validation.json" -Raw|ConvertFrom-Json
+          $addon="$d/out/bin/addon-manager.ps1"
+          $sha=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sha -cne [string]$report.candidate_addon_sha256 -or (Get-Item $addon).Length -ne [int64]$report.candidate_addon_size){throw 'bundle report mismatch'}
+          if((Get-FileHash "$d/out/bin/spotify-control.ps1" -Algorithm SHA256).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate changed'}
+          if(-not[bool]$report.old_full_chain_unchanged -or -not[bool]$report.exact_parent_inverse -or
+            -not[bool]$report.consumed_ledger_and_claim_one_atomic_replace){throw 'required exact inverse and terminal atomicity evidence missing'}
+          foreach($flag in @('normal_auto_update_wired','actual_spicetify_invoked','operating_main_changed')){if([bool]$report.$flag){throw ('unexpected production authority '+$flag)}}
+          foreach($f in @($addon,"$d/verified-terminal-adapter.ps1","$d/terminal-readback-child.ps1")){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Select-Object -First 8|ForEach-Object{Write-Host $_.Message};throw ('WinPS5.1 parser invalid '+$f)}
+          }
+          "CANDIDATE_HASH=$sha"|Out-File $env:GITHUB_ENV -Encoding UTF8 -Append
+          "CANDIDATE_SIZE=$((Get-Item $addon).Length)"|Out-File $env:GITHUB_ENV -Encoding UTF8 -Append
+          Write-Host "USER_TERMINAL_BUNDLED_REAL_ADDON_PS51_PASS sha256=$sha"
+      - name: Real generated Addon Manager SelfTest, no production mutation
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-user-transaction-terminal-journal'
+          $sandbox=Join-Path $env:RUNNER_TEMP ('addon-terminal-'+[Guid]::NewGuid().ToString('N'))
+          $env:LOCALAPPDATA=Join-Path $sandbox 'Local'
+          $env:APPDATA=Join-Path $sandbox 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/out/bin/addon-manager.ps1" -Action SelfTest *>&1|Tee-Object -FilePath "$d/addon-selftest.log"|Out-Null
+          $exit=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($exit -ne 0){throw ('actual Addon Manager SelfTest returned '+$exit)}
+          $log=Get-Content "$d/addon-selftest.log" -Raw
+          foreach($marker in @('CUSTOM_USER_TXN_VERIFIED_TERMINAL_BUNDLE_SELFTEST_PASS','CUSTOM_USER_TXN_GUARD_BUNDLE_SELFTEST_PASS','CUSTOM_APP_USER_TRANSACTION_STORE_BUNDLED_SELFTEST_PASS','CUSTOM_APP_JOURNAL_LOCK_BUNDLED_SELFTEST_PASS')){
+            if(-not $log.Contains($marker)){throw ('candidate missing previous or new selftest '+$marker)}
+          }
+          Write-Host 'USER_TERMINAL_REAL_ADDON_SELFTEST_PASS'
+      - name: Derive pre-existing real ZIP, fresh signed third permit, crash/rollback/retirement full E2E
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-user-transaction-terminal-journal'
+          python "$d/derive_real_zip_terminal_e2e.py"
+          if($LASTEXITCODE -ne 0){throw 'qualified signed real ZIP test derivation failed'}
+          $script="$d/ci_derived_user_verified_terminal.ps1"
+          if(-not(Test-Path -LiteralPath $script -PathType Leaf)){throw 'missing derived E2E'}
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|Select-Object -First 12|ForEach-Object{Write-Host $_.Message};throw 'derived WinPS5.1 end-to-end parser invalid'}
+          Write-Host 'USER_TERMINAL_REAL_SIGNED_ZIP_DERIVATION_PARSER_PASS'
+      - name: Execute real third signed permit ZIP, independently restarted recovery, terminal and fresh DPAPI replay denial
+        shell: powershell
+        timeout-minutes: 60
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-user-transaction-terminal-journal'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/ci_derived_user_verified_terminal.ps1" *>&1|Tee-Object -FilePath "$d/real-signed-zip-terminal-e2e.log"|Out-Null
+          $exit=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($exit -ne 0){throw ('actual signed ZIP rollback terminal E2E failure exit='+$exit)}
+          $log=Get-Content "$d/real-signed-zip-terminal-e2e.log" -Raw
+          foreach($marker in @(
+             'USER_TERMINAL_SIGNED_ID_RESERVED_BEFORE_REAL_ATOMIC_SWAP_PASS',
+             'USER_TERMINAL_UNFINISHED_REAL_JOURNAL_DENIED_PASS',
+             'TRIPLE_ID_EXCLUSIVE_REAL_ZIP_END_TO_END_PASS',
+             'USER_TERMINAL_FRESH_PROCESS_REPLAY_DENIED_PASS',
+             'USER_TERMINAL_REAL_ZIP_SIGNED_JOURNAL_ROLLBACK_RETIREMENT_PASS'
+          )){if(-not $log.Contains($marker)){throw ('required signed ZIP journal recovery proof missing '+$marker)}}
+          Write-Host 'USER_TERMINAL_REAL_ZIP_THIRD_PERMIT_INDEPENDENT_RESTART_E2E_PASS'
+      - name: Deterministic rebuild and last main freeze proof
+        shell: powershell
+        timeout-minutes: 40
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-user-transaction-terminal-journal'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'repeat candidate build failed'}
+          $addon="$d/out/bin/addon-manager.ps1"
+          $hash=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -cne $env:CANDIDATE_HASH -or (Get-Item $addon).Length -ne [int64]$env:CANDIDATE_SIZE){throw 'candidate non-reproducible'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main advanced'}
+          [ordered]@{
+            schema=1;status='PASS';source_sha=(git rev-parse HEAD).Trim()
+            candidate_sha256=$hash;candidate_size=(Get-Item $addon).Length
+            fresh_signed_third_permit='REAL_ZIP_E2E_PASS'
+            pre_swap_dpapi_reservation='PASS'
+            interrupted_terminal_write_recovered='PASS'
+            independent_rollback_worker='PASS'
+            fresh_process_retired_id_replay_denied='PASS'
+            original_live_and_persistence_reverified='PASS'
+            normal_update_wired=$false;real_installed_spotify_touched=$false;production_main_unchanged=$true
+          }|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          Write-Host "USER_TERMINAL_TWO_BUILDS_SAME_MAIN_FROZEN_PASS sha256=$hash"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-real-zip-user-terminal-${{ github.run_id }}
+          path: |
+            validation/custom-app-user-transaction-terminal-journal/candidate-validation.json
+            validation/custom-app-user-transaction-terminal-journal/ci-evidence.json
+            validation/custom-app-user-transaction-terminal-journal/addon-selftest.log
+            validation/custom-app-user-transaction-terminal-journal/real-signed-zip-terminal-e2e.log
+          retention-days: 14
+          if-no-files-found: warn
