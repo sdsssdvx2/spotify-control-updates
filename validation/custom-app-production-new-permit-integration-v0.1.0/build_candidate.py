@@ -81,6 +81,9 @@ SELFTEST = r'''function Invoke-CustomAppProductionNewPermitHardDisabledSelfTestV
     if([int]$CustomAppProductionDualIdNewPermitIssuerReservationWindowSeconds -ne 5){throw 'New permit reservation window drift.'}
     $negative=Test-DualIdNewExecutorStartReceiptV010 -Receipt $null
     if($null -eq $negative -or [bool]$negative.ok){throw 'New permit null receipt unexpectedly accepted.'}
+    $canary=[pscustomobject]@{mutation_mode='deny';auto_update_authorized=$false;auto_install_authorized=$false;canary_execution_authorized=$true}
+    $strict=Test-CustomAppPromotionStrictDeniedAuthorityV010 -Object $canary -Label 'promotion-canary'
+    if($null-eq$strict-or[bool]$strict.ok){throw 'Inherited promotion helper accepted forbidden canary execution authority.'}
     Write-Host 'CUSTOM_APP_PRODUCTION_NEW_PERMIT_HARD_DISABLED_SELFTEST_PASS loaded-but-unreachable'
 }
 '''
@@ -203,6 +206,29 @@ def integrate(parent_addon: bytes) -> tuple[bytes, dict]:
 
     closure_seen = set()
     closure_queue = list(REQUIRED_SUPPORT_EXPORTS)
+    # A historical promotion gate invokes a generic strict-deny helper whose
+    # name is already defined in the exact parent. Prove the inherited helper
+    # is exactly the qualified historical helper OR an exact stricter extension
+    # which additionally rejects canary execution authority. Do not override it.
+    helper_name = "Test-CustomAppPromotionStrictDeniedAuthorityV010"
+    historical_helper = source_defs[helper_name][1]
+    generic_promotion_source = "validation/custom-app-promotion-eligibility-gate-v0.1.0/custom-app-promotion-eligibility.ps1"
+    generic_promotion_blob = "94c1b0ba8f2454078252a723f89ccc0327cbc181"
+    if git_blob("HEAD", generic_promotion_source) != generic_promotion_blob:
+        raise RuntimeError("inherited generic promotion strict-deny source blob drift")
+    stricter_source = git_bytes(generic_promotion_blob).decode("utf-8-sig").replace("\r\n", "\n")
+    stricter_helper = function_block(stricter_source, helper_name).strip()
+    extra_deny = "    if($Object.PSObject.Properties['canary_execution_authorized'] -and [bool]$Object.canary_execution_authorized){return [pscustomobject]@{ok=$false;reason=($Label+'-canary-authority-true')}}"
+    if stricter_helper.count(extra_deny) != 1 or stricter_helper.replace(extra_deny + "\n", "") != historical_helper:
+        raise RuntimeError("inherited generic promotion helper is not exact stricter extension")
+    parent_function_headers = list(re.finditer(r"(?im)^[ \t]*function\s+[A-Za-z0-9_-]+\s*\{", parent))
+    inherited_helper_bodies = [
+        parent[m.start():(parent_function_headers[i + 1].start() if i + 1 < len(parent_function_headers) else len(parent))].strip()
+        for i, m in enumerate(parent_function_headers)
+        if m.group(0).split()[1] == helper_name
+    ]
+    if not inherited_helper_bodies or any(body not in (historical_helper, stricter_helper) for body in inherited_helper_bodies):
+        raise RuntimeError("inherited promotion strict-deny helper differs from both qualified safe bodies")
     source_selected = {label: set() for label, _, _, _ in SUPPORT_MODULES}
     unresolved_reachable = set()
     while closure_queue:
@@ -299,6 +325,7 @@ def integrate(parent_addon: bytes) -> tuple[bytes, dict]:
         "support_added_export_count": len(support_exports),
         "support_modules": support_records,
         "support_overlapping_parent_function_bodies_different": sorted(support_overlap_body_differences),
+        "inherited_promotion_helper_strict_superset_proven": True,
         "support_source_closure_unresolved": sorted(unresolved_reachable),
         "new_permit_external_function_dependencies_unresolved": missing,
         "new_permit_external_dependencies_fully_resolved": not bool(missing),
