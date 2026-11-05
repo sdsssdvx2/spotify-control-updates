@@ -46,6 +46,7 @@ jobs:
             'validation/custom-app-production-transaction-finalization-v0.1.0/custom-app-production-transaction-finalization.ps1'='2958ae3f92173215d32ef8bf284a9433c52caa61'
             'validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1'='f7372b069fbfe6a0f8d8a0aad45312ffd33d9f0a'
             'validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1'='3b14280d727287252f71611e4424d78e5705c2f1'
+            'validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup-finalization-receipt-v011.ps1'='31da8fa6253679f22edc07a6b5c00a47eb26c64d'
           }
           foreach($p in $fixed.Keys){
             if((git rev-parse "HEAD:$p").Trim() -cne $fixed[$p]){throw ('Qualified source drift: '+$p)}
@@ -77,6 +78,7 @@ jobs:
             'validation/custom-app-production-transaction-finalization-v0.1.0/custom-app-production-transaction-finalization.ps1',
             'validation/custom-app-production-spicetify-apply-executor-v0.1.0/custom-app-production-spicetify-apply-executor.ps1',
             'validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup.ps1',
+            'validation/custom-app-production-post-apply-commit-cleanup-v0.1.0/custom-app-production-post-apply-commit-cleanup-finalization-receipt-v011.ps1',
             'validation/custom-app-production-pre-permit-backups-bridge-v0.1.0/test_custom_app_production_pre_permit_backups_bridge.ps1',
             'validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1'
           )
