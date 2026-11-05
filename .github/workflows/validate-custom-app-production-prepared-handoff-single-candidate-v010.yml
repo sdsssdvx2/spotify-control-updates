@@ -1,0 +1,97 @@
+name: Validate one hard-disabled Addon Manager candidate with prepared ZIP and pre-permit backups
+
+on:
+  push:
+    branches:
+      - validate/custom-app-production-prepared-handoff-single-candidate-v0.1.0
+    paths:
+      - 'validation/custom-app-production-prepared-handoff-single-candidate-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-prepared-handoff-single-candidate-v010.yml'
+  pull_request:
+    branches:
+      - validate/custom-app-production-pre-permit-backups-bridge-v0.1.0
+    paths:
+      - 'validation/custom-app-production-prepared-handoff-single-candidate-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-prepared-handoff-single-candidate-v010.yml'
+  workflow_dispatch:
+
+permissions: {contents: read}
+
+jobs:
+  build-one-hard-disabled-candidate:
+    runs-on: windows-2025
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Verify all changes isolated and exact stable production main untouched
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'HEAD not pinned to event revision'}
+          $base='f80ea15f318e04771c960f84d9899aa60cb00b05'
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'PR #211 frozen branch not ancestor'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Stable production main moved'}
+          $dir='validation/custom-app-production-prepared-handoff-single-candidate-v0.1.0'
+          $builder="$dir/build_candidate.py"
+          $wf='.github/workflows/validate-custom-app-production-prepared-handoff-single-candidate-v010.yml'
+          $allowed=@($builder,$wf)
+          $changed=@(git diff --name-only "$base...HEAD")
+          $unexpected=@($changed | Where-Object {$_ -notin $allowed})
+          if($unexpected.Count){throw "Scope escaped: $($unexpected -join ',')"}
+          foreach($p in $allowed){if($p -notin $changed){throw "Required source absent from diff: $p"}}
+          if((git rev-parse "HEAD:$builder").Trim() -cne '63e0edab1e395baef69644e0df71e56665f96be5'){throw 'Reviewed candidate builder Git blob drift'}
+          if((git rev-parse 'HEAD:validation/custom-app-production-new-permit-integration-v0.1.0/build_candidate.py').Trim() -cne '1b69372cbe0bd3b3eb58fa2e242ad470d200dbf4'){throw 'Frozen new-permit parent builder drift'}
+          'ONE_CANDIDATE_SCOPE_GIT_BLOB_AND_PRODUCTION_FREEZE_PASS'
+
+      - name: Build exact qualified Addon Manager without enabling execution
+        shell: powershell
+        timeout-minutes: 80
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m py_compile validation/custom-app-production-prepared-handoff-single-candidate-v0.1.0/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'Builder Python compile failed'}
+          python validation/custom-app-production-prepared-handoff-single-candidate-v0.1.0/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'Reversible qualified hard-disabled Addon Manager candidate assembly failed'}
+          'ONE_CANDIDATE_REPRODUCIBLE_BUILD_PASS'
+
+      - name: Parse assembled PowerShell 5.1, prove disabled policy and locked original source
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-production-prepared-handoff-single-candidate-v0.1.0'
+          $e=Get-Content "$d/candidate-validation.json" -Raw | ConvertFrom-Json
+          if($e.pipeline_enabled -ne $false -or $e.new_production_execution_path_wired -ne $false){throw 'Candidate gained production execution route'}
+          if($e.pre_existing_export_override_count -ne 0 -or $e.normal_full_chain_unmodified -ne $true -or $e.exact_source_reversibility -ne $true){throw 'Parent implementation changed'}
+          if($e.unresolved_new_function_dependencies.Count -ne 0){throw 'New function closure not complete'}
+          if($e.new_modules.Count -ne 3){throw 'Qualified module count unexpected'}
+          if($e.production_main_frozen -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Frozen production main ID drifted'}
+          $main="$d/out/bin/spotify-control.ps1"
+          $addon="$d/out/bin/addon-manager.ps1"
+          foreach($p in @($main,$addon)){
+            if(-not(Test-Path $p -PathType Leaf)){throw "Candidate missing: $p"}
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors | Select-Object -First 12 | ForEach-Object{Write-Host "$p $($_.Extent.StartLineNumber): $($_.Message)"};throw "PS5.1 candidate syntax failed: $p"}
+          }
+          if((Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$e.addon_sha256){throw 'Candidate Addon Manager SHA changed after assembly'}
+          if((Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$e.spotify_control_sha256){throw 'Candidate Spotify Control main SHA drift'}
+          $text=[IO.File]::ReadAllText((Resolve-Path $addon).Path)
+          if($text -notmatch '(?m)^\$script:CustomAppProductionPipelineEnabled = \$false\s*$'){throw 'Addon Manager hard-disabled sentinel absent'}
+          foreach($fn in @('Invoke-CustomAppProductionPreparedHandoffHardDisabledSelfTestV010','Invoke-CustomAppProductionPrePermitBackupPreparationV010','Invoke-CustomAppProductionPrePermitBackupsHandoffV010','Invoke-CustomAppProductionPreparedStageExecutorBridgeV010','Test-CustomAppProductionByteRealPreparedStageHandoffV010')){
+            if($text.IndexOf("function $fn {",[StringComparison]::Ordinal)-lt0){throw "Required qualified export unavailable: $fn"}
+          }
+          'ONE_CANDIDATE_PS51_PARSE_HARD_DISABLED_AND_SHA_PASS'
+
+      - name: Collect reproducible nonproduction candidate evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: prepared-handoff-hard-disabled-addon-candidate-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-prepared-handoff-single-candidate-v0.1.0/out/bin/
+            validation/custom-app-production-prepared-handoff-single-candidate-v0.1.0/candidate-validation.json
+          if-no-files-found: error
+          retention-days: 14
