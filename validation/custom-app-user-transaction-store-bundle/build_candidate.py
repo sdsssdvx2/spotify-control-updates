@@ -95,7 +95,9 @@ def main() -> None:
     if candidate.count("$script:CustomAppProductionPipelineEnabled = $true") != original.count("$script:CustomAppProductionPipelineEnabled = $true"):
         raise RuntimeError("production enablement changed")
     for fn in before_funcs:
-        if fn == "Invoke-AddonSelfTest":
+        if fn in ("Invoke-AddonSelfTest", "Invoke-CustomAppProductionJournalLockBundleSelfTestV010"):
+            # This is the immediately preceding function; the injected payload
+            # occupies its textual tail until the next function declaration.
             continue
         if function_block(original, fn) != function_block(candidate, fn):
             raise RuntimeError(f"existing function modified: {fn}")

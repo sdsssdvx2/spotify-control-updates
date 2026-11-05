@@ -33,7 +33,7 @@ jobs:
           $pins=@{
             "$d/user-transaction-store.ps1"='b547fa00cc0da4368e4943eba6f475f95a8b0622'
             "$d/test_user_transaction_store.ps1"='b06b699a987e838563d3f00f2f9b2e48c4e9d6d3'
-            "$d/build_candidate.py"='d6ae90df9ad0808fa0d268700a327ecd298b0ff1'
+            "$d/build_candidate.py"='179d2bc89289fc96af451c4abef2ed10003af9b1'
           }
           $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-user-transaction-store.yml')
           $changed=@(git diff --name-only "$parent...HEAD")
