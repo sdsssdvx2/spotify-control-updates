@@ -42,6 +42,9 @@ Assert-BRH ([string]$script:BRHExtract.tree_sha256 -ceq [string]$e.tree_sha256) 
 # new-cycle remote tree to these real extracted bytes before readiness/issuance.
 $q=New-DINPFixtureV010 'real-archive'
 $q.bundle=New-DINPPromotionBundleV010 -X $q.x -HousekeepingResult $q.house.result -At $q.at -RemoteTree ([string]$script:BRHExtract.tree_sha256)
+# The signed remote release-asset binding must also pin the EXACT ZIP bytes.
+$q.bundle.binding.binding.last_observed_asset_digest_sha256=$script:BRHZipHash
+[void](Sync-PromotionBundleFingerprints -Bundle $q.bundle)
 $script:BRHBundle=$q.bundle
 $script:BRHAt=$q.at
 
@@ -133,6 +136,16 @@ $bad=Invoke-BRH -Binding $binding -Issuer $issued -Start $start -Key $script:DIN
 Assert-BRHDenied $bad 'source auto-install authority escalated'
 $count++
 
+$digestBad=Copy-BRH $q.bundle.binding;$digestBad.binding.last_observed_asset_digest_sha256=('0'*64)
+$bad=Invoke-BRH -Binding $digestBad -Issuer $issued -Start $start -Key $script:DINPIKey -At $now
+Assert-BRHDenied $bad 'frozen remote release asset digest changed'
+$count++
+
+$commitBad=Copy-BRH $q.bundle.binding;$commitBad.last_remote_commit_sha=('0'*40)
+$bad=Invoke-BRH -Binding $commitBad -Issuer $issued -Start $start -Key $script:DINPIKey -At $now
+Assert-BRHDenied $bad 'remote commit changed after signing'
+$count++
+
 $bad=Invoke-BRH -StagePath ([IO.Path]::GetTempPath()) -At $now
 Assert-BRHDenied $bad 'candidate path escaped sandbox'
 $count++
@@ -166,5 +179,5 @@ Assert-BRH ([bool]$again.ok) ('restored exact stage denied: '+[string]$again.rea
 Assert-BRH ([string]$again.stage_tree_sha256 -ceq [string]$post.stage_tree_sha256) 'read-only repeat stage SHA changed'
 $count++
 
-if($count-ne15){throw "byte-real prepared stage handoff case count $count expected 15"}
+if($count-ne17){throw "byte-real prepared stage handoff case count $count expected 17"}
 Write-Host "CUSTOM_APP_PRODUCTION_BYTE_REAL_PREPARED_STAGE_TRIPLE_ID_HANDOFF_PASS cases=$count actual_zip_before_permit=true same_hmac_permit_and_durable_consumption=true stage_tree_rechecked=true wrong_key_id_and_bytes_denied=true zero_authority=true"
