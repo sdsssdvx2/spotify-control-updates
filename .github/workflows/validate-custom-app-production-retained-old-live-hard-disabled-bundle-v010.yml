@@ -27,7 +27,10 @@ jobs:
           $p='07ca418a6356a4966783480c5200aab123836987';if((git merge-base $p HEAD).Trim()-cne$p){throw 'not descended from exact hard-disabled recovery stack head'}
           if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
           $allowed=@('.github/workflows/validate-custom-app-production-retained-old-live-hard-disabled-bundle-v010.yml','validation/custom-app-production-retained-old-live-hard-disabled-bundle-v0.1.0/build_candidate.py','validation/custom-app-production-retained-old-live-compat-v0.1.1/custom-app-production-retained-old-live-compat.ps1');$changed=@(git diff --name-only "$p...HEAD");$bad=@($changed|Where-Object{$_-notin$allowed});if($bad.Count){throw "scope escaped: $($bad-join', ')"};foreach($x in $allowed){if($x-notin$changed){throw "missing $x"}}
-          $blob=(git rev-parse "HEAD:validation/custom-app-production-retained-old-live-hard-disabled-bundle-v0.1.0/build_candidate.py").Trim();if($blob-cne'1440d16fd55b268efbf1fdd4efe714cd80c35e39'){throw "builder pin drift $blob"}
+          $blob=(git rev-parse "HEAD:validation/custom-app-production-retained-old-live-hard-disabled-bundle-v0.1.0/build_candidate.py").Trim();if($blob-cne'ab9e0b9abc6c2990636fbef57738d432380b76a6'){throw "builder pin drift $blob"}
+          $parent='validation/custom-app-production-bounded-recovery-stack-hard-disabled-integration-v0.1.0/build_candidate.py';if((git rev-parse "HEAD:$parent").Trim()-cne'1440d16fd55b268efbf1fdd4efe714cd80c35e39'){throw 'qualified parent builder drift'}
+          $qualified='validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1';if((git rev-parse "HEAD:$qualified").Trim()-cne'0273d7e28a56759b1d0ec9cbf037483b04d98d63'){throw 'qualified original mapper drift'}
+          if((git rev-parse 'HEAD:validation/custom-app-production-retained-old-live-compat-v0.1.1/custom-app-production-retained-old-live-compat.ps1').Trim()-cne'd1e063101d181d7efe843bee0b9f000563b0875e'){throw 'new module changed without requalification'}
           'CUSTOM_APP_PRODUCTION_RETAINED_OLD_LIVE_BUNDLE_HARD_DISABLED_SCOPE_PASS'
 
       - name: Build exact hard-disabled parent and retained old-live v011 add-on
