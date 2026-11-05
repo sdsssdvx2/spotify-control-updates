@@ -105,5 +105,22 @@ try{
 }finally{[IO.File]::WriteAllBytes($path.record,$bytes)}
 $valid=Read-CustomAppProductionExclusiveGateRecordV010 $path
 Assert-EG ([bool]$valid.ok) 'unchanged-active-record-not-recovered-after-tamper-test';$cases++
-Assert-EG ($cases -eq 17) ('gate-case-count-drift '+$cases)
-Write-Host 'EXCLUSIVE_APP_CLOCK_AND_CRASH_GATE_MATRIX_PASS cases=17 current_utc=true stale_and_future_denied=true same_app_cross_process_lock=true other_app_allowed=true crash_retains_blocking_marker=true corrupt_marker_fail_closed=true no_journal_no_retirement=true installed_spotify_untouched=true'
+# A retired consumption ID stays blocked even with NO active marker. Use an
+# entirely separate isolated app rather than deleting the crash-active record.
+$replayLive=Join-Path $demo 'retired-replay-app';[IO.Directory]::CreateDirectory($replayLive)|Out-Null
+$replayPaths=Get-CustomAppProductionExclusiveGatePathsV010 -Name 'playlist-maker' -LivePath $replayLive
+$oldCid='f'*64
+$archivePath=Get-CustomAppProductionExclusiveGateRetiredPathV010 -Paths $replayPaths -ConsumptionId $oldCid
+[IO.File]::WriteAllText($archivePath,'invalid-archive-must-fail-closed',([Text.UTF8Encoding]::new($false)))
+$badArchive=Test-CustomAppProductionExclusiveGateRetiredReceiptV010 -Path $archivePath -Paths $replayPaths -ConsumptionId $oldCid
+Assert-EG (-not[bool]$badArchive.ok) 'tampered-retired-consumption-archive-accepted';$cases++
+$replayLock=Open-CustomAppProductionExclusiveGateLockV010 -Name 'playlist-maker' -LivePath $replayLive
+Assert-EG ([bool]$replayLock.ok) 'separate-app-history-test-lock-denied'
+try{
+    $reuse=Write-CustomAppProductionExclusiveGateActiveRecordV010 -Lock $replayLock -ConsumptionId $oldCid -JournalStoreDirectory $journal -TransactionNonce ('b'*32)
+    Assert-EG (-not[bool]$reuse.ok -and [string]$reuse.reason -match 'consumption-already-retired') 'retired-consumption-ID-replay-was-accepted'
+    Assert-EG (-not(Test-Path -LiteralPath $replayPaths.record)) 'retired-ID-replay-created-active-claim'
+    $cases++
+}finally{$replayLock.lock_handle.Dispose()}
+Assert-EG ($cases -eq 19) ('gate-case-count-drift '+$cases)
+Write-Host 'EXCLUSIVE_APP_CLOCK_AND_CRASH_GATE_MATRIX_PASS cases=19 current_utc=true stale_and_future_denied=true same_app_cross_process_lock=true other_app_allowed=true crash_retains_blocking_marker=true corrupt_marker_fail_closed=true no_journal_no_retirement=true retired_consumption_replay_denied=true installed_spotify_untouched=true'
