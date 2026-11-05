@@ -176,26 +176,7 @@ $script:JFCases++
 # Bounded deletion only AFTER the durable cleanup-starting phase.
 $txn=[string]$script:JFAtomic.result.transaction_root
 Remove-CustomAppAtomicDirectoryV010 -Path $txn -ExpectedParent ([IO.Path]::GetDirectoryName($txn)) -ExpectedName ([IO.Path]::GetFileName($txn))
-[void](Remove-CustomAppProductionPostApplyBoundedArtifactV010 -Path ([string]$stageArtifact.path) -ExpectedRoot ([string]$stageArtifact.root) -ExpectedNamePattern '^[0-9a-fA-F]{32} -ExpectedRoot ([string]$appArtifact.root) -ExpectedNamePattern '^[0-9a-fA-F]{32}$' -Label 'isolated-app-backup')
-[void](Remove-CustomAppProductionPostApplyBoundedArtifactV010 -Path ([string]$persistArtifact.path) -ExpectedRoot ([string]$persistArtifact.root) -ExpectedNamePattern '^txn-\d{8}-\d{6}-[0-9a-fA-F]{8}$' -Label 'isolated-persistence-backup')
-foreach($target in @($txn,$stageArtifact.path,$appArtifact.path,$persistArtifact.path)){Assert-JF (-not(Test-Path -LiteralPath ([string]$target))) 'bounded cleanup artifact remained'}
-$committed=Snapshot-JF $false
-Assert-JF ([int]([IO.File]::ReadAllText($countPath).Trim()) -eq 1) 'cleanup re-executed fake apply'
-$cleanupFp=Hash-JF ((@('journaled-forward-fixture','all-four-artifacts-clean',$script:JFTx,$finalFp,$applyFp,[string]$committed.runtime.tree_sha256,[string]$committed.git.tree_sha256,[string]$committed.persistence.fingerprint) -join [Environment]::NewLine))
-$jr=Append-JF 'cleanup-starting' 'committed-clean' $finalFp $applyFp $cleanupFp
-Assert-JF ([string]$jr.entry.cleanup_result_fingerprint -ceq $cleanupFp -and [int64]$jr.revision -eq 9 -and [int]$jr.history_count -eq 10) 'committed journal history proof failed'
-$script:JFCases++
-$class=Resolve-CustomAppProductionCrashRecoveryClassificationV010 -StoreRead (Read-JF 'committed-clean') -ExpectedTransactionId $script:JFTx
-Assert-JF ([bool]$class.ok -and [bool]$class.no_action -and [string]$class.classification -ceq 'no-action-new-permit-required-for-future-update') 'committed recovery wrongly requests rollback'
-$script:JFCases++
-$replayDenied=$false
-try{[void](Append-JF 'candidate-live' 'transaction-finalized' $finalFp)}catch{$replayDenied=$true}
-Assert-JF ($replayDenied -and [int]([IO.File]::ReadAllText($countPath).Trim()) -eq 1) 'committed transaction replayed or relaunched fake'
-Assert-JF ([string](Read-JF 'committed-clean').entry.entry_sha256 -ceq [string]$jr.entry.entry_sha256) 'terminal journal mutated on replay'
-$script:JFCases++
-Assert-JF ($script:JFCases -eq 13) ('new case count '+$script:JFCases)
-Write-Host 'TRIPLE_ID_REAL_ZIP_JOURNALED_FORWARD_COMMIT_PASS cases=13 third_permit=true durable_consumption=true evidence_before_atomic=true same_journal_history=10 normal_finalization_without_receipt_forgery=true fake_apply_once=true rollback_source_retained_until_cleanup=true cleanup_barrier_before_four_deletions=true committed_clean=true git_and_spotify_persistence_unchanged=true terminal_replay_denied=true user_spotify_untouched=true'
- -Label 'isolated-stage')
+[void](Remove-CustomAppProductionPostApplyBoundedArtifactV010 -Path ([string]$stageArtifact.path) -ExpectedRoot ([string]$stageArtifact.root) -ExpectedNamePattern '^[0-9a-fA-F]{32}$' -Label 'isolated-stage')
 # Explicit hosted-CI-only simulated abrupt stop AFTER two real bounded deletes.
 # The restart worker reloads all authority from disk: no signing session key,
 # HMAC permit or prepared receipt is serialized into its input state.
