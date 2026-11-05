@@ -56,6 +56,70 @@ function Snapshot-JF([bool]$OldRequired){
     }
     return [pscustomobject]@{runtime=$runtime;git=$git;persistence=$ps}
 }
+# VALIDATION-ONLY crash point; stores only read-only evidence identifiers and
+# paths, never the original HMAC signing key, permit or production authority.
+function Invoke-TIDApplyCrashInterruptV010 {
+    param([Parameter(Mandatory=$true)][string]$Phase)
+    if([string]$env:SC_TID_APPLY_INTERRUPT_PHASE -cne $Phase){return $false}
+    Assert-JF ($env:GITHUB_ACTIONS -ceq 'true' -and $env:RUNNER_OS -ceq 'Windows' -and $env:RUNNER_ENVIRONMENT -ceq 'github-hosted') 'apply-interrupt-requires-hosted-Windows'
+    $statePath=[string]$env:SC_TID_APPLY_CRASH_STATE_PATH
+    Assert-JF (-not[string]::IsNullOrWhiteSpace($statePath)) 'apply-interrupt-state-path-missing'
+    Assert-Isolated $statePath 'independent-restore-worker-state'
+    Assert-JF (-not(Test-Path -LiteralPath $statePath)) 'apply-interrupt-state-overwrite-denied'
+    Assert-JF ($Phase -in @('apply-starting','apply-returned-success-pending-verification')) 'invalid-apply-interrupt-phase'
+    $j=Read-JF $Phase
+    Assert-JF ([string]$j.entry.finalization_fingerprint -ceq [string]$finalFp) 'apply-interrupt-finalization-fingerprint-drift'
+    $e=Read-CustomAppProductionRecoveryEvidenceV010 -AllowedRoot $script:JFAllowed -StoreDirectory $script:JFStore -ExpectedTransactionId $script:JFTx
+    Assert-JF ([bool]$e.ok -and [string]$e.evidence_fingerprint -ceq [string]$script:JFAtomic.result.recovery_evidence_fingerprint) 'apply-interrupt-recovery-evidence-drift'
+    Assert-JF ([int]([IO.File]::ReadAllText($countPath).Trim()) -eq 1) 'apply-interrupt-normal-fake-apply-missing-or-duplicated'
+    Assert-JF ([IO.File]::ReadAllText($appliedPath) -ceq [IO.File]::ReadAllText((Join-Path $script:TIDLive 'index.js'))) 'apply-interrupt-actual-new-code-was-not-applied'
+    Assert-JF (Test-Path -LiteralPath ([string]$script:JFAtomic.result.old_live_path) -PathType Container) 'apply-interrupt-old-live-deleted'
+    foreach($x in @($script:PPBValid.result.stage_workspace_path,$script:PPBValid.result.app_backup_path,$script:PPBValid.result.persistence_backup_path)){
+        Assert-JF (Test-Path -LiteralPath ([string]$x) -PathType Container) 'apply-interrupt-backup-missing'
+    }
+    $recoveryCount=Join-Path ([IO.Path]::GetDirectoryName($countPath)) 'recovery-apply-count.txt'
+    $recoveryApplied=Join-Path ([IO.Path]::GetDirectoryName($countPath)) 'recovery-applied-index.txt'
+    Assert-JF (-not(Test-Path -LiteralPath $recoveryCount) -and -not(Test-Path -LiteralPath $recoveryApplied)) 'apply-interrupt-recovery-fake-premature-execution'
+    $state=[ordered]@{
+        schema=1;managed_by='triple-id-journaled-apply-crash-restart-validation-only'
+        allowed_root=[string]$script:JFAllowed;store_directory=[string]$script:JFStore
+        transaction_id=[string]$script:JFTx
+        expected_start_phase=$Phase
+        expected_revision=[int64]$j.revision
+        expected_entry_sha256=[string]$j.entry.entry_sha256
+        evidence_fingerprint=[string]$e.evidence_fingerprint
+        local_app_data_root=[string]$script:PPBLocal
+        app_data_root=[string]$script:PPBRoaming
+        spicetify_allowed_root=[string]$script:JFAllowed
+        spicetify_path=[string]$exe
+        spicetify_sha256=[string]$sha
+        apply_count_path=$recoveryCount
+        applied_probe_path=$recoveryApplied
+        live_probe_path=(Join-Path $script:TIDLive 'index.js')
+        primary_apply_count_path=$countPath
+        primary_applied_index_path=$appliedPath
+        primary_applied_index_sha256=(Get-FileHash -LiteralPath $appliedPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        stage_workspace_path=[string]$script:PPBValid.result.stage_workspace_path
+        app_backup_path=[string]$script:PPBValid.result.app_backup_path
+        persistence_backup_path=[string]$script:PPBValid.result.persistence_backup_path
+        transaction_root=[string]$script:JFAtomic.result.transaction_root
+        old_live_path=[string]$script:JFAtomic.result.old_live_path
+        expected_new_tree_sha256=[string]$script:PPBStageResult.stage_result.remote_tree_sha256
+        original_app_tree_sha256=[string]$script:Before.tree_sha256
+        original_git_tree_sha256=[string]$script:BeforeGit.tree_sha256
+        original_spotify_persistence_fingerprint=[string]$script:BeforePersist.fingerprint
+        consumption_store=[string]$cf3.store
+        consumption_id=[string]$script:PPBValid.result.consumption_id
+        parent_process_id=$PID
+        validation_only=$true;production_mutation_authorized=$false;execution_authorized=$false
+    }
+    $json=$state|ConvertTo-Json -Depth 8
+    Assert-JF ($json -notmatch '(?i)session.?key|hmac.?key|bearer|client.?secret|token.?secret|DINPIKey') 'apply-interrupt-state-contains-sensitive-key-material'
+    [IO.File]::WriteAllText($statePath,$json,[Text.UTF8Encoding]::new($false))
+    Write-Host ("TRIPLE_ID_APPLY_CRASH_PARENT_PASS phase="+$Phase+" fake_normal_apply_once=true retained_old_live_and_all_backups=true journal_durable=true no_hmac_key_in_child_state=true")
+    return $true
+}
+
 $script:JFCases=0
 Assert-Original 'journaled forward entry exact original'
 $script:JFAllowed=[string]$script:BRHAllowedRoot
@@ -123,7 +187,9 @@ public static class IsolatedForwardFake {
  static string E(string x) {return Environment.GetEnvironmentVariable(x) ?? ""; }
  public static int Main(string[] a){
   if(a==null || a.Length!=1 || a[0]!="apply")return 64;
-  string live=E("JF_LIVE");string count=E("JF_COUNT");string dest=E("JF_APPLIED");
+  string live=E("JF_LIVE");if(String.IsNullOrEmpty(live))live=E("SC_RX_LIVE");
+  string count=E("JF_COUNT");if(String.IsNullOrEmpty(count))count=E("SC_RX_COUNT");
+  string dest=E("JF_APPLIED");if(String.IsNullOrEmpty(dest))dest=E("SC_RX_APPLIED");
   if(String.IsNullOrEmpty(live)||String.IsNullOrEmpty(count)||String.IsNullOrEmpty(dest))return 65;
   int n=0;if(File.Exists(count))Int32.TryParse(File.ReadAllText(count),out n);
   File.WriteAllText(count,(n+1).ToString());
@@ -161,7 +227,9 @@ try {
     foreach($n in @('JF_LIVE','JF_COUNT','JF_APPLIED')){[Environment]::SetEnvironmentVariable($n,$null,'Process')}
 }
 Assert-JF ([bool]$run.ok -and [int]$run.exit_code -eq 0 -and -not[bool]$run.timed_out) ('qualified fake exact process denied '+[string]$run.reason)
+if(Invoke-TIDApplyCrashInterruptV010 -Phase 'apply-starting'){return}
 $jr=Append-JF 'apply-starting' 'apply-returned-success-pending-verification' $finalFp
+if(Invoke-TIDApplyCrashInterruptV010 -Phase 'apply-returned-success-pending-verification'){return}
 $after=Snapshot-JF $true
 Assert-JF ([IO.File]::ReadAllText($appliedPath) -ceq [IO.File]::ReadAllText((Join-Path $script:TIDLive 'index.js'))) 'fake apply read wrong new live bytes'
 Assert-JF ([bool](Test-CustomAppProductionPostSwapConsumptionContinuityV010 -AllowedRoot $script:JFAllowed -StoreDirectory ([string]$cf3.store) -ExpectedConsumptionId ([string]$p.consumption_id) -Permit $script:PPBIssuer.permit -StageExecutorResult $script:PPBStageResult.stage_result -Name 'tagify').ok) 'post-apply durable consumption drift'
