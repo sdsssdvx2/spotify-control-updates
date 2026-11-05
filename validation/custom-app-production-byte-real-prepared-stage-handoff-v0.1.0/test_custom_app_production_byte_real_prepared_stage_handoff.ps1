@@ -63,6 +63,10 @@ function Invoke-BRH {
     if([string]::IsNullOrWhiteSpace([string]$ArchiveHash)){$ArchiveHash=$script:BRHZipHash}
     if($At-eq[DateTimeOffset]::MinValue){$At=$script:BRHAt}
     $args=@{Name='tagify';WorkspacePath=$script:BRHWorkspace;ArchivePath=$script:BRHZip;ArchiveSha256=$ArchiveHash;StagePath=$StagePath;ExtractedStageResult=$script:BRHExtract;LifecycleRow=$Lifecycle;BindingRow=$Binding;IssuerResult=$Issuer;ExecutorStartResult=$Start;SessionKey=$Key;Now=$At}
+    if($null-ne$Issuer-or$null-ne$Start-or$null-ne$Key){
+        $args.AllowedRoot=[string]$script:BRHAllowedRoot
+        $args.ConsumptionStoreDirectory=[string]$script:BRHConsumptionStore
+    }
     return Test-CustomAppProductionByteRealPreparedStageHandoffV010 @args
 }
 $count=0
@@ -101,6 +105,8 @@ $cs=Join-Path $q.x.f.trust ('real-archive-consumption-'+[Guid]::NewGuid().ToStri
 [IO.Directory]::CreateDirectory((Join-Path $cs 'history'))|Out-Null
 $cf=[pscustomobject]@{p=$rp;candidate=$consumed;store=$cs;at=$rp.at.AddMilliseconds(200)}
 $saved=Invoke-DNCPV010 -F $cf -Candidate $consumed -ReservationPersistence $durableReservation -Issuer $issued
+$script:BRHAllowedRoot=[string]$q.x.f.trust
+$script:BRHConsumptionStore=[string]$cf.store
 Assert-BRH ([bool]$saved.ok) ('real-byte consumption persistence denied: '+[string]$saved.reason)
 $now=$cf.at.AddMilliseconds(100)
 $start=Invoke-TDSV010 -F $cf -Persistence $saved -Issuer $issued -Permit $issued.permit -Key $script:DINPIKey -At $now
@@ -110,7 +116,7 @@ $count++
 
 $post=Invoke-BRH -Issuer $issued -Start $start -Key $script:DINPIKey -At $now
 Assert-BRH ([bool]$post.ok) ('same byte-real signed transaction denied: '+[string]$post.reason)
-Assert-BRH ([bool]$post.new_permit_bound -and -not[bool]$post.ready_to_apply) 'signed handoff falsely granted apply'
+Assert-BRH ([bool]$post.new_permit_bound -and [bool]$post.consumption_store_reloaded -and -not[bool]$post.ready_to_apply) 'signed handoff lacked physical consumption read or falsely granted apply'
 Assert-BRH ([string]$post.consumption_id -ceq [string]$saved.receipt.consumption_id) 'consumption identity drift'
 $count++
 
@@ -186,5 +192,14 @@ Assert-BRH ([bool]$again.ok) ('restored exact stage denied: '+[string]$again.rea
 Assert-BRH ([string]$again.stage_tree_sha256 -ceq [string]$post.stage_tree_sha256) 'read-only repeat stage SHA changed'
 $count++
 
-if($count-ne17){throw "byte-real prepared stage handoff case count $count expected 17"}
-Write-Host "CUSTOM_APP_PRODUCTION_BYTE_REAL_PREPARED_STAGE_TRIPLE_ID_HANDOFF_PASS cases=$count actual_zip_before_permit=true same_hmac_permit_and_durable_consumption=true stage_tree_rechecked=true wrong_key_id_and_bytes_denied=true zero_authority=true"
+$paths=Get-CustomAppProductionConsumptionPersistencePathsV010 -AllowedRoot $script:BRHAllowedRoot -StoreDirectory $script:BRHConsumptionStore
+$pointerBytes=[IO.File]::ReadAllBytes([string]$paths.current)
+try{
+    [IO.File]::AppendAllText([string]$paths.current,'invalid-current-store-pointer')
+    $bad=Invoke-BRH -Issuer $issued -Start $start -Key $script:DINPIKey -At $now
+    Assert-BRHDenied $bad 'tampered durable consumption current pointer'
+}finally{[IO.File]::WriteAllBytes([string]$paths.current,$pointerBytes)}
+$count++
+
+if($count-ne18){throw "byte-real prepared stage handoff case count $count expected 18"}
+Write-Host "CUSTOM_APP_PRODUCTION_BYTE_REAL_PREPARED_STAGE_TRIPLE_ID_HANDOFF_PASS cases=$count actual_zip_before_permit=true same_hmac_permit_and_durable_consumption=true physical_consumption_reloaded=true stage_tree_rechecked=true wrong_key_id_and_bytes_denied=true zero_authority=true"
