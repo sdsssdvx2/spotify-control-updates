@@ -69,6 +69,21 @@ function Test-CustomAppProductionByteRealPreparedStageHandoffV010 {
     if(-not(Test-CustomAppByteRealHandoffShaV010 $ArchiveSha256)){
         return (& $deny 'byte-real-handoff-archive-digest-invalid')
     }
+    $surface=([string]$BindingRow.binding.surface_kind).Trim().ToLowerInvariant()
+    if($surface -notin @('release-asset','repo-commit-root')){
+        return (& $deny 'byte-real-handoff-binding-surface-invalid')
+    }
+    if($surface -ceq 'release-asset'){
+        $assetDigest=([string]$BindingRow.binding.last_observed_asset_digest_sha256).Trim().ToLowerInvariant()
+        if(-not(Test-CustomAppByteRealHandoffShaV010 $assetDigest)-or
+           $assetDigest-cne$ArchiveSha256-or
+           [string]$BindingRow.binding.release_asset_selector-cne'unique-zip-asset'){
+            return (& $deny 'byte-real-handoff-frozen-remote-asset-digest-mismatch')
+        }
+        if([int64]$BindingRow.binding.last_observed_asset_id-le0){
+            return (& $deny 'byte-real-handoff-frozen-remote-asset-id-invalid')
+        }
+    }
     if($null-eq$ExtractedStageResult-or$null-eq$ExtractedStageResult.baseline){
         return (& $deny 'byte-real-handoff-extraction-result-missing')
     }
@@ -126,6 +141,17 @@ function Test-CustomAppProductionByteRealPreparedStageHandoffV010 {
             return (& $deny 'byte-real-handoff-start-result-authority-drift')
         }
         $ir=$IssuerResult.receipt;$sr=$ExecutorStartResult.receipt
+        $source=([string]$BindingRow.source_identity).Trim().ToLowerInvariant()
+        $bindingFingerprint=Get-CustomAppPromotionBindingFingerprintV010 -BindingRow $BindingRow
+        if($source-cne([string]$BindingRow.binding.source_identity).Trim().ToLowerInvariant()-or
+           $source-cne([string]$ir.source_identity).Trim().ToLowerInvariant()-or
+           [int64]$BindingRow.binding.github_repo_id-ne[int64]$ir.github_repo_id-or
+           $surface-cne([string]$ir.surface_kind).Trim().ToLowerInvariant()-or
+           ([string]$BindingRow.last_remote_commit_sha).Trim().ToLowerInvariant()-cne([string]$ir.current_remote_commit_sha).Trim().ToLowerInvariant()-or
+           ([string]$ir.current_remote_observed_at)-cne([string]$BindingRow.last_success)-or
+           $bindingFingerprint-cne([string]$ir.current_binding_fingerprint).Trim().ToLowerInvariant()){
+            return (& $deny 'byte-real-handoff-signed-source-remote-commit-or-binding-drift')
+        }
         if(([string]$ir.name).Trim().ToLowerInvariant()-cne$key-or
            ([string]$ir.current_remote_tree_sha256).Trim().ToLowerInvariant()-cne$tree-or
            ([string]$sr.name).Trim().ToLowerInvariant()-cne$key-or
