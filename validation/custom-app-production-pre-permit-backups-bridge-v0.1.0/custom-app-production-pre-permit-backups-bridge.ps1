@@ -118,6 +118,18 @@ function Invoke-CustomAppProductionPrePermitBackupPreparationV010 {
         }
         $rollback=Get-CustomAppProductionPreApplyCanonicalPathV010 -Path $RollbackBackupRoot
         $persistence=Get-CustomAppProductionPreApplyCanonicalPathV010 -Path $PersistenceBackupRoot
+        # No backup destination may be nested under a protected Spotify
+        # persistence surface. A caller must select separate durable roots.
+        foreach($protected in @(
+            (Join-Path $LocalAppDataRoot 'Spotify'),
+            (Join-Path $AppDataRoot 'Spotify'),
+            (Join-Path $AppDataRoot 'spicetify')
+        )){
+            if((Test-CustomAppProductionPreApplyPathsOverlapV010 -A $protected -B $rollback)-or
+               (Test-CustomAppProductionPreApplyPathsOverlapV010 -A $protected -B $persistence)){
+                return (& $deny 'prepermit-backup-target-overlaps-spotify-persistence')
+            }
+        }
         if((Test-CustomAppProductionPreApplyPathsOverlapV010 -A $livePath -B $rollback)-or
            (Test-CustomAppProductionPreApplyPathsOverlapV010 -A $livePath -B $persistence)-or
            (Test-CustomAppProductionPreApplyPathsOverlapV010 -A $workspace -B $rollback)-or
