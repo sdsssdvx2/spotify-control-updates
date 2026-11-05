@@ -1,0 +1,94 @@
+name: Validate same-app cross-process exclusive transaction and true UTC clock gate
+on:
+  push:
+    branches:
+      - validate/custom-app-production-exclusive-transaction-clock-gate-v0.1.0
+    paths:
+      - 'validation/custom-app-production-exclusive-transaction-clock-gate-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-exclusive-transaction-clock-gate-v010.yml'
+  pull_request:
+    branches:
+      - validate/custom-app-production-triple-id-authorized-journal-bridge-v0.1.0
+    paths:
+      - 'validation/custom-app-production-exclusive-transaction-clock-gate-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-exclusive-transaction-clock-gate-v010.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+
+jobs:
+  exclusive-gate-isolated-windows:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "\${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Exact lineage, frozen main, source-only scope and protection audit
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='d9a8e9ac77c3161bf3ad6e4eabf674212d495e0e'
+          $production='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          if((git rev-parse HEAD).Trim() -cne '\${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'wrong tested SHA'}
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'not descended from qualified PR220'}
+          if((git rev-parse origin/main).Trim() -cne $production){throw 'main moved'}
+          $d='validation/custom-app-production-exclusive-transaction-clock-gate-v0.1.0'
+          $module="$d/custom-app-production-exclusive-transaction-clock-gate.ps1"
+          $test="$d/test_exclusive_transaction_clock_gate.ps1"
+          $workflow='.github/workflows/validate-custom-app-production-exclusive-transaction-clock-gate-v010.yml'
+          $allowed=@($module,$test,$workflow)
+          $changed=@(git diff --name-only "$parent...HEAD")
+          $unexpected=@($changed|Where-Object{$_-notin$allowed})
+          if($unexpected.Count){throw ('unapproved scope '+($unexpected -join ','))}
+          foreach($p in $allowed){if($p-notin$changed){throw ('expected new file missing '+$p)}}
+          if((git hash-object $module).Trim()-cne'0f65897e03e28e0e29376c3b36361d174fe02a56'){throw 'module code under test changed'}
+          if((git hash-object $test).Trim()-cne'c7e4125f637b312a7e2f639d0c4204861c51da93'){throw 'test code under review changed'}
+          foreach($p in @('bin/spotify-control.ps1','bin/addon-manager.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
+            git diff --quiet $parent HEAD -- $p
+            if($LASTEXITCODE){throw ('production protected path modified '+$p)}
+          }
+          Write-Host 'EXCLUSIVE_APP_CLOCK_GATE_FROZEN_MAIN_AND_SCOPED_SOURCE_PASS'
+      - name: Windows PowerShell 5.1 parse check for both new safety gate sources
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-production-exclusive-transaction-clock-gate-v0.1.0'
+          foreach($p in @("$d/custom-app-production-exclusive-transaction-clock-gate.ps1","$d/test_exclusive_transaction_clock_gate.ps1")){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Select-Object -First 10|ForEach-Object{Write-Host ($p+':'+$_.Extent.StartLineNumber+' '+$_.Message)};throw 'PS5.1 parse failed'}
+          }
+          Write-Host 'EXCLUSIVE_APP_CLOCK_GATE_PS51_PARSE_PASS'
+      - name: Run real Windows OS cross-process locking, forced process crash, durable marker and honest UTC tests
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-production-exclusive-transaction-clock-gate-v0.1.0'
+          $log="$d/windows-ci.log"
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/test_exclusive_transaction_clock_gate.ps1" *>&1 | Tee-Object -FilePath $log
+          $exitCode=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($exitCode -ne 0){throw ('exclusive gate Windows test failed '+$exitCode)}
+          $logText=Get-Content -LiteralPath $log -Raw
+          if($logText -notmatch 'EXCLUSIVE_APP_CLOCK_AND_CRASH_GATE_MATRIX_PASS cases=17 current_utc=true stale_and_future_denied=true same_app_cross_process_lock=true other_app_allowed=true crash_retains_blocking_marker=true corrupt_marker_fail_closed=true no_journal_no_retirement=true installed_spotify_untouched=true'){throw 'independent process and clock evidence missing'}
+          [ordered]@{
+            schema=1;status='PASS';source='exclusive-app-transaction-clock-gate-validation'
+            test_count=17;windows_process_cross_lock=$true;crash_retains_active_record=$true
+            stale_and_future_utc_denied=$true;corrupt_record_denied=$true;missing_terminal_journal_denied=$true
+            production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+            full_chain_enabled=$false;tested_sha=(git rev-parse HEAD).Trim()
+          }|ConvertTo-Json -Depth 4|Set-Content -LiteralPath "$d/evidence.json" -Encoding UTF8
+          Write-Host 'EXCLUSIVE_APP_CLOCK_GATE_ALL_WINDOWS_EVIDENCE_PASS'
+      - name: Upload read-only CI test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exclusive-app-clock-gate-\${{ github.run_id }}
+          path: |
+            validation/custom-app-production-exclusive-transaction-clock-gate-v0.1.0/windows-ci.log
+            validation/custom-app-production-exclusive-transaction-clock-gate-v0.1.0/evidence.json
+          if-no-files-found: warn
+          retention-days: 14
