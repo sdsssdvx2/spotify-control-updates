@@ -100,6 +100,7 @@ function Test-CustomAppUserTxnStateV010 {
 function Protect-CustomAppUserTxnStateV010 {
     param([Parameter(Mandatory=$true)]$State,[Parameter(Mandatory=$true)]$Paths)
     [void](Test-CustomAppUserTxnStateV010 -State $State -Paths $Paths)
+    Add-Type -AssemblyName System.Security -ErrorAction Stop
     $plain=[Text.Encoding]::UTF8.GetBytes(($State|ConvertTo-Json -Compress -Depth 8))
     try { return [Security.Cryptography.ProtectedData]::Protect($plain,(Get-CustomAppUserTxnEntropyV010 $Paths),[Security.Cryptography.DataProtectionScope]::CurrentUser) }
     finally { [Array]::Clear($plain,0,$plain.Length) }
@@ -110,6 +111,7 @@ function Read-CustomAppUserTxnStateV010 {
     if(-not[IO.File]::Exists($Paths.state)) { throw 'user-store-canonical-state-missing' }
     $sealed=[IO.File]::ReadAllBytes([string]$Paths.state)
     if($sealed.Length -lt 64 -or $sealed.Length -gt 262144) { throw 'user-store-canonical-state-size-invalid' }
+    Add-Type -AssemblyName System.Security -ErrorAction Stop
     $plain=$null
     try {
         $plain=[Security.Cryptography.ProtectedData]::Unprotect($sealed,(Get-CustomAppUserTxnEntropyV010 $Paths),[Security.Cryptography.DataProtectionScope]::CurrentUser)

@@ -31,9 +31,9 @@ jobs:
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main advanced'}
           $d='validation/custom-app-user-transaction-store-bundle'
           $pins=@{
-            "$d/user-transaction-store.ps1"='b547fa00cc0da4368e4943eba6f475f95a8b0622'
+            "$d/user-transaction-store.ps1"='d21dabaeffb9f013d212b0ea15d72285a89c1bc5'
             "$d/test_user_transaction_store.ps1"='b06b699a987e838563d3f00f2f9b2e48c4e9d6d3'
-            "$d/build_candidate.py"='179d2bc89289fc96af451c4abef2ed10003af9b1'
+            "$d/build_candidate.py"='4c9b75f9e2b4a7d96f9c01ca18db671640c6e9fa'
           }
           $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-user-transaction-store.yml')
           $changed=@(git diff --name-only "$parent...HEAD")
