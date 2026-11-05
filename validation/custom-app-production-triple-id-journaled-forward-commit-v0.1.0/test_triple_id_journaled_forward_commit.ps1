@@ -176,7 +176,70 @@ $script:JFCases++
 # Bounded deletion only AFTER the durable cleanup-starting phase.
 $txn=[string]$script:JFAtomic.result.transaction_root
 Remove-CustomAppAtomicDirectoryV010 -Path $txn -ExpectedParent ([IO.Path]::GetDirectoryName($txn)) -ExpectedName ([IO.Path]::GetFileName($txn))
-[void](Remove-CustomAppProductionPostApplyBoundedArtifactV010 -Path ([string]$stageArtifact.path) -ExpectedRoot ([string]$stageArtifact.root) -ExpectedNamePattern '^[0-9a-fA-F]{32}$' -Label 'isolated-stage')
+[void](Remove-CustomAppProductionPostApplyBoundedArtifactV010 -Path ([string]$stageArtifact.path) -ExpectedRoot ([string]$stageArtifact.root) -ExpectedNamePattern '^[0-9a-fA-F]{32} -ExpectedRoot ([string]$appArtifact.root) -ExpectedNamePattern '^[0-9a-fA-F]{32}$' -Label 'isolated-app-backup')
+[void](Remove-CustomAppProductionPostApplyBoundedArtifactV010 -Path ([string]$persistArtifact.path) -ExpectedRoot ([string]$persistArtifact.root) -ExpectedNamePattern '^txn-\d{8}-\d{6}-[0-9a-fA-F]{8}$' -Label 'isolated-persistence-backup')
+foreach($target in @($txn,$stageArtifact.path,$appArtifact.path,$persistArtifact.path)){Assert-JF (-not(Test-Path -LiteralPath ([string]$target))) 'bounded cleanup artifact remained'}
+$committed=Snapshot-JF $false
+Assert-JF ([int]([IO.File]::ReadAllText($countPath).Trim()) -eq 1) 'cleanup re-executed fake apply'
+$cleanupFp=Hash-JF ((@('journaled-forward-fixture','all-four-artifacts-clean',$script:JFTx,$finalFp,$applyFp,[string]$committed.runtime.tree_sha256,[string]$committed.git.tree_sha256,[string]$committed.persistence.fingerprint) -join [Environment]::NewLine))
+$jr=Append-JF 'cleanup-starting' 'committed-clean' $finalFp $applyFp $cleanupFp
+Assert-JF ([string]$jr.entry.cleanup_result_fingerprint -ceq $cleanupFp -and [int64]$jr.revision -eq 9 -and [int]$jr.history_count -eq 10) 'committed journal history proof failed'
+$script:JFCases++
+$class=Resolve-CustomAppProductionCrashRecoveryClassificationV010 -StoreRead (Read-JF 'committed-clean') -ExpectedTransactionId $script:JFTx
+Assert-JF ([bool]$class.ok -and [bool]$class.no_action -and [string]$class.classification -ceq 'no-action-new-permit-required-for-future-update') 'committed recovery wrongly requests rollback'
+$script:JFCases++
+$replayDenied=$false
+try{[void](Append-JF 'candidate-live' 'transaction-finalized' $finalFp)}catch{$replayDenied=$true}
+Assert-JF ($replayDenied -and [int]([IO.File]::ReadAllText($countPath).Trim()) -eq 1) 'committed transaction replayed or relaunched fake'
+Assert-JF ([string](Read-JF 'committed-clean').entry.entry_sha256 -ceq [string]$jr.entry.entry_sha256) 'terminal journal mutated on replay'
+$script:JFCases++
+Assert-JF ($script:JFCases -eq 13) ('new case count '+$script:JFCases)
+Write-Host 'TRIPLE_ID_REAL_ZIP_JOURNALED_FORWARD_COMMIT_PASS cases=13 third_permit=true durable_consumption=true evidence_before_atomic=true same_journal_history=10 normal_finalization_without_receipt_forgery=true fake_apply_once=true rollback_source_retained_until_cleanup=true cleanup_barrier_before_four_deletions=true committed_clean=true git_and_spotify_persistence_unchanged=true terminal_replay_denied=true user_spotify_untouched=true'
+ -Label 'isolated-stage')
+# Explicit hosted-CI-only simulated abrupt stop AFTER two real bounded deletes.
+# The restart worker reloads all authority from disk: no signing session key,
+# HMAC permit or prepared receipt is serialized into its input state.
+if($env:SC_TID_CLEANUP_INTERRUPT_AFTER_STAGE -ceq '1'){
+    Assert-JF ($env:GITHUB_ACTIONS -ceq 'true' -and $env:RUNNER_OS -ceq 'Windows') 'interrupt-mode-outside-hosted-ci'
+    Assert-JF (-not[string]::IsNullOrWhiteSpace($env:SC_TID_CLEANUP_STATE_PATH)) 'interrupt-state-path-absent'
+    Assert-Isolated $env:SC_TID_CLEANUP_STATE_PATH 'restart-child-state'
+    Assert-JF (-not(Test-Path -LiteralPath $env:SC_TID_CLEANUP_STATE_PATH)) 'restart-state-would-be-overwritten'
+    Assert-JF (-not(Test-Path -LiteralPath $txn) -and -not(Test-Path -LiteralPath ([string]$stageArtifact.path))) 'partial-cleanup-first-two-artifacts-not-removed'
+    Assert-JF (Test-Path -LiteralPath ([string]$appArtifact.path) -PathType Container) 'rollback-backup-deleted-before-interrupt'
+    Assert-JF (Test-Path -LiteralPath ([string]$persistArtifact.path) -PathType Container) 'persistence-backup-deleted-before-interrupt'
+    Assert-JF ([string](Read-JF 'cleanup-starting').entry.entry_sha256 -ceq [string]$jr.entry.entry_sha256) 'interrupt-journal-head-drift'
+    $state=[ordered]@{
+        schema=1;scenario='real-third-triple-id-partial-cleanup'
+        allowed_root=[string]$script:JFAllowed
+        store_directory=[string]$script:JFStore
+        transaction_id=[string]$script:JFTx
+        journal_revision=[int64]$jr.revision
+        journal_entry_sha256=[string]$jr.entry.entry_sha256
+        evidence_fingerprint=[string]$atomic.result.recovery_evidence_fingerprint
+        finalization_fingerprint=[string]$finalFp
+        apply_fingerprint=[string]$applyFp
+        live_path=[string]$script:TIDLive
+        expected_live_tree_sha256=[string]$p.stage_tree_sha256
+        original_git_tree_sha256=[string]$script:BeforeGit.tree_sha256
+        original_persistence_fingerprint=[string]$script:BeforePersist.fingerprint
+        transaction_root=[string]$txn
+        stage_workspace_path=[string]$stageArtifact.path
+        app_backup_path=[string]$appArtifact.path
+        persistence_backup_path=[string]$persistArtifact.path
+        local_app_data_root=[string]$script:PPBLocal
+        app_data_root=[string]$script:PPBRoaming
+        fake_apply_counter_path=[string]$countPath
+        fake_applied_index_path=[string]$appliedPath
+        fake_applied_index_sha256=(Get-FileHash -LiteralPath $appliedPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        original_app_full_tree_sha256=[string]$script:Before.tree_sha256
+        validation_only=$true;production_execution_authorized=$false;production_mutation_authorized=$false
+    }
+    $json=$state|ConvertTo-Json -Depth 6
+    Assert-JF ($json -notmatch '(?i)session.key|hmac|bearer|secret|token.id') 'sensitive-session-value-serialized'
+    [IO.File]::WriteAllText($env:SC_TID_CLEANUP_STATE_PATH,$json,[Text.UTF8Encoding]::new($false))
+    Write-Host 'TRIPLE_ID_PARTIAL_CLEANUP_PARENT_INTERRUPT_PASS phase=cleanup-starting root_and_stage_deleted=true app_and_persistence_backups_retained=true primary_fake_apply_count=1 session_key_not_serialized=true'
+    return
+}
 [void](Remove-CustomAppProductionPostApplyBoundedArtifactV010 -Path ([string]$appArtifact.path) -ExpectedRoot ([string]$appArtifact.root) -ExpectedNamePattern '^[0-9a-fA-F]{32}$' -Label 'isolated-app-backup')
 [void](Remove-CustomAppProductionPostApplyBoundedArtifactV010 -Path ([string]$persistArtifact.path) -ExpectedRoot ([string]$persistArtifact.root) -ExpectedNamePattern '^txn-\d{8}-\d{6}-[0-9a-fA-F]{8}$' -Label 'isolated-persistence-backup')
 foreach($target in @($txn,$stageArtifact.path,$appArtifact.path,$persistArtifact.path)){Assert-JF (-not(Test-Path -LiteralPath ([string]$target))) 'bounded cleanup artifact remained'}
