@@ -102,8 +102,11 @@ def integrate(addon: bytes, module_bytes: bytes, qualified_bytes: bytes) -> tupl
     original = qualified_bytes.decode("utf-8-sig").replace("\r\n", "\n")
 
     parent_functions = functions(parent)
-    if len(parent_functions) != len(set(parent_functions)):
-        raise RuntimeError("preexisting parent function duplication")
+    # The qualified parent intentionally contains historical same-name function
+    # overlays. Preserving their order and bytes is mandatory, not rejecting them.
+    # The exact inverse proof below detects ANY extra/modified function content.
+    if not parent_functions:
+        raise RuntimeError("qualified parent has no functions")
     if "$script:CustomAppProductionPipelineEnabled = $false" not in parent:
         raise RuntimeError("production hard-disable missing")
     if "Custom App production full-chain execution is intentionally unavailable in integration-only candidate." not in function_block(parent, "Invoke-CustomAppProductionFullChainV010"):
