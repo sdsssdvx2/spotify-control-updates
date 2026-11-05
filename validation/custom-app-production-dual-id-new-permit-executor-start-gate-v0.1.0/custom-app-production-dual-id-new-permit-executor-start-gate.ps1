@@ -126,7 +126,12 @@ function Test-DualIdNewExecutorStartContinuityV010 {
         return [pscustomobject]@{ok=$false;reason='triple-id-start-issuance-admission-drift'}
     }
     if($null-ne$Decision){
-        foreach($p in @(@('name','name'),@('source_identity','source_identity'),@('github_repo_id','github_repo_id'),@('surface_kind','surface_kind'),
+        foreach($f in @('github_repo_id','surface_kind')){
+            if(([string]$Decision.$f).Trim().ToLowerInvariant()-cne([string]$IssuerReceipt.$f).Trim().ToLowerInvariant()){
+                return [pscustomobject]@{ok=$false;reason=('triple-id-start-decision-issuer-'+$f+'-mismatch')}
+            }
+        }
+        foreach($p in @(@('name','name'),@('source_identity','source_identity'),
             @('current_tree_sha256','stable_live_tree_sha256'),@('remote_tree_sha256','current_remote_tree_sha256'),
             @('remote_commit_sha','current_remote_commit_sha'),@('current_eligibility_fingerprint','current_eligibility_fingerprint'),
             @('live_attested_qualification_fingerprint','live_attested_qualification_fingerprint'),@('admission_fingerprint','live_admission_fingerprint'))){
