@@ -34,8 +34,8 @@ jobs:
           $pins=@{
             "$d/verified-terminal-adapter.ps1"='8a18de8c49d1c32b1c53ca48518af07aa7a617ad'
             "$d/terminal-readback-child.ps1"='fd5465330d84e874a0b594a66ad1d5fa611273c4'
-            "$d/derive_real_zip_terminal_e2e.py"='68615bf6fc52aece4e251fce7926482dd0e61049'
-            "$d/build_candidate.py"='0b188387676deda47a058e8e11331766976cf62f'
+            "$d/derive_real_zip_terminal_e2e.py"='dccf4d656d74cb97ba6eb188ba06fc77057ef209'
+            "$d/build_candidate.py"='20902d142ed5a2270ece4ab75671959dd178bd1e'
           }
           $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-user-transaction-terminal-journal.yml')
           $changed=@(git diff --name-only "$parent...HEAD")

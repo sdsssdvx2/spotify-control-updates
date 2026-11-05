@@ -118,6 +118,9 @@ try{
 $child=Join-Path $root 'validation/custom-app-user-transaction-terminal-journal/terminal-readback-child.ps1'
 $childOutput=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $child -LivePath $script:TIDLive -HostedCiRoot $script:USERStoreRoot -ExpectedConsumptionId ([string]$p.consumption_id) -ExpectedTransactionId $script:USERExpectedTx)
 Assert-TJR ($LASTEXITCODE -eq 0 -and ($childOutput -join ' ') -match 'USER_TERMINAL_FRESH_PROCESS_REPLAY_DENIED_PASS') 'independent process did not recover atomic consumed ledger'
+# The independent child is checked above, then its positive proof is surfaced
+# to the hosted Windows CI log instead of remaining only in a local variable.
+Write-Host ($childOutput -join [Environment]::NewLine)
 Write-Host 'USER_TERMINAL_REAL_ZIP_SIGNED_JOURNAL_ROLLBACK_RETIREMENT_PASS false_ids_denied=true nonterminal_denied=true real_live_and_persistence_rechecked=true crash_before_replace_recovered=true consumed_id_durable=true fresh_process_replay_denied=true'
 """
     s=s[:pos]+retire+"\n"+s[pos:]
