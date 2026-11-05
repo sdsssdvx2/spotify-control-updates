@@ -43,7 +43,7 @@ jobs:
           if($unapproved.Count){throw "Scoped files escaped: $($unapproved -join ',')"}
           foreach($p in $allowed){if($p -notin $changed){throw "Expected validation file missing: $p"}}
           $pins=@(
-            @($core,'d26dd85ef68cc452dd555912336b4e9dcfbd4392'),
+            @($core,'2b91297b72d1b223fffe2428b75ed4de8771b8eb'),
             @($test,'ec684a4dd0aea70db85e0eadfdc2c4feec0b07ac'),
             @('validation/custom-app-production-prepared-stage-executor-bridge-v0.1.0/custom-app-production-prepared-stage-executor-bridge.ps1','04226ed6595049a2fcb3ac355150e9cd62940b58'),
             @('validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1','9b039819e7b2278fe4cf15c8585336dd07a8e8e3'),
