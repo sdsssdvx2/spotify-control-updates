@@ -19,7 +19,9 @@ function Invoke-ARChild {
     $old=$ErrorActionPreference
     try {
         $ErrorActionPreference='Continue'
-        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $Path @Arguments *>&1 | Tee-Object -FilePath $Log
+        & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $Path @Arguments *>&1 | Tee-Object -FilePath $Log | Out-Null
+        # Tee-Object otherwise writes every child log line as a function output,
+        # turning the caller's exit-code variable into an array under PS5.1.
         return [int]$LASTEXITCODE
     } finally {$ErrorActionPreference=$old}
 }
