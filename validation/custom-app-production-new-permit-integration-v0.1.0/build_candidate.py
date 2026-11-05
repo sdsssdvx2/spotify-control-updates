@@ -36,6 +36,8 @@ SUPPORT_MODULES = [
     ("durable-housekeeping", "0948a31cd46aedc3f0af5262feff37e07c6855a0", "validation/custom-app-production-dual-id-housekeeping-resume-executor-v0.1.0/custom-app-production-dual-id-housekeeping-resume-executor.ps1", "6cf870e37b2ad4afc6b4d7eec0538afda595ddb1"),
     ("historical-consumption-reader", "0948a31cd46aedc3f0af5262feff37e07c6855a0", "validation/custom-app-production-recovery-aware-permit-consumption-persistence-v0.1.0/custom-app-production-recovery-aware-permit-consumption-persistence.ps1", "5712edc5a5c8720d3254d9f3a9f151042e8c5187"),
     ("promotion-eligibility", "6bc69d2c8b12d074fa68f3d2ed7688e0846cd23c", "validation/custom-app-production-promotion-gate-v0.1.0/custom-app-production-promotion-gate.ps1", "1164c197405eac2295f789256e2886068611dd94"),
+    ("dual-transaction-id-bridge", "408e24ce7f66d1f5f23025a196b19cd8a42fcda7", "validation/custom-app-production-dual-transaction-id-bridge-v0.1.0/custom-app-production-dual-transaction-id-bridge.ps1", "ce018db8c13d569036ca378bbe3b4a2a84ab3bcd"),
+    ("durable-transaction-id-bridge", "408e24ce7f66d1f5f23025a196b19cd8a42fcda7", "validation/custom-app-production-durable-dual-transaction-id-bridge-integration-v0.1.0/custom-app-production-durable-dual-transaction-id-bridge-integration.ps1", "c9a58a181d3c5f5a230fa895785c3a42a928c8cd"),
 ]
 REQUIRED_SUPPORT_EXPORTS = [
     "Get-CustomAppProductionDualIdHousekeepingResumeDurableIdentityV010",
@@ -170,10 +172,14 @@ def integrate(parent_addon: bytes) -> tuple[bytes, dict]:
         module_source.append(text)
         payloads.append(text)
         module_records.append({"label": label, "path": path, "git_blob": expected, "export_count": len(names)})
-    # This is a hard-disabled packaging candidate, not permission to call new
-    # code from the normal mutation path. Preserve old parent helpers exactly,
-    # import only absent qualified dependency exports, and record any helper
-    # body differences instead of silently overriding a released implementation.
+    # Build the smallest exact source-verified support closure required by the
+    # four new-cycle external entry points. The full ancestor modules contain
+    # unrelated recovery executors: importing them wholesale would reintroduce
+    # dead code and false-positive dependency obligations. Follow only
+    # statically named calls reachable from the declared support roots.
+    source_defs = {}
+    source_headers = {}
+    source_original_order = {}
     for label, lineage, path, expected in SUPPORT_MODULES:
         if git_blob(lineage, path) != expected:
             raise RuntimeError(f"qualified support module lineage drift: {label}")
@@ -185,32 +191,58 @@ def integrate(parent_addon: bytes) -> tuple[bytes, dict]:
         nms = functions(src)
         if not nms or len(nms) != len(set(nms)):
             raise RuntimeError(f"support module malformed function inventory: {label}")
-        first_fn = re.search(r"(?im)^[ \t]*function\s+[A-Za-z0-9_-]+\s*\{", src)
-        if not first_fn:
+        fn_start = re.search(r"(?im)^[ \t]*function\s+[A-Za-z0-9_-]+\s*\{", src)
+        if not fn_start:
             raise RuntimeError(f"support module has no function definition: {label}")
-        prelude = src[:first_fn.start()].strip()
-        chunks = [prelude] if prelude else []
-        missing_names = []
-        overlapping = []
+        source_headers[label] = src[:fn_start.start()].strip()
+        source_original_order[label] = nms
         for nm in nms:
-            if nm in seen_new or nm in support_exports:
-                raise RuntimeError(f"support module would shadow qualified new-cycle function: {nm}")
-            if nm in baseline:
-                overlapping.append(nm)
-                if function_block(parent, nm).strip() != function_block(src, nm).strip():
+            if nm in source_defs:
+                raise RuntimeError(f"two support modules define same function: {nm}")
+            source_defs[nm] = (label, function_block(src, nm).strip())
+
+    closure_seen = set()
+    closure_queue = list(REQUIRED_SUPPORT_EXPORTS)
+    source_selected = {label: set() for label, _, _, _ in SUPPORT_MODULES}
+    unresolved_reachable = set()
+    while closure_queue:
+        nm = closure_queue.pop(0)
+        if nm in closure_seen:
+            continue
+        closure_seen.add(nm)
+        if nm in seen_new:
+            continue
+        if nm in baseline:
+            if nm in source_defs:
+                label, body = source_defs[nm]
+                if function_block(parent, nm).strip() != body:
                     support_overlap_body_differences.append(f"{label}:{nm}")
-                continue
-            chunks.append(function_block(src, nm).strip())
+            continue
+        if nm not in source_defs:
+            unresolved_reachable.add(nm)
+            continue
+        label, body = source_defs[nm]
+        source_selected[label].add(nm)
+        closure_queue.extend(EXTERNAL_EXPORT_PATTERN.findall(body))
+
+    for label, lineage, path, expected in SUPPORT_MODULES:
+        selected = source_selected[label]
+        retained = [nm for nm in source_original_order[label] if nm in selected]
+        chunks = [source_headers[label]] if selected and source_headers[label] else []
+        for nm in retained:
+            chunks.append(source_defs[nm][1])
             support_exports.add(nm)
-            missing_names.append(nm)
-        # Every newly introduced global is scoped to the supporting module and
-        # the fully reversible source reduction below catches any silent edits.
-        support_parts.append("\n\n".join(chunks).rstrip())
-        module_source.append(src)
+        if chunks:
+            filtered = "\n\n".join(chunks).rstrip()
+            support_parts.append(filtered)
+            module_source.append(filtered)
+        overlapping = [
+            nm for nm in source_original_order[label]
+            if nm in baseline and nm in closure_seen
+        ]
         support_records.append({
-            "label": label, "lineage": lineage, "path": path,
-            "git_blob": expected, "imported_exports": missing_names,
-            "inherited_exports_preserved": overlapping,
+            "label": label, "lineage": lineage, "path": path, "git_blob": expected,
+            "imported_exports": retained, "inherited_exports_preserved": overlapping,
         })
     for nm in REQUIRED_SUPPORT_EXPORTS:
         if nm not in (baseline | seen_new | support_exports):
@@ -267,6 +299,7 @@ def integrate(parent_addon: bytes) -> tuple[bytes, dict]:
         "support_added_export_count": len(support_exports),
         "support_modules": support_records,
         "support_overlapping_parent_function_bodies_different": sorted(support_overlap_body_differences),
+        "support_source_closure_unresolved": sorted(unresolved_reachable),
         "new_permit_external_function_dependencies_unresolved": missing,
         "new_permit_external_dependencies_fully_resolved": not bool(missing),
         "preexisting_functions_changed": changed,
