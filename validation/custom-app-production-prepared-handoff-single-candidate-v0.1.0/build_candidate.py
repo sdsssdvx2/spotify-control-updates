@@ -28,16 +28,19 @@ MODULES = [
         "byte-real ZIP handoff",
         "validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/custom-app-production-byte-real-prepared-stage-handoff.ps1",
         "c53eead027e8f48f9777e5c70ae2f011016bb851",
+        "065acbb3b0b8b641ad2468f9738e98905ffac44e",
     ),
     (
         "existing stage-executor bridge",
         "validation/custom-app-production-prepared-stage-executor-bridge-v0.1.0/custom-app-production-prepared-stage-executor-bridge.ps1",
         "04226ed6595049a2fcb3ac355150e9cd62940b58",
+        "02242daa6258fe552ac19e395612df000ddf779f",
     ),
     (
         "pre-permit app and persistence backups",
         "validation/custom-app-production-pre-permit-backups-bridge-v0.1.0/custom-app-production-pre-permit-backups-bridge.ps1",
         "2b91297b72d1b223fffe2428b75ed4de8771b8eb",
+        "f80ea15f318e04771c960f84d9899aa60cb00b05",
     ),
 ]
 HOOK_ORIGINAL = (
@@ -121,8 +124,8 @@ def build() -> None:
     all_new = set()
     imported = []
     chunks = []
-    for label, path, blob in MODULES:
-        if git_blob(PARENT_VALIDATED, path) != blob or git_blob("HEAD", path) != blob:
+    for label, path, blob, qualified_lineage in MODULES:
+        if git_blob(qualified_lineage, path) != blob or git_blob("HEAD", path) != blob:
             raise RuntimeError(f"qualified module source blob drift: {label}")
         raw = subprocess.check_output(["git", "cat-file", "blob", blob], cwd=ROOT)
         content = raw.decode("utf-8-sig").replace("\r\n", "\n").strip()
@@ -136,7 +139,7 @@ def build() -> None:
             raise RuntimeError(f"{label} attempted pipeline configuration: forbidden")
         all_new.update(defs)
         chunks.append(content)
-        imported.append({"name": label, "path": path, "blob": blob, "exports": defs})
+        imported.append({"name": label, "path": path, "blob": blob, "qualified_lineage": qualified_lineage, "exports": defs})
     if "Invoke-CustomAppProductionPreparedHandoffHardDisabledSelfTestV010" in existing | all_new:
         raise RuntimeError("hard-disabled selftest name collision")
     payload = "\n\n".join(chunks + [SELFTEST]) + "\n\n"
