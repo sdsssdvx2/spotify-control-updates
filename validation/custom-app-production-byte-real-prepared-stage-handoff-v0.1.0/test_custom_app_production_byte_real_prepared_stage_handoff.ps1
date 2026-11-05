@@ -40,7 +40,14 @@ Assert-BRH ([string]$script:BRHExtract.tree_sha256 -ceq [string]$e.tree_sha256) 
 
 # Build one fresh synthetic historical-recovery fixture but bind its CURRENT
 # new-cycle remote tree to these real extracted bytes before readiness/issuance.
-$q=New-DINPFixtureV010 'real-archive'
+# The qualified parent matrix already produced a real and independently
+# attested historical recovery state. Reuse its history, but construct an
+# independent new-cycle bundle and fresh durable stores. Re-invoking the
+# historical test factory after all parent matrices would collide with
+# test-only globally named fixture helpers.
+$seed=$script:TDSValidFixture.p.q.i.f.q
+Assert-BRH ($null-ne$seed -and $null-ne$seed.house -and $null-ne$seed.x) 'qualified recovery seed missing'
+$q=[pscustomobject]@{x=$seed.x;house=$seed.house;at=$seed.at;bundle=$null}
 $q.bundle=New-DINPPromotionBundleV010 -X $q.x -HousekeepingResult $q.house.result -At $q.at -RemoteTree ([string]$script:BRHExtract.tree_sha256)
 # The signed remote release-asset binding must also pin the EXACT ZIP bytes.
 $q.bundle.binding.binding.last_observed_asset_digest_sha256=$script:BRHZipHash
