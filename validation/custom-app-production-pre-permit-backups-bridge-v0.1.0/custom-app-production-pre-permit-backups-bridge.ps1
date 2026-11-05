@@ -74,6 +74,29 @@ function Test-CustomAppPrePermitBackupsBridgeReceiptV010 {
     return [pscustomobject]@{ok=$true;reason='prepermit-backup-metadata-valid-zero-authority'}
 }
 
+# Validate output ancestors BEFORE any copy. The existing backup helper checks
+# the destination directory itself, but a junction/symlink higher in the path
+# could redirect backups into the user's live Spotify persistence surface.
+function Test-CustomAppPrePermitBackupTargetAncestorsV010 {
+    param([Parameter(Mandatory=$true)][string]$Path)
+    try{
+        $canonical=[IO.Path]::GetFullPath($Path)
+        $probe=$canonical
+        while(-not[string]::IsNullOrWhiteSpace($probe)){
+            if(Test-Path -LiteralPath $probe){
+                $item=Get-Item -LiteralPath $probe -Force -ErrorAction Stop
+                if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint)-ne0){return $false}
+                if(-not $item.PSIsContainer){return $false}
+            }
+            $parent=[IO.Directory]::GetParent($probe)
+            if($null-eq$parent){break}
+            if($probe.Equals($parent.FullName,[StringComparison]::OrdinalIgnoreCase)){break}
+            $probe=$parent.FullName
+        }
+        return $true
+    }catch{return $false}
+}
+
 function Invoke-CustomAppProductionPrePermitBackupPreparationV010 {
     param(
         [Parameter(Mandatory=$true)][string]$Name,[Parameter(Mandatory=$true)]$LifecycleRow,
@@ -118,6 +141,10 @@ function Invoke-CustomAppProductionPrePermitBackupPreparationV010 {
         }
         $rollback=Get-CustomAppProductionPreApplyCanonicalPathV010 -Path $RollbackBackupRoot
         $persistence=Get-CustomAppProductionPreApplyCanonicalPathV010 -Path $PersistenceBackupRoot
+        if(-not(Test-CustomAppPrePermitBackupTargetAncestorsV010 -Path $rollback)-or
+           -not(Test-CustomAppPrePermitBackupTargetAncestorsV010 -Path $persistence)){
+            return (& $deny 'prepermit-backup-reparse-ancestor-or-file-path')
+        }
         # No backup destination may be nested under a protected Spotify
         # persistence surface. A caller must select separate durable roots.
         foreach($protected in @(
