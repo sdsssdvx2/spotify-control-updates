@@ -1,0 +1,118 @@
+name: Validate Pre-Issued Real ZIP Bound to Triple-ID Permit
+
+on:
+  push:
+    branches: [validate/custom-app-production-preissued-real-zip-bound-permit-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-preissued-real-zip-bound-permit-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-preissued-real-zip-bound-permit-v010.yml'
+  pull_request:
+    branches: [validate/custom-app-production-new-permit-integration-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-preissued-real-zip-bound-permit-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-preissued-real-zip-bound-permit-v010.yml'
+  workflow_dispatch:
+
+permissions: {contents: read}
+
+jobs:
+  isolated-preissue-zip-and-signed-permit:
+    runs-on: windows-2025
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Verify exact scope, immutable test SHA and production safety
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='67e39fd170079e4b1bce920466b5e46365af6050'
+          $expected='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          $head=(git rev-parse HEAD).Trim()
+          if($head -cne $expected -or (git merge-base $base HEAD).Trim() -cne $base){throw 'Qualified #208 lineage/head mismatch'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main moved'}
+          $test='validation/custom-app-production-preissued-real-zip-bound-permit-v0.1.0/test_preissued_real_zip_bound_new_permit.ps1'
+          $workflow='.github/workflows/validate-custom-app-production-preissued-real-zip-bound-permit-v010.yml'
+          $changed=@(git diff --name-only "$base...HEAD")
+          foreach($p in $changed){if($p -notin @($test,$workflow)){throw "Scope escaped $p"}}
+          if($changed.Count -ne 2){throw "Expected exactly two additive validation files; found $($changed.Count)"}
+          $actual=(git rev-parse "HEAD:$test").Trim()
+          if($actual -cne 'cd23730c585de4b686b98657a6bb521f90b5d61b'){throw "Prepared signed ZIP test blob changed $actual"}
+          $errors=$null;$tokens=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $test),[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|ForEach-Object{Write-Host "PS5.1 error $($_.Extent.StartLineNumber) $($_.Message)"};throw 'Preissued ZIP test PowerShell 5.1 syntax invalid'}
+          'PREISSUED_REAL_ZIP_VALIDATION_SCOPE_PASS'
+
+      - name: Materialize historical qualified synthetic permit test dependencies
+        shell: powershell
+        timeout-minutes: 90
+        run: |
+          $ErrorActionPreference='Stop'
+          $prep='validation/custom-app-production-dual-id-new-permit-readiness-v0.1.0/prepare_custom_app_production_dual_id_new_permit_readiness.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $prep -RepoRoot $PWD.Path -RunnerTemp $env:RUNNER_TEMP
+          if($LASTEXITCODE){throw 'Exact historical permit dependency preparation failed'}
+          foreach($p in @(
+            @('validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1','3350cd974bb9f9ae7345e490449c4875d571bf95'),
+            @('validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1','224b9df9d020b74bd4d99c85ca6d06e28999101b'),
+            @('validation/custom-app-production-dual-id-new-permit-executor-start-gate-v0.1.0/custom-app-production-dual-id-new-permit-executor-start-gate.ps1','23ddf1bb5a92279112170a7ddce145afbdba48')
+          )) {
+            if(-not(Test-Path -LiteralPath $p[0])){throw "Missing test source $($p[0])"}
+          }
+          'PREISSUED_REAL_ZIP_QUALIFIED_DEPENDENCY_PREPARED_PASS'
+
+      - name: Compose the two qualified persistence fixes and run real ZIP bound cryptographic permit flow
+        shell: powershell
+        timeout-minutes: 160
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          $core="$d/custom-app-production-dual-id-new-permit-reservation-persistence.ps1"
+          $before=[IO.File]::ReadAllBytes((Resolve-Path $core))
+          $hash=(Get-FileHash -LiteralPath $core -Algorithm SHA256).Hash.ToLowerInvariant()
+          try{
+            $a=Get-Content $core -Raw
+            $b=Get-Content "$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1" -Raw
+            $c=Get-Content "$d/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1" -Raw
+            [IO.File]::WriteAllText((Resolve-Path $core).Path,($a+[Environment]::NewLine+$b+[Environment]::NewLine+$c),[Text.UTF8Encoding]::new($false))
+            $test='validation/custom-app-production-preissued-real-zip-bound-permit-v0.1.0/test_preissued_real_zip_bound_new_permit.ps1'
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test
+            if($LASTEXITCODE){throw "Real ZIP + signed Triple-ID test failed: $LASTEXITCODE"}
+          }finally{
+            [IO.File]::WriteAllBytes((Resolve-Path $core).Path,$before)
+            if((Get-FileHash -LiteralPath $core -Algorithm SHA256).Hash.ToLowerInvariant() -cne $hash){throw 'Synthetic reservation core restoration failed'}
+          }
+          'PREISSUED_REAL_ZIP_SIGNED_PERMIT_TEST_AND_RESTORATION_PASS'
+
+      - name: Freeze read-only CI evidence
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          git diff --exit-code
+          if($LASTEXITCODE){throw 'Test left modified source files or production surfaces'}
+          $d='validation/custom-app-production-preissued-real-zip-bound-permit-v0.1.0'
+          [ordered]@{
+            schema=1
+            head=(git rev-parse HEAD).Trim()
+            qualified_hard_disabled_parent='67e39fd170079e4b1bce920466b5e46365af6050'
+            production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+            actual_zip_prepared_before_permit=$true
+            historical_issuer_hmac_executed=$true
+            durable_reservation_and_consumption=$true
+            start_revalidation_executed=$true
+            original_qualified_fixture_restored=$true
+            no_active_production_pipeline=$true
+            authorized_install_or_apply=$false
+            mutation_to_real_spotify=$false
+          }|ConvertTo-Json|Set-Content -LiteralPath "$d/ci-evidence.json" -Encoding UTF8
+          'PREISSUED_REAL_ZIP_PROTECTED_SURFACE_FREEZE_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spotify-preissued-real-zip-signed-permit-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-preissued-real-zip-bound-permit-v0.1.0/test_preissued_real_zip_bound_new_permit.ps1
+            validation/custom-app-production-preissued-real-zip-bound-permit-v0.1.0/ci-evidence.json
+          if-no-files-found: error
