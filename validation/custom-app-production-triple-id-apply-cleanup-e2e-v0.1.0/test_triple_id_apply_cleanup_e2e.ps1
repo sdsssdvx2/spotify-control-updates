@@ -125,6 +125,19 @@ $afterDenial=Get-CustomAppUpdateTreeSnapshotV010 -Root $script:TIDLive
 Assert-E2E ([string]$afterDenial.tree_sha256 -ceq [string]$script:E2EExpectedPost.tree_sha256) 'failed admission changed live app'
 $script:E2ECases++
 
+# A hash-correct file with the wrong executable name must also fail closed.
+$badNamePath=Join-Path $script:E2EControl 'not-spicetify.exe'
+[IO.File]::Copy($script:E2EFakeExe,$badNamePath,$false)
+$badNameArgs=@{};foreach($k in $script:E2EApplyArgs.Keys){$badNameArgs[$k]=$script:E2EApplyArgs[$k]}
+$badNameArgs.SpicetifyExecutablePath=$badNamePath
+$badNameArgs.ExpectedSpicetifySha256=(Get-FileHash -LiteralPath $badNamePath -Algorithm SHA256).Hash.ToLowerInvariant()
+$badName=Invoke-CustomAppProductionSpicetifyApplyExecutorV010 @badNameArgs
+Assert-E2E (-not[bool]$badName.ok -and -not[bool]$badName.spicetify_apply_executed) ('wrong exe name accepted: '+[string]$badName.reason)
+Assert-E2E (-not(Test-Path -LiteralPath $script:E2ECounter)) 'wrong-named binary invoked'
+Check-E2ENoAuthority $badName 'wrong-exe-name'
+Assert-E2E ([string](Get-CustomAppUpdateTreeSnapshotV010 -Root $script:TIDLive).tree_sha256 -ceq [string]$script:E2EExpectedPost.tree_sha256) 'wrong-named exe check mutated live'
+$script:E2ECases++
+
 try{
     $env:SC_TRIPLE_LIVE=Join-Path $script:TIDLive 'index.js'
     $env:SC_TRIPLE_COUNT=$script:E2ECounter
