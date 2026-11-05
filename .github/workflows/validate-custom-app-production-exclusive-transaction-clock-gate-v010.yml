@@ -45,7 +45,7 @@ jobs:
           foreach($p in $allowed){if($p-notin$changed){throw ('expected new file missing '+$p)}}
           if((git hash-object $module).Trim()-cne'6f4ead463a46824d0e55792d452fe2572790b5b2'){throw 'module code under test changed'}
           if((git hash-object $test).Trim()-cne'b4810d20b2718a3584446d45ee20a24b1f54473f'){throw 'test code under review changed'}
-          if((git hash-object $generator).Trim()-cne'14f912412ecd21baad9d72d9d0e4ebb8f853760e'){throw 'SHA-pinned original fixture transformation changed'}
+          if((git hash-object $generator).Trim()-cne'9909e07ea21046df1804ac2bff45d66c66291a9d'){throw 'SHA-pinned original fixture transformation changed'}
           foreach($p in @('bin/spotify-control.ps1','bin/addon-manager.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
             git diff --quiet $parent HEAD -- $p
             if($LASTEXITCODE){throw ('production protected path modified '+$p)}
@@ -165,6 +165,7 @@ jobs:
           if($exitCode -ne 0){throw ('actual ZIP guarded third-permit recovery failed '+$exitCode)}
           $text=Get-Content -LiteralPath "$d/real-zip.log" -Raw
           foreach($marker in @(
+            'TRIPLE_ID_EXCLUSIVE_REAL_THIRD_PERMIT_ISSUED_AT_HOST_UTC previous_signed_history_untouched=true new_third_permit=true',
             'TRIPLE_ID_EXCLUSIVE_REAL_WALLCLOCK_VERIFIED_PASS synthetic_old_now_denied=true fixture_now_current=true',
             'TRIPLE_ID_EXCLUSIVE_REAL_JOURNALED_SWAP_PASS active_claim_persisted=true fresh_hmac_and_current_utc=true recovery_possible=true',
             'TRIPLE_ID_EXCLUSIVE_REAL_TERMINAL_RETIREMENT_PASS wrong_consumption_denied=true wrong_transaction_denied=true durable_rollback_complete_required=true active_claim_retired=true archived_consumption_replay_denied=true interrupted_archive_crash_reconciled=true',

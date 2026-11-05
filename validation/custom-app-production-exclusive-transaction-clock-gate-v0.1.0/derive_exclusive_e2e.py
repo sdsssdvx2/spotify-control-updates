@@ -15,6 +15,30 @@ HERE=Path(__file__).resolve().parent
 DERIVED=ROOT / "validation/custom-app-production-triple-id-journaled-restart-e2e-v0.1.0/ci_derived_authorized_bridge_restart.ps1"
 OUTPUT=DERIVED.with_name("ci_derived_exclusive_gate_restart.ps1")
 EXPECTED_BASEGEN_GIT_BLOB="68a499af508b1b24d30854c628c1a3f9783c6d9a"
+PREPERMIT = ROOT / "validation/custom-app-production-pre-permit-backups-bridge-v0.1.0/test_custom_app_production_pre_permit_backups_bridge.ps1"
+EXPECTED_PREPERMIT_GIT_BLOB = "ec684a4dd0aea70db85e0eadfdc2c4feec0b07ac"
+
+def start_new_third_permit_at_real_utc():
+    # Patch only the disposable GitHub Actions checkout, never committed
+    # historical fixture bytes or any previously signed approval/receipt.
+    blob=subprocess.check_output(["git","hash-object",str(PREPERMIT)],cwd=ROOT,text=True).strip()
+    if blob!=EXPECTED_PREPERMIT_GIT_BLOB:
+        raise RuntimeError(f"qualified pre-permit fixture drift {blob}")
+    fixture=PREPERMIT.read_text(encoding="utf-8-sig").replace("\r\n","\n")
+    anchor="# Fresh third new-cycle permit is issued only AFTER actual backup creation.\n$prior3=Invoke-DINPV010 $q"
+    fresh=r"""# CI-only: historical matrices completed minutes ago. Do not rewrite an
+# issued HMAC, a consumed ID, a journal or backup timestamp. Begin a NEW
+# third-permit issuance at the actual current UTC immediately before readiness,
+# reservation, signing and consumption. Earlier receipts remain untouched.
+$thirdPermitHostUtc=[DateTimeOffset]::UtcNow
+if(([DateTimeOffset]$q.at)-gt$thirdPermitHostUtc.AddSeconds(5)){throw 'exclusive-third-permit-history-clock-in-future'}
+$q.at=$thirdPermitHostUtc
+Write-Host 'TRIPLE_ID_EXCLUSIVE_REAL_THIRD_PERMIT_ISSUED_AT_HOST_UTC previous_signed_history_untouched=true new_third_permit=true'
+"""
+    fixture=once(fixture,anchor,fresh+anchor,"fresh third permit at real UTC")
+    PREPERMIT.write_text(fixture,encoding="utf-8",newline="\n")
+
+
 
 def once(s,old,new,label):
     n=s.count(old)
@@ -31,6 +55,7 @@ def main():
         raise RuntimeError("refusing to overwrite prior derived test")
     source=runpy.run_path(str(BASEGEN),run_name="validation-import")
     source["derive"]()
+    start_new_third_permit_at_real_utc()
     s=DERIVED.read_text(encoding="utf-8").replace("\r\n","\n")
     oldimport=". (Join-Path $root 'validation/custom-app-production-triple-id-authorized-journal-bridge-v0.1.0/custom-app-production-triple-id-authorized-journal-bridge.ps1')"
     s=once(s,oldimport,oldimport+"\n. (Join-Path $root 'validation/custom-app-production-exclusive-transaction-clock-gate-v0.1.0/custom-app-production-exclusive-transaction-clock-gate.ps1')","gate module load")
