@@ -1,0 +1,138 @@
+name: Validate Pre-Permit App and Spotify Persistence Backups into Standard Pre-Apply Contract
+
+on:
+  push:
+    branches: [validate/custom-app-production-pre-permit-backups-bridge-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-pre-permit-backups-bridge-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-pre-permit-backups-bridge-v010.yml'
+  pull_request:
+    branches: [validate/custom-app-production-prepared-stage-executor-bridge-v0.1.0]
+    paths:
+      - 'validation/custom-app-production-pre-permit-backups-bridge-v0.1.0/**'
+      - '.github/workflows/validate-custom-app-production-pre-permit-backups-bridge-v010.yml'
+  workflow_dispatch:
+
+permissions: {contents: read}
+
+jobs:
+  validate-windows:
+    runs-on: windows-2025
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Verify validation-only change scope, exact source blobs, no-mutation guard and PS5.1 parse
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'Validated HEAD changed'}
+          $base='02242daa6258fe552ac19e395612df000ddf779f'
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'Qualified standard stage-executor bridge parent not ancestor'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main freeze moved'}
+          $d='validation/custom-app-production-pre-permit-backups-bridge-v0.1.0'
+          $core="$d/custom-app-production-pre-permit-backups-bridge.ps1"
+          $test="$d/test_custom_app_production_pre_permit_backups_bridge.ps1"
+          $wf='.github/workflows/validate-custom-app-production-pre-permit-backups-bridge-v010.yml'
+          $allowed=@($core,$test,$wf)
+          $changed=@(git diff --name-only "$base...HEAD")
+          $unapproved=@($changed|Where-Object{$_ -notin $allowed})
+          if($unapproved.Count){throw "Scoped files escaped: $($unapproved -join ',')"}
+          foreach($p in $allowed){if($p -notin $changed){throw "Expected validation file missing: $p"}}
+          $pins=@(
+            @($core,'d26dd85ef68cc452dd555912336b4e9dcfbd4392')
+            @($test,'3beb9c38dfc22e57b9332f32e2355d48584f1313')
+            @('validation/custom-app-production-prepared-stage-executor-bridge-v0.1.0/custom-app-production-prepared-stage-executor-bridge.ps1','04226ed6595049a2fcb3ac355150e9cd62940b58')
+            @('validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1','9b039819e7b2278fe4cf15c8585336dd07a8e8e3')
+            @('validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/custom-app-production-byte-real-prepared-stage-handoff.ps1','c53eead027e8f48f9777e5c70ae2f011016bb851')
+          )
+          foreach($pin in $pins){
+            if((git rev-parse "HEAD:$($pin[0])").Trim() -cne [string]$pin[1]){throw "Qualified source blob drift: $($pin[0])"}
+          }
+          foreach($p in @($core,$test)){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|ForEach-Object{Write-Host "PS5.1 $p line=$($_.Extent.StartLineNumber): $($_.Message)"};throw 'PS5.1 parse failed'}
+          }
+          $coretext=[IO.File]::ReadAllText((Resolve-Path $core))
+          foreach($bad in @('Invoke-WebRequest','Invoke-RestMethod','Start-Process','Remove-Item','Move-Item','Set-Content','Copy-Item','spicetify apply','launch-managed.vbs','Spotify-Managed-DomainVPN.vbs')){
+            if($coretext.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase)-ge0){throw "Unexpected executable or live mutation entrypoint in bounded pre-permit backup core: $bad"}
+          }
+          if($coretext -match '(?i)(ready_to_apply|apply_authorized|production_mutation_authorized)\s*=\s*\$true'){throw 'Pre-permit preparation grants live authority'}
+          'PRE_PERMIT_BACKUP_BRIDGE_FIXED_SCOPE_AND_PS51_PASS'
+
+      - name: Restore qualified historical test dependencies and pinned overlays
+        shell: powershell
+        timeout-minutes: 50
+        run: |
+          $ErrorActionPreference='Stop'
+          $prep='validation/custom-app-production-dual-id-new-permit-readiness-v0.1.0/prepare_custom_app_production_dual_id_new_permit_readiness.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $prep -RepoRoot $PWD.Path -RunnerTemp $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'Historical dependency materialization failed'}
+          $d='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          foreach($pin in @(
+            @("$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1",'3350cd974bb9f9ae7345e490449c4875d571bf95')
+            @("$d/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1",'224b9df9d020b74bd4d99c85ca6d06e28999101b')
+          )){
+            if((git hash-object $pin[0]).Trim() -cne [string]$pin[1]){throw "Historical overlay drift: $($pin[0])"}
+          }
+          'PRE_PERMIT_BACKUP_BRIDGE_PINNED_DEPENDENCIES_PASS'
+
+      - name: Run byte-real pre-issued backups and third signed new-Permit standard-pre-apply matrix
+        shell: powershell
+        timeout-minutes: 210
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          $core="$d/custom-app-production-dual-id-new-permit-reservation-persistence.ps1"
+          $parts=@($core,"$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1","$d/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1")
+          $composed=($parts|ForEach-Object{[IO.File]::ReadAllText((Resolve-Path $_).Path)}) -join [Environment]::NewLine
+          [IO.File]::WriteAllText((Resolve-Path $core).Path,$composed,[Text.UTF8Encoding]::new($false))
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $core).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw 'Qualified reservation overlay PS5.1 parse failed'}
+          $originalRunnerTemp=$env:RUNNER_TEMP;$oldTemp=$env:TEMP;$oldTmp=$env:TMP
+          $runtime=Join-Path $originalRunnerTemp ('prepermit-third-cycle-'+[Guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Force -Path $runtime|Out-Null
+          $exitCode=0
+          try{
+            $env:RUNNER_TEMP=$runtime;$env:TEMP=$runtime;$env:TMP=$runtime
+            $test='validation/custom-app-production-pre-permit-backups-bridge-v0.1.0/test_custom_app_production_pre_permit_backups_bridge.ps1'
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test
+            $exitCode=$LASTEXITCODE
+          }finally{$env:RUNNER_TEMP=$originalRunnerTemp;$env:TEMP=$oldTemp;$env:TMP=$oldTmp}
+          if($exitCode -ne 0){throw "Pre-permit backed-up standard pre-apply test failed code=$exitCode"}
+          'PRE_PERMIT_BACKUPS_TO_NEW_TRIPLE_ID_AND_GENERIC_PRE_APPLY_PASS'
+
+      - name: Preserve production freeze and emit auditable validation-only metadata
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='02242daa6258fe552ac19e395612df000ddf779f'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'Production main changed'}
+          foreach($p in @('bin/spotify-control.ps1','bin/addon-manager.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
+            git diff --quiet $base HEAD -- $p
+            if($LASTEXITCODE -ne 0){throw "Protected operation file changed: $p"}
+          }
+          $d='validation/custom-app-production-pre-permit-backups-bridge-v0.1.0'
+          [ordered]@{
+            schema=1;head=(git rev-parse HEAD).Trim();production_main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+            prepared_backups_before_fresh_permit=$true;verified_backup_and_source_before_and_after=$true
+            stage_already_prepared=$true;existing_pre_apply_result_compatible=$true
+            real_spicetify_apply_tested=$false;actual_swap_tested=$false
+            production_enabled=$false;production_mutation_authorized=$false
+            no_live_spotify_changes=$true;user_runner_not_used=$true
+          }|ConvertTo-Json -Depth 8|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          'PRE_PERMIT_BACKUP_BRIDGE_PROTECTED_PRODUCTION_PASS'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pre-permit-byte-real-backups-third-permit-bridge-${{ github.run_id }}
+          path: |
+            validation/custom-app-production-pre-permit-backups-bridge-v0.1.0/custom-app-production-pre-permit-backups-bridge.ps1
+            validation/custom-app-production-pre-permit-backups-bridge-v0.1.0/test_custom_app_production_pre_permit_backups_bridge.ps1
+            validation/custom-app-production-pre-permit-backups-bridge-v0.1.0/ci-evidence.json
+          if-no-files-found: error
