@@ -49,6 +49,21 @@ jobs:
           }
           if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows'){throw 'Not Windows Actions'}
           Write-Host 'TRIPLE_ID_ATOMIC_SCOPE_AND_FROZEN_PRODUCTION_PASS'
+      - name: Restore qualified historical Windows fixture dependencies and overlays
+        shell: powershell
+        timeout-minutes: 50
+        run: |
+          $ErrorActionPreference='Stop'
+          $prep='validation/custom-app-production-dual-id-new-permit-readiness-v0.1.0/prepare_custom_app_production_dual_id_new_permit_readiness.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $prep -RepoRoot $PWD.Path -RunnerTemp $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'Qualified historical fixture dependency restoration failed'}
+          $d='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          $pins=@(
+            @("$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1",'3350cd974bb9f9ae7345e490449c4875d571bf95'),
+            @("$d/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1",'224b9df9d020b74bd4d99c85ca6d06e28999101b')
+          )
+          foreach($pin in $pins){if((git hash-object $pin[0]).Trim() -cne [string]$pin[1]){throw ('Qualified overlay SHA drift: '+$pin[0])}}
+          Write-Host 'TRIPLE_ID_ATOMIC_PINNED_FIXTURE_DEPENDENCIES_PASS'
       - name: Parse Windows PowerShell 5.1 test and real atomic core
         shell: powershell
         run: |
@@ -70,8 +85,28 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $dir='validation/custom-app-production-triple-id-prepared-atomic-e2e-v0.1.0'
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$dir/test_triple_id_prepared_atomic_e2e.ps1" *>&1 | Tee-Object -FilePath "$dir/windows-ci.log"
-          if($LASTEXITCODE -ne 0){throw 'Real isolated new-Permit atomic/rollback test failed'}
+          $d='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          $core="$d/custom-app-production-dual-id-new-permit-reservation-persistence.ps1"
+          $parts=@($core,"$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1","$d/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1")
+          $composed=($parts|ForEach-Object{[IO.File]::ReadAllText((Resolve-Path $_).Path)}) -join [Environment]::NewLine
+          [IO.File]::WriteAllText((Resolve-Path $core).Path,$composed,[Text.UTF8Encoding]::new($false))
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $core).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw 'Pinned historical reservation fixture overlay parse failed'}
+          $previousRoot=$env:RUNNER_TEMP;$previousTemp=$env:TEMP;$previousTmp=$env:TMP
+          $isolatedRoot=Join-Path $previousRoot ('triple-id-atomic-'+[Guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Force -Path $isolatedRoot|Out-Null
+          $exitCode=1
+          try{
+            $env:RUNNER_TEMP=$isolatedRoot;$env:TEMP=$isolatedRoot;$env:TMP=$isolatedRoot
+            $ErrorActionPreference='Continue'
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$dir/test_triple_id_prepared_atomic_e2e.ps1" *>&1 | Tee-Object -FilePath "$dir/windows-ci.log"
+            $exitCode=$LASTEXITCODE
+          }finally{
+            $ErrorActionPreference='Stop'
+            $env:RUNNER_TEMP=$previousRoot;$env:TEMP=$previousTemp;$env:TMP=$previousTmp
+          }
+          if($exitCode -ne 0){throw "Real isolated Triple-ID atomic/rollback test failed code=$exitCode"}
           $log=Get-Content -LiteralPath "$dir/windows-ci.log" -Raw
           if($log -notmatch 'TRIPLE_ID_PREPARED_ATOMIC_E2E_PASS cases=8 actual_isolated_swap=true new_permit=true durable_consumption=true prepermit_backup=true no_redownload=true fault_rollback=true exact_code_git_persistence_restore=true spicetify_not_executed=true'){throw 'Full integration evidence absent'}
           [ordered]@{
