@@ -9,7 +9,7 @@ $CustomAppPreparedStageBridgeQualifiedHandoffCoreBlob='c53eead027e8f48f9777e5c70
 function New-CustomAppPreparedStageBridgeDeniedV010 {
     param([Parameter(Mandatory=$true)][string]$Reason)
     return [pscustomobject]@{
-        ok=$false;reason=$Reason;stage_result=$null;stage_prepared_before_permit=$false
+        ok=$false;reason=$Reason;stage_result=$null;preexisting_stage_revalidated=$false;stage_prepared_before_permit_unproven=$true
         fetched_again=$false;post_stage_revalidated=$false;requires_cleanup_if_not_promoted=$true
         ready_to_apply=$false;apply_authorized=$false;live_destination_authorized=$false
         production_execution_authorized=$false;production_mutation_authorized=$false
@@ -44,9 +44,11 @@ function Invoke-CustomAppProductionPreparedStageExecutorBridgeV010 {
     if($MaxRemoteObservationAgeHours-lt1-or$MaxRemoteObservationAgeHours-gt168){
         return (& $deny 'prepared-bridge-observation-age-policy-invalid')
     }
-    $postTime=$(if($null-ne$PostStageNow){[DateTimeOffset]$PostStageNow}else{$Now})
-    if($postTime-lt$Now){return (& $deny 'prepared-bridge-post-time-before-pre')}
-    if($postTime-gt$Now.AddSeconds(5)){return (& $deny 'prepared-bridge-post-check-window-exceeded')}
+    # Deterministic test callers may supply a post-stage clock; a real caller
+    # MUST sample the wall clock after the potentially slow byte rehash.
+    $postTime=$(if($null-ne$PostStageNow){[DateTimeOffset]$PostStageNow}else{$null})
+    if($null-ne$postTime -and $postTime-lt$Now){return (& $deny 'prepared-bridge-post-time-before-pre')}
+    if($null-ne$postTime -and $postTime-gt$Now.AddSeconds(5)){return (& $deny 'prepared-bridge-post-check-window-exceeded')}
     if($null-eq$IssuerResult.permit-or$null-eq$IssuerResult.receipt-or
        $null-eq$ExecutorStartResult.receipt){
         return (& $deny 'prepared-bridge-issuer-or-start-missing')
@@ -145,6 +147,9 @@ function Invoke-CustomAppProductionPreparedStageExecutorBridgeV010 {
     if(-not[bool]$freshLive.ok){
         return (& $deny ('prepared-bridge-post-stage-live-drift:'+[string]$freshLive.reason))
     }
+    if($null-eq$postTime){$postTime=[DateTimeOffset]::UtcNow}
+    if($postTime-lt$Now){return (& $deny 'prepared-bridge-post-clock-reversed')}
+    if($postTime-gt$Now.AddSeconds(5)){return (& $deny 'prepared-bridge-post-wall-clock-window-exceeded')}
     $admissionArgs.CurrentBaseline=$freshLive.baseline
     $admissionArgs.Now=$postTime
     $post=Resolve-CustomAppProductionStageAdmissionV010 @admissionArgs
@@ -168,6 +173,17 @@ function Invoke-CustomAppProductionPreparedStageExecutorBridgeV010 {
         return (& $deny ('prepared-bridge-post-stage-physical-bytes-or-consumption-drift:'+[string]$postProof.reason))
     }
 
+    # In non-test execution the last physical check can itself take time.
+    # The five-second eligibility may not be silently extended by reusing
+    # an old Now supplied to an earlier gate.
+    if($null-eq$PostStageNow){
+        $finalNow=[DateTimeOffset]::UtcNow
+        if($finalNow-gt$Now.AddSeconds(5)){return (& $deny 'prepared-bridge-final-clock-window-expired')}
+        $freshStart=Test-DualIdNewExecutorStartReceiptV010 -Receipt $ExecutorStartResult.receipt -Now $finalNow
+        if($null-eq$freshStart-or-not[bool]$freshStart.ok){return (& $deny ('prepared-bridge-final-start-expired:'+[string]$freshStart.reason))}
+        $freshIssuer=Test-CustomAppProductionDualIdNewPermitIssuerReceiptV010 -Receipt $IssuerResult.receipt -SessionKey $SessionKey -Now $finalNow
+        if($null-eq$freshIssuer-or-not[bool]$freshIssuer.ok){return (& $deny ('prepared-bridge-final-issuer-expired:'+[string]$freshIssuer.reason))}
+    }
     # Populate the EXACT legacy stage-executor output contract so the existing
     # pre-apply preparation can consume the result without a new install path.
     $result=[pscustomobject]@{
@@ -206,7 +222,7 @@ function Invoke-CustomAppProductionPreparedStageExecutorBridgeV010 {
     return [pscustomobject]@{
         ok=$true;reason='prepared-real-archive-now-standard-stage-executor-compatible'
         stage_result=$result;workspace_path=$workspace;stage_path=$stage
-        stage_prepared_before_permit=$true;fetched_again=$false
+        preexisting_stage_revalidated=$true;stage_prepared_before_permit_unproven=$true;fetched_again=$false
         physical_store_reloaded_twice=$true;post_stage_revalidated=$true
         source_issuer_fingerprint=[string]$IssuerResult.receipt.issuer_fingerprint
         new_permit_transaction_id=[string]$IssuerResult.receipt.new_permit_transaction_id
