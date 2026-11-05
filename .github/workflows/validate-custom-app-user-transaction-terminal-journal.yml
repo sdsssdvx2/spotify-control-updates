@@ -169,10 +169,19 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $d='validation/custom-app-user-transaction-terminal-journal'
-          $ErrorActionPreference='Continue'
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/ci_derived_user_verified_terminal.ps1" *>&1|Tee-Object -FilePath "$d/real-signed-zip-terminal-e2e.log"|Out-Null
-          $exit=$LASTEXITCODE
-          $ErrorActionPreference='Stop'
+          $oldRunner=$env:RUNNER_TEMP;$oldTemp=$env:TEMP;$oldTmp=$env:TMP
+          $sandbox=Join-Path $oldRunner ('user-terminal-real-zip-'+[Guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Force -Path $sandbox|Out-Null
+          $exit=1
+          try{
+            $env:RUNNER_TEMP=$sandbox;$env:TEMP=$sandbox;$env:TMP=$sandbox
+            $ErrorActionPreference='Continue'
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/ci_derived_user_verified_terminal.ps1" *>&1|Tee-Object -FilePath "$d/real-signed-zip-terminal-e2e.log"|Out-Null
+            $exit=$LASTEXITCODE
+          }finally{
+            $env:RUNNER_TEMP=$oldRunner;$env:TEMP=$oldTemp;$env:TMP=$oldTmp
+            $ErrorActionPreference='Stop'
+          }
           if($exit -ne 0){
             Write-Host '=== USER TERMINAL E2E FAILURE LAST 16 SANDBOX LINES ==='
             Get-Content -LiteralPath "$d/real-signed-zip-terminal-e2e.log" -Tail 16 | ForEach-Object { Write-Host $_ }
