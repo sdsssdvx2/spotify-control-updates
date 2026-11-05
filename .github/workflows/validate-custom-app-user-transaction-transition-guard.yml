@@ -1,0 +1,142 @@
+name: Validate exclusive user transaction transition guard in disabled Addon Manager
+on:
+  push:
+    branches: [validate/custom-app-user-transaction-transition-guard]
+    paths:
+      - 'validation/custom-app-user-transaction-transition-guard/**'
+      - '.github/workflows/validate-custom-app-user-transaction-transition-guard.yml'
+  pull_request:
+    branches: [validate/custom-app-user-transaction-store-bundle]
+    paths:
+      - 'validation/custom-app-user-transaction-transition-guard/**'
+      - '.github/workflows/validate-custom-app-user-transaction-transition-guard.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  denied-unverified-transitions-windows:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Pinned immutable source, main freeze, exact 4-file review scope
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='440b3d695c15c6dddbaa3c71461432d33cc534ad'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'incorrect SHA checkout'}
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'incorrect validated parent'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main changed'}
+          $d='validation/custom-app-user-transaction-transition-guard'
+          $pins=@{
+            "$d/user-transaction-guard.ps1"='554a792fb6eb7ca0a0d44b23a758a2ddf21548a2'
+            "$d/test_user_transaction_guard.ps1"='018dfca2a3dc9c74683ce3320c59d66ec5dd15ce'
+            "$d/build_candidate.py"='3fc616fd561063c97878e6940c84498af23dc165'
+          }
+          $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-user-transaction-transition-guard.yml')
+          $changed=@(git diff --name-only "$parent...HEAD")
+          if($changed.Count -ne 4 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('unexpected scope: '+($changed -join ','))}
+          foreach($p in $pins.Keys){if((git hash-object $p).Trim() -cne $pins[$p]){throw ('pinned file mismatch '+$p)}}
+          foreach($p in @('bin/spotify-control.ps1','bin/addon-manager.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
+            git diff --quiet $parent HEAD -- $p
+            if($LASTEXITCODE -ne 0){throw ('operating file modified '+$p)}
+          }
+          Write-Host 'CUSTOM_USER_GUARD_MAIN_FROZEN_SOURCE_SCOPE_PASS'
+      - name: Byte-pinned actual Addon Manager candidate build and WinPS5 parser
+        shell: powershell
+        timeout-minutes: 35
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-user-transaction-transition-guard'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'guarded candidate builder failed'}
+          $report=Get-Content -LiteralPath "$d/candidate-validation.json" -Raw|ConvertFrom-Json
+          $addon="$d/out/bin/addon-manager.ps1"
+          $hash=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -cne [string]$report.candidate_addon_sha256 -or (Get-Item $addon).Length -ne [int64]$report.candidate_addon_bytes){throw 'candidate hash drift'}
+          if((Get-FileHash "$d/out/bin/spotify-control.ps1" -Algorithm SHA256).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'qualified Spotify Control changed'}
+          if(-not[bool]$report.exact_parent_inverse -or -not[bool]$report.preexisting_full_chain_unchanged -or
+             @($report.intentional_override).Count -ne 1 -or [string]$report.intentional_override[0] -cne 'Save-CustomAppUserTxnStoreV010'){throw 'expected exact guard override proof missing'}
+          foreach($flag in @('terminal_retirement_implemented','normal_auto_update_wired','production_mutation_authorized','real_spicetify_executed','operating_main_changed')){if([bool]$report.$flag){throw ('production capability escaped '+$flag)}}
+          foreach($f in @($addon,"$d/user-transaction-guard.ps1","$d/test_user_transaction_guard.ps1")){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Select-Object -First 8|ForEach-Object{Write-Host $_.Message};throw ('PowerShell 5.1 syntax invalid '+$f)}
+          }
+          "CANDIDATE_HASH=$hash"|Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "CANDIDATE_SIZE=$((Get-Item $addon).Length)"|Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "CUSTOM_USER_GUARD_REAL_ADDON_PARSER_PASS sha256=$hash"
+      - name: Actual Addon Manager isolated SelfTest and previous journal lock regression
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-user-transaction-transition-guard'
+          $sandbox=Join-Path $env:RUNNER_TEMP ('addon-user-guard-test-'+[Guid]::NewGuid().ToString('N'))
+          $env:LOCALAPPDATA=Join-Path $sandbox 'Local'
+          $env:APPDATA=Join-Path $sandbox 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/out/bin/addon-manager.ps1" -Action SelfTest *>&1|Tee-Object -FilePath "$d/addon-selftest.log"|Out-Null
+          $code=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($code -ne 0){throw ('actual bundled Addon Manager SelfTest failure: '+$code)}
+          $log=Get-Content "$d/addon-selftest.log" -Raw
+          foreach($marker in @('CUSTOM_USER_TXN_GUARD_BUNDLE_SELFTEST_PASS','CUSTOM_APP_USER_TRANSACTION_STORE_BUNDLED_SELFTEST_PASS','CUSTOM_APP_JOURNAL_LOCK_BUNDLED_SELFTEST_PASS')){
+            if(-not $log.Contains($marker)){throw ('bundle regression not proven '+$marker)}
+          }
+          Write-Host 'CUSTOM_USER_GUARD_ACTUAL_ADDON_SELFTEST_PASS'
+      - name: Full durable DPAPI and transition-denial E2E in first PowerShell process
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-user-transaction-transition-guard'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/test_user_transaction_guard.ps1" -Phase bootstrap *>&1|Tee-Object -FilePath "$d/bootstrap.log"
+          if($LASTEXITCODE -ne 0 -or -not(Get-Content "$d/bootstrap.log" -Raw).Contains('CUSTOM_USER_GUARDED_BOOTSTRAP_PASS')){throw 'guarded first-process durable test failed'}
+          Write-Host 'CUSTOM_USER_GUARD_FIRST_PROCESS_E2E_PASS'
+      - name: Second distinct PowerShell process, replays, corruptions and false retirement
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-user-transaction-transition-guard'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/test_user_transaction_guard.ps1" -Phase restart *>&1|Tee-Object -FilePath "$d/restart.log"
+          if($LASTEXITCODE -ne 0 -or -not(Get-Content "$d/restart.log" -Raw).Contains('CUSTOM_USER_GUARDED_FRESH_PROCESS_RESTART_PASS')){throw 'guarded fresh-process regression failed'}
+          Write-Host 'CUSTOM_USER_GUARD_FRESH_PROCESS_E2E_PASS'
+      - name: Deterministic rebuild and frozen operating main
+        shell: powershell
+        timeout-minutes: 30
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-user-transaction-transition-guard'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'repeat candidate builder failed'}
+          $a="$d/out/bin/addon-manager.ps1"
+          $hash=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -cne $env:CANDIDATE_HASH -or (Get-Item $a).Length -ne [int64]$env:CANDIDATE_SIZE){throw 'nondeterministic candidate'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main changed'}
+          [ordered]@{
+            schema=1;result='PASS';tested_sha=(git rev-parse HEAD).Trim()
+            candidate_sha256=$hash;candidate_bytes=(Get-Item $a).Length
+            dpapi_persistent_store='PASS';exclusive_cross_process_lock='PASS'
+            injected_write_interruption='PASS';fresh_process_restart='PASS'
+            fake_terminal_disallowed='PASS';ledger_forgery_disallowed='PASS'
+            active_id_rotation_disallowed='PASS';unverified_retirement_enabled=$false
+            full_chain_hard_disabled=$true;installed_software_changed=$false
+          }|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          Write-Host "CUSTOM_USER_GUARD_DETERMINISTIC_MAIN_FROZEN_PASS sha256=$hash"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: user-transition-guard-${{ github.run_id }}
+          path: |
+            validation/custom-app-user-transaction-transition-guard/candidate-validation.json
+            validation/custom-app-user-transaction-transition-guard/ci-evidence.json
+            validation/custom-app-user-transaction-transition-guard/addon-selftest.log
+            validation/custom-app-user-transaction-transition-guard/bootstrap.log
+            validation/custom-app-user-transaction-transition-guard/restart.log
+          retention-days: 14
+          if-no-files-found: warn
