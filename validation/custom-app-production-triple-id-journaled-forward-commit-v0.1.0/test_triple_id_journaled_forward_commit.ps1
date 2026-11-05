@@ -97,7 +97,14 @@ $consumption=Test-CustomAppProductionPostSwapConsumptionContinuityV010 -AllowedR
 Assert-JF ([bool]$consumption.ok -and [bool]$consumption.store.reloaded_from_persistent_store) 'third consumption lost'
 Assert-JF ([bool](Test-CustomAppRemoteBindingEligibilityV040 -LifecycleRow $q.bundle.lifecycle -ProvenanceRow $q.bundle.provenance).ok) 'remote provenance denied'
 $binding=Test-CustomAppStageBindingRowV010 -BindingRow $q.bundle.binding -ExpectedName 'tagify'
-Assert-JF ([bool]$binding.ok -and [string]$binding.remote_tree_sha256 -ceq [string]$script:PPBStageResult.stage_result.remote_tree_sha256) 'remote binding drift'
+Assert-JF ([bool]$binding.ok) 'remote binding schema invalid'
+$stageResult=$script:PPBStageResult.stage_result
+Assert-JF ([string]$binding.source -ceq [string]$stageResult.source_identity -and [string]$binding.surface -ceq [string]$stageResult.surface_kind) 'remote binding source/surface drift'
+Assert-JF ([int64]$binding.repo_id -eq [int64]$stageResult.github_repo_id) 'remote repo identity drift'
+Assert-JF ([string]$binding.remote_tree_sha256 -ceq [string]$stageResult.remote_tree_sha256 -and [string]$binding.commit_sha -ceq [string]$stageResult.remote_commit_sha -and [string]$binding.binding_fingerprint -ceq [string]$stageResult.binding_fingerprint) 'remote signed binding values drift'
+$lastSuccess=[DateTimeOffset]::MinValue
+Assert-JF ([DateTimeOffset]::TryParse([string]$binding.last_success,[ref]$lastSuccess)) 'remote binding freshness timestamp invalid'
+Assert-JF ($now -ge $lastSuccess.AddMinutes(-5) -and $now -le $lastSuccess.AddHours(36)) 'remote binding observation stale/future'
 $before=Snapshot-JF $true
 $stageArtifact=Test-CustomAppProductionPostApplyStageCleanupArtifactV010 -PreparedResult $p -StageExecutorResult $script:PPBStageResult.stage_result -Name 'tagify'
 $appArtifact=Test-CustomAppProductionPostApplyAppBackupCleanupArtifactV010 -PreparedResult $p
@@ -134,7 +141,8 @@ if($null-ne$wrongHash -and $null-ne$wrongHash.stream){$wrongHash.stream.Dispose(
 Assert-JF ($null-eq$wrongHash -and -not(Test-Path -LiteralPath $countPath)) 'wrong executable hash accepted'
 $pin=Open-CustomAppProductionSpicetifyExecutableV010 -ExecutablePath $exe -ExpectedSha256 $sha
 Assert-JF ([string]$pin.sha256 -ceq $sha) 'fake exe pin did not match'
-if($null-ne$pin.stream){$pin.stream.Dispose()}
+# Preserve the SHA-verified read-only file handle until the process has exited:
+# closing it before launch would permit a TOCTOU replacement of the executable.
 $script:JFCases++
 $finalFp=Hash-JF ((@('journaled-forward-fixture','actual-third-id',$script:JFTx,[string]$atomic.result.result_fingerprint,[string]$p.preparation_fingerprint,[string]$before.runtime.tree_sha256,[string]$before.git.tree_sha256,[string]$before.persistence.fingerprint,'old-live-retained-for-rollback') -join [Environment]::NewLine))
 $jr=Append-JF 'candidate-live' 'transaction-finalized' $finalFp
@@ -148,12 +156,16 @@ try {
     $env:JF_COUNT=$countPath
     $env:JF_APPLIED=$appliedPath
     $run=Invoke-CustomAppProductionExactSpicetifyApplyProcessV010 -ExecutablePath $exe -TimeoutSeconds 20
-}finally{foreach($n in @('JF_LIVE','JF_COUNT','JF_APPLIED')){[Environment]::SetEnvironmentVariable($n,$null,'Process')}}
+}finally{
+    if($null-ne$pin.stream){$pin.stream.Dispose()}
+    foreach($n in @('JF_LIVE','JF_COUNT','JF_APPLIED')){[Environment]::SetEnvironmentVariable($n,$null,'Process')}
+}
 Assert-JF ([bool]$run.ok -and [int]$run.exit_code -eq 0 -and -not[bool]$run.timed_out) ('qualified fake exact process denied '+[string]$run.reason)
 $jr=Append-JF 'apply-starting' 'apply-returned-success-pending-verification' $finalFp
 $after=Snapshot-JF $true
 Assert-JF ([IO.File]::ReadAllText($appliedPath) -ceq [IO.File]::ReadAllText((Join-Path $script:TIDLive 'index.js'))) 'fake apply read wrong new live bytes'
 Assert-JF ([bool](Test-CustomAppProductionPostSwapConsumptionContinuityV010 -AllowedRoot $script:JFAllowed -StoreDirectory ([string]$cf3.store) -ExpectedConsumptionId ([string]$p.consumption_id) -Permit $script:PPBIssuer.permit -StageExecutorResult $script:PPBStageResult.stage_result -Name 'tagify').ok) 'post-apply durable consumption drift'
+Assert-JF ([bool](Test-CustomAppProductionPostSwapPermitIntegrityV010 -Permit $script:PPBIssuer.permit -SessionKey $script:DINPIKey -Now $now).ok) 'post-apply HMAC permit drift'
 $applyFp=Hash-JF ((@('journaled-forward-fixture','fake-process-applied-once',$script:JFTx,$finalFp,$sha,[string]$after.runtime.tree_sha256,[string]$after.git.tree_sha256,[string]$after.persistence.fingerprint) -join [Environment]::NewLine))
 $jr=Append-JF 'apply-returned-success-pending-verification' 'apply-verified' $finalFp $applyFp
 Assert-JF ([string]$jr.entry.apply_result_fingerprint -ceq $applyFp -and [int]([IO.File]::ReadAllText($countPath).Trim()) -eq 1) 'apply-verified receipt incorrect'
