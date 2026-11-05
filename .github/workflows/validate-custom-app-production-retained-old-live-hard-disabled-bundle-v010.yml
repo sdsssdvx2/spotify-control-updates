@@ -89,6 +89,10 @@ jobs:
           if((git rev-parse origin/main).Trim()-cne'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main changed'}
           [ordered]@{schema=1;status='PASS';head=(git rev-parse HEAD).Trim();candidate_size=$as;candidate_sha256=$ah;report_sha256=$rh;baseline_sha256='d0bce3c8c4684838cd19cb2bd8bf70a44f8cbba323a853893e5497a854e96afc';qualified_original_sha1='0273d7e28a56759b1d0ec9cbf037483b04d98d63';new_mapping_cases=11;single_line_mapper_wiring=true;baseline_reverse_exact=true;full_chain_enabled=false;production_main_unchanged=true;real_spicetify_executed=false}|ConvertTo-Json | Set-Content -LiteralPath "$d/ci-evidence.json" -Encoding UTF8
           Write-Host "RETAINED_OLD_LIVE_BUNDLE_DETERMINISTIC_AND_MAIN_FROZEN_PASS sha256=$ah"
+          # Explicitly return success after ALL assertions and evidence write.
+          # The historical parent builder runs nested git probes; never inherit
+          # a stale native-command LASTEXITCODE as the Actions step exit status.
+          exit 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
