@@ -1,0 +1,108 @@
+name: Validate journal/Triple-ID/exclusive-gate bundle in hard-disabled Addon Manager
+on:
+  push:
+    branches: [validate/custom-app-journal-lock-integration]
+    paths:
+      - 'validation/custom-app-journal-lock-integration/**'
+      - '.github/workflows/validate-custom-app-journal-lock-integration.yml'
+  pull_request:
+    branches: [validate/custom-app-production-exclusive-transaction-clock-gate-v0.1.0]
+    paths:
+      - 'validation/custom-app-journal-lock-integration/**'
+      - '.github/workflows/validate-custom-app-journal-lock-integration.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  pinned-bundle-windows:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Exact qualified parent, source scope, main freeze
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='d257922e24a35ba9ebebddef7e5df25bc5d44a83'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'CI wrong SHA'}
+          if((git merge-base $p HEAD).Trim() -cne $p){throw 'not descended from qualified gate'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main changed'}
+          $allowed=@('validation/custom-app-journal-lock-integration/build_candidate.py','.github/workflows/validate-custom-app-journal-lock-integration.yml')
+          $changed=@(git diff --name-only "$p...HEAD")
+          if($changed.Count -ne 2 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('scope escaped '+($changed -join ','))}
+          if((git hash-object $allowed[0]).Trim() -cne '5ac34f40bc52ab9583dbeb4a05b45f378aa1d2a2'){throw 'pinned builder source changed'}
+          foreach($f in @('bin/spotify-control.ps1','bin/addon-manager.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
+            git diff --quiet $p HEAD -- $f
+            if($LASTEXITCODE -ne 0){throw ('protected production file modified '+$f)}
+          }
+          Write-Host 'JOURNAL_LOCK_BUNDLE_SOURCE_SCOPE_MAIN_FROZEN_PASS'
+      - name: Build byte-exact candidate, compare report and PowerShell 5.1 syntax
+        shell: powershell
+        timeout-minutes: 25
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-journal-lock-integration'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'candidate failed to build'}
+          $a="$d/out/bin/addon-manager.ps1";$m="$d/out/bin/spotify-control.ps1";$r="$d/candidate-validation.json"
+          $report=Get-Content -LiteralPath $r -Raw|ConvertFrom-Json
+          $hash=(Get-FileHash -LiteralPath $a -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -cne [string]$report.candidate_addon_sha256 -or (Get-Item $a).Length -ne [int64]$report.candidate_addon_size){throw 'source build report drift'}
+          if((Get-Item $m).Length -ne 284327 -or (Get-FileHash $m -Algorithm SHA256).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control was modified'}
+          if([int]$report.added_unique_export_functions -ne 34 -or @($report.source_manifest).Count -ne 5 -or @($report.intentional_overrides).Count -ne 1){throw 'unexpected module export surface'}
+          if(-not[bool]$report.exact_parent_inverse -or -not[bool]$report.full_chain_unchanged){throw 'original candidate not preserved'}
+          foreach($flag in @('normal_update_wired','production_pipeline_enabled','protected_user_pc_store_implemented','actual_spicetify_executed')){if([bool]$report.$flag){throw ('unexpected production authority '+$flag)}}
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $a).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|Select-Object -First 10|ForEach-Object{Write-Host $_.Message};throw 'actual Addon Manager PS5.1 parser error'}
+          "ADDON_HASH=$hash" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "ADDON_SIZE=$((Get-Item $a).Length)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "REPORT_HASH=$((Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant())" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "JOURNAL_LOCK_REAL_ADDON_MANAGER_BUNDLE_PS51_PASS sha256=$hash"
+      - name: Actual Addon Manager isolated SelfTest
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-journal-lock-integration'
+          $sandbox=Join-Path $env:RUNNER_TEMP ('addon-bundle-'+[Guid]::NewGuid().ToString('N'))
+          $env:LOCALAPPDATA=Join-Path $sandbox 'Local'
+          $env:APPDATA=Join-Path $sandbox 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/out/bin/addon-manager.ps1" -Action SelfTest *>&1 | Tee-Object -FilePath "$d/addon-selftest.log" | Out-Null
+          $code=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($code -ne 0){throw ('bundled Addon Manager SelfTest returned '+$code)}
+          $log=Get-Content -LiteralPath "$d/addon-selftest.log" -Raw
+          if(-not $log.Contains('CUSTOM_APP_JOURNAL_LOCK_BUNDLED_SELFTEST_PASS source_pins=true normal_update_disabled=true')){throw 'new bundle SelfTest missing'}
+          if(-not $log.Contains('CUSTOM_APP_PRODUCTION_RETAINED_OLD_LIVE_COMPAT_SELFTEST_V011_PASS')){throw 'preexisting qualified SelfTest missing'}
+          Write-Host 'JOURNAL_LOCK_REAL_ADDON_MANAGER_SELFTEST_PASS'
+      - name: Deterministic second build and final frozen-main proof
+        shell: powershell
+        timeout-minutes: 25
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-journal-lock-integration'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'second build failed'}
+          $a="$d/out/bin/addon-manager.ps1";$r="$d/candidate-validation.json"
+          $hash=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant()
+          $reportHash=(Get-FileHash $r -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -cne $env:ADDON_HASH -or $reportHash -cne $env:REPORT_HASH -or (Get-Item $a).Length -ne [int64]$env:ADDON_SIZE){throw 'candidate nondeterministic'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          [ordered]@{schema=1;status='PASS';tested_sha=(git rev-parse HEAD).Trim();candidate_sha256=$hash;candidate_size=(Get-Item $a).Length;module_count=5;unique_exports=34;inherited_functions_unchanged=$true;full_chain_hard_disabled=$true;real_spicetify_executed=$false;main_changed=$false}|ConvertTo-Json|Set-Content -LiteralPath "$d/ci-evidence.json" -Encoding UTF8
+          Write-Host "JOURNAL_LOCK_REAL_ADDON_MANAGER_DETERMINISTIC_MAIN_FROZEN_PASS sha256=$hash"
+          exit 0
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: journal-lock-addon-bundle-${{ github.run_id }}
+          path: |
+            validation/custom-app-journal-lock-integration/candidate-validation.json
+            validation/custom-app-journal-lock-integration/ci-evidence.json
+            validation/custom-app-journal-lock-integration/addon-selftest.log
+          retention-days: 14
+          if-no-files-found: warn
