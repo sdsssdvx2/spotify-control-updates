@@ -58,6 +58,9 @@ try{
     $exit=$LASTEXITCODE
     Assert-EG ($exit -eq 7 -and ($output -join ' ') -match 'EXCLUSIVE_CHILD_DENIED') 'cross-process-same-app-lock-not-exclusive'
     $cases++
+    $alias=Open-CustomAppProductionExclusiveGateLockV010 -Name 'ivLyrics' -LivePath $live
+    Assert-EG (-not[bool]$alias.ok) 'same-live-directory-with-different-app-alias-was-not-serialized'
+    $cases++
     $otherLive=Join-Path $demo 'live-other';[IO.Directory]::CreateDirectory($otherLive)|Out-Null
     $other=Open-CustomAppProductionExclusiveGateLockV010 -Name 'ivLyrics' -LivePath $otherLive
     Assert-EG ([bool]$other.ok) 'different-app-transaction-unnecessarily-blocked'
@@ -122,5 +125,5 @@ try{
     Assert-EG (-not(Test-Path -LiteralPath $replayPaths.record)) 'retired-ID-replay-created-active-claim'
     $cases++
 }finally{$replayLock.lock_handle.Dispose()}
-Assert-EG ($cases -eq 19) ('gate-case-count-drift '+$cases)
-Write-Host 'EXCLUSIVE_APP_CLOCK_AND_CRASH_GATE_MATRIX_PASS cases=19 current_utc=true stale_and_future_denied=true same_app_cross_process_lock=true other_app_allowed=true crash_retains_blocking_marker=true corrupt_marker_fail_closed=true no_journal_no_retirement=true retired_consumption_replay_denied=true installed_spotify_untouched=true'
+Assert-EG ($cases -eq 20) ('gate-case-count-drift '+$cases)
+Write-Host 'EXCLUSIVE_APP_CLOCK_AND_CRASH_GATE_MATRIX_PASS cases=20 current_utc=true stale_and_future_denied=true same_app_cross_process_lock=true same_live_alias_denied=true other_app_allowed=true crash_retains_blocking_marker=true corrupt_marker_fail_closed=true no_journal_no_retirement=true retired_consumption_replay_denied=true installed_spotify_untouched=true'
