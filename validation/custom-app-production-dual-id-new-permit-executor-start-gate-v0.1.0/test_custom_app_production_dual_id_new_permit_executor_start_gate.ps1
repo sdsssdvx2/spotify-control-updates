@@ -68,6 +68,8 @@ $ck=Test-DualIdNewExecutorStartReceiptV010 -Receipt $good.receipt -Now $script:T
 Assert-TDS ([bool]$ck.ok) ('valid receipt denied: '+[string]$ck.reason)
 Assert-TDSEq $good.receipt.consumption_id $script:TDSPersisted.receipt.consumption_id 'consumption ID'
 Assert-TDSEq $good.receipt.new_permit_transaction_id $script:TDSValidFixture.p.q.i.f.new_id 'new permit ID'
+Assert-TDSEq $good.receipt.pre_start_issuance_admission_fingerprint $good.receipt.post_start_issuance_admission_fingerprint 'start pre/post admission drift'
+Assert-TDS ([string]$good.receipt.pre_start_issuance_admission_fingerprint-cne[string]$script:TDSPersisted.receipt.pre_persistence_admission_fingerprint) 'historical timestamped admission unexpectedly identical to fresh admission'
 $count++
 
 $again=Invoke-TDSV010
