@@ -36,7 +36,9 @@ function Hash-CR([string]$Value){
 }
 Assert-CR ([int]$state.schema -eq 1 -and [string]$state.scenario -ceq 'real-third-triple-id-partial-cleanup' -and [bool]$state.validation_only) 'state-schema-or-scenario-invalid'
 Assert-CR (-not[bool]$state.production_execution_authorized -and -not[bool]$state.production_mutation_authorized) 'state-claims-authority'
-foreach($field in @('allowed_root','store_directory','live_path','transaction_root','stage_workspace_path','app_backup_path','persistence_backup_path','local_app_data_root','app_data_root','fake_apply_counter_path','fake_applied_index_path')){
+Assert-CR ($allowed.Equals($runner,[StringComparison]::OrdinalIgnoreCase)) 'allowed-root-must-equal-hosted-runner-temp'
+Assert-CR (Test-Path -LiteralPath $allowed -PathType Container) 'runner-temp-root-missing'
+foreach($field in @('store_directory','live_path','transaction_root','stage_workspace_path','app_backup_path','persistence_backup_path','local_app_data_root','app_data_root','fake_apply_counter_path','fake_applied_index_path')){
     Assert-CR (Within-CR ([string]$state.$field)) ('unbounded-state-path-'+$field)
 }
 Assert-CR (Within-CR $StatePath) 'unbounded-child-state'
