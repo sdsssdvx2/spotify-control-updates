@@ -86,6 +86,31 @@ function Read-CustomAppProductionExclusiveGateRecordV010 {
         return [pscustomobject]@{ok=$true;reason='exclusive-app-durable-record-valid';record=$record;record_sha256=$expected;production_mutation_authorized=$false}
     }catch{return New-CustomAppProductionExclusiveGateDeniedV010 ('exclusive-app-record-tampered-or-unreadable:'+[string]$_.Exception.Message)}
 }
+function Get-CustomAppProductionExclusiveGateRetiredPathV010 {
+    param([Parameter(Mandatory=$true)]$Paths,[Parameter(Mandatory=$true)][string]$ConsumptionId)
+    if($ConsumptionId -cnotmatch '^[0-9a-f]{64}$'){throw 'exclusive-app-retired-consumption-id-invalid'}
+    return (Join-Path ([string]$Paths.directory) (([string]$Paths.key)+'.'+$ConsumptionId+'.retired.json'))
+}
+function Test-CustomAppProductionExclusiveGateRetiredReceiptV010 {
+    param([Parameter(Mandatory=$true)][string]$Path,[Parameter(Mandatory=$true)]$Paths,[Parameter(Mandatory=$true)][string]$ConsumptionId)
+    try{
+        Assert-CustomAppProductionExclusiveGateNoReparseV010 -Path $Path
+        if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){throw 'retirement-receipt-missing'}
+        $bytes=[IO.File]::ReadAllBytes($Path)
+        if($bytes.Length -lt 120 -or $bytes.Length -gt 8192){throw 'retirement-receipt-size-invalid'}
+        $receipt=([Text.Encoding]::UTF8.GetString($bytes)|ConvertFrom-Json -ErrorAction Stop)
+        if([int]$receipt.schema -ne 1 -or [string]$receipt.name -cne [string]$Paths.name -or
+            [string]$receipt.live_path -cne [string]$Paths.live -or [string]$receipt.consumption_id -cne $ConsumptionId -or
+            [string]$receipt.transaction_id -cnotmatch '^[0-9a-f]{64}$' -or
+            [string]$receipt.terminal_phase -notin @('rollback-complete','committed-clean') -or
+            [string]$receipt.active_record_sha256 -cnotmatch '^[0-9a-f]{64}$'){
+            throw 'retirement-receipt-binding-invalid'
+        }
+        $material=([string]$receipt.schema+'|'+[string]$receipt.name+'|'+[string]$receipt.live_path+'|'+[string]$receipt.consumption_id+'|'+[string]$receipt.transaction_id+'|'+[string]$receipt.terminal_phase+'|'+[string]$receipt.active_record_sha256+'|'+[string]$receipt.completed_utc)
+        if([string]$receipt.receipt_sha256 -cne (Get-CustomAppProductionExclusiveGateSha256V010 $material)){throw 'retirement-receipt-checksum-invalid'}
+        return [pscustomobject]@{ok=$true;reason='retired-consumption-record-present-and-valid';receipt=$receipt;production_mutation_authorized=$false}
+    }catch{return New-CustomAppProductionExclusiveGateDeniedV010 ('retired-consumption-record-invalid:'+[string]$_.Exception.Message)}
+}
 function Write-CustomAppProductionExclusiveGateActiveRecordV010 {
     param(
         [Parameter(Mandatory=$true)]$Lock,
@@ -101,6 +126,8 @@ function Write-CustomAppProductionExclusiveGateActiveRecordV010 {
         if(-not $journal.StartsWith(([string]$p.root+[IO.Path]::DirectorySeparatorChar),[StringComparison]::OrdinalIgnoreCase)){throw 'exclusive-app-journal-not-in-hosted-runner'}
         if($journal.StartsWith(([string]$p.directory+[IO.Path]::DirectorySeparatorChar),[StringComparison]::OrdinalIgnoreCase)){throw 'exclusive-app-journal-overlaps-gate'}
         if(Test-Path -LiteralPath $p.record){throw 'exclusive-app-active-transaction-blocks-new-claim'}
+        $retiredPath=Get-CustomAppProductionExclusiveGateRetiredPathV010 -Paths $p -ConsumptionId $ConsumptionId
+        if(Test-Path -LiteralPath $retiredPath){throw 'exclusive-app-consumption-already-retired'}
         $record=[ordered]@{schema=1;name=[string]$p.name;live_path=[string]$p.live;consumption_id=$ConsumptionId;transaction_nonce=$TransactionNonce;journal_store=$journal;created_utc=([DateTimeOffset]::UtcNow.ToString('o'));state='active'}
         $record.record_sha256=Get-CustomAppProductionExclusiveGateSha256V010 (Get-CustomAppProductionExclusiveGateRecordMaterialV010 $record)
         $bytes=[Text.Encoding]::UTF8.GetBytes(($record|ConvertTo-Json -Compress -Depth 6))
@@ -177,8 +204,33 @@ function Complete-CustomAppProductionExclusiveGateAfterTerminalJournalV010 {
         }
         $e=Read-CustomAppProductionRecoveryEvidenceV010 -AllowedRoot ([string]$lock.paths.root) -StoreDirectory ([string]$r.record.journal_store) -ExpectedTransactionId $ExpectedTransactionId
         if(-not[bool]$e.ok){return New-CustomAppProductionExclusiveGateDeniedV010 'exclusive-app-terminal-recovery-evidence-invalid'}
+        # Persist the consumed-ID retirement BEFORE deleting the active marker.
+        # A crash between these operations is fail-closed (both remain).
+        # The same Third-ID cannot be reused after terminal completion.
+        $retiredPath=Get-CustomAppProductionExclusiveGateRetiredPathV010 -Paths $lock.paths -ConsumptionId $ExpectedConsumptionId
+        if(Test-Path -LiteralPath $retiredPath){
+            return New-CustomAppProductionExclusiveGateDeniedV010 'exclusive-app-terminal-retirement-already-exists-active-claim-requires-reconciliation'
+        }
+        $stamp=[DateTimeOffset]::UtcNow.ToString('o')
+        $archive=[ordered]@{
+            schema=1;name=[string]$lock.paths.name;live_path=[string]$lock.paths.live
+            consumption_id=$ExpectedConsumptionId;transaction_id=$ExpectedTransactionId
+            terminal_phase=[string]$j.entry.phase;active_record_sha256=[string]$r.record_sha256
+            completed_utc=$stamp
+        }
+        $archiveMaterial=([string]$archive.schema+'|'+[string]$archive.name+'|'+[string]$archive.live_path+'|'+[string]$archive.consumption_id+'|'+[string]$archive.transaction_id+'|'+[string]$archive.terminal_phase+'|'+[string]$archive.active_record_sha256+'|'+[string]$archive.completed_utc)
+        $archive.receipt_sha256=Get-CustomAppProductionExclusiveGateSha256V010 $archiveMaterial
+        $archiveBytes=[Text.Encoding]::UTF8.GetBytes(($archive|ConvertTo-Json -Compress -Depth 6))
+        $s=$null
+        try{
+            $s=[IO.File]::Open($retiredPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+            $s.Write($archiveBytes,0,$archiveBytes.Length);$s.Flush($true)
+        }finally{if($null -ne $s){$s.Dispose()}}
+        $archived=Test-CustomAppProductionExclusiveGateRetiredReceiptV010 -Path $retiredPath -Paths $lock.paths -ConsumptionId $ExpectedConsumptionId
+        if(-not[bool]$archived.ok){return New-CustomAppProductionExclusiveGateDeniedV010 ('exclusive-app-retired-archive-readback-denied:'+[string]$archived.reason)}
+        if([string]$archived.receipt.active_record_sha256 -cne [string]$r.record_sha256){return New-CustomAppProductionExclusiveGateDeniedV010 'exclusive-app-retired-active-record-binding-mismatch'}
         [IO.File]::Delete([string]$lock.paths.record)
-        return [pscustomobject]@{ok=$true;reason='exclusive-app-terminal-journal-verified-and-active-claim-retired';phase=[string]$j.entry.phase;production_mutation_authorized=$false}
+        return [pscustomobject]@{ok=$true;reason='exclusive-app-terminal-journal-verified-consumption-archived-and-active-retired';phase=[string]$j.entry.phase;retired_record_path=$retiredPath;retired_receipt_sha256=[string]$archived.receipt.receipt_sha256;production_mutation_authorized=$false}
     }catch{return New-CustomAppProductionExclusiveGateDeniedV010 ('exclusive-app-terminal-recovery-check-threw:'+[string]$_.Exception.Message)}
     finally{if($null -ne $lock -and $null -ne $lock.lock_handle){$lock.lock_handle.Dispose()}}
 }
