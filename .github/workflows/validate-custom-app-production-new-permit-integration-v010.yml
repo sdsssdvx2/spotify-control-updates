@@ -42,7 +42,7 @@ jobs:
           if((@($changed|Where-Object{$_ -notin $allow})).Count -ne 0){throw "Scope escaped: $($changed -join ',')"}
           foreach($path in $allow){if($path -notin $changed){throw "Missing exact reviewed file: $path"}}
           $actual=(git rev-parse "HEAD:$builder").Trim()
-          if($actual -cne '4674c96a7f06dbf356f3e9c0e664fbf79690861b'){throw "Builder Git blob pin drift: $actual"}
+          if($actual -cne '29a6221efd9c2d265d4cc4cdcee0a3e246c771c5'){throw "Builder Git blob pin drift: $actual"}
           'NEW_PERMIT_INTEGRATION_VALIDATION_ONLY_SCOPE_PASS'
 
       - name: Build byte-exact parent and integrate eight qualified new-permit modules
