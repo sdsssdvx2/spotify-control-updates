@@ -74,7 +74,7 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Historical dependency materialization failed'}
           $d='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
           foreach($pin in @(
-            @("$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1",'3350cd974bb9f9ae7345e490449c4875d571bf95')
+            @("$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1",'3350cd974bb9f9ae7345e490449c4875d571bf95'),
             @("$d/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1",'224b9df9d020b74bd4d99c85ca6d06e28999101b')
           )){
             if((git hash-object $pin[0]).Trim() -cne [string]$pin[1]){throw "Historical overlay drift: $($pin[0])"}
