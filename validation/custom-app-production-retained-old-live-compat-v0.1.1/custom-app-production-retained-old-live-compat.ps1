@@ -60,7 +60,7 @@ function Test-CustomAppProductionRetainedOldLiveCompatibilitySelfTestV011 {
     # This is pure local-state mapping with no filesystem changes, I/O,
     # HMAC session material, process start, or network access.
     if([bool]$script:CustomAppProductionPipelineEnabled){throw 'retained-old-live compatibility selftest requires disabled production pipeline'}
-    if([string]$CustomAppProductionRetainedOldLiveCompatibilityQualifiedOriginalBlob -cne '0273d7e28a56759b1d0ec9cb9f037483b04d98d63'){
+    if([string]$CustomAppProductionRetainedOldLiveCompatibilityQualifiedOriginalBlob -cne '0273d7e28a56759b1d0ec9cbf037483b04d98d63'){
         # Deliberately keep pin exact: no silent fallback to unqualified old code.
         throw 'qualified original restore mapping source pin drift'
     }
