@@ -105,6 +105,26 @@ try{
         $savedCase=$saved[$phase]
         $env:RUNNER_TEMP=[string]$savedCase.root;$env:TEMP=[string]$savedCase.root;$env:TMP=[string]$savedCase.root
         $state=$savedCase.state
+        # Real file-system negative: do NOT admit a tampered retained old-live,
+        # even after the new narrow phase mapping is active. This deliberately
+        # modifies ONLY a single disposable runner fixture and restores it.
+        $tamperLeaf=Join-Path ([string]$state.old_live_path) ('.ci-reject-extra-'+[Guid]::NewGuid().ToString('N'))
+        Assert-AR (-not(Test-Path -LiteralPath $tamperLeaf)) 'tamper-path-collision'
+        $tamperResult=Join-Path $savedCase.root 'retained-old-live-tamper-result.json'
+        $tamperExit=-1
+        try{
+            [IO.File]::WriteAllText($tamperLeaf,'invalid-extra-file-during-recovery',([Text.UTF8Encoding]::new($false)))
+            $tamperExit=Invoke-ARChild -Path $worker -Arguments @('-StatePath',$savedCase.path,'-ResultPath',$tamperResult) -Log (Join-Path $PSScriptRoot ($savedCase.tag+'-retained-old-live-tamper.log'))
+        }finally{
+            if(Test-Path -LiteralPath $tamperLeaf -PathType Leaf){[IO.File]::Delete($tamperLeaf)}
+        }
+        Assert-AR ($tamperExit-ne0) ('tampered-old-live-accepted-'+$phase)
+        $tamper=Read-ARJson $tamperResult
+        Assert-AR (-not[bool]$tamper.admission_ok -and -not[bool]$tamper.executor_ok -and [string]$tamper.error -match 'restore-resume-old-live-tree-mismatch') ('tampered-old-live-not-rejected-by-full-tree-fingerprint-'+$phase+' '+[string]$tamper.error)
+        Assert-AR (-not(Test-Path -LiteralPath ([string]$state.apply_count_path)) -and (Read-ARCounter ([string]$state.primary_apply_count_path)) -eq1) ('tamper-case-ran-apply-'+$phase)
+        Assert-AR (-not(Test-Path -LiteralPath $tamperLeaf)) 'tamper-file-remained-after-negative'
+        $cases++
+        Write-Host ('TRIPLE_ID_APPLY_CRASH_TAMPERED_OLD_LIVE_DENIED_PASS phase='+$phase+' full_tree_sha256_rechecked=true restore_not_started=true')
         $resultPath=Join-Path $savedCase.root 'recovery-result.json'
         $childExit=Invoke-ARChild -Path $worker -Arguments @('-StatePath',$savedCase.path,'-ResultPath',$resultPath) -Log (Join-Path $PSScriptRoot ($savedCase.tag+'-fresh-process-rollback.log'))
         $result=Read-ARJson $resultPath
@@ -124,7 +144,7 @@ try{
         $cases++
         Write-Host ('TRIPLE_ID_REAL_ZIP_AMBIGUOUS_APPLY_RESTART_PASS phase='+$phase+' fresh_process=true narrow_mapping=true original_denial_reproduced=true new_fake_apply_count=1 old_fake_recovery_apply_count=1 rollback_complete_durable=true wrong_id_and_replay_denied=true no_key_persisted=true')
     }
-    Assert-AR ($cases-eq5) ('integration-scenario-count-drift-'+$cases)
+    Assert-AR ($cases-eq7) ('integration-scenario-count-drift-'+$cases)
     $evidence=[ordered]@{
         schema=1;status='PASS';validation_only=$true;new_scenario_count=$cases
         normal_forward_parent='b4cf2461b087504894f56c4f09d1cc12cf5eb5e5'
@@ -142,7 +162,7 @@ try{
         tested_sha=(git rev-parse HEAD).Trim()
     }
     [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'evidence.json'),($evidence|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
-    Write-Host 'TRIPLE_ID_REAL_ZIP_APPLY_CRASH_RESTART_ALL_EVIDENCE_PASS ambiguous_phases=2 original_denial_reproduced=true narrow_overlay=true fresh_process=true'
+    Write-Host 'TRIPLE_ID_REAL_ZIP_APPLY_CRASH_RESTART_ALL_EVIDENCE_PASS ambiguous_phases=2 original_denial_reproduced=true narrow_overlay=true fresh_process=true retained_old_live_tamper_denied=true'
 } finally {
     $env:SC_TID_APPLY_INTERRUPT_PHASE=$null;$env:SC_TID_APPLY_CRASH_STATE_PATH=$null
     $env:RUNNER_TEMP=$prevRoot;$env:TEMP=$prevTemp;$env:TMP=$prevTmp
