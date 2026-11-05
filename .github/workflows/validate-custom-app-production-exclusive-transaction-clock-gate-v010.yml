@@ -43,9 +43,9 @@ jobs:
           $unexpected=@($changed|Where-Object{$_-notin$allowed})
           if($unexpected.Count){throw ('unapproved scope '+($unexpected -join ','))}
           foreach($p in $allowed){if($p-notin$changed){throw ('expected new file missing '+$p)}}
-          if((git hash-object $module).Trim()-cne'9928385a7eebda0d5156f491bbdbd1ef360c46d4'){throw 'module code under test changed'}
+          if((git hash-object $module).Trim()-cne'5085eab4fa12ac1c16b37e0493f82b5e6ec78372'){throw 'module code under test changed'}
           if((git hash-object $test).Trim()-cne'8d48424d4c252713656d3f863b0c0b457d27b686'){throw 'test code under review changed'}
-          if((git hash-object $generator).Trim()-cne'699246d891dda5bdd8c96485b2c99cf4a33f762a'){throw 'SHA-pinned original fixture transformation changed'}
+          if((git hash-object $generator).Trim()-cne'14f912412ecd21baad9d72d9d0e4ebb8f853760e'){throw 'SHA-pinned original fixture transformation changed'}
           foreach($p in @('bin/spotify-control.ps1','bin/addon-manager.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
             git diff --quiet $parent HEAD -- $p
             if($LASTEXITCODE){throw ('production protected path modified '+$p)}
@@ -167,7 +167,7 @@ jobs:
           foreach($marker in @(
             'TRIPLE_ID_EXCLUSIVE_REAL_WALLCLOCK_VERIFIED_PASS synthetic_old_now_denied=true fixture_now_current=true',
             'TRIPLE_ID_EXCLUSIVE_REAL_JOURNALED_SWAP_PASS active_claim_persisted=true fresh_hmac_and_current_utc=true recovery_possible=true',
-            'TRIPLE_ID_EXCLUSIVE_REAL_TERMINAL_RETIREMENT_PASS wrong_consumption_denied=true wrong_transaction_denied=true durable_rollback_complete_required=true active_claim_retired=true archived_consumption_replay_denied=true',
+            'TRIPLE_ID_EXCLUSIVE_REAL_TERMINAL_RETIREMENT_PASS wrong_consumption_denied=true wrong_transaction_denied=true durable_rollback_complete_required=true active_claim_retired=true archived_consumption_replay_denied=true interrupted_archive_crash_reconciled=true',
             'TRIPLE_ID_EXCLUSIVE_REAL_ZIP_END_TO_END_PASS third_hmac_real_zip=true current_utc=true active_claim_before_swap=true independent_process_old_code_restore=true terminal_lock_retirement=true replay_denied=true production_disabled=true'
           )){
             if(-not $text.Contains($marker)){throw ('real ZIP guard missing verified proof '+$marker)}
