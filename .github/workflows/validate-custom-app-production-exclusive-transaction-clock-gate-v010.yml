@@ -23,14 +23,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: "\${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
       - name: Exact lineage, frozen main, source-only scope and protection audit
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           $parent='d9a8e9ac77c3161bf3ad6e4eabf674212d495e0e'
           $production='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
-          if((git rev-parse HEAD).Trim() -cne '\${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'wrong tested SHA'}
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'wrong tested SHA'}
           if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'not descended from qualified PR220'}
           if((git rev-parse origin/main).Trim() -cne $production){throw 'main moved'}
           $d='validation/custom-app-production-exclusive-transaction-clock-gate-v0.1.0'
@@ -86,7 +86,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: exclusive-app-clock-gate-\${{ github.run_id }}
+          name: exclusive-app-clock-gate-${{ github.run_id }}
           path: |
             validation/custom-app-production-exclusive-transaction-clock-gate-v0.1.0/windows-ci.log
             validation/custom-app-production-exclusive-transaction-clock-gate-v0.1.0/evidence.json
