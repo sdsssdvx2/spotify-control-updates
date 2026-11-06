@@ -27,7 +27,7 @@ def main():
     src=PARENT_SCRIPT.read_text('utf-8').replace('\r\n','\n')
     dot=". (Join-Path $root 'validation/custom-app-cooperative-cross-engine-lock/cross-engine-transaction-lock.ps1')"
     src=one(src,dot,dot+"\n$script:RecoveryEnrollmentCreated=$false\n. (Join-Path $root 'validation/custom-app-durable-recovery-inventory/durable-recovery-inventory.ps1')",'load signed real E2E inventory')
-    preswap="Write-Host 'USER_JOURNAL_REAL_SIGNED_THIRD_ID_PRE_SWAP_LOCATOR_BOUND_PASS"
+    preswap="Write-Host 'USER_TERMINAL_SIGNED_ID_RESERVED_BEFORE_REAL_ATOMIC_SWAP_PASS'"
     m=src.index(preswap)
     if m<0:raise RuntimeError('previous signed ZIP preswap receipt missing')
     end=src.index("\n",m)
