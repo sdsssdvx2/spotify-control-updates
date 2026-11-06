@@ -22,6 +22,7 @@ def one(s,a,b,label):
     return s.replace(a,b,1)
 def main():
     pin(PARENT,PARENT_BLOB);pin(MODULE,MODULE_BLOB)
+    pin(ROOT/'validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/custom-app-production-recovery-cleanup-resume-admission.ps1', '387d97b10d493b3794b24fba2bac67cf39491444')
     if PARENT_SCRIPT.exists() or OUT.exists():
         raise RuntimeError('protected real signed ZIP derivation will not overwrite original')
     ns=runpy.run_path(str(PARENT),run_name='qualified-readonly-source-derivation')
@@ -30,6 +31,7 @@ def main():
     load=". (Join-Path $root 'validation/custom-app-production-recovery-plan-contract-v0.1.0/custom-app-production-recovery-plan.ps1')"
     imports="""
 . (Join-Path $root 'validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1')
+. (Join-Path $root 'validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/custom-app-production-recovery-cleanup-resume-admission.ps1')
 . (Join-Path $root 'validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1')
 . (Join-Path $root 'validation/custom-app-protected-restore-readiness/protected-restore-readiness.ps1')"""
     s=one(s,load,load+imports,'historical pure plan and signed evidence imports')
