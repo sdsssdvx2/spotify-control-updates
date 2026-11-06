@@ -137,6 +137,8 @@ Write-Host 'NATIVE_REFRESH_REAL_OFFICIAL_SINGLE_CONFIGURED_APP_NARROW_REFRESH_PA
 # A disposable configuration + source + backup clone can narrow the real
 # upstream native refresh WITHOUT changing the canonical user's config.
 # This is still hosted-only and is not an execution permit for actual Spotify.
+Set-SyntheticConfig -Apps 'alpha'
+$scopedConfigContent=[IO.File]::ReadAllText($config)
 Set-SyntheticConfig -Apps 'alpha|beta'
 $userConfigHash=(Get-FileHash -LiteralPath $config -Algorithm SHA256).Hash
 $userAlphaHash=(Get-FileHash -LiteralPath (Join-Path $custom 'alpha\index.js') -Algorithm SHA256).Hash
@@ -150,12 +152,7 @@ foreach($d in @($scoped,$scopedApp,$scopedBackup)){
 [IO.File]::WriteAllText((Join-Path $scopedApp 'index.js'),
     'console.log("ALPHA_SCOPED_V5");',[Text.UTF8Encoding]::new($false))
 $scopedCfg=Join-Path $scoped 'config-xpui.ini'
-$text=[IO.File]::ReadAllText($config)
-if(([regex]::Matches($text,[regex]::Escape('custom_apps = alpha|beta'))).Count -ne 1){
-    throw 'NATIVE_REFRESH_SCOPE_SOURCE_CONFIG_NOT_SINGLE_ANCHOR'
-}
-[IO.File]::WriteAllText($scopedCfg,$text.Replace('custom_apps = alpha|beta',
-    'custom_apps = alpha'),[Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText($scopedCfg,$scopedConfigContent,[Text.UTF8Encoding]::new($false))
 $pre=@{}
 foreach($entry in @(Get-ChildItem -LiteralPath $xpui -File -Recurse -ErrorAction Stop)){
     $pre[$entry.FullName]=[pscustomobject]@{
