@@ -1,0 +1,145 @@
+name: Validate two-way legacy settlement and DPAPI journal enrollment isolation
+on:
+  push:
+    branches: [validate/custom-app-legacy-journal-settlement-barrier]
+    paths:
+      - 'validation/custom-app-legacy-journal-settlement-barrier/**'
+      - '.github/workflows/validate-custom-app-legacy-journal-settlement-barrier.yml'
+  pull_request:
+    branches: [validate/custom-app-missing-live-recovery]
+    paths:
+      - 'validation/custom-app-legacy-journal-settlement-barrier/**'
+      - '.github/workflows/validate-custom-app-legacy-journal-settlement-barrier.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  actual-normal-legacy-actions-journal-conflict-windows:
+    runs-on: windows-2025
+    timeout-minutes: 95
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Qualify exactly four review paths, original sources and unchanged production main
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='0af3158ea0e3878fbc12dc97857b87a8918934db'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'wrong tested ref'}
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'previous signed ZIP recovery provenance invalid'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main changed'}
+          $d='validation/custom-app-legacy-journal-settlement-barrier'
+          $pins=@{
+            "$d/legacy-settlement-barrier.ps1"='ca79b192c99cca29422878caa584075bd39bc845'
+            "$d/test_legacy_settlement_barrier.ps1"='95b90f1c1d8b631973bc6994e69087ee911d6cbc'
+            "$d/build_candidate.py"='064e4a517f5d146289b686f0833dd85e28caaba6'
+          }
+          $allow=@($pins.Keys)+@('.github/workflows/validate-custom-app-legacy-journal-settlement-barrier.yml')
+          $changed=@(git diff --name-only "$parent...HEAD")
+          if($changed.Count -ne 4 -or @($changed|Where-Object{$_ -notin $allow}).Count){throw ('source escaped scope '+($changed -join ','))}
+          foreach($p in $pins.Keys){if((git hash-object $p).Trim() -cne $pins[$p]){throw ('unqualified source '+$p)}}
+          foreach($p in @('bin/addon-manager.ps1','bin/spotify-control.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
+            git diff --quiet $parent HEAD -- $p
+            if($LASTEXITCODE -ne 0){throw ('protected operating file changed '+$p)}
+          }
+          Write-Host 'DUAL_LEGACY_JOURNAL_SETTLEMENT_REVIEW_SCOPE_FROZEN_PASS'
+      - name: Real qualified Addon Manager build and WinPS5.1 parser, exact parent inverse
+        shell: powershell
+        timeout-minutes: 50
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-legacy-journal-settlement-barrier'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'actual prior full-chain bundle builder failed'}
+          $r=Get-Content "$d/candidate-validation.json" -Raw|ConvertFrom-Json
+          $a="$d/out/bin/addon-manager.ps1"
+          $sha=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sha -cne [string]$r.addon_sha256 -or (Get-Item $a).Length -ne [int64]$r.addon_size){throw 'actual bundle size/hash mismatch'}
+          if((Get-FileHash "$d/out/bin/spotify-control.ps1" -Algorithm SHA256).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control modified'}
+          if(-not[bool]$r.exact_frozen_parent_inverse -or -not[bool]$r.original_fullchain_hard_disabled -or
+            -not[bool]$r.original_Update_AutoApps_unchanged -or
+            -not[bool]$r.CommitLast_first_statement_exclusivity -or
+            -not[bool]$r.RollbackLast_first_statement_exclusivity -or
+            -not[bool]$r.cross_engine_atomic_lock_not_yet_implemented -or
+            [bool]$r.normal_new_auto_update_enabled){throw 'qualified two-way guard evidence incomplete'}
+          foreach($f in @($a,"$d/legacy-settlement-barrier.ps1","$d/test_legacy_settlement_barrier.ps1")){
+            $tokens=$null;$errs=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tokens,[ref]$errs)
+            if($errs.Count){$errs|Select-Object -First 8|ForEach-Object{Write-Host ($_.Extent.StartLineNumber.ToString()+':'+$_.Message)};throw ('PowerShell 5.1 parser failed '+$f)}
+          }
+          "DUAL_LEGACY_ADDON_SHA=$sha"|Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "DUAL_LEGACY_ADDON_SIZE=$((Get-Item $a).Length)"|Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "DUAL_LEGACY_SETTLEMENT_REAL_ADDON_PS51_PASS sha256=$sha"
+      - name: Real Addon Manager SelfTest with previous legacy CommitLast cycle retained
+        shell: powershell
+        timeout-minutes: 20
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-legacy-journal-settlement-barrier'
+          $sandbox=Join-Path $env:RUNNER_TEMP ('dual-engine-selftest-'+[Guid]::NewGuid().ToString('N'))
+          $env:LOCALAPPDATA=Join-Path $sandbox 'Local'
+          $env:APPDATA=Join-Path $sandbox 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/out/bin/addon-manager.ps1" -Action SelfTest *>&1|Tee-Object -FilePath "$d/addon-selftest.log"|Out-Null
+          $code=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($code -ne 0){Get-Content "$d/addon-selftest.log" -Tail 25|ForEach-Object{Write-Host $_};throw ('actual Addon Manager SelfTest failed '+$code)}
+          $log=Get-Content "$d/addon-selftest.log" -Raw
+          foreach($marker in @('CUSTOM_APP_LEGACY_SETTLEMENT_BARRIER_SELFTEST_PASS','CUSTOM_APP_MISSING_LIVE_RECOVERY_SELFTEST_PASS','CUSTOM_APP_USER_JOURNAL_LOCATOR_SELFTEST_PASS')){
+            if(-not $log.Contains($marker)){throw ('missing original/new selftest '+$marker)}
+          }
+          Write-Host 'DUAL_LEGACY_SETTLEMENT_PREVIOUS_LEGACY_COMMIT_CYCLE_SELFTEST_PASS'
+      - name: Actual legacy CommitLast RollbackLast Update Force denial and new engine pre-enrollment read-only matrix
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-legacy-journal-settlement-barrier'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/test_legacy_settlement_barrier.ps1" -CandidatePath "$d/out/bin/addon-manager.ps1" *>&1|Tee-Object -FilePath "$d/two-way-windows.log"|Out-Null
+          $code=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($code -ne 0){Get-Content "$d/two-way-windows.log" -Tail 35|ForEach-Object{Write-Host $_};throw ('actual two-way settlement Windows test failed '+$code)}
+          $log=Get-Content "$d/two-way-windows.log" -Raw
+          foreach($marker in @('TWO_WAY_LEGACY_NEW_ENGINE_PREFLIGHT_MATRIX_PASS','ACTUAL_TWO_WAY_LEGACY_ENTRYPOINT_DENIED_PASS action=CommitLast','ACTUAL_TWO_WAY_LEGACY_ENTRYPOINT_DENIED_PASS action=RollbackLast','ACTUAL_TWO_WAY_LEGACY_ENTRYPOINT_DENIED_PASS action=Update','ACTUAL_COMMITLAST_ROLLBACKLAST_UPDATE_FORCE_TWO_WAY_BARRIER_PASS')){
+            if(-not $log.Contains($marker)){throw ('real Windows independent entrypoint proof missing '+$marker)}
+          }
+          Write-Host 'DUAL_LEGACY_SETTLEMENT_THREE_REAL_ACTIONS_E2E_PASS'
+      - name: Byte-exact deterministic Addon Manager rebuild and final main freeze
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-legacy-journal-settlement-barrier'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'repeat generated candidate build failed'}
+          $a="$d/out/bin/addon-manager.ps1"
+          $sha=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sha -cne $env:DUAL_LEGACY_ADDON_SHA -or (Get-Item $a).Length -ne [int64]$env:DUAL_LEGACY_ADDON_SIZE){throw 'candidate is not reproducible'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main advanced'}
+          [ordered]@{
+            schema=1;result='PASS';tested_commit=(git rev-parse HEAD).Trim()
+            actual_candidate_sha256=$sha;actual_candidate_bytes=(Get-Item $a).Length
+            legacy_CommitLast_gate='PASS';legacy_RollbackLast_gate='PASS'
+            legacy_Update_gate='PREVIOUSLY_PINNED'
+            new_journal_enrollment_pending_legacy_denied='PASS'
+            qualified_parent_real_signed_zip_crash_recovery='0af3158ea0e3878fbc12dc97857b87a8918934db'
+            cross_engine_atomic_lock_implemented=$false
+            normal_new_auto_update_enabled=$false
+            operating_main_unchanged=$true
+            installed_user_spotify_touched=$false
+          }|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          Write-Host "DUAL_LEGACY_SETTLEMENT_TWO_BUILDS_MAIN_FROZEN_PASS sha256=$sha"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-journal-two-way-settlement-${{ github.run_id }}
+          path: |
+            validation/custom-app-legacy-journal-settlement-barrier/candidate-validation.json
+            validation/custom-app-legacy-journal-settlement-barrier/ci-evidence.json
+            validation/custom-app-legacy-journal-settlement-barrier/addon-selftest.log
+            validation/custom-app-legacy-journal-settlement-barrier/two-way-windows.log
+          retention-days: 14
+          if-no-files-found: warn
