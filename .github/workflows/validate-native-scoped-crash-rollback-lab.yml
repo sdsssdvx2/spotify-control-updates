@@ -128,6 +128,9 @@ jobs:
             throw 'official native mutation proof missing despite exit 71'
           }
           Write-Host 'NATIVE_SCOPED_V017_OFFICIAL_APPLIED_THEN_ABRUPT_TERMINATION_PASS'
+          # The updater's 71 is expected and verified; do not leak it as the runner shell result.
+          $global:LASTEXITCODE=0
+          exit 0
       - name: Fresh process denies unrelated asset mutation and tampered durable intent without touching target
         shell: powershell
         timeout-minutes: 8
