@@ -34,7 +34,7 @@ jobs:
           $pins=@{
             "$d/cross-engine-transaction-lock.ps1"='5139a8c9f461b892fbd30d7dfebec97816863844'
             "$d/test_cross_engine_lock.ps1"='697b296ad7b9632bdc800747cfb5f5c51a8a4324'
-            "$d/build_candidate.py"='e9d7b5463d673984e0238fe6599cb4bae812dede'
+            "$d/build_candidate.py"='9bb911d3bfd75c283d75970bd06d5ee856c8a5c7'
           }
           $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-cooperative-cross-engine-lock.yml')
           $changed=@(git diff --name-only "$parent...HEAD")
