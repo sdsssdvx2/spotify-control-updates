@@ -1,0 +1,147 @@
+name: Validate native official Spicetify custom-app refresh effect scope
+on:
+  push:
+    branches: [validate/native-spicetify-refresh-footprint]
+    paths:
+      - 'validation/native-spicetify-refresh-footprint/**'
+      - '.github/workflows/validate-native-spicetify-refresh-footprint.yml'
+  pull_request:
+    branches: [validate/custom-app-spicetify-sealed-enrollment]
+    paths:
+      - 'validation/native-spicetify-refresh-footprint/**'
+      - '.github/workflows/validate-native-spicetify-refresh-footprint.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  official-cli-synthetic-windows-only:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Frozen main and exact new candidate scope
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='b8c6476ab8fd11bfd24592c0b378ce300daa7aeb'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'checked out unexpected head'}
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'PR238 parent changed'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main drift'}
+          $p='validation/native-spicetify-refresh-footprint/audit_native_refresh.ps1'
+          if((git hash-object $p).Trim() -cne '27521b70a4887d371de3e2c87344763e1aa54766'){throw 'candidate source drift'}
+          $changed=@(git diff --name-only "$base...HEAD")
+          if($changed.Count -ne 2 -or @($changed|Where-Object{$_ -notin @($p,'.github/workflows/validate-native-spicetify-refresh-footprint.yml')}).Count){
+            throw 'unexpected production source modifications'
+          }
+          $tokens=$null;$errs=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$tokens,[ref]$errs)
+          if($errs.Count){throw 'Windows PS5.1 native refresh audit parser errors'}
+          Write-Host 'NATIVE_REFRESH_OFFICIAL_SOURCE_SCOPE_MAIN_FROZEN_PASS'
+      - name: Verify v2.46.4 upstream Go function boundaries by exact Git blob hash
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP ('native-source-'+[guid]::NewGuid().ToString('N'))
+          [void][IO.Directory]::CreateDirectory($root)
+          foreach($e in @(
+            @('spicetify.go','70080796654af5a09941fd4fb97582b498d827ce'),
+            @('src/cmd/apply.go','e7bb43c810e4c0c56dc104366b277d99de1a30c7'),
+            @('src/cmd/cmd.go','87391f85d44da055b56596eb1f6f063ef0812975')
+          )){
+            $path=[string]$e[0];$expected=[string]$e[1]
+            $out=Join-Path $root ([IO.Path]::GetFileName($path))
+            Invoke-WebRequest -UseBasicParsing -Uri ('https://raw.githubusercontent.com/spicetify/cli/v2.46.4/'+$path) -OutFile $out
+            if((git hash-object $out).Trim() -cne $expected){throw ('upstream Go source hash changed '+$path)}
+          }
+          $entry=[IO.File]::ReadAllText((Join-Path $root 'spicetify.go'))
+          $apply=[IO.File]::ReadAllText((Join-Path $root 'apply.go'))
+          if(-not$entry.Contains('cmd.RefreshApps()') -or
+             -not$apply.Contains('list = featureSection.Key("custom_apps").Strings("|")') -or
+             -not$apply.Contains('spinner.Success("Refreshed custom apps")')){
+            throw 'upstream source behavior not matched'
+          }
+          Write-Host 'NATIVE_REFRESH_OFFICIAL_GO_SOURCE_HASH_AND_SEMANTICS_PASS'
+      - name: Download and pin exact official v2.46.4 Windows x64 executable
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP ('official-refresh-'+[guid]::NewGuid().ToString('N'))
+          [void][IO.Directory]::CreateDirectory($root)
+          $zip=Join-Path $root 'spicetify.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip' -OutFile $zip
+          if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f' -or
+             (Get-Item $zip).Length -ne 7795758){throw 'upstream official ZIP failed SHA+size'}
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z=[IO.Compression.ZipFile]::OpenRead($zip)
+          try{
+            $size=[long]0
+            foreach($e in $z.Entries){
+              $rel=$e.FullName.Replace('/','\')
+              if([IO.Path]::IsPathRooted($rel) -or $rel.StartsWith('\') -or $rel.Contains('..\') -or $rel.Contains(':')){throw 'unsafe upstream ZIP path'}
+              $size+=[long]$e.Length
+              if($size -gt 104857600){throw 'upstream ZIP inflated too large'}
+            }
+          }finally{$z.Dispose()}
+          $out=Join-Path $root 'extract'
+          Expand-Archive -LiteralPath $zip -DestinationPath $out
+          $exes=@(Get-ChildItem -LiteralPath $out -Recurse -File -Filter spicetify.exe)
+          if($exes.Count -ne 1 -or
+             (Get-FileHash $exes[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+            throw 'official exe hash unexpected'
+          }
+          "NATIVE_REFRESH_OFFICIAL_EXE=$($exes[0].FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host 'NATIVE_REFRESH_OFFICIAL_ZIP_AND_EXECUTABLE_SHA_PASS'
+      - name: Real official CLI native refresh positive and negative effect tests under isolated fake Spotify
+        shell: powershell
+        timeout-minutes: 12
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/native-spicetify-refresh-footprint/audit_native_refresh.ps1'
+          $log='validation/native-spicetify-refresh-footprint/windows-native-refresh-evidence.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -OfficialExecutable $env:NATIVE_REFRESH_OFFICIAL_EXE *>&1 |
+            Tee-Object -FilePath $log|Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 0){Get-Content $log -Tail 65|ForEach-Object{Write-Host $_};throw ('native refresh real CLI synthetic audit failed '+$rc)}
+          $all=Get-Content $log -Raw
+          foreach($marker in @(
+            'NATIVE_REFRESH_REAL_OFFICIAL_TWO_ENABLED_APPS_BOTH_REFRESHED_PASS',
+            'NATIVE_REFRESH_REAL_OFFICIAL_PARTIAL_FAILURE_EXIT_ZERO_PASS',
+            'NATIVE_REFRESH_REAL_OFFICIAL_TARGET_ARGUMENT_SIDE_EFFECT_BEFORE_ERROR_PASS',
+            'NATIVE_REFRESH_REAL_OFFICIAL_SINGLE_CONFIGURED_APP_NARROW_REFRESH_PASS',
+            'NATIVE_REFRESH_REAL_OFFICIAL_CLI_SOURCE_SEMANTICS_PROVED_NO_USER_SPOTIFY_PASS'
+          )){if(-not$all.Contains($marker)){throw ('required native effect marker missing '+$marker)}}
+          Write-Host 'NATIVE_REFRESH_REAL_EXE_ALL_EFFECT_SCOPE_TESTS_PASS'
+      - name: Operating main still immutable; no on-PC Spotify effects
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main changed'}
+          $p='validation/native-spicetify-refresh-footprint/evidence.json'
+          [ordered]@{
+            schema=1;result='PASS';head=(git rev-parse HEAD).Trim()
+            exact_official_cli='v2.46.4 windows x64'
+            official_exe_sha256='3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'
+            all_configured_apps_refreshed=$true
+            partial_app_error_can_return_zero=$true
+            extra_target_argument_can_mutate_before_error=$true
+            single_configured_app_only_did_not_mutate_other_app=$true
+            native_exe_only_executed_in_disposable_synthetic_runner_profile=$true
+            actual_spotify_install_touched=$false;production_execution_authorized=$false
+            main_frozen=$true
+          }|ConvertTo-Json|Set-Content $p -Encoding UTF8
+          Write-Host 'NATIVE_REFRESH_OPERATING_MAIN_UNCHANGED_PASS'
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-refresh-footprint-${{ github.run_id }}
+          path: |
+            validation/native-spicetify-refresh-footprint/windows-native-refresh-evidence.log
+            validation/native-spicetify-refresh-footprint/evidence.json
+          retention-days: 14
+          if-no-files-found: warn
