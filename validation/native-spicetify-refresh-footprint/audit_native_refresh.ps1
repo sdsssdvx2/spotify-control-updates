@@ -133,4 +133,81 @@ if((Get-FileHash -LiteralPath $sentinel -Algorithm SHA256).Hash -cne $sentinelSh
     throw 'NATIVE_REFRESH_AUDIT_PROTECTED_SENTINEL_CHANGED'
 }
 Write-Host 'NATIVE_REFRESH_REAL_OFFICIAL_SINGLE_CONFIGURED_APP_NARROW_REFRESH_PASS'
+
+# A disposable configuration + source + backup clone can narrow the real
+# upstream native refresh WITHOUT changing the canonical user's config.
+# This is still hosted-only and is not an execution permit for actual Spotify.
+Set-SyntheticConfig -Apps 'alpha|beta'
+$userConfigHash=(Get-FileHash -LiteralPath $config -Algorithm SHA256).Hash
+$userAlphaHash=(Get-FileHash -LiteralPath (Join-Path $custom 'alpha\index.js') -Algorithm SHA256).Hash
+$scoped=Join-Path $sandboxRoot 'ScopedConfig'
+$scopedApp=Join-Path $scoped 'CustomApps\alpha'
+$scopedBackup=Join-Path $scoped 'Backup'
+foreach($d in @($scoped,$scopedApp,$scopedBackup)){
+    [void][IO.Directory]::CreateDirectory($d)
+}
+[IO.File]::WriteAllBytes((Join-Path $scopedBackup 'xpui.spa'),[byte[]](0x50,0x4b))
+[IO.File]::WriteAllText((Join-Path $scopedApp 'index.js'),
+    'console.log("ALPHA_SCOPED_V5");',[Text.UTF8Encoding]::new($false))
+$scopedCfg=Join-Path $scoped 'config-xpui.ini'
+$text=[IO.File]::ReadAllText($config)
+if($text.Split('custom_apps = alpha|beta').Length -ne 2){
+    throw 'NATIVE_REFRESH_SCOPE_SOURCE_CONFIG_NOT_SINGLE_ANCHOR'
+}
+[IO.File]::WriteAllText($scopedCfg,$text.Replace('custom_apps = alpha|beta',
+    'custom_apps = alpha'),[Text.UTF8Encoding]::new($false))
+$pre=@{}
+foreach($entry in @(Get-ChildItem -LiteralPath $xpui -File -Recurse -ErrorAction Stop)){
+    $pre[$entry.FullName]=[pscustomobject]@{
+        content=[IO.File]::ReadAllBytes($entry.FullName)
+        sha=(Get-FileHash -LiteralPath $entry.FullName -Algorithm SHA256).Hash
+    }
+}
+$betaPrior=(Get-FileHash -LiteralPath $betaJS -Algorithm SHA256).Hash
+$alphaPrior=(Get-FileHash -LiteralPath $alphaJS -Algorithm SHA256).Hash
+$env:SPICETIFY_CONFIG=$scoped
+$env:SPICETIFY_STATE=$scoped
+try{
+    $scopedResult=Invoke-SyntheticRefresh -Arguments @('-a','refresh') -LogName 'isolated-scoped-refresh.log'
+}finally{
+    Remove-Item Env:SPICETIFY_CONFIG,Env:SPICETIFY_STATE -ErrorAction SilentlyContinue
+}
+if($scopedResult.exit_code -ne 0 -or
+   -not[IO.File]::ReadAllText($alphaJS).Contains('ALPHA_SCOPED_V5') -or
+   (Get-FileHash -LiteralPath $alphaJS -Algorithm SHA256).Hash -ceq $alphaPrior -or
+   (Get-FileHash -LiteralPath $betaJS -Algorithm SHA256).Hash -cne $betaPrior -or
+   (Get-FileHash -LiteralPath $config -Algorithm SHA256).Hash -cne $userConfigHash -or
+   (Get-FileHash -LiteralPath (Join-Path $custom 'alpha\index.js') -Algorithm SHA256).Hash -cne $userAlphaHash){
+    throw 'NATIVE_REFRESH_SCOPED_CLONED_PROFILE_NOT_CONFINED'
+}
+$postFiles=@(Get-ChildItem -LiteralPath $xpui -File -Recurse -ErrorAction Stop)
+$allowed=@($alphaJS,(Join-Path $xpui 'spicetify-routes-alpha.json'),(Join-Path $xpui 'spicetify-routes-alpha.css'))
+foreach($entry in $postFiles){
+    if($entry.FullName -notin $allowed){
+        if(-not$pre.ContainsKey($entry.FullName) -or
+           (Get-FileHash -LiteralPath $entry.FullName -Algorithm SHA256).Hash -cne [string]$pre[$entry.FullName].sha){
+            throw 'NATIVE_REFRESH_CLONED_PROFILE_OUTSIDE_APP_OUTPUT_CHANGED'
+        }
+    }
+}
+Write-Host 'NATIVE_REFRESH_OFFICIAL_CLONED_CONFIG_SINGLE_APP_SOURCE_PROFILE_CONFINE_PASS'
+# Explicitly simulate post-apply rejection, restore every managed target artifact
+# to its byte-for-byte pre-apply contents, and check every unrelated artifact.
+foreach($path in $allowed){
+    if($pre.ContainsKey($path)){
+        [IO.File]::WriteAllBytes($path,[byte[]]$pre[$path].content)
+    }elseif([IO.File]::Exists($path)){
+        [IO.File]::Delete($path)
+    }
+}
+$afterRestore=@(Get-ChildItem -LiteralPath $xpui -File -Recurse -ErrorAction Stop)
+if($afterRestore.Count -ne $pre.Count){throw 'NATIVE_REFRESH_ROLLBACK_FILE_COUNT_NOT_RESTORED'}
+foreach($entry in $afterRestore){
+    if(-not$pre.ContainsKey($entry.FullName) -or
+       (Get-FileHash -LiteralPath $entry.FullName -Algorithm SHA256).Hash -cne [string]$pre[$entry.FullName].sha){
+        throw 'NATIVE_REFRESH_ROLLBACK_SNAPSHOT_BYTES_NOT_RESTORED'
+    }
+}
+Write-Host 'NATIVE_REFRESH_OFFICIAL_SCOPED_REFRESH_BYTE_EXACT_ROLLBACK_SYNTHETIC_PASS'
+
 Write-Host 'NATIVE_REFRESH_REAL_OFFICIAL_CLI_SOURCE_SEMANTICS_PROVED_NO_USER_SPOTIFY_PASS'
