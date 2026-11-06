@@ -18,16 +18,16 @@ if(-not $exe.StartsWith(($runner+'\'),[StringComparison]::OrdinalIgnoreCase) -or
    '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
     throw 'NATIVE_REFRESH_AUDIT_OFFICIAL_EXE_SHA_MISMATCH'
 }
-$home=Join-Path $env:RUNNER_TEMP ('native-refresh-audit-'+[guid]::NewGuid().ToString('N'))
-$roaming=Join-Path $home 'Roaming';$local=Join-Path $home 'Local'
-$user=Join-Path $home 'User';$spicetify=Join-Path $roaming 'spicetify'
-$spotify=Join-Path $home 'FakeSpotify';$apps=Join-Path $spotify 'Apps'
+$sandboxRoot=Join-Path $env:RUNNER_TEMP ('native-refresh-audit-'+[guid]::NewGuid().ToString('N'))
+$roaming=Join-Path $sandboxRoot 'Roaming';$local=Join-Path $sandboxRoot 'Local'
+$user=Join-Path $sandboxRoot 'User';$spicetify=Join-Path $roaming 'spicetify'
+$spotify=Join-Path $sandboxRoot 'FakeSpotify';$apps=Join-Path $spotify 'Apps'
 $xpui=Join-Path $apps 'xpui'
 $backup=Join-Path $spicetify 'Backup'
 $custom=Join-Path $spicetify 'CustomApps'
-$prefs=Join-Path $home 'prefs'
+$prefs=Join-Path $sandboxRoot 'prefs'
 $config=Join-Path $spicetify 'config-xpui.ini'
-foreach($dir in @($home,$roaming,$local,$user,$spicetify,$spotify,$apps,$xpui,$backup,$custom,(Join-Path $custom 'alpha'),(Join-Path $custom 'beta'))){
+foreach($dir in @($sandboxRoot,$roaming,$local,$user,$spicetify,$spotify,$apps,$xpui,$backup,$custom,(Join-Path $custom 'alpha'),(Join-Path $custom 'beta'))){
     [void][IO.Directory]::CreateDirectory($dir)
 }
 $env:APPDATA=$roaming
@@ -59,10 +59,10 @@ function Set-SyntheticConfig([string]$Apps){
     [IO.File]::WriteAllText($config,$cfg,[Text.UTF8Encoding]::new($false))
 }
 function Invoke-SyntheticRefresh([string[]]$Arguments,[string]$LogName){
-    $log=Join-Path $home $LogName
-    $errs=Join-Path $home ($LogName+'.err')
+    $log=Join-Path $sandboxRoot $LogName
+    $errs=Join-Path $sandboxRoot ($LogName+'.err')
     $p=New-Object System.Diagnostics.ProcessStartInfo
-    $p.FileName=$exe;$p.WorkingDirectory=$home
+    $p.FileName=$exe;$p.WorkingDirectory=$sandboxRoot
     $p.UseShellExecute=$false;$p.CreateNoWindow=$true
     $p.RedirectStandardOutput=$true;$p.RedirectStandardError=$true
     # PowerShell 5.1 StartInfo.Arguments does not support ArgumentList.
