@@ -32,8 +32,8 @@ jobs:
           $source='validation/custom-app-native-scoped-crash-rollback/native-scoped-crash-rollback.ps1'
           $test='validation/custom-app-native-scoped-crash-rollback/test_native_scoped_crash_rollback.ps1'
           $workflow='.github/workflows/validate-native-scoped-crash-rollback-lab.yml'
-          if((git hash-object $source).Trim() -cne '87fd611400353b4a38bb1f4975a49869132628b9' -or
-             (git hash-object $test).Trim() -cne 'c91cddc2bd4aad6239bf7deb2d04320f087f48bf'){
+          if((git hash-object $source).Trim() -cne 'e0f725cfcf1b1221e3df8f2465ac9887dba5e955' -or
+             (git hash-object $test).Trim() -cne '92b536d26fcaff0b11e58d0490ece6dc834d336d'){
             throw 'V017 source or acceptance test changed'
           }
           $changes=@(git diff --name-only "$parent...HEAD")
@@ -140,6 +140,25 @@ jobs:
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Mode tamper-denial -FixtureRoot $env:SCOPED_FIXTURE_ROOT
           if($LASTEXITCODE -ne 0){throw 'new-process fail-closed tamper test failed'}
           Write-Host 'NATIVE_SCOPED_V017_INDEPENDENT_TAMPER_DENIAL_PASS'
+      - name: Intentionally terminate independent recovery midway through an existing JS file write
+        shell: powershell
+        timeout-minutes: 8
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/custom-app-native-scoped-crash-rollback/test_native_scoped_crash_rollback.ps1'
+          $log='validation/custom-app-native-scoped-crash-rollback/recovery-half-file-exit.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Mode recover-interrupted -FixtureRoot $env:SCOPED_FIXTURE_ROOT *>&1 |
+            Tee-Object -FilePath $log|Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 72){Get-Content $log -Tail 45|ForEach-Object{Write-Host $_};throw ('half-write recovery interruption not observed '+$rc)}
+          if(-not(Get-Content $log -Raw).Contains('NATIVE_SCOPED_LAB_HOSTED_RESTORE_EXIT_MID_TARGET_FILE')){
+            throw 'missing independent recovery half-write flush proof'
+          }
+          Write-Host 'NATIVE_SCOPED_V017_RECOVERY_INTERRUPTED_AFTER_PARTIAL_DURABLE_TARGET_WRITE_PASS'
+          $global:LASTEXITCODE=0
+          exit 0
       - name: Independently restarted worker restores exact original target without touching state.pending
         shell: powershell
         timeout-minutes: 8
@@ -165,5 +184,6 @@ jobs:
           name: native-scoped-crash-rollback-${{ github.run_id }}
           path: |
             validation/custom-app-native-scoped-crash-rollback/abrupt-exit.log
+            validation/custom-app-native-scoped-crash-rollback/recovery-half-file-exit.log
           retention-days: 14
           if-no-files-found: warn

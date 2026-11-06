@@ -462,7 +462,8 @@ function Restore-CustomAppScopedLabNativeV017 {
           [Parameter(Mandatory=$true)]$HeldCrossEngineSession,
           [Parameter(Mandatory=$true)][string]$HostedCiRoot,
           [Parameter(Mandatory=$true)][string]$HostedCiLocalAppDataRoot,
-          [Parameter(Mandatory=$true)][string]$HostedCiAppDataRoot)
+          [Parameter(Mandatory=$true)][string]$HostedCiAppDataRoot,
+          [switch]$HostedCiCrashAfterHalfTargetWrite)
     $ctx=Get-CustomAppScopedLabContextV017 -Session $Session -HeldCrossEngineSession $HeldCrossEngineSession -HostedCiRoot $HostedCiRoot -HostedCiLocalAppDataRoot $HostedCiLocalAppDataRoot -HostedCiAppDataRoot $HostedCiAppDataRoot
     $path=[string]$ctx.sealed_path
     if(-not[IO.File]::Exists($path)){
@@ -504,6 +505,13 @@ function Restore-CustomAppScopedLabNativeV017 {
             try{
                 $handle=[IO.File]::Open($targetPath,[IO.FileMode]::Create,
                     [IO.FileAccess]::Write,[IO.FileShare]::None)
+                if($HostedCiCrashAfterHalfTargetWrite -and $data.Length -gt 2){
+                    $half=[int][Math]::Floor($data.Length/2)
+                    $handle.Write($data,0,$half)
+                    $handle.Flush($true)
+                    Write-Host 'NATIVE_SCOPED_LAB_HOSTED_RESTORE_EXIT_MID_TARGET_FILE'
+                    [Environment]::Exit(72)
+                }
                 $handle.Write($data,0,$data.Length)
                 $handle.Flush($true)
             }finally{if($null-ne$handle){$handle.Dispose()}}
@@ -542,7 +550,8 @@ function Restore-CustomAppScopedLabNativeV017 {
 function Invoke-CustomAppScopedLabIndependentRecoveryV017 {
     param([Parameter(Mandatory=$true)][string]$HostedCiRoot,
           [Parameter(Mandatory=$true)][string]$HostedCiLocalAppDataRoot,
-          [Parameter(Mandatory=$true)][string]$HostedCiAppDataRoot)
+          [Parameter(Mandatory=$true)][string]$HostedCiAppDataRoot,
+          [switch]$HostedCiCrashAfterHalfTargetWrite)
     [void](Assert-CustomAppScopedLabHostedV017 -Path $HostedCiRoot)
     $global=Open-CustomAppCrossEngineTransactionLockV010 -HostedCiRoot $HostedCiRoot
     try{
@@ -580,7 +589,7 @@ function Invoke-CustomAppScopedLabIndependentRecoveryV017 {
                 ok=$true;paths=$paths;state=$state;lock_handle=$handle
                 production_execution_authorized=$false;production_mutation_authorized=$false
             }
-            return Restore-CustomAppScopedLabNativeV017 -Session $session -HeldCrossEngineSession $global -HostedCiRoot $HostedCiRoot -HostedCiLocalAppDataRoot $HostedCiLocalAppDataRoot -HostedCiAppDataRoot $HostedCiAppDataRoot
+            return Restore-CustomAppScopedLabNativeV017 -Session $session -HeldCrossEngineSession $global -HostedCiRoot $HostedCiRoot -HostedCiLocalAppDataRoot $HostedCiLocalAppDataRoot -HostedCiAppDataRoot $HostedCiAppDataRoot -HostedCiCrashAfterHalfTargetWrite:$HostedCiCrashAfterHalfTargetWrite
         }finally{if($null-ne$handle){$handle.Dispose()}}
     }finally{
         if($null-ne$global -and $null-ne$global.lock_handle){$global.lock_handle.Dispose()}

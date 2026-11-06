@@ -1,5 +1,5 @@
 # Independent host-only restart contract for genuine official Spicetify.
-param([Parameter(Mandatory=$true)][ValidateSet('mutate','tamper-denial','recover','replay')][string]$Mode,
+param([Parameter(Mandatory=$true)][ValidateSet('mutate','tamper-denial','recover-interrupted','recover','replay')][string]$Mode,
       [Parameter(Mandatory=$true)][string]$FixtureRoot,
       [string]$OfficialExecutable)
 $ErrorActionPreference='Stop'
@@ -164,6 +164,12 @@ if($Mode -ceq 'tamper-denial'){
     }
     Write-Host 'NATIVE_SCOPED_LAB_FRESH_PROCESS_DENIED_OUTSIDER_AND_INTENT_TAMPER_PASS'
     exit 0
+}
+if($Mode -ceq 'recover-interrupted'){
+    # This must exit 72 in the middle of writing the already-enrolled JS
+    # before any durable terminal marker is created. A fourth child repairs.
+    [void](Invoke-CustomAppScopedLabIndependentRecoveryV017 @pinArgs -HostedCiCrashAfterHalfTargetWrite)
+    throw 'SCOPED_LAB_UNEXPECTEDLY_RETURNED_FROM_MIDWRITE_KILL'
 }
 $result=Invoke-CustomAppScopedLabIndependentRecoveryV017 @pinArgs
 if(-not[bool]$result.ok -or [bool]$result.production_execution_authorized -or
