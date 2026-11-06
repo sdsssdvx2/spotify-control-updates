@@ -82,11 +82,11 @@ $originalExe=[IO.File]::ReadAllBytes($official)
 [IO.File]::WriteAllBytes($exe,$originalExe)
 $configData=[Text.Encoding]::UTF8.GetBytes("[AdditionalOptions]"+[Environment]::NewLine+"custom_apps = tagify"+[Environment]::NewLine)
 [IO.File]::WriteAllBytes($config,$configData)
-$initialState=Open-CustomAppUserTxnStoreV010 -Name 'tagify' -LivePath $live -HostedCiRoot $store -Initialize
-$initialState.lock_handle.Dispose()
 $global=Open-CustomAppCrossEngineTransactionLockV010 -HostedCiRoot $store
 $session=$null
 try{
+    $initialState=Open-CustomAppUserTxnStoreV010 -Name 'tagify' -LivePath $live -HostedCiRoot $store -Initialize
+    $initialState.lock_handle.Dispose()
     $session=Open-CustomAppUserTxnStoreV010 -Name 'tagify' -LivePath $live -HostedCiRoot $store
     $cid='a'*64;$nonce='b'*32
     $identity=New-CustomAppProductionCrashJournalIdentityV010 -Name tagify -ConsumptionId $cid -SourceIdentity 'owner/repo' -RemoteCommitSha ('c'*40) -StageResultFingerprint ('d'*64) -PreparationFingerprint ('e'*64) -AllowedRoot $root -LivePath $live -TransactionRoot $txn -StageWorkspacePath $stage -AppBackupPath $appBackup -PersistenceBackupPath $persistBackup

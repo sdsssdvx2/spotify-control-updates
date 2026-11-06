@@ -32,8 +32,8 @@ jobs:
           $d='validation/custom-app-spicetify-sealed-enrollment'
           $pins=@{
             "$d/spicetify-sealed-enrollment.ps1"='7140631a0da495ecf2c696e8188476b3e5c9f685'
-            "$d/test_spicetify_sealed_enrollment.ps1"='7ba1573827fd16e550264609a05b3b23a86150fc'
-            "$d/build_candidate.py"='1b6b6a18578f305f6a095a10b8a14406bcda5f44'
+            "$d/test_spicetify_sealed_enrollment.ps1"='060dc5c2fce72fd2aa97110cc51bb1032c5c98ce'
+            "$d/build_candidate.py"='27c9cace152401c02448e82767c2f6d557368de8'
           }
           $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-spicetify-sealed-enrollment.yml')
           $changed=@(git diff --name-only "$base...HEAD")
@@ -88,6 +88,29 @@ jobs:
             if(-not $log.Contains($mark)){throw ('historical or new SelfTest missing '+$mark)}
           }
           Write-Host "SPICETIFY_SEALED_PIN_ACTUAL_ADDON_SELFTEST_PASS sha256=$sha"
+      - name: Restore ONLY exact SHA-qualified historical journal and pure plan sources
+        shell: powershell
+        timeout-minutes: 12
+        run: |
+          $ErrorActionPreference='Stop'
+          $historical=@(
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+            @('b266bad660d4b7bc87e7093c5b12f0cff1dc466f','validation/custom-app-production-recovery-plan-contract-v0.1.0/custom-app-production-recovery-plan.ps1','ae49409973164052d5830b981d804707f9d62b6c')
+          )
+          foreach($item in $historical){
+            $rev=[string]$item[0];$path=[string]$item[1];$sha=[string]$item[2]
+            if(-not(Test-Path -LiteralPath $path -PathType Leaf)){
+              git cat-file -e ($rev+'^{commit}') 2>$null
+              if($LASTEXITCODE -ne 0){git fetch --no-tags origin $rev|Out-Null;if($LASTEXITCODE -ne 0){throw ('historical commit unavailable '+$rev)}}
+              New-Item -ItemType Directory -Force -Path (Split-Path $path -Parent)|Out-Null
+              $env:PIN_HISTORICAL_SPEC=($rev+':'+$path)
+              $env:PIN_HISTORICAL_OUT=$path
+              python -c "import os,subprocess,pathlib;pathlib.Path(os.environ['PIN_HISTORICAL_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['PIN_HISTORICAL_SPEC']]))"
+              if($LASTEXITCODE -ne 0){throw ('historical blob restoration failed '+$path)}
+            }
+            if((git hash-object $path).Trim() -cne $sha){throw ('historic source blob not authenticated '+$path)}
+          }
+          Write-Host 'SPICETIFY_SEALED_PIN_HISTORICAL_JOURNAL_PLAN_SOURCES_PINNED_PASS'
       - name: Official signed-release digest, real CLI -v/-c only under isolated profile
         shell: powershell
         timeout-minutes: 30
