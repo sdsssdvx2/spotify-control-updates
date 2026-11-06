@@ -32,8 +32,8 @@ jobs:
           $d='validation/custom-app-spicetify-passive-provenance'
           $pins=@{
             "$d/spicetify-passive-provenance.ps1"='ea07bdabc3ad318b0b80cc4e81560bb6faded225'
-            "$d/test_spicetify_passive_provenance.ps1"='99051fdb47d2e19cdd5d87cd11a60a4dfbf82315'
-            "$d/build_candidate.py"='f7c16d40a33841ea9459fc9afc593906cedb95a0'
+            "$d/test_spicetify_passive_provenance.ps1"='e6249715e7d7cdfa5e526d24f87349f190805ad4'
+            "$d/build_candidate.py"='97ec42277aa23a22e9378b0d3063abb26ca02b77'
           }
           $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-spicetify-passive-provenance.yml')
           $changed=@(git diff --name-only "$base...HEAD")
@@ -155,6 +155,7 @@ jobs:
           }
           $src=(Resolve-Path .).Path
           foreach($p in @('validation/custom-app-user-transaction-store-bundle/user-transaction-store.ps1',
+             'validation/custom-app-journal-restart-locator/user-journal-locator.ps1',
              'validation/custom-app-normal-entrypoint-transaction-integration/normal-update-engine-fence.ps1',
              'validation/custom-app-legacy-journal-settlement-barrier/legacy-settlement-barrier.ps1',
              'validation/custom-app-cooperative-cross-engine-lock/cross-engine-transaction-lock.ps1',

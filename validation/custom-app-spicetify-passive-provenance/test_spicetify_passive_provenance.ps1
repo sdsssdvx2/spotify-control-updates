@@ -9,6 +9,7 @@ if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows' -or
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 foreach($p in @(
     'validation/custom-app-user-transaction-store-bundle/user-transaction-store.ps1',
+    'validation/custom-app-journal-restart-locator/user-journal-locator.ps1',
     'validation/custom-app-normal-entrypoint-transaction-integration/normal-update-engine-fence.ps1',
     'validation/custom-app-legacy-journal-settlement-barrier/legacy-settlement-barrier.ps1',
     'validation/custom-app-cooperative-cross-engine-lock/cross-engine-transaction-lock.ps1',
@@ -48,7 +49,7 @@ if(-not[bool]$s.ok -or [string]$s.exe_sha256 -cne $exeHash -or
    [bool]$s.recovery_apply_eligible -or [bool]$s.result_is_authority -or
    [bool]$s.production_execution_authorized -or
    [bool]$s.production_mutation_authorized){
-    throw 'SPICETIFY_PASSIVE_OBSERVATION_ESCAPED_ZERO_AUTHORITY'
+    throw ('SPICETIFY_PASSIVE_OBSERVATION_ESCAPED_ZERO_AUTHORITY: '+[string]$s.reason)
 }
 $s2=Get-CustomAppSpicetifyPassiveObservationV015 @sourceArgs
 if(-not[bool]$s2.ok -or
