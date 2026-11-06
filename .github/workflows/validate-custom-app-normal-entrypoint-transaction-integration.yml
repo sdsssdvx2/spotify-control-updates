@@ -1,4 +1,4 @@
-name: Validate actual Addon Manager normal entrypoint transaction integration
+name: Validate actual normal Addon Manager legacy-vs-journal transaction fence
 on:
   push:
     branches: [validate/custom-app-normal-entrypoint-transaction-integration]
@@ -13,51 +13,129 @@ on:
   workflow_dispatch:
 permissions: {contents: read}
 jobs:
-  normal-entrypoint-structural-and-bounded-windows:
+  bounded-windows-normal-update-safety:
     runs-on: windows-2025
-    timeout-minutes: 80
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
-      - name: Source pins, scope, production freeze
+      - name: Review exactly pinned source files and frozen production main
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           $parent='22c548aad75d2dc59699062b4d01f8c4020e5b15'
-          $production='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
-          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'checkout SHA mismatch'}
-          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'qualified terminal source parent mismatch'}
-          if((git rev-parse origin/main).Trim() -cne $production){throw 'operating main advanced'}
-          $audit='validation/custom-app-normal-entrypoint-transaction-integration/audit_entrypoint.py'
-          if((git hash-object $audit).Trim() -cne '4a931dc02a89c19b7b1fdc09412fa52a77fbfe02'){throw 'unqualified entrypoint inventory'}
-          $allowed=@($audit,'.github/workflows/validate-custom-app-normal-entrypoint-transaction-integration.yml')
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'wrong checkout SHA'}
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'unqualified source parent'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main changed'}
+          $d='validation/custom-app-normal-entrypoint-transaction-integration'
+          $pins=@{
+            "$d/audit_entrypoint.py"='4a931dc02a89c19b7b1fdc09412fa52a77fbfe02'
+            "$d/normal-update-engine-fence.ps1"='5335c610325a4654aaba83749ed5ede500981c7c'
+            "$d/build_candidate.py"='49392b2d345b90e82f383583dbcf1f4e41a00788'
+            "$d/test_normal_engine_fence.ps1"='07e533d750292152245fcdb29f6149dbeaaac0d0'
+          }
+          $allow=@($pins.Keys)+@('.github/workflows/validate-custom-app-normal-entrypoint-transaction-integration.yml')
           $changed=@(git diff --name-only "$parent...HEAD")
-          if($changed.Count -ne 2 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('unapproved source scope '+($changed -join ','))}
+          if($changed.Count -ne 5 -or @($changed|Where-Object{$_ -notin $allow}).Count){throw ('source scope escaped '+($changed -join ','))}
+          foreach($p in $pins.Keys){if((git hash-object $p).Trim() -cne $pins[$p]){throw ('unqualified blob '+$p)}}
           foreach($p in @('manifest.json','stable-version.json','addon-policy-registry.json','bin/addon-manager.ps1','bin/spotify-control.ps1')){
             git diff --quiet $parent HEAD -- $p
-            if($LASTEXITCODE -ne 0){throw ('protected production file changed '+$p)}
+            if($LASTEXITCODE -ne 0){throw ('protected operating file changed '+$p)}
           }
-          Write-Host 'NORMAL_ENTRYPOINT_AUDIT_SOURCE_MAIN_FROZEN_PASS'
-      - name: Rebuild real hard-disabled Addon Manager and trace normal update dispatch
+          Write-Host 'NORMAL_UPDATE_ENGINE_FENCE_PINNED_SCOPE_MAIN_FROZEN_PASS'
+      - name: Build actual Addon Manager with early normal Update gate and exact inverse
         shell: powershell
-        timeout-minutes: 50
+        timeout-minutes: 45
         run: |
           $ErrorActionPreference='Stop'
           $d='validation/custom-app-normal-entrypoint-transaction-integration'
-          python "$d/audit_entrypoint.py"
-          if($LASTEXITCODE -ne 0){throw 'actual full candidate entrypoint inventory failed'}
-          $report=Get-Content "$d/entrypoint-inventory.json" -Raw|ConvertFrom-Json
-          if([string]$report.addon_sha256 -cne '6fe25f592fddd30424d670bc20fc68f0a8b78a01c4fa29f8dc2268d2714b46f9' -or
-            [int64]$report.addon_size -ne 1448757 -or
-            [int]$report.total_functions -lt 200 -or
-            [bool]$report.production_wiring_enabled -or -not[bool]$report.operating_main_unchanged){throw 'unqualified entrypoint source or authority'}
-          Write-Host 'ACTUAL_NORMAL_ENTRYPOINT_STATIC_CLOSURE_CAPTURED_PASS'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'candidate builder failed'}
+          $report=Get-Content "$d/candidate-validation.json" -Raw|ConvertFrom-Json
+          $addon="$d/out/bin/addon-manager.ps1"
+          $hash=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -cne [string]$report.candidate_sha256 -or (Get-Item $addon).Length -ne [int64]$report.candidate_size){throw 'candidate sha size mismatch'}
+          if((Get-FileHash "$d/out/bin/spotify-control.ps1" -Algorithm SHA256).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate changed'}
+          if(-not[bool]$report.exact_parent_inverse -or -not[bool]$report.no_legacy_rollback_before_gate -or
+             -not[bool]$report.production_full_chain_still_disabled -or [bool]$report.new_full_chain_normal_wiring){throw 'normal path safety invariants changed'}
+          foreach($f in @($addon,"$d/normal-update-engine-fence.ps1","$d/test_normal_engine_fence.ps1")){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Select-Object -First 8|ForEach-Object{Write-Host $_.Message};throw ('WinPS5.1 parse failed '+$f)}
+          }
+          "CANDIDATE_HASH=$hash"|Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "CANDIDATE_SIZE=$((Get-Item $addon).Length)"|Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "NORMAL_UPDATE_ENGINE_GATE_ACTUAL_ADDON_PS51_PASS sha256=$hash"
+      - name: Run actual Addon Manager SelfTest in isolated throwaway Windows profile
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-normal-entrypoint-transaction-integration'
+          $sandbox=Join-Path $env:RUNNER_TEMP ('addon-fence-selftest-'+[Guid]::NewGuid().ToString('N'))
+          $env:LOCALAPPDATA=Join-Path $sandbox 'Local'
+          $env:APPDATA=Join-Path $sandbox 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/out/bin/addon-manager.ps1" -Action SelfTest *>&1|Tee-Object -FilePath "$d/addon-selftest.log"|Out-Null
+          $exitCode=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($exitCode -ne 0){Get-Content "$d/addon-selftest.log" -Tail 20|ForEach-Object{Write-Host $_};throw ('Addon Manager SelfTest failed '+$exitCode)}
+          $log=Get-Content "$d/addon-selftest.log" -Raw
+          foreach($marker in @('CUSTOM_APP_NORMAL_UPDATE_ENGINE_EXCLUSIVITY_SELFTEST_PASS','CUSTOM_USER_TXN_VERIFIED_TERMINAL_BUNDLE_SELFTEST_PASS','CUSTOM_USER_TXN_GUARD_BUNDLE_SELFTEST_PASS')){
+            if(-not $log.Contains($marker)){throw ('SelfTest regression '+$marker)}
+          }
+          Write-Host 'NORMAL_UPDATE_ENGINE_FENCE_ACTUAL_ADDON_SELFTEST_PASS'
+      - name: Execute real -Action Update -Force under incompatible DPAPI enrollment, verify no old mutation
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-normal-entrypoint-transaction-integration'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/test_normal_engine_fence.ps1" -CandidatePath "$d/out/bin/addon-manager.ps1" *>&1|Tee-Object -FilePath "$d/compatibility-windows.log"|Out-Null
+          $exitCode=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($exitCode -ne 0){Get-Content "$d/compatibility-windows.log" -Tail 35|ForEach-Object{Write-Host $_};throw ('normal Update safety test failed '+$exitCode)}
+          $log=Get-Content "$d/compatibility-windows.log" -Raw
+          foreach($marker in @('NORMAL_UPDATE_FENCE_DIRECT_WINDOWS_MATRIX_PASS','NORMAL_UPDATE_FENCE_ACTUAL_ACTION_UPDATE_DENIED_PASS','ACTUAL_NORMAL_ADDON_ENTRYPOINT_COMPATIBILITY_BARRIER_E2E_PASS')){
+            if(-not $log.Contains($marker)){throw ('normal Update proof missing '+$marker)}
+          }
+          Write-Host 'NORMAL_UPDATE_ENGINE_FENCE_ACTUAL_NORMAL_ACTION_E2E_PASS'
+      - name: Double build reproducibility and final operating main freeze
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-normal-entrypoint-transaction-integration'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'repeat build failed'}
+          $addon="$d/out/bin/addon-manager.ps1"
+          $hash=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -cne $env:CANDIDATE_HASH -or (Get-Item $addon).Length -ne [int64]$env:CANDIDATE_SIZE){throw 'non-deterministic candidate'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main changed'}
+          [ordered]@{
+            schema=1;result='PASS';head=(git rev-parse HEAD).Trim()
+            actual_candidate_sha256=$hash;candidate_bytes=(Get-Item $addon).Length
+            original_candidate_inverse='exact'
+            enrolled_new_engine_blocks_legacy_update='PASS'
+            actual_minus_Action_Update_Force_denial='PASS'
+            current_unenrolled_legacy_allow='PASS'
+            older_state_and_spotify_protected='PASS'
+            new_full_chain_enabled=$false;installed_user_spotify_touched=$false
+          }|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          Write-Host "NORMAL_UPDATE_ENGINE_FENCE_DETERMINISTIC_MAIN_FROZEN_PASS sha256=$hash"
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: normal-addon-entrypoint-contract-${{ github.run_id }}
-          path: validation/custom-app-normal-entrypoint-transaction-integration/entrypoint-inventory.json
+          name: normal-update-mixed-engine-fence-${{ github.run_id }}
+          path: |
+            validation/custom-app-normal-entrypoint-transaction-integration/entrypoint-inventory.json
+            validation/custom-app-normal-entrypoint-transaction-integration/candidate-validation.json
+            validation/custom-app-normal-entrypoint-transaction-integration/ci-evidence.json
+            validation/custom-app-normal-entrypoint-transaction-integration/addon-selftest.log
+            validation/custom-app-normal-entrypoint-transaction-integration/compatibility-windows.log
           retention-days: 14
           if-no-files-found: warn
