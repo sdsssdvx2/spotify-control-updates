@@ -179,7 +179,40 @@ jobs:
           $untracked=@(git ls-files --others --exclude-standard)
           $unexpected=@($untracked | Where-Object {
             $_ -cnotmatch '^validation/[^/]+/out/.+' -and
-            $_ -cnotmatch '^validation/[^/]+/candidate-validation\.json$' -and
+            $_ -cnotmatch '^validation/[^/]+/candidate-validation\.json
+            $_ -cnotmatch '^validation/spicetify-real-cli-evidence/(addon-selftest\.log|real-cli-hosted\.log|real-cli-provenance-ci\.json)$'
+          })
+          if($unexpected.Count){throw ('unexpected untracked source '+($unexpected -join ','))}
+          Write-Host 'SPICETIFY_REAL_CLI_STATIC_SOURCE_AND_OPERATING_MAIN_UNCHANGED_PASS'
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-spicetify-cli-isolation-${{ github.run_id }}
+          path: |
+            validation/spicetify-real-cli-evidence/candidate-validation.json
+            validation/spicetify-real-cli-evidence/addon-selftest.log
+            validation/spicetify-real-cli-evidence/real-cli-provenance-ci.json
+            validation/spicetify-real-cli-evidence/real-cli-hosted.log
+          retention-days: 14
+          if-no-files-found: warn
+ -and
+            $_ -cnotmatch '^validation/(sc-cover-ambience-commit-provenance-v0\.1\.0|splitify-release-provenance-v0\.1\.[12]|star-ratings-release-provenance-v0\.1\.2|tagify-release-provenance-v0\.1\.0)/candidate-report\.json
+            $_ -cnotmatch '^validation/spicetify-real-cli-evidence/(addon-selftest\.log|real-cli-hosted\.log|real-cli-provenance-ci\.json)$'
+          })
+          if($unexpected.Count){throw ('unexpected untracked source '+($unexpected -join ','))}
+          Write-Host 'SPICETIFY_REAL_CLI_STATIC_SOURCE_AND_OPERATING_MAIN_UNCHANGED_PASS'
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-spicetify-cli-isolation-${{ github.run_id }}
+          path: |
+            validation/spicetify-real-cli-evidence/candidate-validation.json
+            validation/spicetify-real-cli-evidence/addon-selftest.log
+            validation/spicetify-real-cli-evidence/real-cli-provenance-ci.json
+            validation/spicetify-real-cli-evidence/real-cli-hosted.log
+          retention-days: 14
+          if-no-files-found: warn
+ -and
             $_ -cnotmatch '^validation/spicetify-real-cli-evidence/(addon-selftest\.log|real-cli-hosted\.log|real-cli-provenance-ci\.json)$'
           })
           if($unexpected.Count){throw ('unexpected untracked source '+($unexpected -join ','))}
