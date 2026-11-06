@@ -39,8 +39,8 @@ $history=Join-Path $journal 'history'
 foreach($path in @($store,$local,$roaming,$live,$journal,$history)){
     [void][IO.Directory]::CreateDirectory($path)
 }
-$args=@{HostedCiRoot=$store;HostedCiLocalAppDataRoot=$local;HostedCiAppDataRoot=$roaming}
-$empty=Get-CustomAppSealedRestoreReadinessV014 @args
+$readinessRoots=@{HostedCiRoot=$store;HostedCiLocalAppDataRoot=$local;HostedCiAppDataRoot=$roaming}
+$empty=Get-CustomAppSealedRestoreReadinessV014 @readinessRoots
 if(-not[bool]$empty.ok -or $empty.inspected_count -ne 0 -or
    [bool]$empty.production_mutation_authorized -or
    [IO.Directory]::Exists((Join-Path $store 'SpotifyControlUpdates-CustomApp-State'))){
@@ -56,7 +56,7 @@ $sealedHash=(Get-FileHash -LiteralPath $paths.state -Algorithm SHA256).Hash
 $pendingHash=(Get-FileHash -LiteralPath $paths.pending -Algorithm SHA256).Hash
 $owned=Open-CustomAppCrossEngineTransactionLockV010 -HostedCiRoot $store
 try{
-    $idle=Get-CustomAppSealedRestoreReadinessV014 @args -HeldCrossEngineSession $owned
+    $idle=Get-CustomAppSealedRestoreReadinessV014 @readinessRoots -HeldCrossEngineSession $owned
     if(-not[bool]$idle.ok -or $idle.inspected_count -ne 1 -or
        $idle.active_count -ne 0 -or $idle.items.Count -ne 1 -or
        [bool]$idle.items[0].eligible -or $null-ne$idle.items[0].receipt -or
@@ -78,7 +78,7 @@ if((Get-FileHash -LiteralPath $paths.state -Algorithm SHA256).Hash -cne $sealedH
 }
 $missing=Join-Path $root 'live-moved-out'
 [IO.Directory]::Move($live,$missing)
-$missingIdle=Get-CustomAppSealedRestoreReadinessV014 @args
+$missingIdle=Get-CustomAppSealedRestoreReadinessV014 @readinessRoots
 if(-not[bool]$missingIdle.ok -or $missingIdle.active_count -ne 0 -or
    [IO.Directory]::Exists($live)){
     throw 'PROTECTED_RESTORE_IDLE_MISSING_LIVE_RECREATED_FOLDER'
@@ -108,7 +108,7 @@ if([bool]$uninitialized.ok -or
     throw 'PROTECTED_RESTORE_EVIDENCE_READER_MUTATED_UNINITIALIZED_JOURNAL'
 }
 [IO.File]::WriteAllBytes([string]$paths.state,[byte[]](1,2,3,4))
-Assert-Blocked {Get-CustomAppSealedRestoreReadinessV014 @args} 'corrupted_DPAPI_state'
+Assert-Blocked {Get-CustomAppSealedRestoreReadinessV014 @readinessRoots} 'corrupted_DPAPI_state'
 if((Get-FileHash -LiteralPath $paths.pending -Algorithm SHA256).Hash -cne $pendingHash){
     throw 'PROTECTED_RESTORE_READ_DELETED_INCOMPLETE_PENDING'
 }
