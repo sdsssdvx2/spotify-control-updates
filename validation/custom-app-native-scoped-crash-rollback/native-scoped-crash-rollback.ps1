@@ -390,7 +390,7 @@ function Invoke-CustomAppScopedLabNativeV017 {
           [Parameter(Mandatory=$true)][string]$HostedCiRoot,
           [Parameter(Mandatory=$true)][string]$HostedCiLocalAppDataRoot,
           [Parameter(Mandatory=$true)][string]$HostedCiAppDataRoot)
-    $ctx=Get-CustomAppScopedLabContextV017 -Session $Session -HeldCrossEngineSession $HeldCrossEngineSession -HostedCiRoot $HostedCiRoot -HostedCiLocalAppDataRoot $HostedCiAppDataRoot -HeldCrossEngineSession $HeldCrossEngineSession
+    $ctx=Get-CustomAppScopedLabContextV017 -Session $Session -HeldCrossEngineSession $HeldCrossEngineSession -HostedCiRoot $HostedCiRoot -HostedCiLocalAppDataRoot $HostedCiLocalAppDataRoot -HostedCiAppDataRoot $HostedCiAppDataRoot
     $snap=Read-CustomAppScopedLabSnapshotV017 -Context $ctx -Session $Session
     if([IO.File]::Exists([string]$ctx.intent_path) -or
        [IO.File]::Exists([string]$ctx.recovered_path)){
