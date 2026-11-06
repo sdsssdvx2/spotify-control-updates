@@ -1,0 +1,153 @@
+name: Validate missing-live crash window with DPAPI journal locator and exclusive recovery session
+on:
+  push:
+    branches: [validate/custom-app-missing-live-recovery]
+    paths:
+      - 'validation/custom-app-missing-live-recovery/**'
+      - '.github/workflows/validate-custom-app-missing-live-recovery.yml'
+  pull_request:
+    branches: [validate/custom-app-journal-restart-locator]
+    paths:
+      - 'validation/custom-app-missing-live-recovery/**'
+      - '.github/workflows/validate-custom-app-missing-live-recovery.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  missing-live-after-atomic-rename-windows:
+    runs-on: windows-2025
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Verify source pins, review scope and frozen production main
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='f60aa58af69f2aafade3ba9e48d2779872fada2b'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'wrong checkout SHA'}
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'qualified parent mismatch'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main changed'}
+          $dir='validation/custom-app-missing-live-recovery'
+          $pins=@{
+            "$dir/missing-live-recovery.ps1"='5f25458ebf9c40206fde11918c2ce221966d6b2b'
+            "$dir/test_missing_live_recovery.ps1"='d4adc5c1486de6c7684fb4bda1e328b359316823'
+            "$dir/build_candidate.py"='8000f3dd6ac7ece4def09648e0c4ef5da5ed4c85'
+          }
+          $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-missing-live-recovery.yml')
+          $changed=@(git diff --name-only "$parent...HEAD")
+          if($changed.Count -ne 4 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('disallowed modification '+($changed -join ','))}
+          foreach($p in $pins.Keys){if((git hash-object $p).Trim() -cne $pins[$p]){throw ('qualified source pin mismatch '+$p)}}
+          foreach($p in @('bin/addon-manager.ps1','bin/spotify-control.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
+            git diff --quiet $parent HEAD -- $p
+            if($LASTEXITCODE -ne 0){throw ('protected operating artifact changed '+$p)}
+          }
+          Write-Host 'MISSING_LIVE_SOURCE_SCOPE_MAIN_FROZEN_PASS'
+      - name: Generate actual Addon Manager and check exact parent inverse and PowerShell 5.1 parser
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir='validation/custom-app-missing-live-recovery'
+          python "$dir/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'previous qualified candidate builder chain failed'}
+          $a="$dir/out/bin/addon-manager.ps1"
+          $r=Get-Content "$dir/candidate-validation.json" -Raw|ConvertFrom-Json
+          $sha=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sha -cne [string]$r.addon_sha256 -or (Get-Item $a).Length -ne [int64]$r.addon_size){throw 'generated addon source fingerprint mismatch'}
+          if((Get-FileHash "$dir/out/bin/spotify-control.ps1" -Algorithm SHA256).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'qualified main addon changed'}
+          if(-not[bool]$r.exact_parent_inverse -or -not[bool]$r.original_update_autoapps_unchanged -or
+             -not[bool]$r.original_fullchain_hard_disabled -or
+             [bool]$r.automatic_fullchain_enabled -or [bool]$r.operating_main_changed){throw 'normal auto update or FullChain modified'}
+          foreach($f in @($a,"$dir/missing-live-recovery.ps1","$dir/test_missing_live_recovery.ps1")){
+            $tokens=$null;$errs=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tokens,[ref]$errs)
+            if($errs.Count){$errs|Select-Object -First 9|ForEach-Object{Write-Host ($_.Extent.StartLineNumber.ToString()+':'+$_.Message)};throw ('PowerShell 5.1 syntax invalid '+$f)}
+          }
+          "RECOVERY_ADDON_SHA=$sha"|Out-File $env:GITHUB_ENV -Encoding UTF8 -Append
+          "RECOVERY_ADDON_BYTES=$((Get-Item $a).Length)"|Out-File $env:GITHUB_ENV -Encoding UTF8 -Append
+          Write-Host "MISSING_LIVE_BUNDLED_ACTUAL_ADDON_PS51_PASS sha256=$sha"
+      - name: Run real generated Addon Manager SelfTest in disposable Windows user profile
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir='validation/custom-app-missing-live-recovery'
+          $sandbox=Join-Path $env:RUNNER_TEMP ('missing-live-selftest-'+[Guid]::NewGuid().ToString('N'))
+          $env:LOCALAPPDATA=Join-Path $sandbox 'Local'
+          $env:APPDATA=Join-Path $sandbox 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$dir/out/bin/addon-manager.ps1" -Action SelfTest *>&1|Tee-Object -FilePath "$dir/addon-selftest.log"|Out-Null
+          $exitCode=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($exitCode -ne 0){Get-Content "$dir/addon-selftest.log" -Tail 22|ForEach-Object{Write-Host $_};throw ('real Addon Manager SelfTest failed '+$exitCode)}
+          $log=Get-Content "$dir/addon-selftest.log" -Raw
+          foreach($m in @('CUSTOM_APP_MISSING_LIVE_RECOVERY_SELFTEST_PASS','CUSTOM_APP_USER_JOURNAL_LOCATOR_SELFTEST_PASS','CUSTOM_APP_NORMAL_UPDATE_ENGINE_EXCLUSIVITY_SELFTEST_PASS','CUSTOM_USER_TXN_VERIFIED_TERMINAL_BUNDLE_SELFTEST_PASS')){
+            if(-not $log.Contains($m)){throw ('bundled prior/new function regression '+$m)}
+          }
+          Write-Host 'MISSING_LIVE_REAL_ADDON_SELFTEST_PASS'
+      - name: First PowerShell process reserve qualified Triple-ID, persist DPAPI journal locator and simulate partial live rename
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir='validation/custom-app-missing-live-recovery'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$dir/test_missing_live_recovery.ps1" -Phase bootstrap *>&1|Tee-Object -FilePath "$dir/bootstrap.log"|Out-Null
+          $code=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($code -ne 0){Get-Content "$dir/bootstrap.log" -Tail 25|ForEach-Object{Write-Host $_};throw ('missing live crash fixture failed '+$code)}
+          if(-not(Get-Content "$dir/bootstrap.log" -Raw).Contains('MISSING_LIVE_RECOVERY_BOOTSTRAP_PASS')){throw 'missing-live bootstrap proof absent'}
+          Write-Host 'MISSING_LIVE_FIRST_PROCESS_SIMULATED_ATOMIC_RENAME_PASS'
+      - name: Second independent Windows PowerShell process recover locator without reconstructing live, protect pending and verify lock
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir='validation/custom-app-missing-live-recovery'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$dir/test_missing_live_recovery.ps1" -Phase fresh-missing *>&1|Tee-Object -FilePath "$dir/fresh-missing.log"|Out-Null
+          $code=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($code -ne 0){Get-Content "$dir/fresh-missing.log" -Tail 35|ForEach-Object{Write-Host $_};throw ('recovery session from missing live failed '+$code)}
+          if(-not(Get-Content "$dir/fresh-missing.log" -Raw).Contains('MISSING_LIVE_FRESH_PROCESS_RECOVERY_PASS')){throw 'read-only missing live recovery proof absent'}
+          Write-Host 'MISSING_LIVE_INDEPENDENT_RECOVERY_AND_RESTORATION_PASS'
+      - name: Deterministic candidate rebuild, final production main and provenance proof
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir='validation/custom-app-missing-live-recovery'
+          python "$dir/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'repeat code generation failed'}
+          $a="$dir/out/bin/addon-manager.ps1"
+          $sha=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sha -cne $env:RECOVERY_ADDON_SHA -or (Get-Item $a).Length -ne [int64]$env:RECOVERY_ADDON_BYTES){throw 'candidate non-deterministic'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main changed'}
+          [ordered]@{
+            schema=1;status='PASS';head=(git rev-parse HEAD).Trim()
+            actual_addon_sha256=$sha;actual_addon_bytes=(Get-Item $a).Length
+            existing_real_zip_signed_e2e_parent_sha='f60aa58af69f2aafade3ba9e48d2779872fada2b'
+            actual_live_directory_missing_first_process='PASS'
+            second_process_encrypted_locator_readback='PASS'
+            cross_process_exclusive_lock='PASS'
+            pending_state_not_silently_discarded='PASS'
+            original_fullchain_hard_disabled=$true
+            operating_user_spotify_changed=$false
+            operating_main_unchanged=$true
+          }|ConvertTo-Json|Set-Content "$dir/ci-evidence.json" -Encoding UTF8
+          Write-Host "MISSING_LIVE_RECOVERY_TWO_BUILDS_MAIN_FROZEN_PASS sha256=$sha"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: missing-live-dpapi-recovery-${{ github.run_id }}
+          path: |
+            validation/custom-app-missing-live-recovery/candidate-validation.json
+            validation/custom-app-missing-live-recovery/ci-evidence.json
+            validation/custom-app-missing-live-recovery/addon-selftest.log
+            validation/custom-app-missing-live-recovery/bootstrap.log
+            validation/custom-app-missing-live-recovery/fresh-missing.log
+          retention-days: 14
+          if-no-files-found: warn
