@@ -1,0 +1,214 @@
+name: Validate real signed ZIP new journal under common user transaction lock
+on:
+  push:
+    branches: [validate/custom-app-real-signed-zip-held-cross-engine]
+    paths:
+      - 'validation/custom-app-real-signed-zip-held-cross-engine/**'
+      - '.github/workflows/validate-custom-app-real-signed-zip-held-cross-engine.yml'
+  pull_request:
+    branches: [validate/custom-app-cooperative-cross-engine-lock]
+    paths:
+      - 'validation/custom-app-real-signed-zip-held-cross-engine/**'
+      - '.github/workflows/validate-custom-app-real-signed-zip-held-cross-engine.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  real-third-signed-zip-held-cross-engine-lock:
+    runs-on: windows-2025
+    timeout-minutes: 125
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Validate exactly pinned review scope and frozen operating production
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='1d9e26801e0ef7c14596eaedc224c16b1b2dca7d'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'wrong tested SHA'}
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'unqualified prior locked Addon Manager candidate'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main advanced'}
+          $d='validation/custom-app-real-signed-zip-held-cross-engine'
+          $pins=@{
+            "$d/derive_signed_zip_under_held_cross_engine.py"='c6815fb996db2a51722fe9bbeb2596a1d4fff1b4'
+          }
+          $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-real-signed-zip-held-cross-engine.yml')
+          $changed=@(git diff --name-only "$parent...HEAD")
+          if($changed.Count -ne 2 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('unreviewed source scope '+($changed -join ','))}
+          foreach($p in $pins.Keys){if((git hash-object $p).Trim() -cne $pins[$p]){throw ('derivation source pin drift '+$p)}}
+          foreach($p in @('manifest.json','stable-version.json','addon-policy-registry.json','bin/addon-manager.ps1','bin/spotify-control.ps1')){
+            git diff --quiet $parent HEAD -- $p
+            if($LASTEXITCODE -ne 0){throw ('operating artifact changed '+$p)}
+          }
+          Write-Host 'NEW_JOURNAL_REAL_SIGNED_ZIP_HELD_LOCK_SCOPE_MAIN_FROZEN_PASS'
+      - name: Rebuild precisely qualified actual disabled Addon Manager with cooperative lock
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-cooperative-cross-engine-lock'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'qualified Addon Manager builder failed'}
+          $addon="$d/out/bin/addon-manager.ps1"
+          $hash=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -cne 'fbce12662b1135d098503a017d4e4443d55814796cb986dfc59012ea094d66ae' -or
+             (Get-Item $addon).Length -ne 1485347){throw 'last Windows-proven Addon Manager drift'}
+          if((Get-FileHash "$d/out/bin/spotify-control.ps1" -Algorithm SHA256).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){
+            throw 'prior Spotify control candidate unexpectedly changed'
+          }
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $addon).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw 'actual Addon Manager PS5.1 parser rejected source'}
+          Write-Host "ACTUAL_DISABLED_ADDON_COOPERATIVE_LOCK_REBUILT_PASS sha256=$hash"
+      - name: Restore qualified historical Windows fixture dependencies and overlays
+        shell: powershell
+        timeout-minutes: 50
+        run: |
+          $ErrorActionPreference='Stop'
+          $prep='validation/custom-app-production-dual-id-new-permit-readiness-v0.1.0/prepare_custom_app_production_dual_id_new_permit_readiness.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $prep -RepoRoot $PWD.Path -RunnerTemp $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'Qualified historical fixture dependency restoration failed'}
+          $d='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          $pins=@(
+            @("$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1",'3350cd974bb9f9ae7345e490449c4875d571bf95'),
+            @("$d/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1",'224b9df9d020b74bd4d99c85ca6d06e28999101b')
+          )
+          foreach($pin in $pins){if((git hash-object $pin[0]).Trim() -cne [string]$pin[1]){throw ('Qualified overlay SHA drift: '+$pin[0])}}
+          # Pinned historical-only dependencies: materialize into ephemeral checkout.
+          $historical=@(
+            @('e2b80822835bf5d59dc179e345e098b5bd79759e','validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/test_custom_app_production_atomic_live_swap_mutation.ps1','d15e0768162b0659c57602eaf0242b035b48b0c7'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+            @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','79580da78443a18bd281d4fce61c4a57d958a196'),
+            @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),
+            @('b266bad660d4b7bc87e7093c5b12f0cff1dc466f','validation/custom-app-production-recovery-plan-contract-v0.1.0/custom-app-production-recovery-plan.ps1','ae49409973164052d5830b981d804707f9d62b6c'),
+            @('ffb5aad4a605691ee7b80392498b0cb6fa4e4052','validation/custom-app-production-recovery-preflight-v0.1.0/custom-app-production-recovery-preflight.ps1','b1816a24849a559b4da2537aa1b2436124fbee50'),
+            @('ffb5aad4a605691ee7b80392498b0cb6fa4e4052','validation/custom-app-production-recovery-execution-admission-v0.1.0/custom-app-production-recovery-execution-admission.ps1','e8804a7c53ad0d3e5420e037d468d9c397e52529'),
+            @('5232e5adeb13e6942acb210b3cd13058e1eaaf05','validation/custom-app-production-recovery-evidence-admission-integration-v0.1.0/custom-app-production-recovery-evidence-admission-integration.ps1','c92c727b5a2217f5b84a1072608bfc4662e68926'),
+            @('d3969a746ed1736fe93586bd025116c2526fbff5','validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/custom-app-production-recovery-cleanup-resume-admission.ps1','387d97b10d493b3794b24fba2bac67cf39491444'),
+            @('d9a1face71511bdaeeef4e8c761415ef9ec95fc0','validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','0273d7e28a56759b1d0ec9cbf037483b04d98d63')
+          )
+          foreach($dep in $historical){
+            $commit=[string]$dep[0];$p=[string]$dep[1];$blob=[string]$dep[2]
+            if(-not(Test-Path -LiteralPath $p -PathType Leaf)){
+              git cat-file -e ($commit+'^{commit}') 2>$null
+              if($LASTEXITCODE){git fetch --no-tags origin $commit | Out-Null;if($LASTEXITCODE){throw ('historical fetch failed '+$commit)}}
+              New-Item -ItemType Directory -Force -Path (Split-Path $p -Parent)|Out-Null
+              $env:TJR_SPEC=($commit+':'+$p);$env:TJR_OUT=$p
+              python -c "import os,subprocess,pathlib;pathlib.Path(os.environ['TJR_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['TJR_SPEC']]))"
+              if($LASTEXITCODE){throw ('historical materialize failed '+$p)}
+            }
+            if((git hash-object $p).Trim() -cne $blob){throw ('historical recovery blob drift '+$p)}
+          }
+          # The parent preparer intentionally applies its separately qualified
+          # monotonic restore-executor patch. Do not overwrite it with its old blob.
+          if(-not(Test-Path -LiteralPath 'validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1' -PathType Leaf)){throw 'qualified monotonic restore executor absent'}
+          Write-Host 'TRIPLE_ID_AUTHORIZED_JOURNAL_BRIDGE_HISTORICAL_RECOVERY_MODULES_PINNED_PASS'
+          Write-Host 'TRIPLE_ID_AUTHORIZED_JOURNAL_BRIDGE_PINNED_FIXTURES_PASS'
+      - name: Apply SHA-qualified old reservation compatibility overlays in temporary Windows checkout
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          $core="$d/custom-app-production-dual-id-new-permit-reservation-persistence.ps1"
+          $pieces=@($core,"$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1","$d/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1")
+          $source=($pieces|ForEach-Object{[IO.File]::ReadAllText((Resolve-Path $_).Path)}) -join [Environment]::NewLine
+          [IO.File]::WriteAllText((Resolve-Path $core).Path,$source,[Text.UTF8Encoding]::new($false))
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $core).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw 'qualified historical reservation overlays PS5.1 invalid'}
+          Write-Host 'USER_TERMINAL_QUALIFIED_OLD_PERMIT_RESERVATION_OVERLAYS_PASS'
+      - name: Derive original real third signed ZIP plus lock around all setup, swap and journal terminal
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-real-signed-zip-held-cross-engine'
+          python "$d/derive_signed_zip_under_held_cross_engine.py"
+          if($LASTEXITCODE -ne 0){throw 'actual signed HMAC ZIP with cooperative lock derivation failed'}
+          $script="$d/ci_derived_held_cross_engine_real_signed_zip.ps1"
+          if(-not(Test-Path -LiteralPath $script -PathType Leaf)){throw 'missing actual signed ZIP derived test'}
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|Select-Object -First 10|ForEach-Object{Write-Host $_.Message};throw 'full signed ZIP lock lifecycle PS5.1 syntax invalid'}
+          Write-Host 'COOPERATIVE_LOCKED_SIGNED_THIRD_REAL_ZIP_GENERATED_PS51_PASS'
+      - name: Actual third signed ZIP, concurrent legacy denial, missing live and independently restarted verified rollback
+        shell: powershell
+        timeout-minutes: 65
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-real-signed-zip-held-cross-engine'
+          $originalRun=$env:RUNNER_TEMP;$originalTemp=$env:TEMP;$originalTmp=$env:TMP
+          $sandbox=Join-Path $originalRun ('real-signed-third-lock-'+[Guid]::NewGuid().ToString('N'))
+          [IO.Directory]::CreateDirectory($sandbox)|Out-Null
+          $exitCode=1
+          try{
+            $env:RUNNER_TEMP=$sandbox;$env:TEMP=$sandbox;$env:TMP=$sandbox
+            $ErrorActionPreference='Continue'
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/ci_derived_held_cross_engine_real_signed_zip.ps1" *>&1 |
+              Tee-Object -FilePath "$d/cross-engine-real-signed-zip-e2e.log"|Out-Null
+            $exitCode=$LASTEXITCODE
+          }finally{
+            $env:RUNNER_TEMP=$originalRun;$env:TEMP=$originalTemp;$env:TMP=$originalTmp
+            $ErrorActionPreference='Stop'
+          }
+          if($exitCode -ne 0){
+            Get-Content "$d/cross-engine-real-signed-zip-e2e.log" -Tail 48 | ForEach-Object{Write-Host $_}
+            throw ('real locked signed ZIP lifecycle failed '+$exitCode)
+          }
+          $log=Get-Content "$d/cross-engine-real-signed-zip-e2e.log" -Raw
+          foreach($mark in @(
+            'CROSS_ENGINE_SIGNED_ZIP_LOCK_BEFORE_STAGING_PASS',
+            'USER_JOURNAL_REAL_SIGNED_THIRD_ID_PRE_SWAP_LOCATOR_BOUND_PASS',
+            'MISSING_LIVE_REAL_SIGNED_ZIP_ATOMIC_CRASH_WINDOW_RECOVERY_PASS',
+            'CROSS_ENGINE_SIGNED_ZIP_ACTUAL_LEGACY_ACTION_DENIED_PASS action=Update',
+            'CROSS_ENGINE_SIGNED_ZIP_ACTUAL_LEGACY_ACTION_DENIED_PASS action=CommitLast',
+            'CROSS_ENGINE_SIGNED_ZIP_ACTUAL_LEGACY_ACTION_DENIED_PASS action=RollbackLast',
+            'CROSS_ENGINE_THIRD_SIGNED_ZIP_SWAPPED_WITH_GLOBAL_LOCK_PASS',
+            'USER_JOURNAL_SIGNED_ZIP_BOUND_RESTART_TERMINAL_PASS',
+            'USER_TERMINAL_FRESH_PROCESS_REPLAY_DENIED_PASS',
+            'TRIPLE_ID_EXCLUSIVE_REAL_ZIP_END_TO_END_PASS',
+            'CROSS_ENGINE_SIGNED_ZIP_HELD_THROUGH_VERIFIED_TERMINAL_PASS',
+            'CROSS_ENGINE_SIGNED_REAL_ZIP_FULL_LIFECYCLE_PASS'
+          )){
+            if(-not $log.Contains($mark)){throw ('real signed ZIP + shared lock marker absent '+$mark)}
+          }
+          Write-Host 'REAL_SIGNED_ZIP_NEW_JOURNAL_LOCK_HELD_ENTIRE_TRANSACTION_WINDOWS_PASS'
+      - name: Rebuild unchanged disabled candidate and confirm operating main remains pinned
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-cooperative-cross-engine-lock'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'rebuild of unchanged Addon Manager failed'}
+          $addon="$d/out/bin/addon-manager.ps1"
+          $sha=(Get-FileHash $addon -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sha -cne 'fbce12662b1135d098503a017d4e4443d55814796cb986dfc59012ea094d66ae' -or
+             (Get-Item $addon).Length -ne 1485347){throw 'real candidate not reproducible'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main advanced'}
+          [ordered]@{
+            schema=1;result='PASS';qualified_commit=(git rev-parse HEAD).Trim()
+            actual_generated_addon_sha256=$sha
+            actual_generated_addon_bytes=(Get-Item $addon).Length
+            currentuser_shared_lock_held_during_new_signed_zip='PASS'
+            actual_legacy_Update_CommitLast_RollbackLast_blocked='PASS'
+            resumed_independent_original_app_spotify_rollback='PASS'
+            durable_triple_id_consumption_after_terminal='PASS'
+            final_lock_reacquired='PASS'
+            new_engine_normal_execution_enabled=$false
+            user_installed_spotify_changed=$false
+            main_unchanged=$true
+          }|ConvertTo-Json|Set-Content 'validation/custom-app-real-signed-zip-held-cross-engine/ci-evidence.json' -Encoding UTF8
+          Write-Host "COOPERATIVE_SIGNED_ZIP_DETERMINISTIC_MAIN_FROZEN_PASS sha256=$sha"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-engine-real-signed-zip-${{ github.run_id }}
+          path: |
+            validation/custom-app-real-signed-zip-held-cross-engine/cross-engine-real-signed-zip-e2e.log
+            validation/custom-app-real-signed-zip-held-cross-engine/ci-evidence.json
+          retention-days: 14
+          if-no-files-found: warn
