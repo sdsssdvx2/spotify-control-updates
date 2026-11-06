@@ -64,6 +64,27 @@ def inspect():
                 top_110_lines='\n'.join(lines[:110]),tail_110_lines=tail,
                 full_chain_call_occurrences=len(re.findall(r'\bInvoke-CustomAppProductionFullChainV010\b',text)),
                 production_wiring_enabled=False,operating_main_unchanged=True)
+    # Preserve the actual handlers, not guessed names. This is source code only:
+    # it is produced from the immutable qualified candidate, never loaded from
+    # a running user's machine and contains no runtime credentials or profile.
+    exact_names=('Update-AutoApps','Get-DiscoveredActionableAutoUpdateCount',
+                 'Get-AddonMutationAuthorization','Get-AddonPolicyRegistry',
+                 'Get-AddonInventory','Load-AddonState','Commit-LastTransaction',
+                 'Rollback-LastTransaction','Invoke-CustomAppProductionFullChainV010',
+                 'Get-CustomAppLocalRuntimeBaseline','Get-AddonSourceAdapterPlan')
+    handlers={}
+    for i,m in enumerate(matches):
+        n=m.group(1)
+        if n not in exact_names:continue
+        end=matches[i+1].start() if i+1<len(matches) else len(text)
+        handlers[n]=text[m.start():end].rstrip()
+    report['handler_blocks']=handlers
+    report['handler_names_found']=sorted(handlers)
+    for n in exact_names:
+        if n not in handlers:print('ENTRYPOINT_HANDLER_UNAVAILABLE',n)
+    if 'Update-AutoApps' not in handlers or 'Get-AddonMutationAuthorization' not in handlers:
+        raise RuntimeError('normal mutating entrypoint and authorization function not found in signed candidate')
+    print('ACTUAL_ADDON_UPDATE_AUTO_APPS_HANDLERS_CAPTURED_PASS names='+','.join(sorted(handlers)))
     HERE.mkdir(parents=True,exist_ok=True)
     (HERE/'entrypoint-inventory.json').write_text(json.dumps(report,indent=2,ensure_ascii=False)+'\n',encoding='utf-8')
     print('ACTUAL_ADDON_ENTRYPOINT_INVENTORY_PASS candidate_sha256='+sha(addon)+

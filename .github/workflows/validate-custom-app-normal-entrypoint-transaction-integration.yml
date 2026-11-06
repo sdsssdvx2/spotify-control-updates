@@ -31,7 +31,7 @@ jobs:
           if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'qualified terminal source parent mismatch'}
           if((git rev-parse origin/main).Trim() -cne $production){throw 'operating main advanced'}
           $audit='validation/custom-app-normal-entrypoint-transaction-integration/audit_entrypoint.py'
-          if((git hash-object $audit).Trim() -cne 'bedb70776a6b1913a49f43f4c112bdd648cab6aa'){throw 'unqualified entrypoint inventory'}
+          if((git hash-object $audit).Trim() -cne '4a931dc02a89c19b7b1fdc09412fa52a77fbfe02'){throw 'unqualified entrypoint inventory'}
           $allowed=@($audit,'.github/workflows/validate-custom-app-normal-entrypoint-transaction-integration.yml')
           $changed=@(git diff --name-only "$parent...HEAD")
           if($changed.Count -ne 2 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('unapproved source scope '+($changed -join ','))}
