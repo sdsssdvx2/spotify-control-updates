@@ -1,0 +1,145 @@
+name: Validate cooperative CurrentUser lock across actual legacy actions and disabled new journal
+on:
+  push:
+    branches: [validate/custom-app-cooperative-cross-engine-lock]
+    paths:
+      - 'validation/custom-app-cooperative-cross-engine-lock/**'
+      - '.github/workflows/validate-custom-app-cooperative-cross-engine-lock.yml'
+  pull_request:
+    branches: [validate/custom-app-legacy-journal-settlement-barrier]
+    paths:
+      - 'validation/custom-app-cooperative-cross-engine-lock/**'
+      - '.github/workflows/validate-custom-app-cooperative-cross-engine-lock.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  actual-legacy-new-cross-engine-exclusive-windows:
+    runs-on: windows-2025
+    timeout-minutes: 95
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Pin exact module and test blobs, review scope, freeze operating main
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='e86cdea0b19b5a8e0b2cb22c59415185e512fdf2'
+          $actual=(git rev-parse HEAD).Trim()
+          if($actual -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'wrong tested checkout SHA'}
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'qualified parent missing'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main advanced'}
+          $d='validation/custom-app-cooperative-cross-engine-lock'
+          $pins=@{
+            "$d/cross-engine-transaction-lock.ps1"='246fca11e6d97f972c575eb90ead3f070bcc26d6'
+            "$d/test_cross_engine_lock.ps1"='697b296ad7b9632bdc800747cfb5f5c51a8a4324'
+            "$d/build_candidate.py"='e9d7b5463d673984e0238fe6599cb4bae812dede'
+          }
+          $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-cooperative-cross-engine-lock.yml')
+          $changed=@(git diff --name-only "$parent...HEAD")
+          if($changed.Count -ne 4 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('unqualified source scope '+($changed -join ','))}
+          foreach($p in $pins.Keys){if((git hash-object $p).Trim() -cne $pins[$p]){throw ('unqualified source hash '+$p)}}
+          foreach($p in @('bin/addon-manager.ps1','bin/spotify-control.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
+            git diff --quiet $parent HEAD -- $p
+            if($LASTEXITCODE -ne 0){throw ('operating file changed '+$p)}
+          }
+          Write-Host 'COOPERATIVE_CROSS_ENGINE_SCOPE_PRODUCTION_FROZEN_PASS'
+      - name: Build exact qualified Addon Manager and verify static/PS5.1 inverse of three action dispatcher
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-cooperative-cross-engine-lock'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'qualified Addon Manager candidate builder failed'}
+          $r=Get-Content "$d/candidate-validation.json" -Raw|ConvertFrom-Json
+          $a="$d/out/bin/addon-manager.ps1"
+          $sha=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sha -cne [string]$r.candidate_sha256 -or (Get-Item $a).Length -ne [int64]$r.candidate_bytes){throw 'candidate checksum mismatch'}
+          if((Get-FileHash "$d/out/bin/spotify-control.ps1" -Algorithm SHA256).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control candidate changed'}
+          if(-not[bool]$r.exact_qualified_parent_inverse -or -not[bool]$r.prior_fullchain_hard_disabled -or
+             -not[bool]$r.exact_old_transaction_functions_preserved -or
+             -not[bool]$r.separate_legacy_and_new_engine_shared_lock_path -or
+             [bool]$r.full_new_engine_runtime_not_wired -eq $false -or [bool]$r.operating_main_unchanged -eq $false){throw 'cross-engine preservation/disabled guard missing'}
+          foreach($f in @($a,"$d/cross-engine-transaction-lock.ps1","$d/test_cross_engine_lock.ps1")){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Select-Object -First 10|ForEach-Object{Write-Host ($_.Extent.StartLineNumber.ToString()+':'+$_.Message)};throw ('Windows PowerShell 5.1 parser failed '+$f)}
+          }
+          "CROSS_ENGINE_ADDON_SHA=$sha"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          "CROSS_ENGINE_ADDON_BYTES=$((Get-Item $a).Length)"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host "COOPERATIVE_CROSS_ENGINE_BUNDLED_ADDON_PS51_PASS sha256=$sha"
+      - name: Actual Addon Manager selftest with previous transactions and new lock declaration
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-cooperative-cross-engine-lock'
+          $sandbox=Join-Path $env:RUNNER_TEMP ('cross-engine-selftest-'+[Guid]::NewGuid().ToString('N'))
+          $env:LOCALAPPDATA=Join-Path $sandbox 'Local'
+          $env:APPDATA=Join-Path $sandbox 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/out/bin/addon-manager.ps1" -Action SelfTest *>&1|Tee-Object -FilePath "$d/addon-selftest.log"|Out-Null
+          $code=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($code -ne 0){Get-Content "$d/addon-selftest.log" -Tail 35|ForEach-Object{Write-Host $_};throw ('actual Addon Manager selftest failed '+$code)}
+          $log=Get-Content "$d/addon-selftest.log" -Raw
+          foreach($m in @('CROSS_ENGINE_REAL_ACTION_LOCK_SELFTEST_PASS','CUSTOM_APP_LEGACY_SETTLEMENT_BARRIER_SELFTEST_PASS','CUSTOM_APP_MISSING_LIVE_RECOVERY_SELFTEST_PASS','CUSTOM_APP_USER_JOURNAL_LOCATOR_SELFTEST_PASS')){
+            if(-not $log.Contains($m)){throw ('missing new/previous actual selftest '+$m)}
+          }
+          Write-Host 'COOPERATIVE_CROSS_ENGINE_REAL_ADDON_SELFTEST_PASS'
+      - name: Test independent same-user lock contenders and all three real mutating actions
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-cooperative-cross-engine-lock'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/test_cross_engine_lock.ps1" -Mode all -CandidatePath "$d/out/bin/addon-manager.ps1" *>&1|Tee-Object -FilePath "$d/cross-engine-windows.log"|Out-Null
+          $code=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($code -ne 0){Get-Content "$d/cross-engine-windows.log" -Tail 42|ForEach-Object{Write-Host $_};throw ('actual cross-engine exclusive transaction matrix failed '+$code)}
+          $log=Get-Content "$d/cross-engine-windows.log" -Raw
+          foreach($m in @('CROSS_ENGINE_LOCK_TWO_PROCESS_MATRIX_PASS','CROSS_ENGINE_ACTUAL_ACTION_BUSY_DENIED_PASS action=CommitLast','CROSS_ENGINE_ACTUAL_ACTION_BUSY_DENIED_PASS action=RollbackLast','CROSS_ENGINE_ACTUAL_ACTION_BUSY_DENIED_PASS action=Update','CROSS_ENGINE_ACTUAL_ADDON_ACTIONS_E2E_PASS')){
+            if(-not $log.Contains($m)){throw ('missing independent/current-user action lock evidence '+$m)}
+          }
+          Write-Host 'COOPERATIVE_CROSS_ENGINE_ACTUAL_ACTIONS_WINDOWS_PASS'
+      - name: Rebuild byte-identically; freeze main and write bounded evidence
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-cooperative-cross-engine-lock'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'repeat signed candidate builder failed'}
+          $a="$d/out/bin/addon-manager.ps1"
+          $sha=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sha -cne $env:CROSS_ENGINE_ADDON_SHA -or (Get-Item $a).Length -ne [int64]$env:CROSS_ENGINE_ADDON_BYTES){throw 'candidate not reproducible'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main changed'}
+          [ordered]@{
+            schema=1;status='PASS';review_head=(git rev-parse HEAD).Trim()
+            addon_sha256=$sha;addon_bytes=(Get-Item $a).Length
+            old_new_shared_owner_private_lock='PASS'
+            FileShareNone_across_processes='PASS'
+            actual_CommitLast_RollbackLast_Update_mutual_exclusion='PASS'
+            disabled_new_pre_enrollment_under_same_lock='PASS'
+            unlocked_legacy_noop_preserved='PASS'
+            legacy_fullchain_enabled=$false
+            new_auto_update_enabled=$false
+            user_spotify_touched=$false
+            production_main_unchanged=$true
+          }|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          Write-Host "COOPERATIVE_CROSS_ENGINE_DETERMINISTIC_MAIN_FROZEN_PASS sha256=$sha"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cooperative-cross-engine-lock-${{ github.run_id }}
+          path: |
+            validation/custom-app-cooperative-cross-engine-lock/candidate-validation.json
+            validation/custom-app-cooperative-cross-engine-lock/ci-evidence.json
+            validation/custom-app-cooperative-cross-engine-lock/addon-selftest.log
+            validation/custom-app-cooperative-cross-engine-lock/cross-engine-windows.log
+          retention-days: 14
+          if-no-files-found: warn
