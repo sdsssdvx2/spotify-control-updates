@@ -34,7 +34,7 @@ jobs:
             "$d/protected-restore-readiness.ps1"='4578d92f7e751222b939c88011801d8d7930f60a'
             "$d/test_protected_restore_readiness.ps1"='6d74fec794358c95973eeeb67ae90e9d528fb1e9'
             "$d/build_candidate.py"='e5c2f48631cea5848a902a41abfd96acf9d50349'
-            "$d/derive_signed_zip_protected_restore_e2e.py"='4453c4f8fdaef6785dab87164c7f4f3c7d173a59'
+            "$d/derive_signed_zip_protected_restore_e2e.py"='8ac775945a63db6f749e56573d755652b7e306c5'
           }
           $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-protected-restore-readiness.yml')
           $changed=@(git diff --name-only "$base...HEAD")

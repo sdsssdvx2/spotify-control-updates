@@ -110,11 +110,27 @@ Assert-TJR ([bool]$activeReady.ok -and [int]$activeReady.active_count -eq 1 -and
    -not[bool]$activeReady.production_mutation_authorized -and
    -not[IO.Directory]::Exists([string]$script:TIDLive)) 'missing-live real signed ZIP protected readiness mutated app'
 $activeItem=$activeReady.items[0]
-if([string]$activeItem.phase -in @('live-moved-to-old','candidate-live','transaction-finalized')){
-    Assert-TJR ([bool]$activeItem.eligible -and $null-ne$activeItem.receipt -and
-       [string]$activeItem.receipt.transaction_id -ceq [string]$script:USERExpectedTx -and
-       -not[bool]$activeItem.receipt.production_mutation_authorized) (
-         'missing live valid exact-restore state failed no-create preflight: '+[string]$activeItem.reason)
+if([string]$activeItem.phase -in @('candidate-live','transaction-finalized')){
+    # This is a deliberately DISPLACED live candidate after a completed
+    # atomic swap. The journal has not recorded an absent live directory:
+    # it is not safe to misclassify that tampered layout as a qualified
+    # pre-apply restore. Deny even with a valid journal and envelope.
+    Assert-TJR (-not[bool]$activeItem.eligible -and $null-eq$activeItem.receipt -and
+       [string]$activeItem.reason -match '^qualified-readonly-admission-denied:') (
+         'displaced live candidate was admitted against its recorded journal phase: '+[string]$activeItem.reason)
+    Write-Host 'PROTECTED_RESTORE_DISPLACED_CANDIDATE_FAIL_CLOSED_PASS'
+}elseif([string]$activeItem.phase -ceq 'live-moved-to-old'){
+    # A legitimate live-moved-to-old crash can be restorable if the old
+    # and staged candidate still match the durable receipt. A second
+    # unexplained displacement must instead remain a no-action denial.
+    if([bool]$activeItem.eligible){
+        Assert-TJR ($null-ne$activeItem.receipt -and
+           [string]$activeItem.receipt.transaction_id -ceq [string]$script:USERExpectedTx -and
+           -not[bool]$activeItem.receipt.production_mutation_authorized) 'restore receipt identity or authority failed'
+    }else{
+        Assert-TJR ($null-eq$activeItem.receipt -and
+           [string]$activeItem.reason -match '^qualified-readonly-admission-denied:') 'live-moved preflight denied without fail-closed reason'
+    }
 }elseif([string]$activeItem.phase -in @('apply-starting','apply-returned-success-pending-verification','rollback-required')){
     Assert-TJR (-not[bool]$activeItem.eligible -and
        [string]$activeItem.reason -ceq 'verified-spicetify-binary-pin-not-enrolled') 'missing live apply phase incorrectly admitted'
