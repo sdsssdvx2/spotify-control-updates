@@ -1,0 +1,166 @@
+name: Windows official scoped native refresh crash-restart rollback validation only
+on:
+  push:
+    branches: [validate/native-scoped-crash-rollback-lab]
+    paths:
+      - 'validation/custom-app-native-scoped-crash-rollback/**'
+      - '.github/workflows/validate-native-scoped-crash-rollback-lab.yml'
+  pull_request:
+    branches: [validate/native-spicetify-refresh-footprint]
+    paths:
+      - 'validation/custom-app-native-scoped-crash-rollback/**'
+      - '.github/workflows/validate-native-scoped-crash-rollback-lab.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  official-native-crash-restarter:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Immutable parent, operating main and exactly two isolated source files
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='27a69437bfbb9a7e6f17f93f2beefe7ca2e83408'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'unqualified head checked out'}
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'qualified PR239 parent not ancestor'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main moved'}
+          $source='validation/custom-app-native-scoped-crash-rollback/native-scoped-crash-rollback.ps1'
+          $test='validation/custom-app-native-scoped-crash-rollback/test_native_scoped_crash_rollback.ps1'
+          $workflow='.github/workflows/validate-native-scoped-crash-rollback-lab.yml'
+          if((git hash-object $source).Trim() -cne '57a5b5231827413dbec14f67d49b75f94b27527c' -or
+             (git hash-object $test).Trim() -cne 'c91cddc2bd4aad6239bf7deb2d04320f087f48bf'){
+            throw 'V017 source or acceptance test changed'
+          }
+          $changes=@(git diff --name-only "$parent...HEAD")
+          if($changes.Count -ne 3 -or @($changes|Where-Object{$_ -notin @($source,$test,$workflow)}).Count){
+            throw 'production source scope expanded unexpectedly'
+          }
+          foreach($file in @($source,$test)){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|ForEach-Object{Write-Host ('PARSER='+[string]$_.Message)};throw ('Windows PowerShell 5.1 parse failure '+$file)}
+          }
+          $module=[IO.File]::ReadAllText((Resolve-Path $source).Path)
+          foreach($required in @('Read-CustomAppSpicetifySealedPinV016','Write-CustomAppUserTxnBytesV010',
+              'Invoke-CustomAppScopedLabIndependentRecoveryV017','Restore-CustomAppScopedLabNativeV017',
+              'Get-CustomAppSealedStartupRecoveryAssessmentV013','[Environment]::GetFolderPath')){
+            if(-not$module.Contains($required) -and $required -ne '[Environment]::GetFolderPath'){
+              throw ('V017 missing authenticated boundary '+$required)
+            }
+          }
+          foreach($denied in @('Open-CustomAppUserTxnStoreV010 -Name','$script:CustomAppProductionPipelineEnabled = $true')){
+            if($module.Contains($denied)){throw ('V017 forbidden legacy mutating entrypoint '+$denied)}
+          }
+          Write-Host 'NATIVE_SCOPED_V017_FROZEN_MAIN_AND_NO_NORMAL_DISPATCH_PASS'
+      - name: Restore pinned historical journal source used by V016
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $rev='7e26187e2360089024e9d72d0701be6f1577a1ef'
+          $path='validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1'
+          $expected='a3df7e5d89c594083c10e240e13029ca5640b8ae'
+          if(-not(Test-Path -LiteralPath $path -PathType Leaf)){
+            git cat-file -e ($rev+'^{commit}') 2>$null
+            if($LASTEXITCODE -ne 0){git fetch --no-tags origin $rev|Out-Null;if($LASTEXITCODE -ne 0){throw 'historic journal commit unavailable'}}
+            New-Item -ItemType Directory -Force (Split-Path $path -Parent)|Out-Null
+            $env:PIN_OLD_BLOB=($rev+':'+$path)
+            $env:PIN_OLD_OUT=$path
+            python -c "import os,subprocess,pathlib;pathlib.Path(os.environ['PIN_OLD_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['PIN_OLD_BLOB']]))"
+            if($LASTEXITCODE -ne 0){throw 'historic crash journal blob restore failed'}
+          }
+          if((git hash-object $path).Trim() -cne $expected){throw 'historic journal source not authenticated'}
+          Write-Host 'NATIVE_SCOPED_V017_HISTORICAL_JOURNAL_PINNED_PASS'
+      - name: Fetch real upstream official Spicetify 2.46.4 Windows x64 into RUNNER_TEMP
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP ('native-scoped-official-'+[guid]::NewGuid().ToString('N'))
+          [void][IO.Directory]::CreateDirectory($root)
+          $zip=Join-Path $root 'official.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip' -OutFile $zip
+          if((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f' -or
+             (Get-Item $zip).Length -ne 7795758){throw 'official upstream ZIP SHA/size drift'}
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z=[IO.Compression.ZipFile]::OpenRead($zip)
+          try{
+            $total=[long]0
+            foreach($f in $z.Entries){
+              $relative=$f.FullName.Replace('/','\')
+              if([IO.Path]::IsPathRooted($relative) -or $relative.StartsWith('\') -or
+                 $relative.Contains('..\') -or $relative.Contains(':')){throw 'unsafe upstream ZIP entry'}
+              $total+=[long]$f.Length
+              if($total -gt 104857600){throw 'upstream ZIP expansion exceeds bound'}
+            }
+          }finally{$z.Dispose()}
+          $dir=Join-Path $root 'unzipped'
+          Expand-Archive -LiteralPath $zip -DestinationPath $dir
+          $exes=@(Get-ChildItem -LiteralPath $dir -Recurse -File -Filter spicetify.exe)
+          if($exes.Count -ne 1 -or
+             (Get-FileHash -LiteralPath $exes[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+              '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+            throw 'official Spicetify.exe checksum mismatch'
+          }
+          "SCOPED_OFFICIAL_EXE=$($exes[0].FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host 'NATIVE_SCOPED_V017_EXACT_OFFICIAL_VENDOR_BINARY_PASS'
+      - name: Real native scoped mutation then terminate updater WITHOUT finally
+        shell: powershell
+        timeout-minutes: 12
+        run: |
+          $ErrorActionPreference='Stop'
+          $f=Join-Path $env:RUNNER_TEMP ('native-scoped-crash-'+[guid]::NewGuid().ToString('N'))
+          "SCOPED_FIXTURE_ROOT=$f"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          $script='validation/custom-app-native-scoped-crash-rollback/test_native_scoped_crash_rollback.ps1'
+          $log='validation/custom-app-native-scoped-crash-rollback/abrupt-exit.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Mode mutate -FixtureRoot $f -OfficialExecutable $env:SCOPED_OFFICIAL_EXE *>&1 |
+            Tee-Object -FilePath $log|Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 71){Get-Content $log -Tail 50|ForEach-Object{Write-Host $_};throw ('actual native mutated child did not die at injected interruption '+$rc)}
+          $raw=Get-Content $log -Raw
+          if(-not$raw.Contains('NATIVE_SCOPED_LAB_REAL_OFFICIAL_APPLIED_AND_INTENT_DURABLE_PASS')){
+            throw 'official native mutation proof missing despite exit 71'
+          }
+          Write-Host 'NATIVE_SCOPED_V017_OFFICIAL_APPLIED_THEN_ABRUPT_TERMINATION_PASS'
+      - name: Fresh process denies unrelated asset mutation and tampered durable intent without touching target
+        shell: powershell
+        timeout-minutes: 8
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/custom-app-native-scoped-crash-rollback/test_native_scoped_crash_rollback.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Mode tamper-denial -FixtureRoot $env:SCOPED_FIXTURE_ROOT
+          if($LASTEXITCODE -ne 0){throw 'new-process fail-closed tamper test failed'}
+          Write-Host 'NATIVE_SCOPED_V017_INDEPENDENT_TAMPER_DENIAL_PASS'
+      - name: Independently restarted worker restores exact original target without touching state.pending
+        shell: powershell
+        timeout-minutes: 8
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/custom-app-native-scoped-crash-rollback/test_native_scoped_crash_rollback.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Mode recover -FixtureRoot $env:SCOPED_FIXTURE_ROOT
+          if($LASTEXITCODE -ne 0){throw 'independent crash recovery failed'}
+          Write-Host 'NATIVE_SCOPED_V017_REAL_OFFICIAL_NATIVE_INDEPENDENT_CRASH_RESTORE_PASS'
+      - name: Third independent worker rejects repeat mutation and validates durable recovered terminal
+        shell: powershell
+        timeout-minutes: 8
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/custom-app-native-scoped-crash-rollback/test_native_scoped_crash_rollback.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Mode replay -FixtureRoot $env:SCOPED_FIXTURE_ROOT
+          if($LASTEXITCODE -ne 0){throw 'recovery terminal replay not idempotent'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main changed'}
+          Write-Host 'NATIVE_SCOPED_V017_CROSS_PROCESS_RECOVERY_IDEMPOTENT_MAIN_FROZEN_PASS'
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-scoped-crash-rollback-${{ github.run_id }}
+          path: |
+            validation/custom-app-native-scoped-crash-rollback/abrupt-exit.log
+          retention-days: 14
+          if-no-files-found: warn
