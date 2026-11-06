@@ -34,7 +34,7 @@ jobs:
             "$d/durable-recovery-inventory.ps1"='ce6f4d8a04648387ee2bb3d067973c4243006660'
             "$d/test_durable_recovery_inventory.ps1"='b1416f592d183201f9a828c52d38729ebd5d895c'
             "$d/build_candidate.py"='563bb168fd59691d9ac6c6d67c07e4d476d8ea45'
-            "$d/derive_signed_zip_inventory_e2e.py"='60007947c9183b4bf0f2e7890e420769a8b49370'
+            "$d/derive_signed_zip_inventory_e2e.py"='192eecd7e15934335f02f8d54665130a4a8a5de9'
           }
           $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-durable-recovery-inventory.yml')
           $changed=@(git diff --name-only "$base...HEAD")
