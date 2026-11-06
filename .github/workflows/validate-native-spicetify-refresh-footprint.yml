@@ -30,7 +30,7 @@ jobs:
           if((git merge-base $base HEAD).Trim() -cne $base){throw 'PR238 parent changed'}
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main drift'}
           $p='validation/native-spicetify-refresh-footprint/audit_native_refresh.ps1'
-          if((git hash-object $p).Trim() -cne 'd8beffc1fc893ed14056445c9534c72a230080b8'){throw 'candidate source drift'}
+          if((git hash-object $p).Trim() -cne '653b3598601a9bcee5f00b05ae9eea4cac31e975'){throw 'candidate source drift'}
           $changed=@(git diff --name-only "$base...HEAD")
           if($changed.Count -ne 2 -or @($changed|Where-Object{$_ -notin @($p,'.github/workflows/validate-native-spicetify-refresh-footprint.yml')}).Count){
             throw 'unexpected production source modifications'
@@ -116,6 +116,10 @@ jobs:
             'NATIVE_REFRESH_REAL_OFFICIAL_SINGLE_CONFIGURED_APP_NARROW_REFRESH_PASS',
             'NATIVE_REFRESH_OFFICIAL_CLONED_CONFIG_SINGLE_APP_SOURCE_PROFILE_CONFINE_PASS',
             'NATIVE_REFRESH_OFFICIAL_SCOPED_REFRESH_BYTE_EXACT_ROLLBACK_SYNTHETIC_PASS',
+            'NATIVE_REFRESH_OFFICIAL_EXTENSION_ALL_ENABLED_BOTH_UPDATED_PASS',
+            'NATIVE_REFRESH_OFFICIAL_EXTENSION_PARTIAL_FAILURE_EXIT_ZERO_PASS',
+            'NATIVE_REFRESH_OFFICIAL_EXTENSION_SCOPED_CLONED_PROFILE_NARROW_PASS',
+            'NATIVE_REFRESH_OFFICIAL_EXTENSION_SCOPED_BYTE_EXACT_ROLLBACK_PASS',
             'NATIVE_REFRESH_REAL_OFFICIAL_CLI_SOURCE_SEMANTICS_PROVED_NO_USER_SPOTIFY_PASS'
           )){if(-not$all.Contains($marker)){throw ('required native effect marker missing '+$marker)}}
           Write-Host 'NATIVE_REFRESH_REAL_EXE_ALL_EFFECT_SCOPE_TESTS_PASS'
@@ -135,6 +139,10 @@ jobs:
             single_configured_app_only_did_not_mutate_other_app=$true
             cloned_scoped_config_did_not_modify_canonical_profile=$true
             scoped_target_output_byte_exact_rollback_synthetic=$true
+            official_extensions_all_configured_can_refresh=$true
+            extension_partial_error_can_return_zero=$true
+            cloned_scoped_extension_config_preserves_unrelated_files=$true
+            extension_output_byte_exact_rollback_synthetic=$true
             native_exe_only_executed_in_disposable_synthetic_runner_profile=$true
             actual_spotify_install_touched=$false;production_execution_authorized=$false
             main_frozen=$true

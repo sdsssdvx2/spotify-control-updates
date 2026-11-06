@@ -207,4 +207,96 @@ foreach($entry in $afterRestore){
 }
 Write-Host 'NATIVE_REFRESH_OFFICIAL_SCOPED_REFRESH_BYTE_EXACT_ROLLBACK_SYNTHETIC_PASS'
 
+
+# Extension update has a distinct official flag (-e). Prove the same
+# all-configured behavior and separately scoped profile, preserving installed
+# resources and unrelated extensions. All fixtures remain in RUNNER_TEMP.
+$extFolder=Join-Path $spicetify 'Extensions'
+$extOut=Join-Path $xpui 'extensions'
+[void][IO.Directory]::CreateDirectory($extFolder)
+[void][IO.Directory]::CreateDirectory($extOut)
+$extOneSource=Join-Path $extFolder 'one.js'
+$extTwoSource=Join-Path $extFolder 'two.js'
+$extOneOutput=Join-Path $extOut 'one.js'
+$extTwoOutput=Join-Path $extOut 'two.js'
+[IO.File]::WriteAllText($extOneSource,'const EXT_ONE_V1 = true;',[Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText($extTwoSource,'const EXT_TWO_V1 = true;',[Text.UTF8Encoding]::new($false))
+Set-SyntheticConfig -Apps 'alpha|beta'
+[IO.File]::AppendAllText($config,'extensions = one.js|two.js'+[Environment]::NewLine)
+$extAll=Invoke-SyntheticRefresh -Arguments @('-e','refresh') -LogName 'extensions-all.log'
+if($extAll.exit_code -ne 0 -or -not[IO.File]::Exists($extOneOutput) -or
+   -not[IO.File]::Exists($extTwoOutput) -or
+   -not[IO.File]::ReadAllText($extOneOutput).Contains('EXT_ONE_V1') -or
+   -not[IO.File]::ReadAllText($extTwoOutput).Contains('EXT_TWO_V1')){
+    throw ('NATIVE_REFRESH_OFFICIAL_EXTENSION_ALL_CONFIGURED_NOT_RENDERED exit='+$extAll.exit_code)
+}
+Write-Host 'NATIVE_REFRESH_OFFICIAL_EXTENSION_ALL_ENABLED_BOTH_UPDATED_PASS'
+$extOneOld=(Get-FileHash -LiteralPath $extOneOutput -Algorithm SHA256).Hash
+$extTwoOld=(Get-FileHash -LiteralPath $extTwoOutput -Algorithm SHA256).Hash
+[IO.File]::WriteAllText($extOneSource,'const EXT_ONE_V2 = true;',[Text.UTF8Encoding]::new($false))
+[IO.File]::Delete($extTwoSource)
+$extPartial=Invoke-SyntheticRefresh -Arguments @('-e','refresh') -LogName 'extensions-missing.log'
+if($extPartial.exit_code -ne 0 -or
+   (Get-FileHash -LiteralPath $extOneOutput -Algorithm SHA256).Hash -ceq $extOneOld -or
+   (Get-FileHash -LiteralPath $extTwoOutput -Algorithm SHA256).Hash -cne $extTwoOld){
+    throw ('NATIVE_REFRESH_EXTENSION_PARTIAL_ERROR_EXIT_NOT_ZERO exit='+$extPartial.exit_code)
+}
+Write-Host 'NATIVE_REFRESH_OFFICIAL_EXTENSION_PARTIAL_FAILURE_EXIT_ZERO_PASS'
+[IO.File]::WriteAllText($extTwoSource,'const EXT_TWO_V2 = true;',[Text.UTF8Encoding]::new($false))
+Set-SyntheticConfig -Apps 'alpha|beta'
+[IO.File]::AppendAllText($config,'extensions = one.js'+[Environment]::NewLine)
+$extSingleConfig=[IO.File]::ReadAllText($config)
+Set-SyntheticConfig -Apps 'alpha|beta'
+[IO.File]::AppendAllText($config,'extensions = one.js|two.js'+[Environment]::NewLine)
+$originalConfigHash=(Get-FileHash -LiteralPath $config -Algorithm SHA256).Hash
+$originalOneSourceHash=(Get-FileHash -LiteralPath $extOneSource -Algorithm SHA256).Hash
+$originalTwoSha=(Get-FileHash -LiteralPath $extTwoOutput -Algorithm SHA256).Hash
+$scopedExt=Join-Path $sandboxRoot 'ScopedExtensions'
+$scopedExtFiles=Join-Path $scopedExt 'Extensions'
+$scopedExtBackup=Join-Path $scopedExt 'Backup'
+foreach($dir in @($scopedExt,$scopedExtFiles,$scopedExtBackup)){
+    [void][IO.Directory]::CreateDirectory($dir)
+}
+[IO.File]::WriteAllBytes((Join-Path $scopedExtBackup 'xpui.spa'),[byte[]](0x50,0x4b))
+[IO.File]::WriteAllText((Join-Path $scopedExtFiles 'one.js'),'const EXT_ONE_SCOPED_V3 = true;',[Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText((Join-Path $scopedExt 'config-xpui.ini'),$extSingleConfig,[Text.UTF8Encoding]::new($false))
+$allBefore=@{}
+foreach($item in @(Get-ChildItem -LiteralPath $xpui -File -Recurse)){
+    $allBefore[$item.FullName]=(Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash
+}
+$oldExtOneBytes=[IO.File]::ReadAllBytes($extOneOutput)
+$env:SPICETIFY_CONFIG=$scopedExt
+$env:SPICETIFY_STATE=$scopedExt
+try{
+    $extScopedRun=Invoke-SyntheticRefresh -Arguments @('-e','refresh') -LogName 'extensions-scoped-profile.log'
+}finally{
+    Remove-Item Env:SPICETIFY_CONFIG,Env:SPICETIFY_STATE -ErrorAction SilentlyContinue
+}
+if($extScopedRun.exit_code -ne 0 -or
+   -not[IO.File]::ReadAllText($extOneOutput).Contains('EXT_ONE_SCOPED_V3') -or
+   (Get-FileHash -LiteralPath $extTwoOutput -Algorithm SHA256).Hash -cne $originalTwoSha -or
+   (Get-FileHash -LiteralPath $config -Algorithm SHA256).Hash -cne $originalConfigHash -or
+   (Get-FileHash -LiteralPath $extOneSource -Algorithm SHA256).Hash -cne $originalOneSourceHash){
+    throw ('NATIVE_REFRESH_EXTENSION_SCOPED_PROFILE_MISMATCH exit='+$extScopedRun.exit_code)
+}
+$allAfter=@(Get-ChildItem -LiteralPath $xpui -File -Recurse)
+if($allBefore.Count -ne $allAfter.Count){throw 'NATIVE_REFRESH_EXTENSION_SCOPED_UNEXPECTED_FILES'}
+foreach($item in $allAfter){
+    if($item.FullName -cne $extOneOutput -and
+       ($allBefore[$item.FullName] -cne (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash)){
+        throw 'NATIVE_REFRESH_EXTENSION_SCOPED_UNRELATED_FILE_CHANGED'
+    }
+}
+Write-Host 'NATIVE_REFRESH_OFFICIAL_EXTENSION_SCOPED_CLONED_PROFILE_NARROW_PASS'
+# A native CLI exit code is not a commit authority; an outer transaction can
+# still reject and restore the touched extension artifact exactly.
+[IO.File]::WriteAllBytes($extOneOutput,$oldExtOneBytes)
+foreach($item in $allAfter){
+    if($allBefore[$item.FullName] -cne
+        (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash){
+        throw 'NATIVE_REFRESH_EXTENSION_NATIVE_EFFECT_ROLLBACK_BYTES_DRIFT'
+    }
+}
+Write-Host 'NATIVE_REFRESH_OFFICIAL_EXTENSION_SCOPED_BYTE_EXACT_ROLLBACK_PASS'
+
 Write-Host 'NATIVE_REFRESH_REAL_OFFICIAL_CLI_SOURCE_SEMANTICS_PROVED_NO_USER_SPOTIFY_PASS'
