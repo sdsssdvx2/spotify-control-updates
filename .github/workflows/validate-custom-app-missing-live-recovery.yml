@@ -15,7 +15,7 @@ permissions: {contents: read}
 jobs:
   missing-live-after-atomic-rename-windows:
     runs-on: windows-2025
-    timeout-minutes: 85
+    timeout-minutes: 130
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,11 +33,12 @@ jobs:
           $pins=@{
             "$dir/missing-live-recovery.ps1"='5f25458ebf9c40206fde11918c2ce221966d6b2b'
             "$dir/test_missing_live_recovery.ps1"='d4adc5c1486de6c7684fb4bda1e328b359316823'
-            "$dir/build_candidate.py"='8000f3dd6ac7ece4def09648e0c4ef5da5ed4c85'
+            "$dir/build_candidate.py"='00390c7764bce40fd3c5e001cff69a7430c4529f'
+            "$dir/derive_actual_signed_zip_missing_live.py"='4733e300f692cc7a741330a9a8fc21328cc7b74d'
           }
           $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-missing-live-recovery.yml')
           $changed=@(git diff --name-only "$parent...HEAD")
-          if($changed.Count -ne 4 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('disallowed modification '+($changed -join ','))}
+          if($changed.Count -ne 5 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('disallowed modification '+($changed -join ','))}
           foreach($p in $pins.Keys){if((git hash-object $p).Trim() -cne $pins[$p]){throw ('qualified source pin mismatch '+$p)}}
           foreach($p in @('bin/addon-manager.ps1','bin/spotify-control.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
             git diff --quiet $parent HEAD -- $p
@@ -114,6 +115,111 @@ jobs:
           if($code -ne 0){Get-Content "$dir/fresh-missing.log" -Tail 35|ForEach-Object{Write-Host $_};throw ('recovery session from missing live failed '+$code)}
           if(-not(Get-Content "$dir/fresh-missing.log" -Raw).Contains('MISSING_LIVE_FRESH_PROCESS_RECOVERY_PASS')){throw 'read-only missing live recovery proof absent'}
           Write-Host 'MISSING_LIVE_INDEPENDENT_RECOVERY_AND_RESTORATION_PASS'
+      - name: Restore qualified historical Windows fixture dependencies and overlays
+        shell: powershell
+        timeout-minutes: 50
+        run: |
+          $ErrorActionPreference='Stop'
+          $prep='validation/custom-app-production-dual-id-new-permit-readiness-v0.1.0/prepare_custom_app_production_dual_id_new_permit_readiness.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $prep -RepoRoot $PWD.Path -RunnerTemp $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'Qualified historical fixture dependency restoration failed'}
+          $d='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          $pins=@(
+            @("$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1",'3350cd974bb9f9ae7345e490449c4875d571bf95'),
+            @("$d/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1",'224b9df9d020b74bd4d99c85ca6d06e28999101b')
+          )
+          foreach($pin in $pins){if((git hash-object $pin[0]).Trim() -cne [string]$pin[1]){throw ('Qualified overlay SHA drift: '+$pin[0])}}
+          # Pinned historical-only dependencies: materialize into ephemeral checkout.
+          $historical=@(
+            @('e2b80822835bf5d59dc179e345e098b5bd79759e','validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/test_custom_app_production_atomic_live_swap_mutation.ps1','d15e0768162b0659c57602eaf0242b035b48b0c7'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+            @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','79580da78443a18bd281d4fce61c4a57d958a196'),
+            @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),
+            @('b266bad660d4b7bc87e7093c5b12f0cff1dc466f','validation/custom-app-production-recovery-plan-contract-v0.1.0/custom-app-production-recovery-plan.ps1','ae49409973164052d5830b981d804707f9d62b6c'),
+            @('ffb5aad4a605691ee7b80392498b0cb6fa4e4052','validation/custom-app-production-recovery-preflight-v0.1.0/custom-app-production-recovery-preflight.ps1','b1816a24849a559b4da2537aa1b2436124fbee50'),
+            @('ffb5aad4a605691ee7b80392498b0cb6fa4e4052','validation/custom-app-production-recovery-execution-admission-v0.1.0/custom-app-production-recovery-execution-admission.ps1','e8804a7c53ad0d3e5420e037d468d9c397e52529'),
+            @('5232e5adeb13e6942acb210b3cd13058e1eaaf05','validation/custom-app-production-recovery-evidence-admission-integration-v0.1.0/custom-app-production-recovery-evidence-admission-integration.ps1','c92c727b5a2217f5b84a1072608bfc4662e68926'),
+            @('d3969a746ed1736fe93586bd025116c2526fbff5','validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/custom-app-production-recovery-cleanup-resume-admission.ps1','387d97b10d493b3794b24fba2bac67cf39491444'),
+            @('d9a1face71511bdaeeef4e8c761415ef9ec95fc0','validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','0273d7e28a56759b1d0ec9cbf037483b04d98d63')
+          )
+          foreach($dep in $historical){
+            $commit=[string]$dep[0];$p=[string]$dep[1];$blob=[string]$dep[2]
+            if(-not(Test-Path -LiteralPath $p -PathType Leaf)){
+              git cat-file -e ($commit+'^{commit}') 2>$null
+              if($LASTEXITCODE){git fetch --no-tags origin $commit | Out-Null;if($LASTEXITCODE){throw ('historical fetch failed '+$commit)}}
+              New-Item -ItemType Directory -Force -Path (Split-Path $p -Parent)|Out-Null
+              $env:TJR_SPEC=($commit+':'+$p);$env:TJR_OUT=$p
+              python -c "import os,subprocess,pathlib;pathlib.Path(os.environ['TJR_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['TJR_SPEC']]))"
+              if($LASTEXITCODE){throw ('historical materialize failed '+$p)}
+            }
+            if((git hash-object $p).Trim() -cne $blob){throw ('historical recovery blob drift '+$p)}
+          }
+          # The parent preparer intentionally applies its separately qualified
+          # monotonic restore-executor patch. Do not overwrite it with its old blob.
+          if(-not(Test-Path -LiteralPath 'validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1' -PathType Leaf)){throw 'qualified monotonic restore executor absent'}
+          Write-Host 'TRIPLE_ID_AUTHORIZED_JOURNAL_BRIDGE_HISTORICAL_RECOVERY_MODULES_PINNED_PASS'
+          Write-Host 'TRIPLE_ID_AUTHORIZED_JOURNAL_BRIDGE_PINNED_FIXTURES_PASS'
+      - name: Apply SHA-qualified old reservation compatibility overlays in temporary Windows checkout
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          $core="$d/custom-app-production-dual-id-new-permit-reservation-persistence.ps1"
+          $pieces=@($core,"$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1","$d/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1")
+          $source=($pieces|ForEach-Object{[IO.File]::ReadAllText((Resolve-Path $_).Path)}) -join [Environment]::NewLine
+          [IO.File]::WriteAllText((Resolve-Path $core).Path,$source,[Text.UTF8Encoding]::new($false))
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $core).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw 'qualified historical reservation overlays PS5.1 invalid'}
+          Write-Host 'USER_TERMINAL_QUALIFIED_OLD_PERMIT_RESERVATION_OVERLAYS_PASS'
+      - name: Derive real signed ZIP third-HMAC permit full-chain rollback with missing-live crash injection
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir='validation/custom-app-missing-live-recovery'
+          python "$dir/derive_actual_signed_zip_missing_live.py"
+          if($LASTEXITCODE -ne 0){throw 'qualified real ZIP and missing-live injection derivation failed'}
+          $script="$dir/ci_derived_real_zip_missing_live_recovery.ps1"
+          if(-not(Test-Path -LiteralPath $script -PathType Leaf)){throw 'derived real ZIP E2E absent'}
+          $tokens=$null;$errs=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script).Path,[ref]$tokens,[ref]$errs)
+          if($errs.Count){$errs|Select-Object -First 12|ForEach-Object{Write-Host $_.Message};throw 'derived real ZIP PS5.1 parser failed'}
+          Write-Host 'MISSING_LIVE_ACTUAL_SIGNED_ZIP_INJECTION_PS51_PASS'
+      - name: Real signed third-ID ZIP swap, live disappearance, read-only reboot recovery and independent rollback
+        shell: powershell
+        timeout-minutes: 70
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir='validation/custom-app-missing-live-recovery'
+          $oldRun=$env:RUNNER_TEMP;$oldTemp=$env:TEMP;$oldTmp=$env:TMP
+          $sandbox=Join-Path $oldRun ('real-zip-missing-live-'+[Guid]::NewGuid().ToString('N'))
+          [IO.Directory]::CreateDirectory($sandbox)|Out-Null
+          $exitCode=1
+          try{
+            $env:RUNNER_TEMP=$sandbox;$env:TEMP=$sandbox;$env:TMP=$sandbox
+            $ErrorActionPreference='Continue'
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$dir/ci_derived_real_zip_missing_live_recovery.ps1" *>&1 |
+              Tee-Object -FilePath "$dir/real-zip-missing-live-e2e.log"|Out-Null
+            $exitCode=$LASTEXITCODE
+          }finally{
+            $env:RUNNER_TEMP=$oldRun;$env:TEMP=$oldTemp;$env:TMP=$oldTmp
+            $ErrorActionPreference='Stop'
+          }
+          if($exitCode -ne 0){
+            Get-Content "$dir/real-zip-missing-live-e2e.log" -Tail 38|ForEach-Object{Write-Host $_}
+            throw ('real signed ZIP missing live E2E failure exit='+$exitCode)
+          }
+          $log=Get-Content "$dir/real-zip-missing-live-e2e.log" -Raw
+          foreach($marker in @(
+            'MISSING_LIVE_REAL_SIGNED_ZIP_ATOMIC_CRASH_WINDOW_RECOVERY_PASS',
+            'USER_JOURNAL_SIGNED_ZIP_BOUND_RESTART_TERMINAL_PASS',
+            'USER_TERMINAL_FRESH_PROCESS_REPLAY_DENIED_PASS',
+            'TRIPLE_ID_EXCLUSIVE_REAL_ZIP_END_TO_END_PASS'
+          )){if(-not $log.Contains($marker)){throw ('real ZIP recovery evidence absent '+$marker)}}
+          Write-Host 'MISSING_LIVE_REAL_SIGNED_ZIP_CRASH_AND_INDEPENDENT_ROLLBACK_PASS'
       - name: Deterministic candidate rebuild, final production main and provenance proof
         shell: powershell
         timeout-minutes: 45
@@ -134,6 +240,8 @@ jobs:
             second_process_encrypted_locator_readback='PASS'
             cross_process_exclusive_lock='PASS'
             pending_state_not_silently_discarded='PASS'
+            real_signed_third_hmac_zip_partial_live_crash='PASS'
+            verified_independent_signed_zip_rollback='PASS'
             original_fullchain_hard_disabled=$true
             operating_user_spotify_changed=$false
             operating_main_unchanged=$true
@@ -149,5 +257,6 @@ jobs:
             validation/custom-app-missing-live-recovery/addon-selftest.log
             validation/custom-app-missing-live-recovery/bootstrap.log
             validation/custom-app-missing-live-recovery/fresh-missing.log
+            validation/custom-app-missing-live-recovery/real-zip-missing-live-e2e.log
           retention-days: 14
           if-no-files-found: warn

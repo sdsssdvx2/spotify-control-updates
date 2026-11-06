@@ -21,6 +21,8 @@ MODULE='validation/custom-app-missing-live-recovery/missing-live-recovery.ps1'
 MODULE_BLOB='5f25458ebf9c40206fde11918c2ce221966d6b2b'
 TEST='validation/custom-app-missing-live-recovery/test_missing_live_recovery.ps1'
 TEST_BLOB='d4adc5c1486de6c7684fb4bda1e328b359316823'
+DERIVE='validation/custom-app-missing-live-recovery/derive_actual_signed_zip_missing_live.py'
+DERIVE_BLOB='4733e300f692cc7a741330a9a8fc21328cc7b74d'
 OLD_HOOK='    try { Test-CustomAppUserJournalLocatorSelfTestV010 } catch { $errors.Add("Custom App user journal restart locator self-test failed: $($_.Exception.Message)") }'
 NEW_HOOK=OLD_HOOK+'\n    try { Test-CustomAppMissingLiveRecoverySelfTestV011 } catch { $errors.Add("Custom App interrupted live path recovery self-test failed: $($_.Exception.Message)") }'
 SELFTEST=r"""function Test-CustomAppMissingLiveRecoverySelfTestV011 {
@@ -49,7 +51,7 @@ def block(s,name):
     return s[m.start():m.end()+nxt.start() if nxt else len(s)]
 def main():
     for ref,path,expect in ((PARENT,PARENT_BUILDER,PARENT_BLOB),
-                            ('HEAD',MODULE,MODULE_BLOB),('HEAD',TEST,TEST_BLOB)):
+                            ('HEAD',MODULE,MODULE_BLOB),('HEAD',TEST,TEST_BLOB),('HEAD',DERIVE,DERIVE_BLOB)):
         git_pin(ref,path,expect)
     subprocess.check_call(['python',str(ROOT/PARENT_BUILDER)],cwd=ROOT)
     d=ROOT/'validation/custom-app-journal-restart-locator/out/bin'
@@ -102,7 +104,7 @@ def main():
     report=dict(schema=1,qualified_parent=PARENT,prior_addon_sha256=sha(addon),
         addon_sha256=sha(output),addon_size=len(output),spotify_control_sha256=sha(spotify),
         new_function_names=new_functions,source_git_blob=MODULE_BLOB,
-        regression_git_blob=TEST_BLOB,original_update_autoapps_unchanged=True,
+        regression_git_blob=TEST_BLOB,real_signed_zip_derived_regression_blob=DERIVE_BLOB,original_update_autoapps_unchanged=True,
         original_fullchain_hard_disabled=True,exact_parent_inverse=True,
         absent_live_parent_and_ancestor_validation=True,
         original_user_store_never_re_enrolled=True,
