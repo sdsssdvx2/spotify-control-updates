@@ -1,0 +1,124 @@
+name: Validate official Spicetify CLI executable under isolated hosted Windows profile
+on:
+  push:
+    branches: [validate/spicetify-official-cli-evidence]
+    paths:
+      - 'validation/spicetify-real-cli-evidence/**'
+      - '.github/workflows/validate-spicetify-real-cli-evidence.yml'
+  pull_request:
+    branches: [validate/custom-app-protected-restore-readiness]
+    paths:
+      - 'validation/spicetify-real-cli-evidence/**'
+      - '.github/workflows/validate-spicetify-real-cli-evidence.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  real-official-cli-hosted-windows-provenance:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Verify exact candidate tree, source hashes and frozen production main
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='7d1969638e995ebbf4c01429f44090d3e9297e71'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'tested candidate ref mismatch'}
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'qualified parent missing'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main drift'}
+          $d='validation/spicetify-real-cli-evidence'
+          $pins=@{
+            "$d/static-spicetify-provenance.ps1"='03deb8aee17a6a7bded91167196d2317cbbe586f'
+            "$d/ci_spicetify_release_v2464.ps1"='43fc7cde228263647757b1d8a9e71798e951bbd7'
+          }
+          $allowed=@($pins.Keys)+@('.github/workflows/validate-spicetify-real-cli-evidence.yml')
+          $changed=@(git diff --name-only "$base...HEAD")
+          if($changed.Count -ne 3 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('unreviewed source scope: '+($changed -join ','))}
+          foreach($p in $pins.Keys){if((git hash-object $p).Trim() -cne [string]$pins[$p]){throw ('source sha mismatch '+$p)}}
+          foreach($p in @('bin/addon-manager.ps1','bin/spotify-control.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
+            git diff --quiet $base HEAD -- $p
+            if($LASTEXITCODE -ne 0){throw ('production source changed '+$p)}
+          }
+          Write-Host 'SPICETIFY_REAL_CLI_SOURCE_MAIN_FROZEN_PASS'
+      - name: Verify official GitHub release asset SHA metadata
+        shell: powershell
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference='Stop'
+          $meta=Invoke-RestMethod -Uri 'https://api.github.com/repos/spicetify/cli/releases/tags/v2.46.4' -Headers @{'User-Agent'='sc-official-cli-provenance'}
+          $assets=@($meta.assets|Where-Object{$_.name -ceq 'spicetify-2.46.4-windows-x64.zip'})
+          if([string]$meta.tag_name -cne 'v2.46.4' -or $assets.Count -ne 1 -or
+             [string]$assets[0].digest -cne 'sha256:0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f' -or
+             [string]$assets[0].browser_download_url -cne 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip'){
+            throw 'official release asset metadata digest not qualified'
+          }
+          Write-Host 'SPICETIFY_REAL_CLI_OFFICIAL_ARCHIVE_DIGEST_METADATA_PASS'
+      - name: Parse Windows PS5.1 scripts and reject mutation in static binary evidence reader
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/spicetify-real-cli-evidence'
+          foreach($p in @("$d/static-spicetify-provenance.ps1","$d/ci_spicetify_release_v2464.ps1")){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|Select-Object -First 12|ForEach-Object{Write-Host ($_.Extent.StartLineNumber.ToString()+':'+$_.Message)};throw ('PowerShell parser rejected '+$p)}
+          }
+          $s=[IO.File]::ReadAllText((Resolve-Path "$d/static-spicetify-provenance.ps1").Path)
+          foreach($bad in @('Start-Process','Invoke-WebRequest','Invoke-CustomAppProductionFullChainV010','[IO.File]::WriteAllBytes','[IO.Directory]::Move','FileMode]::OpenOrCreate')){
+            if($s.Contains($bad)){throw ('static evidence reader gained mutation primitive '+$bad)}
+          }
+          if(-not $s.Contains('[IO.FileMode]::Open') -or
+             -not $s.Contains('spicetify-profile-enrolled-exe-pin-mismatch')){
+            throw 'static reader lacks exact no-create/pin boundary'
+          }
+          Write-Host 'SPICETIFY_REAL_CLI_PS51_PARSE_AND_STATIC_NO_EXECUTE_PASS'
+      - name: Download pinned release and test real exe only inside isolated runner profile
+        shell: powershell
+        timeout-minutes: 13
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/spicetify-real-cli-evidence'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/ci_spicetify_release_v2464.ps1" *>&1 |
+             Tee-Object -FilePath "$d/real-cli-hosted.log"|Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 0){Get-Content "$d/real-cli-hosted.log" -Tail 65|ForEach-Object{Write-Host $_};throw ('real official CLI hosted test failed '+$rc)}
+          $log=Get-Content "$d/real-cli-hosted.log" -Raw
+          foreach($mark in @('SPICETIFY_REAL_OFFICIAL_RELEASE_EXE_SHA256=','SPICETIFY_CANONICAL_CURRENTUSER_EXE_SNAPSHOT_PASS','SPICETIFY_REAL_CLI_HOSTED_ISOLATED_PROVENANCE_PASS')){
+            if(-not $log.Contains($mark)){throw ('official CLI test marker missing '+$mark)}
+          }
+          $r=Get-Content "$d/real-cli-provenance-ci.json" -Raw|ConvertFrom-Json
+          if([string]$r.release -cne 'v2.46.4' -or
+             [string]$r.release_zip_sha256 -cne '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f' -or
+             [string]$r.extracted_executable_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+             -not[bool]$r.package_init_created_config_directory -or
+             -not[bool]$r.package_init_created_state_directory -or
+             -not[bool]$r.canonical_profile_executable_read_only_verified -or
+             -not[bool]$r.wrong_hash_denied -or
+             -not[bool]$r.no_cli_apply_or_spotify_execution -or
+             -not[bool]$r.result_is_not_production_execution_authority){
+            throw 'real CLI evidence schema denies completion'
+          }
+          Write-Host ('SPICETIFY_REAL_CLI_OFFICIAL_EXE_PINNED_SHA256='+[string]$r.extracted_executable_sha256)
+      - name: Check original working source still unchanged
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main drift'}
+          $allow=@('?? validation/spicetify-real-cli-evidence/real-cli-provenance-ci.json','?? validation/spicetify-real-cli-evidence/real-cli-hosted.log')
+          $dirty=@(git status --porcelain --untracked-files=normal|Where-Object{$_ -notin $allow})
+          if($dirty.Count){throw ('unexpected checkout changes '+($dirty -join ','))}
+          Write-Host 'SPICETIFY_REAL_CLI_STATIC_SOURCE_AND_OPERATING_MAIN_UNCHANGED_PASS'
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-spicetify-cli-isolation-${{ github.run_id }}
+          path: |
+            validation/spicetify-real-cli-evidence/real-cli-provenance-ci.json
+            validation/spicetify-real-cli-evidence/real-cli-hosted.log
+          retention-days: 14
+          if-no-files-found: warn
