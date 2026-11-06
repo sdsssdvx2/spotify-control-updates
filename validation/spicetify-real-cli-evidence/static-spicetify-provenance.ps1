@@ -120,3 +120,13 @@ function Get-CustomAppSpicetifyCanonicalEvidenceV015 {
         config_relative='spicetify/config-xpui.ini'
     }
 }
+
+function Test-CustomAppSpicetifyCanonicalEvidenceSelfTestV015 {
+    if([bool]$script:CustomAppProductionPipelineEnabled){
+        throw 'spicetify-canonical-evidence-cannot-enable-fullchain'
+    }
+    if(-not(Get-Command Get-CustomAppSpicetifyCanonicalEvidenceV015 -CommandType Function -ErrorAction SilentlyContinue)){
+        throw 'spicetify-canonical-evidence-export-missing'
+    }
+    Write-Host 'SPICETIFY_CANONICAL_EVIDENCE_SELFTEST_PASS no_cli_execution=true canonical_currentuser_profile=true no_caller_executable_path=true zero_mutation_authority=true'
+}

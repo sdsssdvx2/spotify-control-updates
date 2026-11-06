@@ -31,12 +31,13 @@ jobs:
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main drift'}
           $d='validation/spicetify-real-cli-evidence'
           $pins=@{
-            "$d/static-spicetify-provenance.ps1"='03deb8aee17a6a7bded91167196d2317cbbe586f'
+            "$d/static-spicetify-provenance.ps1"='acf2c32f8fd8611b36b00bb81e39dd5367593cfb'
+            "$d/build_candidate.py"='970db9fe85ef59a38c1be35b42a78b3f47d73d22'
             "$d/ci_spicetify_release_v2464.ps1"='43fc7cde228263647757b1d8a9e71798e951bbd7'
           }
           $allowed=@($pins.Keys)+@('.github/workflows/validate-spicetify-real-cli-evidence.yml')
           $changed=@(git diff --name-only "$base...HEAD")
-          if($changed.Count -ne 3 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('unreviewed source scope: '+($changed -join ','))}
+          if($changed.Count -ne 4 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('unreviewed source scope: '+($changed -join ','))}
           foreach($p in $pins.Keys){if((git hash-object $p).Trim() -cne [string]$pins[$p]){throw ('source sha mismatch '+$p)}}
           foreach($p in @('bin/addon-manager.ps1','bin/spotify-control.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
             git diff --quiet $base HEAD -- $p
@@ -75,6 +76,50 @@ jobs:
             throw 'static reader lacks exact no-create/pin boundary'
           }
           Write-Host 'SPICETIFY_REAL_CLI_PS51_PARSE_AND_STATIC_NO_EXECUTE_PASS'
+      - name: Generate and self-test actual hard-disabled Addon Manager with canonical exe evidence
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/spicetify-real-cli-evidence'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'canonical executable evidence qualified Addon build failed'}
+          $r=Get-Content "$d/candidate-validation.json" -Raw | ConvertFrom-Json
+          $a="$d/out/bin/addon-manager.ps1"
+          $sha=(Get-FileHash -LiteralPath $a -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sha -cne [string]$r.addon_sha256 -or
+             (Get-Item -LiteralPath $a).Length -ne [int64]$r.addon_bytes -or
+             -not[bool]$r.fullchain_hard_disabled -or
+             -not[bool]$r.exact_previous_candidate_inverse -or
+             -not[bool]$r.all_legacy_transaction_functions_preserved -or
+             -not[bool]$r.no_mutation_authority -or
+             -not[bool]$r.actual_cli_binary_is_never_executed_by_static_reader -or
+             -not[bool]$r.exact_executable_hash_required_for_pin){
+            throw 'canonical executable evidence actual Addon inverse/fail-closed proof invalid'
+          }
+          if((Get-FileHash -LiteralPath "$d/out/bin/spotify-control.ps1" -Algorithm SHA256).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){
+            throw 'existing Spotify Control bytes changed'
+          }
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $a).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|Select-Object -First 10|ForEach-Object{Write-Host $_.Message};throw 'generated actual Addon Manager PS5.1 parser denied'}
+          $sand=Join-Path $env:RUNNER_TEMP ('spicetify-exe-addon-selftest-'+[Guid]::NewGuid().ToString('N'))
+          $env:LOCALAPPDATA=Join-Path $sand 'Local'
+          $env:APPDATA=Join-Path $sand 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest *>&1 |
+             Tee-Object -FilePath "$d/addon-selftest.log"|Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 0){Get-Content "$d/addon-selftest.log" -Tail 55|ForEach-Object{Write-Host $_};throw ('actual Addon selftest failed '+$rc)}
+          $log=Get-Content "$d/addon-selftest.log" -Raw
+          foreach($proof in @('SPICETIFY_CANONICAL_EVIDENCE_SELFTEST_PASS','PROTECTED_READINESS_SELFTEST_PASS','CROSS_ENGINE_REAL_ACTION_LOCK_SELFTEST_PASS')){
+            if(-not $log.Contains($proof)){throw ('qualified real Addon selftest marker missing '+$proof)}
+          }
+          "SPICETIFY_CANONICAL_ADDON_SHA=$sha"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          "SPICETIFY_CANONICAL_ADDON_BYTES=$((Get-Item $a).Length)"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host ('SPICETIFY_CANONICAL_EVIDENCE_ACTUAL_ADDON_BUILT_AND_SELFTEST_PASS sha256='+$sha)
       - name: Download pinned release and test real exe only inside isolated runner profile
         shell: powershell
         timeout-minutes: 13
@@ -104,12 +149,28 @@ jobs:
             throw 'real CLI evidence schema denies completion'
           }
           Write-Host ('SPICETIFY_REAL_CLI_OFFICIAL_EXE_PINNED_SHA256='+[string]$r.extracted_executable_sha256)
+      - name: Repeat byte-identical qualified disabled Addon build and freeze operating main
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/spicetify-real-cli-evidence'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'repeat canonical executable evidence addon build failed'}
+          $a="$d/out/bin/addon-manager.ps1"
+          $sha=(Get-FileHash -LiteralPath $a -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sha -cne $env:SPICETIFY_CANONICAL_ADDON_SHA -or
+             (Get-Item $a).Length -ne [int64]$env:SPICETIFY_CANONICAL_ADDON_BYTES){
+            throw 'non-deterministic actual disabled Addon candidate'
+          }
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main drift'}
+          Write-Host ('SPICETIFY_CANONICAL_EVIDENCE_ACTUAL_ADDON_DETERMINISTIC_PASS sha256='+$sha)
       - name: Check original working source still unchanged
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main drift'}
-          $allow=@('?? validation/spicetify-real-cli-evidence/real-cli-provenance-ci.json','?? validation/spicetify-real-cli-evidence/real-cli-hosted.log')
+          $allow=@('?? validation/spicetify-real-cli-evidence/real-cli-provenance-ci.json','?? validation/spicetify-real-cli-evidence/real-cli-hosted.log','?? validation/spicetify-real-cli-evidence/candidate-validation.json','?? validation/spicetify-real-cli-evidence/addon-selftest.log','?? validation/spicetify-real-cli-evidence/out/')
           $dirty=@(git status --porcelain --untracked-files=normal|Where-Object{$_ -notin $allow})
           if($dirty.Count){throw ('unexpected checkout changes '+($dirty -join ','))}
           Write-Host 'SPICETIFY_REAL_CLI_STATIC_SOURCE_AND_OPERATING_MAIN_UNCHANGED_PASS'
@@ -118,6 +179,8 @@ jobs:
         with:
           name: official-spicetify-cli-isolation-${{ github.run_id }}
           path: |
+            validation/spicetify-real-cli-evidence/candidate-validation.json
+            validation/spicetify-real-cli-evidence/addon-selftest.log
             validation/spicetify-real-cli-evidence/real-cli-provenance-ci.json
             validation/spicetify-real-cli-evidence/real-cli-hosted.log
           retention-days: 14
