@@ -1,0 +1,273 @@
+name: Validate durable DPAPI startup inventory against real signed ZIP and crash recovery
+on:
+  push:
+    branches: [validate/custom-app-durable-recovery-inventory]
+    paths:
+      - 'validation/custom-app-durable-recovery-inventory/**'
+      - '.github/workflows/validate-custom-app-durable-recovery-inventory.yml'
+  pull_request:
+    branches: [validate/custom-app-fresh-worker-lock-handoff]
+    paths:
+      - 'validation/custom-app-durable-recovery-inventory/**'
+      - '.github/workflows/validate-custom-app-durable-recovery-inventory.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  durable-currentuser-recovery-inventory-windows:
+    runs-on: windows-2025
+    timeout-minutes: 135
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Pin source and never modify the operating production branch
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='513e5fa9f174bb481b2cc9a1585c9d5700be409b'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'tested commit mismatch'}
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'missing qualified parent'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main drift'}
+          $d='validation/custom-app-durable-recovery-inventory'
+          $pins=@{
+            "$d/durable-recovery-inventory.ps1"='ce6f4d8a04648387ee2bb3d067973c4243006660'
+            "$d/test_durable_recovery_inventory.ps1"='b1416f592d183201f9a828c52d38729ebd5d895c'
+            "$d/build_candidate.py"='563bb168fd59691d9ac6c6d67c07e4d476d8ea45'
+            "$d/derive_signed_zip_inventory_e2e.py"='60007947c9183b4bf0f2e7890e420769a8b49370'
+          }
+          $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-durable-recovery-inventory.yml')
+          $changed=@(git diff --name-only "$base...HEAD")
+          if($changed.Count -ne 5 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('outside review scope '+($changed -join ','))}
+          foreach($p in $pins.Keys){if((git hash-object $p).Trim() -cne $pins[$p]){throw ('source pin mismatch '+$p)}}
+          foreach($p in @('bin/addon-manager.ps1','bin/spotify-control.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
+            git diff --quiet $base HEAD -- $p
+            if($LASTEXITCODE -ne 0){throw ('operating source changed '+$p)}
+          }
+          Write-Host 'DURABLE_RECOVERY_PINNED_SOURCE_MAIN_FROZEN_PASS'
+      - name: Generate real Addon Manager with read-only recovery startup inventory
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-durable-recovery-inventory'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'actual pinned Addon Manager generation failed'}
+          $r=Get-Content "$d/candidate-validation.json" -Raw|ConvertFrom-Json
+          $a="$d/out/bin/addon-manager.ps1"
+          $sha=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sha -cne [string]$r.addon_sha256 -or (Get-Item $a).Length -ne [int64]$r.addon_bytes){throw 'generated actual candidate fingerprint mismatch'}
+          if(-not[bool]$r.exact_previous_candidate_inverse -or
+             -not[bool]$r.fullchain_hard_disabled -or
+             -not[bool]$r.all_legacy_transaction_functions_preserved -or
+             -not[bool]$r.pending_write_never_discarded_by_discovery -or
+             -not[bool]$r.journal_identity_verified_before_reporting_active -or
+             -not[bool]$r.no_mutation_authority){throw 'read-only or inverse source proofs missing'}
+          if((Get-FileHash "$d/out/bin/spotify-control.ps1" -Algorithm SHA256).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control changed'}
+          foreach($path in @($a,"$d/durable-recovery-inventory.ps1","$d/test_durable_recovery_inventory.ps1")){
+            $tokens=$null;$errs=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path).Path,[ref]$tokens,[ref]$errs)
+            if($errs.Count){$errs|Select-Object -First 12|ForEach-Object{Write-Host ($_.Extent.StartLineNumber.ToString()+':'+$_.Message)};throw ('PS5.1 parser denied '+$path)}
+          }
+          "DURABLE_INVENTORY_ADDON_SHA=$sha"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          "DURABLE_INVENTORY_ADDON_SIZE=$((Get-Item $a).Length)"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host "DURABLE_RECOVERY_ACTUAL_ADDON_PARSER_AND_INVERSE_PASS sha256=$sha"
+      - name: Verify actual Addon Manager selftest with full previous hard-disabled integration
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-durable-recovery-inventory'
+          $sandbox=Join-Path $env:RUNNER_TEMP ('durable-selftest-'+[Guid]::NewGuid().ToString('N'))
+          $env:LOCALAPPDATA=Join-Path $sandbox 'Local'
+          $env:APPDATA=Join-Path $sandbox 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/out/bin/addon-manager.ps1" -Action SelfTest *>&1 |
+             Tee-Object -FilePath "$d/addon-selftest.log" | Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 0){Get-Content "$d/addon-selftest.log" -Tail 45|ForEach-Object{Write-Host $_};throw ('actual addon SelfTest failed '+$rc)}
+          $log=Get-Content "$d/addon-selftest.log" -Raw
+          foreach($m in @('DURABLE_RECOVERY_SELF_DISCOVERY_SELFTEST_PASS',
+            'CROSS_ENGINE_REAL_ACTION_LOCK_SELFTEST_PASS',
+            'CUSTOM_APP_USER_JOURNAL_LOCATOR_SELFTEST_PASS',
+            'CUSTOM_APP_MISSING_LIVE_RECOVERY_SELFTEST_PASS')){
+            if(-not $log.Contains($m)){throw ('missing new/previous candidate selftest '+$m)}
+          }
+          Write-Host 'DURABLE_RECOVERY_REAL_ADDON_SELFTEST_PASS'
+      - name: First clean Windows process active old ledger rejection and pending-write preserving inventory
+        shell: powershell
+        timeout-minutes: 12
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-durable-recovery-inventory'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/test_durable_recovery_inventory.ps1" -Phase bootstrap *>&1 |
+             Tee-Object -FilePath "$d/first-process.log" | Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 0){Get-Content "$d/first-process.log" -Tail 40|ForEach-Object{Write-Host $_};throw ('first-process DPAPI scan failed '+$rc)}
+          if(-not(Get-Content "$d/first-process.log" -Raw).Contains('DURABLE_RECOVERY_INVENTORY_BOOTSTRAP_PASS')){throw 'missing no-mutation first-process proof'}
+          Write-Host 'DURABLE_RECOVERY_FIRST_PROCESS_READONLY_PASS'
+      - name: Second independent Windows process discover missing live and reject unqualified active transaction
+        shell: powershell
+        timeout-minutes: 12
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-durable-recovery-inventory'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/test_durable_recovery_inventory.ps1" -Phase fresh-readback *>&1 |
+             Tee-Object -FilePath "$d/second-process.log" | Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 0){Get-Content "$d/second-process.log" -Tail 42|ForEach-Object{Write-Host $_};throw ('independent DPAPI state inventory failed '+$rc)}
+          if(-not(Get-Content "$d/second-process.log" -Raw).Contains('DURABLE_RECOVERY_INVENTORY_FRESH_PROCESS_PASS')){throw 'second-process identity and missing-live proof absent'}
+          Write-Host 'DURABLE_RECOVERY_FRESH_PROCESS_NO_AUTHORITY_MATRIX_PASS'
+      - name: Restore qualified historical Windows fixture dependencies and overlays
+        shell: powershell
+        timeout-minutes: 50
+        run: |
+          $ErrorActionPreference='Stop'
+          $prep='validation/custom-app-production-dual-id-new-permit-readiness-v0.1.0/prepare_custom_app_production_dual_id_new_permit_readiness.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $prep -RepoRoot $PWD.Path -RunnerTemp $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'Qualified historical fixture dependency restoration failed'}
+          $d='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          $pins=@(
+            @("$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1",'3350cd974bb9f9ae7345e490449c4875d571bf95'),
+            @("$d/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1",'224b9df9d020b74bd4d99c85ca6d06e28999101b')
+          )
+          foreach($pin in $pins){if((git hash-object $pin[0]).Trim() -cne [string]$pin[1]){throw ('Qualified overlay SHA drift: '+$pin[0])}}
+          # Pinned historical-only dependencies: materialize into ephemeral checkout.
+          $historical=@(
+            @('e2b80822835bf5d59dc179e345e098b5bd79759e','validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/test_custom_app_production_atomic_live_swap_mutation.ps1','d15e0768162b0659c57602eaf0242b035b48b0c7'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+            @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','79580da78443a18bd281d4fce61c4a57d958a196'),
+            @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),
+            @('b266bad660d4b7bc87e7093c5b12f0cff1dc466f','validation/custom-app-production-recovery-plan-contract-v0.1.0/custom-app-production-recovery-plan.ps1','ae49409973164052d5830b981d804707f9d62b6c'),
+            @('ffb5aad4a605691ee7b80392498b0cb6fa4e4052','validation/custom-app-production-recovery-preflight-v0.1.0/custom-app-production-recovery-preflight.ps1','b1816a24849a559b4da2537aa1b2436124fbee50'),
+            @('ffb5aad4a605691ee7b80392498b0cb6fa4e4052','validation/custom-app-production-recovery-execution-admission-v0.1.0/custom-app-production-recovery-execution-admission.ps1','e8804a7c53ad0d3e5420e037d468d9c397e52529'),
+            @('5232e5adeb13e6942acb210b3cd13058e1eaaf05','validation/custom-app-production-recovery-evidence-admission-integration-v0.1.0/custom-app-production-recovery-evidence-admission-integration.ps1','c92c727b5a2217f5b84a1072608bfc4662e68926'),
+            @('d3969a746ed1736fe93586bd025116c2526fbff5','validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/custom-app-production-recovery-cleanup-resume-admission.ps1','387d97b10d493b3794b24fba2bac67cf39491444'),
+            @('d9a1face71511bdaeeef4e8c761415ef9ec95fc0','validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','0273d7e28a56759b1d0ec9cbf037483b04d98d63')
+          )
+          foreach($dep in $historical){
+            $commit=[string]$dep[0];$p=[string]$dep[1];$blob=[string]$dep[2]
+            if(-not(Test-Path -LiteralPath $p -PathType Leaf)){
+              git cat-file -e ($commit+'^{commit}') 2>$null
+              if($LASTEXITCODE){git fetch --no-tags origin $commit | Out-Null;if($LASTEXITCODE){throw ('historical fetch failed '+$commit)}}
+              New-Item -ItemType Directory -Force -Path (Split-Path $p -Parent)|Out-Null
+              $env:TJR_SPEC=($commit+':'+$p);$env:TJR_OUT=$p
+              python -c "import os,subprocess,pathlib;pathlib.Path(os.environ['TJR_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['TJR_SPEC']]))"
+              if($LASTEXITCODE){throw ('historical materialize failed '+$p)}
+            }
+            if((git hash-object $p).Trim() -cne $blob){throw ('historical recovery blob drift '+$p)}
+          }
+          # The parent preparer intentionally applies its separately qualified
+          # monotonic restore-executor patch. Do not overwrite it with its old blob.
+          if(-not(Test-Path -LiteralPath 'validation/custom-app-production-recovery-restore-executor-v0.1.0/custom-app-production-recovery-restore-executor.ps1' -PathType Leaf)){throw 'qualified monotonic restore executor absent'}
+          Write-Host 'TRIPLE_ID_AUTHORIZED_JOURNAL_BRIDGE_HISTORICAL_RECOVERY_MODULES_PINNED_PASS'
+          Write-Host 'TRIPLE_ID_AUTHORIZED_JOURNAL_BRIDGE_PINNED_FIXTURES_PASS'
+      - name: Apply SHA-qualified old reservation compatibility overlays in temporary Windows checkout
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          $core="$d/custom-app-production-dual-id-new-permit-reservation-persistence.ps1"
+          $pieces=@($core,"$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1","$d/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1")
+          $source=($pieces|ForEach-Object{[IO.File]::ReadAllText((Resolve-Path $_).Path)}) -join [Environment]::NewLine
+          [IO.File]::WriteAllText((Resolve-Path $core).Path,$source,[Text.UTF8Encoding]::new($false))
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $core).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw 'qualified historical reservation overlays PS5.1 invalid'}
+          Write-Host 'USER_TERMINAL_QUALIFIED_OLD_PERMIT_RESERVATION_OVERLAYS_PASS'
+      - name: Derive real THIRD-HMAC signed ZIP plus durable active missing-live and retired state inventory
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-durable-recovery-inventory'
+          python "$d/derive_signed_zip_inventory_e2e.py"
+          if($LASTEXITCODE -ne 0){throw 'historical real signed ZIP read-only injection failed'}
+          $script="$d/ci_signed_zip_durable_recovery_inventory.ps1"
+          if(-not(Test-Path -LiteralPath $script -PathType Leaf)){throw 'missing real signed ZIP inventory E2E'}
+          $tokens=$null;$errs=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script).Path,[ref]$tokens,[ref]$errs)
+          if($errs.Count){$errs|Select-Object -First 10|ForEach-Object{Write-Host $_.Message};throw 'real ZIP inventory script PS5.1 parser rejected'}
+          Write-Host 'DURABLE_RECOVERY_REAL_SIGNED_ZIP_INVENTORY_PARSER_PASS'
+      - name: Real signed ZIP active and missing-live self-discovery, independently locked rollback, durable retirement
+        shell: powershell
+        timeout-minutes: 70
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-durable-recovery-inventory'
+          $savedRun=$env:RUNNER_TEMP;$savedTemp=$env:TEMP;$savedTmp=$env:TMP
+          $sandbox=Join-Path $savedRun ('signed-zip-inventory-'+[Guid]::NewGuid().ToString('N'))
+          [IO.Directory]::CreateDirectory($sandbox)|Out-Null
+          $exitCode=1
+          try{
+            $env:RUNNER_TEMP=$sandbox;$env:TEMP=$sandbox;$env:TMP=$sandbox
+            $ErrorActionPreference='Continue'
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/ci_signed_zip_durable_recovery_inventory.ps1" *>&1 |
+               Tee-Object -FilePath "$d/real-zip-inventory-e2e.log"|Out-Null
+            $exitCode=$LASTEXITCODE
+          }finally{
+            $env:RUNNER_TEMP=$savedRun;$env:TEMP=$savedTemp;$env:TMP=$savedTmp
+            $ErrorActionPreference='Stop'
+          }
+          if($exitCode -ne 0){
+            Get-Content "$d/real-zip-inventory-e2e.log" -Tail 55|ForEach-Object{Write-Host $_}
+            throw ('real signed ZIP and read-only DPAPI inventory failed '+$exitCode)
+          }
+          $log=Get-Content "$d/real-zip-inventory-e2e.log" -Raw
+          foreach($proof in @(
+            'DURABLE_RECOVERY_REAL_SIGNED_ZIP_ACTIVE_DPAPI_INVENTORY_PASS',
+            'DURABLE_RECOVERY_REAL_SIGNED_ZIP_MISSING_LIVE_DISCOVERY_PASS',
+            'FRESH_RECOVERY_REAL_INDEPENDENT_WORKER_LOCKED_APPLY_PASS',
+            'USER_TERMINAL_FRESH_PROCESS_REPLAY_DENIED_PASS',
+            'DURABLE_RECOVERY_REAL_SIGNED_ZIP_TERMINAL_INVENTORY_PASS',
+            'FRESH_WORKER_REAL_SIGNED_ZIP_HANDOFF_END_TO_END_PASS')){
+            if(-not $log.Contains($proof)){throw ('actual signed ZIP recovery inventory proof missing '+$proof)}
+          }
+          Write-Host 'DURABLE_RECOVERY_REAL_SIGNED_ZIP_COMPLETE_READONLY_INVENTORY_E2E_PASS'
+      - name: Repeat real Addon Manager build byte-identically and freeze operating main
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-durable-recovery-inventory'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'repeat qualified Addon Manager build failed'}
+          $a="$d/out/bin/addon-manager.ps1"
+          $sha=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sha -cne $env:DURABLE_INVENTORY_ADDON_SHA -or (Get-Item $a).Length -ne [int64]$env:DURABLE_INVENTORY_ADDON_SIZE){throw 'non-deterministic read-only recovery candidate'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main changed'}
+          [ordered]@{
+            schema=1;result='PASS';head=(git rev-parse HEAD).Trim()
+            actual_addon_sha256=$sha;actual_addon_bytes=(Get-Item $a).Length
+            stored_currentuser_DPAPI_enumeration_without_name_or_live_input='PASS'
+            real_signed_zip_active_journal_identity_verified='PASS'
+            real_signed_zip_missing_live_verified='PASS'
+            complete_rollback_then_no_active_claim='PASS'
+            pending_uncommitted_state_bytes_preserved='PASS'
+            cross_engine_and_per_app_lock_acquired='PASS'
+            no_recovery_or_mutation_authorized=$true
+            installed_spotify_unchanged=$true
+            operating_main_unchanged=$true
+          }|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          Write-Host "DURABLE_RECOVERY_INVENTORY_DETERMINISTIC_MAIN_FROZEN_PASS sha256=$sha"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: durable-recovery-inventory-${{ github.run_id }}
+          path: |
+            validation/custom-app-durable-recovery-inventory/candidate-validation.json
+            validation/custom-app-durable-recovery-inventory/ci-evidence.json
+            validation/custom-app-durable-recovery-inventory/first-process.log
+            validation/custom-app-durable-recovery-inventory/second-process.log
+            validation/custom-app-durable-recovery-inventory/addon-selftest.log
+            validation/custom-app-durable-recovery-inventory/real-zip-inventory-e2e.log
+          retention-days: 14
+          if-no-files-found: warn
