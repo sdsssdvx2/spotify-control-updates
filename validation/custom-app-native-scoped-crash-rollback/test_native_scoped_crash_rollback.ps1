@@ -162,6 +162,32 @@ if($Mode -ceq 'tamper-denial'){
     if(-not$denied -or -not[IO.File]::ReadAllText($target).Contains('NEW_SCOPED_ALPHA_V17')){
         throw 'SCOPED_LAB_INTENT_TAMPER_NOT_FAIL_CLOSED'
     }
+    $sealed=Join-Path $stateDir ('native-scoped-'+('a'*64)+'.dpapi')
+    $originalSeal=[IO.File]::ReadAllBytes($sealed)
+    $corruptedSeal=New-Object byte[] $originalSeal.Length
+    [Array]::Copy($originalSeal,$corruptedSeal,$originalSeal.Length)
+    $corruptedSeal[$corruptedSeal.Length-2]=$corruptedSeal[$corruptedSeal.Length-2] -bxor 1
+    [IO.File]::WriteAllBytes($sealed,$corruptedSeal)
+    $denied=$false
+    try{[void](Invoke-CustomAppScopedLabIndependentRecoveryV017 @pinArgs)}catch{$denied=$true}
+    finally{[IO.File]::WriteAllBytes($sealed,$originalSeal)}
+    if(-not$denied -or -not[IO.File]::ReadAllText($target).Contains('NEW_SCOPED_ALPHA_V17')){
+        throw 'SCOPED_LAB_DPAPI_SNAPSHOT_TAMPER_NOT_FAIL_CLOSED'
+    }
+    $journalLock=Join-Path $journal '.journal.lock'
+    $relocatedLock=Join-Path $root 'temporarily-relocated-journal-lock'
+    [IO.File]::Move($journalLock,$relocatedLock)
+    $denied=$false;$recreated=$false
+    try{[void](Invoke-CustomAppScopedLabIndependentRecoveryV017 @pinArgs)}catch{$denied=$true}
+    finally{
+        $recreated=[IO.File]::Exists($journalLock)
+        if(-not$recreated){[IO.File]::Move($relocatedLock,$journalLock)}
+    }
+    if(-not$denied -or $recreated -or
+       -not[IO.File]::ReadAllText($target).Contains('NEW_SCOPED_ALPHA_V17')){
+        throw 'SCOPED_LAB_MISSING_JOURNAL_LOCK_CREATED_OR_FAIL_OPEN'
+    }
+    Write-Host 'NATIVE_SCOPED_LAB_DPAPI_SNAPSHOT_TAMPER_AND_MISSING_JOURNAL_LOCK_DENIED_PASS'
     Write-Host 'NATIVE_SCOPED_LAB_FRESH_PROCESS_DENIED_OUTSIDER_AND_INTENT_TAMPER_PASS'
     exit 0
 }
@@ -200,5 +226,14 @@ if($Mode -ceq 'recover'){
        [string]$result.status -cne 'already-recovered-verified'){
         throw 'NATIVE_SCOPED_LAB_TERMINAL_REPLAY_NOT_IDEMPOTENT'
     }
+    $terminalTargetBytes=[IO.File]::ReadAllBytes($target)
+    [IO.File]::AppendAllText($target,'POST_TERMINAL_UNEXPECTED_DRIFT')
+    $denied=$false
+    try{[void](Invoke-CustomAppScopedLabIndependentRecoveryV017 @pinArgs)}catch{$denied=$true}
+    finally{[IO.File]::WriteAllBytes($target,$terminalTargetBytes)}
+    if(-not$denied){
+        throw 'SCOPED_LAB_RESTORED_TERMINAL_SILENTLY_REWROTE_DRIFT'
+    }
+    Write-Host 'NATIVE_SCOPED_LAB_RECOVERED_TERMINAL_POST_DRIFT_DENIED_PASS'
     Write-Host 'NATIVE_SCOPED_LAB_INDEPENDENT_RESTART_TERMINAL_REPLAY_IDEMPOTENT_PASS'
 }

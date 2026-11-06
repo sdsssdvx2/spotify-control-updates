@@ -33,7 +33,7 @@ jobs:
           $test='validation/custom-app-native-scoped-crash-rollback/test_native_scoped_crash_rollback.ps1'
           $workflow='.github/workflows/validate-native-scoped-crash-rollback-lab.yml'
           if((git hash-object $source).Trim() -cne 'e0f725cfcf1b1221e3df8f2465ac9887dba5e955' -or
-             (git hash-object $test).Trim() -cne '92b536d26fcaff0b11e58d0490ece6dc834d336d'){
+             (git hash-object $test).Trim() -cne '1eb86275fc8533b5e77c0b33436be12ea07336c1'){
             throw 'V017 source or acceptance test changed'
           }
           $changes=@(git diff --name-only "$parent...HEAD")
