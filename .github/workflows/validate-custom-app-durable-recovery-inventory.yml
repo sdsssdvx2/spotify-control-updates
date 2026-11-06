@@ -31,10 +31,10 @@ jobs:
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main drift'}
           $d='validation/custom-app-durable-recovery-inventory'
           $pins=@{
-            "$d/durable-recovery-inventory.ps1"='61090af5fde29c7cdcac72a0cc4f186fd2889976'
+            "$d/durable-recovery-inventory.ps1"='5452d87053e8d1d7ba69e026c874208ab506dab3'
             "$d/test_durable_recovery_inventory.ps1"='be250f30f1a80d758ca312fa7424280f0e3e5855'
-            "$d/build_candidate.py"='b66e9a44e078f2ddded44d1ce94fb331e7dc12d8'
-            "$d/derive_signed_zip_inventory_e2e.py"='1a07f473ea391e354991425af20a019f44772978'
+            "$d/build_candidate.py"='7d736389049e4342b82559eafb7946c6a7826929'
+            "$d/derive_signed_zip_inventory_e2e.py"='0cc98c86b0784c9a6787b712437db7a147316430'
           }
           $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-durable-recovery-inventory.yml')
           $changed=@(git diff --name-only "$base...HEAD")
@@ -226,6 +226,7 @@ jobs:
             'DURABLE_RECOVERY_REAL_SIGNED_ZIP_UNREADY_JOURNAL_DENIED_PASS',
             'DURABLE_RECOVERY_REAL_SIGNED_ZIP_ACTIVE_DPAPI_INVENTORY_PASS',
             'DURABLE_RECOVERY_REAL_SIGNED_ZIP_MISSING_LIVE_DISCOVERY_PASS',
+            'DURABLE_RECOVERY_JOURNAL_LOCK_MISSING_READ_ONLY_DENIED_PASS',
             'FRESH_RECOVERY_REAL_INDEPENDENT_WORKER_LOCKED_APPLY_PASS',
             'USER_TERMINAL_FRESH_PROCESS_REPLAY_DENIED_PASS',
             'DURABLE_RECOVERY_REAL_SIGNED_ZIP_TERMINAL_INVENTORY_PASS',

@@ -14,12 +14,12 @@ PARENT_BUILDER_SHA='9bb911d3bfd75c283d75970bd06d5ee856c8a5c7'
 PRIOR=(1485347,'fbce12662b1135d098503a017d4e4443d55814796cb986dfc59012ea094d66ae')
 MAIN=(284327,'69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99')
 MODULE='validation/custom-app-durable-recovery-inventory/durable-recovery-inventory.ps1'
-MODULE_BLOB='61090af5fde29c7cdcac72a0cc4f186fd2889976'
+MODULE_BLOB='5452d87053e8d1d7ba69e026c874208ab506dab3'
 TEST='validation/custom-app-durable-recovery-inventory/test_durable_recovery_inventory.ps1'
 TEST_BLOB='be250f30f1a80d758ca312fa7424280f0e3e5855'
 OLD_HOOK='    try { Test-CustomAppCrossEngineTransactionLockSelfTestV010 } catch { $errors.Add("Custom App cooperative cross-engine transaction lock self-test failed: $($_.Exception.Message)") }'
 NEW_HOOK=OLD_HOOK+'\n    try { Test-CustomAppDurableRecoveryInventorySelfTestV012 } catch { $errors.Add("Custom App durable recovery startup inventory self-test failed: $($_.Exception.Message)") }'
-NEW_FUNCTIONS=['Get-CustomAppDurableRecoveryInventoryV012','Test-CustomAppDurableRecoveryInventorySelfTestV012']
+NEW_FUNCTIONS=['Read-CustomAppDurableRecoveryJournalReadOnlyV012','Get-CustomAppDurableRecoveryInventoryV012','Test-CustomAppDurableRecoveryInventorySelfTestV012']
 def sha(b):return hashlib.sha256(b).hexdigest()
 def pin(ref,p,expected):
     actual=subprocess.check_output(['git','rev-parse',f'{ref}:{p}'],cwd=ROOT,text=True).strip()
@@ -55,7 +55,8 @@ def main():
       'Open-CustomAppCrossEngineTransactionLockV010',
       'Read-CustomAppUserTxnStateV010',
       'Read-CustomAppUserTxnJournalLocatorV010',
-      'Read-CustomAppProductionCrashJournalV010',
+      'Read-CustomAppProductionCrashJournalUnlockedV010',
+      'Get-CustomAppProductionCrashJournalPathsV010',
       'Get-CustomAppUserTxnMissingLivePathsV011',
       'no_app_state_modified=$true'):
         if required not in module:raise RuntimeError('unsafe or missing inventory invariant '+required)

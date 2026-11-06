@@ -2,6 +2,30 @@
 # Acquire the same global lock used by normal Update / CommitLast /
 # RollbackLast. Read CurrentUser DPAPI records without user-supplied paths.
 # Never call Open-CustomAppUserTxnStoreV010: it removes state.pending.
+# The historical crash-journal reader opens .journal.lock with OpenOrCreate.
+# An inventory must never materialize a missing journal lock: absence is
+# evidence of an incomplete or altered journal, not permission to repair it.
+function Read-CustomAppDurableRecoveryJournalReadOnlyV012 {
+    param([Parameter(Mandatory=$true)][string]$AllowedRoot,
+          [Parameter(Mandatory=$true)][string]$StoreDirectory)
+    $paths=Get-CustomAppProductionCrashJournalPathsV010 -AllowedRoot $AllowedRoot -StoreDirectory $StoreDirectory
+    $lockPath=[string]$paths.lock
+    Assert-CustomAppUserTxnNoReparseV010 -Path $lockPath
+    if(-not[IO.File]::Exists($lockPath)) {
+        throw 'durable-recovery-journal-lock-missing'
+    }
+    $stream=$null
+    try {
+        # Keep the original crash journal reader's exclusive FileShare.None
+        # semantics, but never create or rewrite any journal artifact.
+        $stream=[IO.File]::Open($lockPath,[IO.FileMode]::Open,
+            [IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+        Assert-CustomAppUserTxnNoReparseV010 -Path $lockPath
+        return Read-CustomAppProductionCrashJournalUnlockedV010 -Paths $paths
+    } finally {
+        if($null -ne $stream){$stream.Dispose()}
+    }
+}
 function Get-CustomAppDurableRecoveryInventoryV012 {
     param([string]$HostedCiRoot,$HeldCrossEngineSession)
     $globalLock=$null
@@ -154,10 +178,10 @@ function Get-CustomAppDurableRecoveryInventoryV012 {
                        [string]$locator.record.transaction_id -cne [string]$canonical.active.transaction_id) {
                         throw 'durable-recovery-locator-unqualified'
                     }
-                    if(-not(Get-Command Read-CustomAppProductionCrashJournalV010 -CommandType Function -ErrorAction SilentlyContinue)) {
+                    if(-not(Get-Command Read-CustomAppProductionCrashJournalUnlockedV010 -CommandType Function -ErrorAction SilentlyContinue)) {
                         throw 'durable-recovery-journal-reader-not-loaded'
                     }
-                    $j=Read-CustomAppProductionCrashJournalV010 -AllowedRoot ([string]$locator.record.allowed_root) -StoreDirectory ([string]$locator.record.store_directory)
+                    $j=Read-CustomAppDurableRecoveryJournalReadOnlyV012 -AllowedRoot ([string]$locator.record.allowed_root) -StoreDirectory ([string]$locator.record.store_directory)
                     if($null -eq $j -or -not[bool]$j.ok -or
                       [string]$j.entry.transaction_id -cne [string]$canonical.active.transaction_id) {
                         throw 'durable-recovery-journal-corrupt-or-wrong-transaction'

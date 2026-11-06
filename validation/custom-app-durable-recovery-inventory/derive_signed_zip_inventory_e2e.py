@@ -11,7 +11,7 @@ PARENT_BLOB='34d1abfa71055c955405e2e91cead45d1e7684ee'
 PARENT_SCRIPT=ROOT/'validation/custom-app-fresh-worker-lock-handoff/ci_signed_zip_fresh_worker_lock_handoff.ps1'
 OUT=HERE/'ci_signed_zip_durable_recovery_inventory.ps1'
 MODULE=ROOT/'validation/custom-app-durable-recovery-inventory/durable-recovery-inventory.ps1'
-MODULE_BLOB='61090af5fde29c7cdcac72a0cc4f186fd2889976'
+MODULE_BLOB='5452d87053e8d1d7ba69e026c874208ab506dab3'
 def pin(p,sha):
     x=subprocess.check_output(['git','hash-object',str(p)],cwd=ROOT,text=True).strip()
     if x!=sha:raise RuntimeError('qualified original source drift '+str(p))
@@ -55,6 +55,33 @@ Write-Host 'DURABLE_RECOVERY_REAL_SIGNED_ZIP_UNREADY_JOURNAL_DENIED_PASS'
 # After the actual journal is initialized and the live directory has
 # been moved away, a sealed active transaction is discoverable even
 # without a caller-supplied path. Acquire the exact hosted registry-root global lock.
+# A damaged/missing journal lock must not be silently recreated by
+# read-only inventory. The legacy reader used OpenOrCreate, which would have
+# altered the active transaction's journal even when discovery fails.
+$journalLock=Join-Path $script:TJRStore '.journal.lock'
+Assert-TJR ([IO.File]::Exists($journalLock)) 'real signed journal exclusive lock is absent before adversarial test'
+$journalLockHash=(Get-FileHash -LiteralPath $journalLock -Algorithm SHA256).Hash
+$detachedJournalLock=Join-Path $script:TJRStore ('journal-lock-detached-'+[Guid]::NewGuid().ToString('N'))
+[IO.File]::Move($journalLock,$detachedJournalLock)
+try{
+    $lockMissingDenied=$false
+    try{
+        $lockMissingProbe=Get-CustomAppDurableRecoveryInventoryV012 -HostedCiRoot $script:USERStoreRoot
+    }catch{
+        $lockMissingDenied=([string]$_.Exception.Message -match 'durable-recovery-journal-lock-missing')
+    }
+    Assert-TJR $lockMissingDenied 'missing journal lock was not rejected by the read-only inventory'
+    Assert-TJR (-not[IO.File]::Exists($journalLock)) 'journal inventory recreated the missing lock file'
+    Assert-TJR ((Get-FileHash -LiteralPath $inventoryStatePaths.state -Algorithm SHA256).Hash -ceq $sealedBefore) 'missing journal lock check changed sealed active record'
+}finally{
+    if([IO.File]::Exists($detachedJournalLock) -and -not[IO.File]::Exists($journalLock)){
+        [IO.File]::Move($detachedJournalLock,$journalLock)
+    }
+}
+Assert-TJR ([IO.File]::Exists($journalLock) -and
+    (Get-FileHash -LiteralPath $journalLock -Algorithm SHA256).Hash -ceq $journalLockHash) 'journal lock not restored bit-for-bit after negative test'
+Write-Host 'DURABLE_RECOVERY_JOURNAL_LOCK_MISSING_READ_ONLY_DENIED_PASS'
+
 $missingInventory=Get-CustomAppDurableRecoveryInventoryV012 -HostedCiRoot $script:USERStoreRoot
 Assert-TJR ([bool]$missingInventory.ok -and [bool]$missingInventory.enrollment_found -and
    [bool]$missingInventory.needs_recovery -and
@@ -88,6 +115,7 @@ Write-Host 'DURABLE_RECOVERY_REAL_SIGNED_ZIP_TERMINAL_INVENTORY_PASS'
       'USER_JOURNAL_REAL_SIGNED_THIRD_ID_PRE_SWAP_LOCATOR_BOUND_PASS',
       'DURABLE_RECOVERY_REAL_SIGNED_ZIP_ACTIVE_DPAPI_INVENTORY_PASS',
       'DURABLE_RECOVERY_REAL_SIGNED_ZIP_MISSING_LIVE_DISCOVERY_PASS',
+       'DURABLE_RECOVERY_JOURNAL_LOCK_MISSING_READ_ONLY_DENIED_PASS',
       'DURABLE_RECOVERY_REAL_SIGNED_ZIP_TERMINAL_INVENTORY_PASS',
       'FRESH_WORKER_REAL_SIGNED_ZIP_HANDOFF_END_TO_END_PASS'):
         if src.count(x)!=1:raise RuntimeError('derived real signed ZIP stage not unique '+x)
