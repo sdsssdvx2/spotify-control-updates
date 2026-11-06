@@ -4,12 +4,12 @@ on:
     branches: [validate/custom-app-startup-recovery-source]
     paths:
       - 'validation/custom-app-startup-recovery-source/**'
-      - '.github/workflows/validate-custom-app-durable-recovery-inventory.yml'
+      - '.github/workflows/validate-custom-app-startup-recovery-source.yml'
   pull_request:
     branches: [validate/custom-app-durable-recovery-inventory]
     paths:
       - 'validation/custom-app-startup-recovery-source/**'
-      - '.github/workflows/validate-custom-app-durable-recovery-inventory.yml'
+      - '.github/workflows/validate-custom-app-startup-recovery-source.yml'
   workflow_dispatch:
 permissions: {contents: read}
 jobs:
@@ -36,7 +36,7 @@ jobs:
             "$d/build_candidate.py"='4201b16fbc8111c431f0d3ab9e3fa06f88049e1c'
             "$d/derive_signed_zip_source_e2e.py"='674b231c759be850bb9fe72188d1babf99605a7a'
           }
-          $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-durable-recovery-inventory.yml')
+          $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-startup-recovery-source.yml')
           $changed=@(git diff --name-only "$base...HEAD")
           if($changed.Count -ne 5 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('outside review scope '+($changed -join ','))}
           foreach($p in $pins.Keys){if((git hash-object $p).Trim() -cne $pins[$p]){throw ('source pin mismatch '+$p)}}
