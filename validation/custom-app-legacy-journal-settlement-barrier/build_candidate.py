@@ -36,7 +36,7 @@ def block(s,n):
     m=re.search(r'(?im)^[ \t]*function\s+'+re.escape(n)+r'\s*\{',s)
     if not m:raise RuntimeError('missing qualified original function '+n)
     z=re.search(r'(?im)^[ \t]*function\s+[A-Za-z0-9_-]+\s*\{',s[m.end():])
-    return s[m.start():m.end()+z.start() if z else len(s))
+    return s[m.start():(m.end()+z.start() if z else len(s))]
 def main():
     for ref,p,expected in ((PARENT,PARENT_BUILDER,PARENT_BLOB),
                            ('HEAD',MODULE,MODULE_SHA),('HEAD',TEST,TEST_SHA)):

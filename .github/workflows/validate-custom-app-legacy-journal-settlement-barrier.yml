@@ -33,7 +33,7 @@ jobs:
           $pins=@{
             "$d/legacy-settlement-barrier.ps1"='ca79b192c99cca29422878caa584075bd39bc845'
             "$d/test_legacy_settlement_barrier.ps1"='95b90f1c1d8b631973bc6994e69087ee911d6cbc'
-            "$d/build_candidate.py"='064e4a517f5d146289b686f0833dd85e28caaba6'
+            "$d/build_candidate.py"='0e57ae759ca37ee51de7b8d8c784212f1794c3bf'
           }
           $allow=@($pins.Keys)+@('.github/workflows/validate-custom-app-legacy-journal-settlement-barrier.yml')
           $changed=@(git diff --name-only "$parent...HEAD")
