@@ -3,10 +3,62 @@
 # RollbackLast. Read CurrentUser DPAPI records without user-supplied paths.
 # Never call Open-CustomAppUserTxnStoreV010: it removes state.pending.
 function Get-CustomAppDurableRecoveryInventoryV012 {
-    param([string]$HostedCiRoot)
+    param([string]$HostedCiRoot,$HeldCrossEngineSession)
     $globalLock=$null
+    $ownsGlobalLock=$false
     try {
-        $globalLock=Open-CustomAppCrossEngineTransactionLockV010 -HostedCiRoot $HostedCiRoot
+        if($null -ne $HeldCrossEngineSession){
+            $globalLock=$HeldCrossEngineSession
+            [void](Assert-CustomAppCrossEngineTransactionLockHeldV010 -Session $globalLock)
+            if($globalLock.lock_handle -isnot [IO.FileStream]) {
+                throw 'durable-recovery-shared-session-stream-type-invalid'
+            }
+            $root=[IO.Path]::GetFullPath([string]$globalLock.root).TrimEnd('\','/')
+            if([bool]$globalLock.hosted_test_root){
+                if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows' -or
+                   $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or
+                   [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)){
+                    throw 'durable-recovery-held-hosted-root-not-in-ci'
+                }
+                if([string]::IsNullOrWhiteSpace($HostedCiRoot) -or
+                   -not $root.Equals([IO.Path]::GetFullPath($HostedCiRoot).TrimEnd('\','/'),
+                         [StringComparison]::OrdinalIgnoreCase)){
+                    throw 'durable-recovery-held-ci-root-mismatch'
+                }
+                $ciBase=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\','/')
+                if(-not $root.StartsWith(($ciBase+'\'),[StringComparison]::OrdinalIgnoreCase)){
+                    throw 'durable-recovery-held-root-outside-ci'
+                }
+            } else {
+                if(-not[string]::IsNullOrWhiteSpace($HostedCiRoot) -or
+                   -not $root.Equals([IO.Path]::GetFullPath(
+                    [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
+                   ).TrimEnd('\','/'),[StringComparison]::OrdinalIgnoreCase)){
+                    throw 'durable-recovery-held-profile-root-mismatch'
+                }
+            }
+            $expectedLock=Join-Path (Join-Path $root 'SpotifyControlUpdates-CrossEngineLock') 'current-user-exclusive.lock'
+            if(-not[IO.Path]::GetFullPath([string]$globalLock.lock_path).Equals(
+                [IO.Path]::GetFullPath($expectedLock),[StringComparison]::OrdinalIgnoreCase) -or
+               -not[IO.Path]::GetFullPath([string]$globalLock.lock_handle.Name).Equals(
+                [IO.Path]::GetFullPath($expectedLock),[StringComparison]::OrdinalIgnoreCase)){
+                throw 'durable-recovery-held-global-lock-not-canonical'
+            }
+            # Prove the supplied handle actually excludes all other openers.
+            # A caller-crafted session with only a readable, shared stream
+            # must not claim the transaction-wide lock.
+            $adversary=$null
+            $denied=$false
+            try {
+                $adversary=[IO.File]::Open($expectedLock,[IO.FileMode]::Open,
+                    [IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+            }catch [IO.IOException] {$denied=$true}
+            finally {if($null -ne $adversary){$adversary.Dispose()}}
+            if(-not $denied){throw 'durable-recovery-held-global-lock-not-exclusive'}
+        } else {
+            $globalLock=Open-CustomAppCrossEngineTransactionLockV010 -HostedCiRoot $HostedCiRoot
+            $ownsGlobalLock=$true
+        }
         [void](Assert-CustomAppCrossEngineTransactionLockHeldV010 -Session $globalLock)
         $root=[string]$globalLock.root
         if([bool]$globalLock.hosted_test_root) {
@@ -149,7 +201,8 @@ function Get-CustomAppDurableRecoveryInventoryV012 {
             production_mutation_authorized=$false
         }
     }finally {
-        if($null -ne $globalLock -and $null -ne $globalLock.lock_handle){
+        if($ownsGlobalLock -and $null -ne $globalLock -and
+           $null -ne $globalLock.lock_handle){
             $globalLock.lock_handle.Dispose()
         }
     }

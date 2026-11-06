@@ -33,6 +33,37 @@ if($Phase -ceq 'bootstrap'){
        [IO.Directory]::Exists((Join-Path $store 'SpotifyControlUpdates-CustomApp-State'))){
         throw 'INVENTORY_BOOTSTRAPPED_STATE_WHILE_IDLE'
     }
+    # Already-locked inventory has to reuse the owner's actual FileStream;
+    # never acquire the same FileShare.None lock recursively.
+    $owned=Open-CustomAppCrossEngineTransactionLockV010 -HostedCiRoot $store
+    try {
+        $inside=Get-CustomAppDurableRecoveryInventoryV012 -HostedCiRoot $store -HeldCrossEngineSession $owned
+        if(-not[bool]$inside.ok -or [bool]$inside.enrollment_found) {
+            throw 'DURABLE_HELD_OWNER_INVENTORY_FAILED'
+        }
+        [void](Assert-CustomAppCrossEngineTransactionLockHeldV010 -Session $owned)
+        Assert-Throw {
+            Get-CustomAppDurableRecoveryInventoryV012 -HostedCiRoot (Join-Path $root 'different') -HeldCrossEngineSession $owned
+        } 'held_ci_root_mismatch'
+        [void](Assert-CustomAppCrossEngineTransactionLockHeldV010 -Session $owned)
+    } finally {
+        $owned.lock_handle.Dispose()
+    }
+    # A claimed "held" object pointing to a different, freely shared
+    # FileStream is not authority to inspect registered user transactions.
+    $fakePath=Join-Path $store 'fake-exclusive.lock'
+    $fakeStream=[IO.File]::Open($fakePath,[IO.FileMode]::CreateNew,
+        [IO.FileAccess]::ReadWrite,[IO.FileShare]::ReadWrite)
+    try {
+        $fake=[pscustomobject]@{
+            ok=$true;exclusive_cross_engine=$true;root=$store
+            hosted_test_root=$true
+            lock_path=(Join-Path (Join-Path $store 'SpotifyControlUpdates-CrossEngineLock') 'current-user-exclusive.lock')
+            lock_handle=$fakeStream
+        }
+        Assert-Throw { Get-CustomAppDurableRecoveryInventoryV012 -HostedCiRoot $store -HeldCrossEngineSession $fake } 'forged_lock_handle'
+    }finally{$fakeStream.Dispose()}
+    Write-Host 'DURABLE_HELD_OWNER_GLOBAL_LOCK_MATRIX_PASS owner_retained=true ci_root_mismatch_denied=true fake_handle_denied=true'
     $l=Join-Path $store 'SpotifyControl'
     [void][IO.Directory]::CreateDirectory($l)
     $oldLedger=Join-Path $l 'addon-last-transaction.json'

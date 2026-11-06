@@ -11,7 +11,7 @@ PARENT_BLOB='34d1abfa71055c955405e2e91cead45d1e7684ee'
 PARENT_SCRIPT=ROOT/'validation/custom-app-fresh-worker-lock-handoff/ci_signed_zip_fresh_worker_lock_handoff.ps1'
 OUT=HERE/'ci_signed_zip_durable_recovery_inventory.ps1'
 MODULE=ROOT/'validation/custom-app-durable-recovery-inventory/durable-recovery-inventory.ps1'
-MODULE_BLOB='ce6f4d8a04648387ee2bb3d067973c4243006660'
+MODULE_BLOB='61090af5fde29c7cdcac72a0cc4f186fd2889976'
 def pin(p,sha):
     x=subprocess.check_output(['git','hash-object',str(p)],cwd=ROOT,text=True).strip()
     if x!=sha:raise RuntimeError('qualified original source drift '+str(p))
@@ -33,29 +33,41 @@ def main():
     end=src.index("\n",m)
     before=src[m:end]
     injection=r"""
+# The DPAPI locator is durable, but this is intentionally BEFORE the
+# journal store is created by the actual transaction executor. It must
+# be rejected, not elevated into an authenticated recovery instruction.
 $inventoryStatePaths=Get-CustomAppUserTxnPathsV010 -Name tagify -LivePath $script:TIDLive -HostedCiRoot $script:USERStoreRoot
 $sealedBefore=(Get-FileHash -LiteralPath $inventoryStatePaths.state -Algorithm SHA256).Hash
-$discovered=Get-CustomAppDurableRecoveryInventoryV012 -HostedCiRoot $script:USERStoreRoot
-Assert-TJR ([bool]$discovered.ok -and [bool]$discovered.enrollment_found -and
-    [bool]$discovered.needs_recovery -and [int]$discovered.active_count -eq 1 -and
-    [int]$discovered.inspected_count -eq 1 -and [bool]$discovered.items[0].active -and
-    -not[bool]$discovered.items[0].live_missing -and
-    -not[bool]$discovered.items[0].may_execute_recovery -and
-    -not[bool]$discovered.production_mutation_authorized -and
-    [string]$discovered.items[0].journal_phase -in @('prepared','atomic-mutation-starting',
-      'live-moved-to-old','candidate-live','transaction-finalized')) 'active signed journal was not discovered read-only before swap'
-Assert-TJR ((Get-FileHash -LiteralPath $inventoryStatePaths.state -Algorithm SHA256).Hash -ceq $sealedBefore) 'inventory modified protected user state before signed swap'
-Write-Host 'DURABLE_RECOVERY_REAL_SIGNED_ZIP_ACTIVE_DPAPI_INVENTORY_PASS'
+$earlyDenied=$false
+try{
+    $early=Get-CustomAppDurableRecoveryInventoryV012 -HostedCiRoot $script:USERStoreRoot
+}catch{
+    $earlyDenied=([string]$_.Exception.Message -match 'journal store missing')
+}
+Assert-TJR $earlyDenied 'locator with uncreated journal store was treated as recovery authority'
+Assert-TJR ((Get-FileHash -LiteralPath $inventoryStatePaths.state -Algorithm SHA256).Hash -ceq $sealedBefore) 'unready journal probe modified sealed active state'
+[void](Assert-CustomAppCrossEngineTransactionLockHeldV010 -Session $script:RealZipCrossLock)
+Write-Host 'DURABLE_RECOVERY_REAL_SIGNED_ZIP_UNREADY_JOURNAL_DENIED_PASS'
 """
     src=one(src,before,before+'\n'+injection.strip('\n'),'read sealed active original signed journal before live swap')
     missing="$opened=Open-CustomAppUserTxnMissingLiveRecoveryV011 -Name tagify -LivePath $script:TIDLive -HostedCiRoot $script:USERStoreRoot"
     miss=r"""
+# After the actual journal is initialized and the live directory has
+# been moved away, a sealed active transaction is discoverable even
+# without a caller-supplied path. Acquire the exact hosted registry-root global lock.
 $missingInventory=Get-CustomAppDurableRecoveryInventoryV012 -HostedCiRoot $script:USERStoreRoot
-Assert-TJR ([bool]$missingInventory.ok -and [bool]$missingInventory.needs_recovery -and
+Assert-TJR ([bool]$missingInventory.ok -and [bool]$missingInventory.enrollment_found -and
+   [bool]$missingInventory.needs_recovery -and
+   [int]$missingInventory.inspected_count -eq 1 -and
    [int]$missingInventory.active_count -eq 1 -and
+   [bool]$missingInventory.items[0].active -and
    [bool]$missingInventory.items[0].live_missing -and
-   -not[bool]$missingInventory.items[0].may_execute_recovery) 'encrypted missing-live user transaction could not be discovered'
+   -not[bool]$missingInventory.items[0].may_execute_recovery -and
+   -not[bool]$missingInventory.production_mutation_authorized) 'missing live authenticated journal was not safely discovered'
+Assert-TJR ((Get-FileHash -LiteralPath $inventoryStatePaths.state -Algorithm SHA256).Hash -ceq $sealedBefore) 'missing-live inventory modified protected state'
 Assert-TJR (-not[IO.Directory]::Exists([string]$script:TIDLive)) 'read-only missing-live scan recreated custom app'
+[void](Assert-CustomAppCrossEngineTransactionLockHeldV010 -Session $script:RealZipCrossLock)
+Write-Host 'DURABLE_RECOVERY_REAL_SIGNED_ZIP_ACTIVE_DPAPI_INVENTORY_PASS'
 Write-Host 'DURABLE_RECOVERY_REAL_SIGNED_ZIP_MISSING_LIVE_DISCOVERY_PASS'
 """
     src=one(src,missing,miss.strip('\n')+'\n'+missing,'read DPAPI when real swapped live folder absent')
@@ -72,7 +84,8 @@ Assert-TJR ([bool]$finished.ok -and
 Write-Host 'DURABLE_RECOVERY_REAL_SIGNED_ZIP_TERMINAL_INVENTORY_PASS'
 """
     src=one(src,line,line+'\n'+after.strip('\n'),'read terminal DPAPI state after retired signed claim')
-    for x in ('USER_JOURNAL_REAL_SIGNED_THIRD_ID_PRE_SWAP_LOCATOR_BOUND_PASS',
+    for x in ('DURABLE_RECOVERY_REAL_SIGNED_ZIP_UNREADY_JOURNAL_DENIED_PASS',
+      'USER_JOURNAL_REAL_SIGNED_THIRD_ID_PRE_SWAP_LOCATOR_BOUND_PASS',
       'DURABLE_RECOVERY_REAL_SIGNED_ZIP_ACTIVE_DPAPI_INVENTORY_PASS',
       'DURABLE_RECOVERY_REAL_SIGNED_ZIP_MISSING_LIVE_DISCOVERY_PASS',
       'DURABLE_RECOVERY_REAL_SIGNED_ZIP_TERMINAL_INVENTORY_PASS',
