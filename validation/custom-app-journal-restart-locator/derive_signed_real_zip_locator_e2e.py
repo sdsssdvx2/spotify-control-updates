@@ -15,7 +15,7 @@ PRIOR_BLOB='dccf4d656d74cb97ba6eb188ba06fc77057ef209'
 ORIGINAL=ROOT/'validation/custom-app-user-transaction-terminal-journal/ci_derived_user_verified_terminal.ps1'
 OUT=HERE/'ci_derived_signed_zip_bound_locator.ps1'
 MODULE='validation/custom-app-journal-restart-locator/user-journal-locator.ps1'
-MODULE_BLOB='21bfb516f2f8369e5d8a46dc3816db5e7281a971'
+MODULE_BLOB='bb29fe26a3d58f63eb70188bd24ad0782db07efc'
 
 def once(s,old,new,label):
     count=s.count(old)

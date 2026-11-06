@@ -31,10 +31,10 @@ jobs:
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main changed'}
           $d='validation/custom-app-journal-restart-locator'
           $pins=@{
-            "$d/user-journal-locator.ps1"='21bfb516f2f8369e5d8a46dc3816db5e7281a971'
+            "$d/user-journal-locator.ps1"='bb29fe26a3d58f63eb70188bd24ad0782db07efc'
             "$d/test_user_journal_locator.ps1"='4a865eeac38dd26cada4144af8c7f4d0cdd6411e'
-            "$d/derive_signed_real_zip_locator_e2e.py"='b838effa6227d026a129969fa363b9fd1b3409ec'
-            "$d/build_candidate.py"='f4fbc924d43d55201f4971ec4493958ffe4bc0f1'
+            "$d/derive_signed_real_zip_locator_e2e.py"='af4ddbe703c8c0408ea12f0fdd95aff5297d9a14'
+            "$d/build_candidate.py"='f44fc4a08d5a9b9db94f90f5f0edbf27777a13fb'
           }
           $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-journal-restart-locator.yml')
           $changed=@(git diff --name-only "$parent...HEAD")

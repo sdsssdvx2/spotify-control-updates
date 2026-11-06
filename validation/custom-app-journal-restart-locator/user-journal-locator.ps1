@@ -82,9 +82,21 @@ function Read-CustomAppUserTxnJournalLocatorV010 {
     $path=Get-CustomAppUserTxnJournalLocatorFileV010 -Session $Session
     Assert-CustomAppUserTxnNoReparseV010 $path
     if(-not [IO.File]::Exists($path)){throw 'user-journal-locator-missing-fail-closed'}
-    $sealed=[IO.File]::ReadAllBytes($path)
-    if($sealed.Length -lt 64 -or $sealed.Length -gt 32768){
+    # DPAPI blobs can include non-authenticated metadata bytes. A checksum
+    # over the ENTIRE sealed object detects even unused-header modifications.
+    # Not intended to resist an attacker who can write as the same user.
+    $wrapped=[IO.File]::ReadAllBytes($path)
+    if($wrapped.Length -lt 96 -or $wrapped.Length -gt 32800){
         throw 'user-journal-locator-encrypted-file-size-invalid'
+    }
+    $sealed=New-Object byte[] ($wrapped.Length-32)
+    [Array]::Copy($wrapped,32,$sealed,0,$sealed.Length)
+    $hash=[Security.Cryptography.SHA256]::Create()
+    try{$actual=$hash.ComputeHash($sealed)}finally{$hash.Dispose()}
+    for($i=0;$i -lt 32;$i++){
+        if($actual[$i] -ne $wrapped[$i]){
+            throw 'user-journal-locator-whole-ciphertext-sha256-invalid'
+        }
     }
     $entropy=[Text.Encoding]::UTF8.GetBytes(('SpotifyControlUpdates|UserTxnJournalLocator|v1|'+
        [string]$Session.paths.key+'|'+[string]$canonical.active.consumption_id))
@@ -145,8 +157,15 @@ function Bind-CustomAppUserTxnJournalLocatorV010 {
             [string]$Session.paths.key+'|'+[string]$canonical.active.consumption_id))
         $sealed=[Security.Cryptography.ProtectedData]::Protect($plain,$entropy,[Security.Cryptography.DataProtectionScope]::CurrentUser)
     }finally{[Array]::Clear($plain,0,$plain.Length)}
+    # SHA256 prefix covers complete DPAPI ciphertext including metadata, not
+    # only the authenticated plaintext. Write as ONE durable CreateNew file.
+    $hash=[Security.Cryptography.SHA256]::Create()
+    try{$digest=$hash.ComputeHash($sealed)}finally{$hash.Dispose()}
+    $wrapped=New-Object byte[] ($sealed.Length+32)
+    [Array]::Copy($digest,0,$wrapped,0,32)
+    [Array]::Copy($sealed,0,$wrapped,32,$sealed.Length)
     # CreateNew + Flush(true); never overwrite or erase on exception.
-    Write-CustomAppUserTxnBytesV010 -Path $path -Bytes $sealed
+    Write-CustomAppUserTxnBytesV010 -Path $path -Bytes $wrapped
     $check=Read-CustomAppUserTxnJournalLocatorV010 -Session $Session
     if(-not [bool]$check.ok -or [string]$check.record.store_directory -cne $store -or
        [string]$check.record.allowed_root -cne $root){
