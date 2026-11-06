@@ -47,7 +47,12 @@ function Open-CustomAppCrossEngineTransactionLockV010 {
         $user=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
         $system='S-1-5-18'
         $acl=[IO.File]::GetAccessControl($path)
-        if($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne $user){
+        # A protected user/SYSTEM-only DACL is the enforced access boundary.
+        # Windows admin tokens can assign BUILTIN\Administrators ownership to
+        # newly created child files, even under a user-owned private parent.
+        # Ownership by a different ordinary user remains prohibited.
+        $owner=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+        if($owner -notin @($user,$system,'S-1-5-32-544')){
             throw 'cross-engine-lock-file-owner-changed'
         }
         foreach($entry in $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])){
