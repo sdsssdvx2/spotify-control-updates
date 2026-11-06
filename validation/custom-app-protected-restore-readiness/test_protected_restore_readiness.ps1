@@ -98,7 +98,7 @@ $exclusive=[IO.File]::Open($lockPath,[IO.FileMode]::Open,
     [IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
 try{
     $busy=Read-CustomAppProtectedEvidenceReadOnlyV014 -AllowedRoot $root -StoreDirectory $journal -ExpectedTransactionId ('a'*64)
-    if([bool]$busy.ok -or [bool]$busy.production_execution_authorized){
+    if([bool]$busy.ok -or [bool]$busy.execution_authorized){
         throw 'PROTECTED_RESTORE_EVIDENCE_READER_IGNORED_LOCK_CONTENTION'
     }
 }finally{$exclusive.Dispose()}
