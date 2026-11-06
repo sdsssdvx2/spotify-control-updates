@@ -32,7 +32,7 @@ jobs:
           $source='validation/custom-app-native-scoped-crash-rollback/native-scoped-crash-rollback.ps1'
           $test='validation/custom-app-native-scoped-crash-rollback/test_native_scoped_crash_rollback.ps1'
           $workflow='.github/workflows/validate-native-scoped-crash-rollback-lab.yml'
-          if((git hash-object $source).Trim() -cne '57a5b5231827413dbec14f67d49b75f94b27527c' -or
+          if((git hash-object $source).Trim() -cne '856bbd2138212c90bd1fbb982b444814de2d784e' -or
              (git hash-object $test).Trim() -cne 'c91cddc2bd4aad6239bf7deb2d04320f087f48bf'){
             throw 'V017 source or acceptance test changed'
           }

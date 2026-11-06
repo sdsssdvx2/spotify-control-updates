@@ -170,14 +170,16 @@ function Read-CustomAppScopedLabSnapshotV017 {
        [string]$snap.source_sha256 -cnotmatch '^[0-9a-f]{64}$'){
         throw 'native-scoped-lab-sealed-snapshot-identity-invalid'
     }
-    $expected=@('spicetify-routes-'+$Context.target+'.css',
-                'spicetify-routes-'+$Context.target+'.js',
-                'spicetify-routes-'+$Context.target+'.json')
+    $expected=@(('spicetify-routes-{0}.css' -f [string]$Context.target),
+                ('spicetify-routes-{0}.js' -f [string]$Context.target),
+                ('spicetify-routes-{0}.json' -f [string]$Context.target))
     $targetRecords=@($snap.targets)
     if($targetRecords.Count -ne 3 -or
        ((@($targetRecords|ForEach-Object{[string]$_.rel}|Sort-Object) -join '|') -cne
         (@($expected|Sort-Object) -join '|'))){
-        throw 'native-scoped-lab-snapshot-target-list-invalid'
+        $actualNames=(@($targetRecords|ForEach-Object{[string]$_.rel}|Sort-Object) -join '|')
+        $expectedNames=(@($expected|Sort-Object) -join '|')
+        throw ('native-scoped-lab-snapshot-target-list-invalid count='+$targetRecords.Count+' expected='+$expectedNames+' actual='+$actualNames)
     }
     foreach($item in $targetRecords){
         if([string]$item.rel -cnotmatch ('^spicetify-routes-'+[regex]::Escape([string]$Context.target)+'\.(js|json|css)$') -or
@@ -247,9 +249,9 @@ function Assert-CustomAppScopedLabOutsideUnchangedV017 {
     param([Parameter(Mandatory=$true)]$Context,
           [Parameter(Mandatory=$true)]$Snapshot)
     $current=@(Get-CustomAppScopedLabInventoryV017 -Context $Context)
-    $allowed=@('spicetify-routes-'+$Context.target+'.css',
-               'spicetify-routes-'+$Context.target+'.js',
-               'spicetify-routes-'+$Context.target+'.json')
+    $allowed=@(('spicetify-routes-{0}.css' -f [string]$Context.target),
+               ('spicetify-routes-{0}.js' -f [string]$Context.target),
+               ('spicetify-routes-{0}.json' -f [string]$Context.target))
     $outside=@($current|Where-Object{$_.rel -notin $allowed})
     $saved=@($Snapshot.others)
     if($outside.Count -ne $saved.Count){throw 'native-scoped-lab-outside-inventory-count-changed'}
@@ -281,9 +283,9 @@ function Save-CustomAppScopedLabSnapshotV017 {
         throw 'native-scoped-lab-existing-ephemeral-profile-denied'
     }
     $inventory=@(Get-CustomAppScopedLabInventoryV017 -Context $ctx)
-    $allowed=@('spicetify-routes-'+$ctx.target+'.css',
-               'spicetify-routes-'+$ctx.target+'.js',
-               'spicetify-routes-'+$ctx.target+'.json')
+    $allowed=@(('spicetify-routes-{0}.css' -f [string]$ctx.target),
+               ('spicetify-routes-{0}.js' -f [string]$ctx.target),
+               ('spicetify-routes-{0}.json' -f [string]$ctx.target))
     $targets=New-Object 'System.Collections.Generic.List[object]'
     $outside=New-Object 'System.Collections.Generic.List[object]'
     foreach($name in $allowed){
@@ -437,7 +439,7 @@ function Invoke-CustomAppScopedLabNativeV017 {
     }finally{$child.Dispose()}
     if($code -ne 0){throw ('native-scoped-lab-real-cli-error-recovery-required-'+$code)}
     [void](Assert-CustomAppScopedLabOutsideUnchangedV017 -Context $ctx -Snapshot $snap)
-    $out=Join-Path ([string]$ctx.xpui) ('spicetify-routes-'+$ctx.target+'.js')
+    $out=Join-Path ([string]$ctx.xpui) (('spicetify-routes-{0}.js' -f [string]$ctx.target))
     if(-not[IO.File]::Exists($out) -or
        -not[IO.File]::ReadAllText($out).Contains([IO.File]::ReadAllText([string]$ctx.source_index))){
         throw 'native-scoped-lab-exit-zero-without-target-output-postcondition'
