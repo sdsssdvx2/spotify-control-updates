@@ -1,0 +1,63 @@
+name: Validate actual Addon Manager normal entrypoint transaction integration
+on:
+  push:
+    branches: [validate/custom-app-normal-entrypoint-transaction-integration]
+    paths:
+      - 'validation/custom-app-normal-entrypoint-transaction-integration/**'
+      - '.github/workflows/validate-custom-app-normal-entrypoint-transaction-integration.yml'
+  pull_request:
+    branches: [validate/custom-app-user-transaction-terminal-journal]
+    paths:
+      - 'validation/custom-app-normal-entrypoint-transaction-integration/**'
+      - '.github/workflows/validate-custom-app-normal-entrypoint-transaction-integration.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  normal-entrypoint-structural-and-bounded-windows:
+    runs-on: windows-2025
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Source pins, scope, production freeze
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='22c548aad75d2dc59699062b4d01f8c4020e5b15'
+          $production='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'checkout SHA mismatch'}
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'qualified terminal source parent mismatch'}
+          if((git rev-parse origin/main).Trim() -cne $production){throw 'operating main advanced'}
+          $audit='validation/custom-app-normal-entrypoint-transaction-integration/audit_entrypoint.py'
+          if((git hash-object $audit).Trim() -cne 'bedb70776a6b1913a49f43f4c112bdd648cab6aa'){throw 'unqualified entrypoint inventory'}
+          $allowed=@($audit,'.github/workflows/validate-custom-app-normal-entrypoint-transaction-integration.yml')
+          $changed=@(git diff --name-only "$parent...HEAD")
+          if($changed.Count -ne 2 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('unapproved source scope '+($changed -join ','))}
+          foreach($p in @('manifest.json','stable-version.json','addon-policy-registry.json','bin/addon-manager.ps1','bin/spotify-control.ps1')){
+            git diff --quiet $parent HEAD -- $p
+            if($LASTEXITCODE -ne 0){throw ('protected production file changed '+$p)}
+          }
+          Write-Host 'NORMAL_ENTRYPOINT_AUDIT_SOURCE_MAIN_FROZEN_PASS'
+      - name: Rebuild real hard-disabled Addon Manager and trace normal update dispatch
+        shell: powershell
+        timeout-minutes: 50
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-normal-entrypoint-transaction-integration'
+          python "$d/audit_entrypoint.py"
+          if($LASTEXITCODE -ne 0){throw 'actual full candidate entrypoint inventory failed'}
+          $report=Get-Content "$d/entrypoint-inventory.json" -Raw|ConvertFrom-Json
+          if([string]$report.addon_sha256 -cne '6fe25f592fddd30424d670bc20fc68f0a8b78a01c4fa29f8dc2268d2714b46f9' -or
+            [int64]$report.addon_size -ne 1448757 -or
+            [int]$report.total_functions -lt 200 -or
+            [bool]$report.production_wiring_enabled -or -not[bool]$report.operating_main_unchanged){throw 'unqualified entrypoint source or authority'}
+          Write-Host 'ACTUAL_NORMAL_ENTRYPOINT_STATIC_CLOSURE_CAPTURED_PASS'
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: normal-addon-entrypoint-contract-${{ github.run_id }}
+          path: validation/custom-app-normal-entrypoint-transaction-integration/entrypoint-inventory.json
+          retention-days: 14
+          if-no-files-found: warn
