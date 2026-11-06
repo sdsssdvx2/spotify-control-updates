@@ -1,0 +1,211 @@
+name: Validate actual Spicetify executable read-only evidence in isolated Windows
+on:
+  push:
+    branches: [validate/custom-app-spicetify-passive-provenance]
+    paths:
+      - 'validation/custom-app-spicetify-passive-provenance/**'
+      - '.github/workflows/validate-custom-app-spicetify-passive-provenance.yml'
+  pull_request:
+    branches: [validate/custom-app-protected-restore-readiness]
+    paths:
+      - 'validation/custom-app-spicetify-passive-provenance/**'
+      - '.github/workflows/validate-custom-app-spicetify-passive-provenance.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  official-spicetify-isolated-windows:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Freeze operating main and all added source hashes
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='7d1969638e995ebbf4c01429f44090d3e9297e71'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'wrong checked out head'}
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'unqualified PR235 ancestry'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main changed'}
+          $d='validation/custom-app-spicetify-passive-provenance'
+          $pins=@{
+            "$d/spicetify-passive-provenance.ps1"='ea07bdabc3ad318b0b80cc4e81560bb6faded225'
+            "$d/test_spicetify_passive_provenance.ps1"='99051fdb47d2e19cdd5d87cd11a60a4dfbf82315'
+            "$d/build_candidate.py"='f7c16d40a33841ea9459fc9afc593906cedb95a0'
+          }
+          $allowed=@($pins.Keys)+@('.github/workflows/validate-custom-app-spicetify-passive-provenance.yml')
+          $changed=@(git diff --name-only "$base...HEAD")
+          if($changed.Count -ne 4 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('out-of-scope '+($changed -join ','))}
+          foreach($p in $pins.Keys){if((git hash-object $p).Trim() -cne $pins[$p]){throw ('pin mismatch '+$p)}}
+          foreach($p in @('bin/addon-manager.ps1','bin/spotify-control.ps1','manifest.json','stable-version.json','addon-policy-registry.json')){
+            git diff --quiet $base HEAD -- $p
+            if($LASTEXITCODE -ne 0){throw ('production file modified '+$p)}
+          }
+          Write-Host 'SPICETIFY_PASSIVE_FROZEN_PARENT_AND_SOURCE_PINS_PASS'
+      - name: Build actual hard-disabled Addon Manager, PS5.1 parse and historical SelfTest
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-spicetify-passive-provenance'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'qualified builder failure'}
+          $r=Get-Content "$d/candidate-validation.json" -Raw|ConvertFrom-Json
+          $a="$d/out/bin/addon-manager.ps1"
+          $sha=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sha -cne [string]$r.addon_sha256 -or
+             (Get-Item $a).Length -ne [int64]$r.addon_bytes -or
+             -not[bool]$r.fullchain_hard_disabled -or
+             -not[bool]$r.exact_previous_candidate_inverse -or
+             -not[bool]$r.all_legacy_transaction_functions_preserved -or
+             -not[bool]$r.real_spicetify_execution_disabled -or
+             -not[bool]$r.no_external_executable_path_or_sha_trusted -or
+             -not[bool]$r.no_mutation_authority){throw 'candidate inverse or non-execution contract invalid'}
+          if((Get-FileHash "$d/out/bin/spotify-control.ps1" -Algorithm SHA256).Hash.ToLowerInvariant() -cne '69ef7fb3ca57b4d5faac6873ac06dffc38f6e5b0d1ad8fc31fcbe2bb236f5c99'){throw 'Spotify Control changed'}
+          foreach($p in @($a,"$d/spicetify-passive-provenance.ps1","$d/test_spicetify_passive_provenance.ps1")){
+            $t=$null;$err=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$t,[ref]$err)
+            if($err.Count){$err|Select-Object -First 10|ForEach-Object{Write-Host $_.Message};throw ('Windows PS5.1 parser failure '+$p)}
+          }
+          "CANDIDATE_SHA=$sha"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          "CANDIDATE_SIZE=$((Get-Item $a).Length)"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          $sand=Join-Path $env:RUNNER_TEMP ('addon-standalone-selftest-'+[Guid]::NewGuid().ToString('N'))
+          $env:LOCALAPPDATA=Join-Path $sand 'Local';$env:APPDATA=Join-Path $sand 'Roaming'
+          New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA,$env:APPDATA,(Join-Path $env:LOCALAPPDATA 'Spotify')|Out-Null
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $a -Action SelfTest *>&1 |
+              Tee-Object -FilePath "$d/addon-selftest.log"|Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 0){Get-Content "$d/addon-selftest.log" -Tail 50|ForEach-Object{Write-Host $_};throw ('real Addon SelfTest failed '+$rc)}
+          $log=Get-Content "$d/addon-selftest.log" -Raw
+          foreach($mark in @('SPICETIFY_PASSIVE_SOURCE_SELFTEST_PASS','PROTECTED_READINESS_SELFTEST_PASS','SEALED_STARTUP_SOURCE_SELFTEST_PASS','CROSS_ENGINE_REAL_ACTION_LOCK_SELFTEST_PASS')){
+            if(-not $log.Contains($mark)){throw ('historical or new SelfTest missing '+$mark)}
+          }
+          Write-Host "SPICETIFY_PASSIVE_ACTUAL_ADDON_SELFTEST_PASS sha256=$sha"
+      - name: Windows negative source matrix, fake bytes never executed
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-spicetify-passive-provenance'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/test_spicetify_passive_provenance.ps1" *>&1 |
+              Tee-Object -FilePath "$d/passive-unit.log"|Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 0){Get-Content "$d/passive-unit.log" -Tail 60|ForEach-Object{Write-Host $_};throw ('negative source test failed '+$rc)}
+          if(-not(Get-Content "$d/passive-unit.log" -Raw).Contains('SPICETIFY_PASSIVE_WINDOWS_NEGATIVE_MATRIX_PASS')){throw 'negative proof missing'}
+          Write-Host 'SPICETIFY_PASSIVE_WINDOWS_NEGATIVE_MATRIX_CONFIRMED'
+      - name: Official signed-release digest, real CLI -v/-c only under isolated profile
+        shell: powershell
+        timeout-minutes: 30
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-spicetify-passive-provenance'
+          $root=Join-Path $env:RUNNER_TEMP ('official-spicetify-'+[Guid]::NewGuid().ToString('N'))
+          $user=Join-Path $root 'User';$store=Join-Path $root 'Store'
+          $local=Join-Path $root 'Local';$roaming=Join-Path $root 'Roaming';$extract=Join-Path $root 'Extract'
+          foreach($p in @($root,$user,$store,$local,$roaming,$extract)){[void][IO.Directory]::CreateDirectory($p)}
+          $archive=Join-Path $root 'spicetify-upstream.zip'
+          $officialSha='0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f'
+          $officialSize=7795758
+          $url='https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip'
+          [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+          Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing -MaximumRedirection 5
+          $hash=(Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -cne $officialSha -or (Get-Item $archive).Length -ne $officialSize){throw 'official ZIP digest or byte size mismatch'}
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z=[IO.Compression.ZipFile]::OpenRead($archive)
+          try{
+            $total=[long]0
+            foreach($e in $z.Entries){
+              $rel=$e.FullName.Replace('/','\')
+              if([string]::IsNullOrWhiteSpace($rel) -or [IO.Path]::IsPathRooted($rel) -or
+                 $rel.StartsWith('\') -or $rel.Contains('..\') -or $rel.Contains(':')){
+                throw 'upstream ZIP unsafe path'
+              }
+              $total+=[long]$e.Length
+              if($total -gt 104857600){throw 'upstream ZIP expanded bytes exceed limit'}
+            }
+          }finally{$z.Dispose()}
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract -ErrorAction Stop
+          $found=@(Get-ChildItem -LiteralPath $extract -Recurse -File -Filter spicetify.exe)
+          if($found.Count -ne 1 -or $found[0].Length -lt 1048576){throw 'upstream archive missing executable'}
+          $exeDir=Join-Path $local 'spicetify';$cfgDir=Join-Path $roaming 'spicetify'
+          foreach($p in @($exeDir,$cfgDir)){[void][IO.Directory]::CreateDirectory($p)}
+          $exe=Join-Path $exeDir 'spicetify.exe';$cfg=Join-Path $cfgDir 'config-xpui.ini'
+          Copy-Item -LiteralPath $found[0].FullName -Destination $exe
+          $sample='[AdditionalOptions]'+[Environment]::NewLine+'custom_apps = tagify'+[Environment]::NewLine
+          [IO.File]::WriteAllText($cfg,$sample,[Text.UTF8Encoding]::new($false))
+          $exeSha=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $cfgSha=(Get-FileHash $cfg -Algorithm SHA256).Hash.ToLowerInvariant()
+          # May create directories: strictly runner-scoped APPDATA/HOME, never the user's PC.
+          $env:APPDATA=$roaming;$env:LOCALAPPDATA=$local;$env:HOME=$user;$env:USERPROFILE=$user
+          Remove-Item Env:SPICETIFY_CONFIG,Env:SPICETIFY_STATE -ErrorAction SilentlyContinue
+          $vOutput=@(& $exe -v 2>&1|ForEach-Object{[string]$_});$vCode=$LASTEXITCODE
+          if($vCode -ne 0 -or ($vOutput -join ' ') -notmatch '2\.46\.4'){throw 'official CLI version query failed'}
+          $cOutput=@(& $exe -c 2>&1|ForEach-Object{[string]$_});$cCode=$LASTEXITCODE
+          if($cCode -ne 0 -or ($cOutput -join ' ') -notmatch 'config-xpui\.ini'){throw 'official CLI config-path query failed'}
+          if((Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant() -cne $exeSha -or
+             (Get-FileHash $cfg -Algorithm SHA256).Hash.ToLowerInvariant() -cne $cfgSha){
+            throw 'isolated official CLI altered exe or config bytes'
+          }
+          $src=(Resolve-Path .).Path
+          foreach($p in @('validation/custom-app-user-transaction-store-bundle/user-transaction-store.ps1',
+             'validation/custom-app-normal-entrypoint-transaction-integration/normal-update-engine-fence.ps1',
+             'validation/custom-app-legacy-journal-settlement-barrier/legacy-settlement-barrier.ps1',
+             'validation/custom-app-cooperative-cross-engine-lock/cross-engine-transaction-lock.ps1',
+             'validation/custom-app-spicetify-passive-provenance/spicetify-passive-provenance.ps1')){
+            . (Join-Path $src $p)
+          }
+          $obs=Get-CustomAppSpicetifyPassiveObservationV015 -HostedCiRoot $store -HostedCiLocalAppDataRoot $local -HostedCiAppDataRoot $roaming
+          if(-not[bool]$obs.ok -or [string]$obs.exe_sha256 -cne $exeSha -or
+             [string]$obs.config_sha256 -cne $cfgSha -or [bool]$obs.binary_trusted -or
+             [bool]$obs.enrolled_executable_pin -or [bool]$obs.recovery_apply_eligible -or
+             [bool]$obs.production_execution_authorized -or [bool]$obs.production_mutation_authorized){
+            throw ('official executable observation not zero-authority '+[string]$obs.reason)
+          }
+          [ordered]@{
+            schema=1;upstream='spicetify/cli v2.46.4 windows x64'
+            official_zip_sha256=$hash;official_zip_bytes=$officialSize
+            real_executable_sha256=$exeSha;real_executable_bytes=(Get-Item $exe).Length
+            cli_version_readonly_sandbox='PASS';cli_config_path_sandbox='PASS'
+            exe_and_config_bytes_unchanged=$true
+            actual_spotify_apply_invoked=$false;production_execution_authorized=$false
+          }|ConvertTo-Json|Set-Content "$d/real-spicetify-provenance.json" -Encoding UTF8
+          Write-Host "SPICETIFY_OFFICIAL_NATIVE_X64_SANDBOX_EVIDENCE_PASS zip_sha256=$hash exe_sha256=$exeSha"
+      - name: Repeat byte-identical candidate and operating main unchanged
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-spicetify-passive-provenance'
+          python "$d/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'repeat qualified build failed'}
+          $a="$d/out/bin/addon-manager.ps1"
+          $hash=(Get-FileHash $a -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -cne $env:CANDIDATE_SHA -or
+             (Get-Item $a).Length -ne [int64]$env:CANDIDATE_SIZE){throw 'non-deterministic candidate'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main changed'}
+          [ordered]@{
+            schema=1;result='PASS';head=(git rev-parse HEAD).Trim()
+            addon_sha256=$hash;addon_bytes=(Get-Item $a).Length
+            verified_real_official_spicetify_executable='PASS'
+            fullchain_disabled=$true;installed_spotify_unchanged=$true;main_frozen=$true
+          }|ConvertTo-Json|Set-Content "$d/ci-evidence.json" -Encoding UTF8
+          Write-Host "SPICETIFY_PASSIVE_REPEAT_BUILD_MAIN_FROZEN_PASS sha256=$hash"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spicetify-passive-provenance-${{ github.run_id }}
+          path: |
+            validation/custom-app-spicetify-passive-provenance/candidate-validation.json
+            validation/custom-app-spicetify-passive-provenance/ci-evidence.json
+            validation/custom-app-spicetify-passive-provenance/real-spicetify-provenance.json
+            validation/custom-app-spicetify-passive-provenance/addon-selftest.log
+            validation/custom-app-spicetify-passive-provenance/passive-unit.log
+          retention-days: 14
+          if-no-files-found: warn
