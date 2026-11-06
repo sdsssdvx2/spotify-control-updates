@@ -30,7 +30,7 @@ jobs:
           if((git merge-base $base HEAD).Trim() -cne $base){throw 'PR238 parent changed'}
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main drift'}
           $p='validation/native-spicetify-refresh-footprint/audit_native_refresh.ps1'
-          if((git hash-object $p).Trim() -cne 'cc34a469f569ec8b31a32a88292d08069c185c7f'){throw 'candidate source drift'}
+          if((git hash-object $p).Trim() -cne '18a06c1f36c80304bcc747c7b7688a4ff15caea0'){throw 'candidate source drift'}
           $changed=@(git diff --name-only "$base...HEAD")
           if($changed.Count -ne 2 -or @($changed|Where-Object{$_ -notin @($p,'.github/workflows/validate-native-spicetify-refresh-footprint.yml')}).Count){
             throw 'unexpected production source modifications'

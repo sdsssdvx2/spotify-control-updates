@@ -151,7 +151,7 @@ foreach($d in @($scoped,$scopedApp,$scopedBackup)){
     'console.log("ALPHA_SCOPED_V5");',[Text.UTF8Encoding]::new($false))
 $scopedCfg=Join-Path $scoped 'config-xpui.ini'
 $text=[IO.File]::ReadAllText($config)
-if($text.Split('custom_apps = alpha|beta').Length -ne 2){
+if(([regex]::Matches($text,[regex]::Escape('custom_apps = alpha|beta'))).Count -ne 1){
     throw 'NATIVE_REFRESH_SCOPE_SOURCE_CONFIG_NOT_SINGLE_ANCHOR'
 }
 [IO.File]::WriteAllText($scopedCfg,$text.Replace('custom_apps = alpha|beta',
