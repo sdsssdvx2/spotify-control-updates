@@ -21,7 +21,7 @@ $result=Read-ApprovedPreparedCentralJournalV030 -WorkRoot $WorkRoot -Name $Name 
 if(-not[bool]$result.ok -or
    [string]$result.phase -cne 'prepared' -or
    [int64]$result.journal_revision -ne 0 -or
-   -not[bool]$result.original_hmac_key_needed -eq $false -or
+   [bool]$result.original_hmac_key_needed -or
    [bool]$result.real_spotify_persistence_covered -or
    [bool]$result.production_mutation_authorized){
     throw ('V030_INDEPENDENT_RECOVERY_OF_EXACT_PREPARED_EVIDENCE_FAILED:'+ [string]$result.reason)
