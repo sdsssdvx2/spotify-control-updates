@@ -4,7 +4,7 @@
 # V048 immutable preflight, V050 full-source preimage and V051 cold recovery.
 # V046 cannot be reused AFTER candidate mutation; a sealed pre-change intent
 # plus pinned exact candidate hashes and retained quarantine are required.
-# Preload V010/V036/V041/V042/V044/V046/V047/V048/V050/V051 modules.
+# Preload V010/V036/V041/V042/V044/V046/V047/V048/V050/V051 and V054 module.
 function Assert-CustomAppV052Fixture {
  param([string]$HostedFixtureRoot,[string]$HostedFixtureCliPath,[string]$HostedEscrowRoot)
  if([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
@@ -97,6 +97,11 @@ function Get-CustomAppV052SealedIntent {
     [string]$r.owned_output_source_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
     [string]$r.owned_output_manifest_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
     [string]$r.owned_output_scope_fingerprint -cnotmatch '^[a-f0-9]{64}$' -or
+    [string]$r.official_route_js_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
+    [string]$r.official_route_css_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
+    [string]$r.official_route_manifest_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
+    [string]$r.owned_output_source_sha256 -cne [string]$r.candidate_app_sha256 -or
+    -not[bool]$r.v054_official_source_route_bytes_verified -or
     [int]$r.owned_output_file_count -lt 3 -or [int]$r.owned_output_file_count -gt 256 -or
     -not[bool]$r.v044_native_manifest_fence_verified -or
     [bool]$r.actual_vendor_cli_invoked -or
@@ -163,19 +168,21 @@ function New-CustomAppHostedCutoverIntentV052 {
     [string]$newApp.tree_sha256 -ceq [string]$originalApp.tree_sha256){
     throw 'V052_BACKUP_OR_CANDIDATE_NOT_DISTINCTLY_PINNED'
  }
- # Synthetic candidate app source may edit exactly its own index.js.
- # The simulated XPUI output MUST pass the genuine V044 official Spicetify
- # manifest ownership comparator, not the old foreign-file-only rehearsal.
- # V044 verifies ALL nonowned XPUI bytes and exact extensions/assets hashes.
- # This does not attest a real vendor execution or release provenance.
+ # Verify what the NEW candidate source, not the old installed source,
+ # produces through the official v2.46.4 RefreshApps Go byte format.
+ # Both V044 ownership and V054 byte-accurate routes must agree.
  [void](Get-CustomAppV052OnlyChanged -Before $originalApp -After $newApp -OnlyRelativePath 'index.js')
- $native=Test-ApprovedNativeManifestOnlyOwnedTargetChangedV044 -Before $originalXpui -After $newXpui -Name $AppName -SourceAppPath $app -ExpectedSourceTreeSha256 ([string]$originalApp.tree_sha256)
+ $native=Test-ApprovedNativeManifestOnlyOwnedTargetChangedV044 -Before $originalXpui -After $newXpui -Name $AppName -SourceAppPath $appCandidate -ExpectedSourceTreeSha256 ([string]$newApp.tree_sha256)
  if(-not[bool]$native.ok -or -not[bool]$native.foreign_xpui_preserved -or
     [bool]$native.production_mutation_authorized -or
     [int]$native.scoped_file_count -lt 3 -or
-    [string]$native.source_tree_sha256 -cne [string]$originalApp.tree_sha256 -or
+    [string]$native.source_tree_sha256 -cne [string]$newApp.tree_sha256 -or
     [string]$native.manifest_sha256 -cnotmatch '^[a-f0-9]{64}$'){
     throw 'V053_NATIVE_MANIFEST_ONLY_OWNED_OUTPUT_NOT_VERIFIED'
+ }
+ $routes=Test-CustomAppV054OfficialSourceBoundRoutes -Name $AppName -SourceAppPath $appCandidate -CandidateXpuiRoot $xpuiCandidate -ExpectedSourceTreeSha256 ([string]$newApp.tree_sha256)
+ if(-not[bool]$routes.ok -or [bool]$routes.production_mutation_authorized){
+    throw 'V054_OFFICIAL_ROUTES_NOT_BOUND_TO_NEW_APP_SOURCE'
  }
  $nativeScopeFingerprint=Get-CustomAppUpdateStringSha256V010 -Text (
      (@('v053-native-manifest-owned-candidate',
@@ -202,6 +209,10 @@ function New-CustomAppHostedCutoverIntentV052 {
    owned_output_source_sha256=[string]$native.source_tree_sha256
    owned_output_manifest_sha256=[string]$native.manifest_sha256
    owned_output_scope_fingerprint=$nativeScopeFingerprint
+   official_route_js_sha256=[string]$routes.route_js_sha256
+   official_route_css_sha256=[string]$routes.route_css_sha256
+   official_route_manifest_sha256=[string]$routes.route_manifest_sha256
+   v054_official_source_route_bytes_verified=$true
    owned_output_file_count=[int]$native.scoped_file_count
    v044_native_manifest_fence_verified=$true
    actual_vendor_cli_invoked=$false
@@ -277,7 +288,8 @@ function Test-CustomAppV053HostedBeforeApply {
      throw 'V053_BEFORE_APPLY_ORIGINAL_OR_CANDIDATE_HASH_CHANGED'
  }
  [void](Get-CustomAppV052OnlyChanged -Before $currentApp -After $candidateApp -OnlyRelativePath 'index.js')
- $proof=Test-ApprovedNativeManifestOnlyOwnedTargetChangedV044 -Before $currentXpui -After $candidateXpui -Name ([string]$intent.app_name) -SourceAppPath $app -ExpectedSourceTreeSha256 ([string]$intent.owned_output_source_sha256)
+ $proof=Test-ApprovedNativeManifestOnlyOwnedTargetChangedV044 -Before $currentXpui -After $candidateXpui -Name ([string]$intent.app_name) -SourceAppPath $CandidateAppRoot -ExpectedSourceTreeSha256 ([string]$intent.candidate_app_sha256)
+ $routes=Test-CustomAppV054OfficialSourceBoundRoutes -Name ([string]$intent.app_name) -SourceAppPath $CandidateAppRoot -CandidateXpuiRoot $CandidateXpuiRoot -ExpectedSourceTreeSha256 ([string]$intent.candidate_app_sha256)
  $fingerprint=Get-CustomAppUpdateStringSha256V010 -Text (
   (@('v053-native-manifest-owned-candidate',
     [string]$proof.source_tree_sha256,[string]$proof.manifest_sha256,
@@ -287,6 +299,11 @@ function Test-CustomAppV053HostedBeforeApply {
  if(-not[bool]$proof.ok -or -not[bool]$proof.foreign_xpui_preserved -or
     [string]$proof.manifest_sha256 -cne [string]$intent.owned_output_manifest_sha256 -or
     [int]$proof.scoped_file_count -ne [int]$intent.owned_output_file_count -or
+    -not[bool]$intent.v054_official_source_route_bytes_verified -or
+    -not[bool]$routes.ok -or
+    [string]$routes.route_js_sha256 -cne [string]$intent.official_route_js_sha256 -or
+    [string]$routes.route_css_sha256 -cne [string]$intent.official_route_css_sha256 -or
+    [string]$routes.route_manifest_sha256 -cne [string]$intent.official_route_manifest_sha256 -or
     $fingerprint -cne [string]$intent.owned_output_scope_fingerprint -or
     [bool]$proof.production_mutation_authorized){
     throw 'V053_BEFORE_APPLY_NATIVE_OWNERSHIP_FINGERPRINT_CHANGED'
@@ -296,6 +313,7 @@ function Test-CustomAppV053HostedBeforeApply {
  return [pscustomobject]@{
     ok=$true;status='hosted-manifest-owned-candidate-unchanged-before-simulation'
     source_and_xpui_pinned=$true;v044_manifest_owned_output_verified=$true
+    v054_candidate_source_official_route_bytes_verified=$true
     same_os_lease_held=$true;backup_and_detached_revalidated=$true
     actual_vendor_cli_executed=$false
     real_release_provenance_verified=$false;older_unpatched_processes_excluded=$false
