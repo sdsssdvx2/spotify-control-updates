@@ -14,7 +14,7 @@ function Assert-ApprovedNativeManifestHostedV044 {
 }
 function Assert-ApprovedNativeManifestRelativeV044 {
  param([Parameter(Mandatory=$true)][string]$Value)
- if($Value.Length -gt 160 -or $Value -cnotmatch '^[A-Za-z0-9_-]+(?:/[A-Za-z0-9_.-]+)*$' -or
+ if($Value.Length -gt 160 -or $Value -cnotmatch '^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$' -or
     $Value -cmatch '(^|/)\.{1,2}(/|$)' -or $Value.Contains('\') -or
     $Value.Contains(':')){
     throw 'V044_MANIFEST_UNSAFE_RELATIVE_SOURCE'
