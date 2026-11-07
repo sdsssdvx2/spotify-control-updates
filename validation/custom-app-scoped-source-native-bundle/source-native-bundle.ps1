@@ -20,6 +20,7 @@ function Get-CustomAppScopedBundlePathsV020 {
     $restore=Join-Path $parent ('.'+$stem+'.restore.tmp')
     $paths=[pscustomobject]@{
         sealed=(Join-Path $dir ($stem+'.dpapi'))
+        preintent=(Join-Path $dir ($stem+'.preintent.dpapi'))
         intent=(Join-Path $dir ($stem+'.intent'))
         recovered=(Join-Path $dir ($stem+'.recovered'))
         swap_temp=$temp
@@ -27,7 +28,7 @@ function Get-CustomAppScopedBundlePathsV020 {
         swap_backup=(Join-Path $parent ('.'+$stem+'.swap.before.bak'))
         restore_backup=(Join-Path $parent ('.'+$stem+'.restore.candidate.bak'))
     }
-    foreach($v in @($paths.sealed,$paths.intent,$paths.recovered,$paths.swap_temp,$paths.restore_temp,$paths.swap_backup,$paths.restore_backup)){
+    foreach($v in @($paths.sealed,$paths.preintent,$paths.intent,$paths.recovered,$paths.swap_temp,$paths.restore_temp,$paths.swap_backup,$paths.restore_backup)){
         Assert-CustomAppUserTxnNoReparseV010 -Path ([string]$v)
     }
     return $paths
@@ -38,6 +39,93 @@ function Get-CustomAppScopedBundleEntropyV020 {
     return [Text.Encoding]::UTF8.GetBytes(('SpotifyControlUpdates|ScopedSourceAndXpui|V020|'+
       [string]$Session.paths.key+'|'+[string]$Context.consumption_id))
 }
+# The DPAPI pre-CAS intent binds both sealed beforeimages to the
+# initial prepared journal head and lets a new process recover the
+# narrow CAS->final-intent interruption without guessing any user bytes.
+function Get-CustomAppScopedBundlePreIntentEntropyV022 {
+    param([Parameter(Mandatory=$true)]$Session,[Parameter(Mandatory=$true)]$Context)
+    return [Text.Encoding]::UTF8.GetBytes(('SpotifyControlUpdates|ScopedPreCasIntent|V022|'+
+      [string]$Session.paths.key+'|'+[string]$Context.consumption_id))
+}
+function Read-CustomAppScopedBundlePreIntentV022 {
+    param([Parameter(Mandatory=$true)]$Session,
+          [Parameter(Mandatory=$true)]$Context,
+          [Parameter(Mandatory=$true)]$Bundle)
+    $path=[string]$Bundle.paths.preintent
+    Assert-CustomAppUserTxnNoReparseV010 -Path $path
+    if(-not[IO.File]::Exists($path)){throw 'scoped-preintent-not-durable'}
+    $cipher=[IO.File]::ReadAllBytes($path)
+    if($cipher.Length -lt 128 -or $cipher.Length -gt 1048576){
+        throw 'scoped-preintent-cipher-size-invalid'
+    }
+    Add-Type -AssemblyName System.Security -ErrorAction Stop
+    $plain=$null
+    try{
+        $plain=[Security.Cryptography.ProtectedData]::Unprotect(
+            $cipher,(Get-CustomAppScopedBundlePreIntentEntropyV022 -Session $Session -Context $Context),
+            [Security.Cryptography.DataProtectionScope]::CurrentUser)
+        $receipt=([Text.Encoding]::UTF8.GetString($plain)|ConvertFrom-Json -ErrorAction Stop)
+    }finally{if($null-ne$plain){[Array]::Clear($plain,0,$plain.Length)}}
+    $nativeSeal=[IO.File]::ReadAllBytes([string]$Context.sealed_path)
+    $nativeSealHash=Get-CustomAppScopedLabShaV017 -Bytes $nativeSeal
+    if([long]$receipt.schema -ne 1 -or
+       [string]$receipt.target -cne [string]$Context.target -or
+       [string]$receipt.consumption_id -cne [string]$Context.consumption_id -or
+       [string]$receipt.transaction_id -cne [string]$Context.transaction_id -or
+       [string]$receipt.nonce -cne [string]$Context.nonce -or
+       [long]$receipt.state_revision -ne [long]$Context.state_revision -or
+       [string]$receipt.source_path -cne [string]$Context.source_index -or
+       [string]$receipt.bundle_cipher_sha256 -cne [string]$Bundle.sha256 -or
+       [string]$receipt.native_cipher_sha256 -cne $nativeSealHash -or
+       [string]$receipt.prepared_journal_sha256 -cne [string]$Bundle.snapshot.prepared_journal_sha256 -or
+       [string]$receipt.before_sha256 -cne [string]$Bundle.snapshot.before_sha256 -or
+       [string]$receipt.candidate_sha256 -cne [string]$Bundle.snapshot.candidate_sha256){
+        throw 'scoped-preintent-dpapi-dual-beforeimage-or-journal-identity-drift'
+    }
+    return [pscustomobject]@{
+        ok=$true;pre_cas_intent_authenticated=$true
+        prepared_journal_sha256=[string]$receipt.prepared_journal_sha256
+        production_execution_authorized=$false;production_mutation_authorized=$false
+    }
+}
+function Save-CustomAppScopedBundlePreIntentV022 {
+    param([Parameter(Mandatory=$true)]$Session,
+          [Parameter(Mandatory=$true)]$Context,
+          [Parameter(Mandatory=$true)]$Bundle)
+    if([long]$Bundle.journal.revision -ne 0 -or
+       [string]$Bundle.journal.phase -cne 'prepared' -or
+       [IO.File]::Exists([string]$Bundle.paths.preintent)){
+        throw 'scoped-preintent-must-be-created-once-before-central-CAS'
+    }
+    $nativeSeal=[IO.File]::ReadAllBytes([string]$Context.sealed_path)
+    $receipt=[ordered]@{
+        schema=1;target=[string]$Context.target
+        consumption_id=[string]$Context.consumption_id
+        transaction_id=[string]$Context.transaction_id
+        nonce=[string]$Context.nonce
+        state_revision=[long]$Context.state_revision
+        source_path=[string]$Context.source_index
+        bundle_cipher_sha256=[string]$Bundle.sha256
+        native_cipher_sha256=(Get-CustomAppScopedLabShaV017 -Bytes $nativeSeal)
+        prepared_journal_sha256=[string]$Bundle.snapshot.prepared_journal_sha256
+        before_sha256=[string]$Bundle.snapshot.before_sha256
+        candidate_sha256=[string]$Bundle.snapshot.candidate_sha256
+    }
+    Add-Type -AssemblyName System.Security -ErrorAction Stop
+    $raw=[Text.Encoding]::UTF8.GetBytes(($receipt|ConvertTo-Json -Compress -Depth 7))
+    try{
+        $cipher=[Security.Cryptography.ProtectedData]::Protect(
+            $raw,(Get-CustomAppScopedBundlePreIntentEntropyV022 -Session $Session -Context $Context),
+            [Security.Cryptography.DataProtectionScope]::CurrentUser)
+    }finally{[Array]::Clear($raw,0,$raw.Length)}
+    Write-CustomAppUserTxnBytesV010 -Path ([string]$Bundle.paths.preintent) -Bytes $cipher
+    $verified=Read-CustomAppScopedBundlePreIntentV022 -Session $Session -Context $Context -Bundle $Bundle
+    if(-not[bool]$verified.ok -or -not[bool]$verified.pre_cas_intent_authenticated){
+        throw 'scoped-preintent-durable-readback-invalid'
+    }
+    return $verified
+}
+
 function Read-CustomAppScopedBundleV020 {
     param([Parameter(Mandatory=$true)]$Session,
           [Parameter(Mandatory=$true)]$HeldCrossEngineSession,
@@ -123,7 +211,7 @@ function Save-CustomAppScopedBundleV020 {
     }
     Assert-CustomAppUserTxnNoReparseV010 -Path $candidate
     $paths=Get-CustomAppScopedBundlePathsV020 -Session $Session -Context $ctx
-    foreach($p in @($paths.sealed,$paths.intent,$paths.recovered,$paths.swap_temp,$paths.restore_temp,$paths.swap_backup,$paths.restore_backup)){
+    foreach($p in @($paths.sealed,$paths.preintent,$paths.intent,$paths.recovered,$paths.swap_temp,$paths.restore_temp,$paths.swap_backup,$paths.restore_backup)){
         if([IO.File]::Exists([string]$p)){throw 'scoped-bundle-duplicate-or-existing-intent'}
     }
     if(-not[IO.File]::Exists([string]$ctx.sealed_path)){
@@ -239,7 +327,8 @@ function Invoke-CustomAppScopedBundleNativeV020 {
           [Parameter(Mandatory=$true)]$HeldCrossEngineSession,
           [Parameter(Mandatory=$true)][string]$HostedCiRoot,
           [Parameter(Mandatory=$true)][string]$HostedCiLocalAppDataRoot,
-          [Parameter(Mandatory=$true)][string]$HostedCiAppDataRoot)
+          [Parameter(Mandatory=$true)][string]$HostedCiAppDataRoot,
+          [switch]$HostedCiExitAfterCasBeforeFinalIntent)
     $ctx=Get-CustomAppScopedLabContextV017 -Session $Session -HeldCrossEngineSession $HeldCrossEngineSession -HostedCiRoot $HostedCiRoot -HostedCiLocalAppDataRoot $HostedCiLocalAppDataRoot -HostedCiAppDataRoot $HostedCiAppDataRoot
     $bundle=Read-CustomAppScopedBundleV020 -Session $Session -HeldCrossEngineSession $HeldCrossEngineSession -Context $ctx
     $j=$bundle.journal
@@ -308,8 +397,17 @@ function Invoke-CustomAppScopedBundleNativeV020 {
        [string]$bundle.snapshot.candidate_sha256){
         throw 'scoped-bundle-staged-source-sha-drift'
     }
+    # Crash durable pre-CAS seal; both future intent markers can be derived
+    # from this identity only after journal rev1 authenticates the transition.
+    $preIntent=Save-CustomAppScopedBundlePreIntentV022 -Session $Session -Context $ctx -Bundle $bundle
+    if(-not[bool]$preIntent.ok){throw 'scoped-preintent-not-fully-durable'}
+    Write-Host 'NATIVE_BUNDLE_V022_DPAPI_PRE_CAS_INTENT_DURABLE_PASS'
     # All admissible effects must appear AFTER this journal CAS barrier.
     $started=Move-CustomAppScopedLabJournalV018 -Session $Session -HeldCrossEngineSession $HeldCrossEngineSession -Context $ctx -NextPhase 'atomic-mutation-starting'
+    if($HostedCiExitAfterCasBeforeFinalIntent){
+        Write-Host 'NATIVE_BUNDLE_V022_HOSTED_CRASH_AFTER_CAS_BEFORE_EITHER_FINAL_INTENT'
+        [Environment]::Exit(75)
+    }
     $nativeBefore=[IO.File]::ReadAllBytes([string]$ctx.sealed_path)
     $nativeSha=Get-CustomAppScopedLabShaV017 -Bytes $nativeBefore
     $marker=[Text.Encoding]::ASCII.GetBytes(('V018_INTENT_SHA256='+$nativeSha+'|FIRST_JOURNAL_SHA256='+[string]$started.entry_sha256+[Environment]::NewLine))
@@ -392,17 +490,47 @@ function Restore-CustomAppScopedBundleV020 {
         throw 'scoped-bundle-journal-not-eligible-for-independent-recovery'
     }
     $first=Get-CustomAppScopedLabFirstMutationEntryV018 -Journal $phase
-    if(-not[IO.File]::Exists([string]$bundle.paths.intent) -or
-       -not[IO.File]::Exists([string]$ctx.intent_path)){
-        throw 'scoped-bundle-source-or-XPUI-intent-missing-after-CAS'
+    $preIntentPresent=[IO.File]::Exists([string]$bundle.paths.preintent)
+    if($preIntentPresent){
+        $proof=Read-CustomAppScopedBundlePreIntentV022 -Session $Session -Context $ctx -Bundle $bundle
+        if(-not[bool]$proof.ok){throw 'scoped-preintent-post-CAS-readback-invalid'}
     }
     $bundleIntent='V020_BUNDLE_INTENT_SHA256='+[string]$bundle.sha256+'|FIRST_JOURNAL_SHA256='+$first+[Environment]::NewLine
-    $actualBundle=[Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes([string]$bundle.paths.intent))
     $v017Seal=[IO.File]::ReadAllBytes([string]$ctx.sealed_path)
     $nativeIntent='V018_INTENT_SHA256='+(Get-CustomAppScopedLabShaV017 -Bytes $v017Seal)+'|FIRST_JOURNAL_SHA256='+$first+[Environment]::NewLine
-    $actualNative=[Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes([string]$ctx.intent_path))
-    if($actualBundle -cne $bundleIntent -or $actualNative -cne $nativeIntent){
-        throw 'scoped-bundle-intent-not-bound-to-two-durable-preimages-and-journal'
+    $bundleExists=[IO.File]::Exists([string]$bundle.paths.intent)
+    $nativeExists=[IO.File]::Exists([string]$ctx.intent_path)
+    # Existing-but-tampered markers always deny; only physically absent
+    # markers on a pending authentic preintent may be reconstructed.
+    if($bundleExists -and
+       [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes([string]$bundle.paths.intent)) -cne $bundleIntent){
+        throw 'scoped-bundle-existing-final-intent-tampered'
+    }
+    if($nativeExists -and
+       [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes([string]$ctx.intent_path)) -cne $nativeIntent){
+        throw 'scoped-native-existing-final-intent-tampered'
+    }
+    $now=Get-CustomAppSpicetifyPassiveFileSha256V015 -Path ([string]$ctx.source_index)
+    if($now -cne [string]$bundle.snapshot.before_sha256 -and
+       $now -cne [string]$bundle.snapshot.candidate_sha256){
+        throw 'scoped-bundle-live-source-unexpected-unowned-change'
+    }
+    if(-not$bundleExists -or -not$nativeExists){
+        if(-not$preIntentPresent -or [string]$phase.phase -ceq 'rollback-complete' -or
+           [IO.File]::Exists([string]$bundle.paths.recovered)){
+            throw 'scoped-bundle-final-intent-missing-without-authenticated-pending-preintent'
+        }
+        if(-not$bundleExists){
+            Write-CustomAppUserTxnBytesV010 -Path ([string]$bundle.paths.intent) -Bytes ([Text.Encoding]::ASCII.GetBytes($bundleIntent))
+        }
+        if(-not$nativeExists){
+            Write-CustomAppUserTxnBytesV010 -Path ([string]$ctx.intent_path) -Bytes ([Text.Encoding]::ASCII.GetBytes($nativeIntent))
+        }
+        Write-Host 'NATIVE_BUNDLE_V022_DPAPI_PREINTENT_RECONSTRUCTED_PENDING_FINAL_MARKERS_PASS'
+    }
+    if([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes([string]$bundle.paths.intent)) -cne $bundleIntent -or
+       [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes([string]$ctx.intent_path)) -cne $nativeIntent){
+        throw 'scoped-bundle-final-intents-not-byte-exact-after-preintent-recovery'
     }
     $now=Get-CustomAppSpicetifyPassiveFileSha256V015 -Path ([string]$ctx.source_index)
     if($now -cne [string]$bundle.snapshot.before_sha256 -and
@@ -480,6 +608,21 @@ function Restore-CustomAppScopedBundleV020 {
         if([IO.File]::Exists([string]$record.path)){
             if((Get-CustomAppSpicetifyPassiveFileSha256V015 -Path ([string]$record.path)) -cne [string]$record.sha){
                 throw 'scoped-bundle-private-source-swap-backup-not-authentic'
+            }
+            [IO.File]::Delete([string]$record.path)
+        }
+    }
+    # A crash before File.Replace can leave the explicitly transaction-owned
+    # source staging file behind. Never delete an unexpected byte sequence.
+    foreach($record in @(
+        [pscustomobject]@{path=[string]$bundle.paths.swap_temp;sha=[string]$bundle.snapshot.candidate_sha256},
+        [pscustomobject]@{path=[string]$bundle.paths.restore_temp;sha=[string]$bundle.snapshot.before_sha256}
+    )){
+        Assert-CustomAppUserTxnNoReparseV010 -Path ([string]$record.path)
+        if([IO.File]::Exists([string]$record.path)){
+            if((Get-CustomAppSpicetifyPassiveFileSha256V015 -Path ([string]$record.path)) -cne
+               [string]$record.sha){
+                throw 'scoped-bundle-private-staging-temp-tampered-refuse-delete'
             }
             [IO.File]::Delete([string]$record.path)
         }

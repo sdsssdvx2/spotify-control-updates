@@ -1,0 +1,149 @@
+name: Experimental DPAPI pre-CAS native source and XPUI independent resume
+on:
+  push:
+    branches: [validate/native-dual-preintent-restart]
+    paths:
+      - 'validation/custom-app-scoped-source-native-bundle/**'
+      - '.github/workflows/validate-native-dual-preintent-restart.yml'
+  pull_request:
+    branches: [validate/scoped-native-pre-cas-preflight]
+    paths:
+      - 'validation/custom-app-scoped-source-native-bundle/**'
+      - '.github/workflows/validate-native-dual-preintent-restart.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  preintent-early-kill:
+    runs-on: windows-2025
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Pin original V020 parent and Windows PowerShell source; protect operating main
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='6b401d0ca4e3a22bb47b92aac95c134885d6a7d5'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'HEAD not event-pinned'}
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'V020 qualified baseline not ancestor'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main changed'}
+          $core='validation/custom-app-scoped-source-native-bundle/source-native-bundle.ps1'
+          $test='validation/custom-app-scoped-source-native-bundle/test_source_native_bundle.ps1'
+          $wf='.github/workflows/validate-native-dual-preintent-restart.yml'
+          $diff=@(git diff --name-only "$base...HEAD")
+          if($diff.Count -ne 3 -or @($diff|Where-Object{$_ -notin @($core,$test,$wf)}).Count){throw 'protected source scope widened'}
+          if((git hash-object $core).Trim() -cne '50a65d644999dff36a17dd85339ade8b9a2b7eed' -or
+             (git hash-object $test).Trim() -cne '7ac66c1b007c7a4dd42096c713c2d9c21deb7e54'){
+            throw 'unreviewed V022 source or test bytes'
+          }
+          foreach($p in @($core,$test)){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|ForEach-Object{Write-Host ("PS51_ERROR file="+$p+" line="+$_.Extent.StartLineNumber+" msg="+$_.Message)};throw 'V022 PS 5.1 parse failure'}
+          }
+          $code=[IO.File]::ReadAllText((Resolve-Path $core).Path)
+          foreach($must in @('DataProtectionScope]::CurrentUser','ScopedPreCasIntent|V022','Move-CustomAppScopedLabJournalV018',
+              'scoped-bundle-existing-final-intent-tampered','NATIVE_BUNDLE_V022_DPAPI_PREINTENT_RECONSTRUCTED_PENDING_FINAL_MARKERS_PASS',
+              'signed_source_provenance_verified=$false')){
+            if(-not$code.Contains($must)){throw ('protected protocol function missing '+$must)}
+          }
+          if($code.Contains('$script:CustomAppProductionPipelineEnabled = $true')){throw 'production dispatcher enabled'}
+          Write-Host 'NATIVE_BUNDLE_V022_SCOPE_PS51_AND_PRODUCTION_FROZEN_PASS'
+      - name: Restore pinned historical V010 journal and official upstream Spicetify 2.46.4
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $ref='7e26187e2360089024e9d72d0701be6f1577a1ef'
+          $path='validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1'
+          if(-not(Test-Path -LiteralPath $path -PathType Leaf)){
+            $env:PIN_REF=$ref+':'+$path;$env:PIN_OUT=$path
+            [IO.Directory]::CreateDirectory((Split-Path $path -Parent))|Out-Null
+            python -c "import os,subprocess,pathlib;pathlib.Path(os.environ['PIN_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['PIN_REF']]))"
+            if($LASTEXITCODE -ne 0){throw 'historical journal source not retrievable'}
+          }
+          if((git hash-object $path).Trim() -cne 'a3df7e5d89c594083c10e240e13029ca5640b8ae'){throw 'historical V010 journal drift'}
+          $root=Join-Path $env:RUNNER_TEMP ('v022off-'+[guid]::NewGuid().ToString('N').Substring(0,8))
+          [void][IO.Directory]::CreateDirectory($root)
+          $zip=Join-Path $root 'official.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip' -OutFile $zip
+          if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f' -or (Get-Item $zip).Length -ne 7795758){throw 'official ZIP SHA or size mismatch'}
+          $out=Join-Path $root 'unzipped';Expand-Archive -LiteralPath $zip -DestinationPath $out
+          $exes=@(Get-ChildItem -LiteralPath $out -File -Recurse -Filter 'spicetify.exe')
+          if($exes.Count -ne 1 -or (Get-FileHash $exes[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){throw 'official native executable not pinned'}
+          "V022_EXE=$($exes[0].FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host 'NATIVE_BUNDLE_V022_PINNED_OFFICIAL_AND_HISTORICAL_JOURNAL_PASS'
+      - name: Kill after CAS rev1 but before either final source or XPUI intent exists
+        shell: powershell
+        timeout-minutes: 12
+        run: |
+          $f=Join-Path $env:RUNNER_TEMP ('v022b-'+[guid]::NewGuid().ToString('N').Substring(0,8))
+          "V022_ROOT=$f"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          $test='validation/custom-app-scoped-source-native-bundle/test_source_native_bundle.ps1'
+          $log=Join-Path $env:RUNNER_TEMP 'v022-early-kill.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test -Mode bundle-early-crash -FixtureRoot $f -OfficialExecutable $env:V022_EXE *>&1|Tee-Object -FilePath $log|Out-Null
+          $rc=$LASTEXITCODE;$raw=Get-Content $log -Raw
+          if($rc -ne 75 -or -not$raw.Contains('NATIVE_BUNDLE_V022_DPAPI_PRE_CAS_INTENT_DURABLE_PASS') -or
+             -not$raw.Contains('NATIVE_BUNDLE_V022_HOSTED_CRASH_AFTER_CAS_BEFORE_EITHER_FINAL_INTENT')){
+            Get-Content $log -Tail 60|ForEach-Object{Write-Host $_};throw ('expected rev1 early termination not observed '+$rc)
+          }
+          Write-Host 'NATIVE_BUNDLE_V022_CAS_GAP_PROCESS_KILLED_PASS'
+          exit 0
+      - name: Independent process rejects altered DPAPI pre-CAS intent without modifying any source
+        shell: powershell
+        timeout-minutes: 8
+        run: |
+          $ErrorActionPreference='Stop'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-scoped-source-native-bundle/test_source_native_bundle.ps1' -Mode bundle-preintent-tamper -FixtureRoot $env:V022_ROOT
+          if($LASTEXITCODE -ne 0){throw 'fresh-process tampered preintent was not rejected'}
+          Write-Host 'NATIVE_BUNDLE_V022_FRESH_PROCESS_PREINTENT_TAMPER_DENIED_PASS'
+      - name: New process derives both missing markers and safely finishes journaled source XPUI rollback
+        shell: powershell
+        timeout-minutes: 8
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v022-independent-recovery.log'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-scoped-source-native-bundle/test_source_native_bundle.ps1' -Mode bundle-recover -FixtureRoot $env:V022_ROOT *>&1|Tee-Object -FilePath $log|Out-Null
+          if($LASTEXITCODE -ne 0){Get-Content $log -Tail 65|ForEach-Object{Write-Host $_};throw 'independent CAS-gap recovery failed'}
+          $raw=Get-Content $log -Raw
+          foreach($m in @('NATIVE_BUNDLE_V022_DPAPI_PREINTENT_RECONSTRUCTED_PENDING_FINAL_MARKERS_PASS','NATIVE_BUNDLE_V020_JOURNALED_SOURCE_AND_XPUI_RECOVERY_COMPLETE_PASS','NATIVE_BUNDLE_V020_FRESH_PROCESS_SOURCE_PLUS_XPUI_RESTORED_BYTE_EXACT_PASS')){
+            if(-not$raw.Contains($m)){throw ('independent recovery marker absent '+$m)}
+          }
+          Write-Host 'NATIVE_BUNDLE_V022_CAS_GAP_DUAL_SOURCE_XPUI_ROLLBACK_PASS'
+      - name: Terminal recovery idempotent, user edits denied, old state preserved
+        shell: powershell
+        timeout-minutes: 8
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-scoped-source-native-bundle/test_source_native_bundle.ps1' -Mode bundle-replay -FixtureRoot $env:V022_ROOT
+          if($LASTEXITCODE -ne 0){throw 'CAS gap terminal replay failed'}
+          Write-Host 'NATIVE_BUNDLE_V022_CAS_GAP_TERMINAL_REPLAY_PASS'
+      - name: Recheck existing official native source+XPUI mutate/crash/recovery matrix without rebuilding Addon
+        shell: powershell
+        timeout-minutes: 22
+        run: |
+          $ErrorActionPreference='Stop'
+          $f=Join-Path $env:RUNNER_TEMP ('v022old-'+[guid]::NewGuid().ToString('N').Substring(0,8))
+          $test='validation/custom-app-scoped-source-native-bundle/test_source_native_bundle.ps1'
+          $log=Join-Path $env:RUNNER_TEMP 'v022-normal-mutate.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test -Mode bundle-mutate -FixtureRoot $f -OfficialExecutable $env:V022_EXE *>&1|Tee-Object -FilePath $log|Out-Null
+          $rc=$LASTEXITCODE
+          if($rc -ne 73){Get-Content $log -Tail 55|ForEach-Object{Write-Host $_};throw ('native old-case updater not killed '+$rc)}
+          $ErrorActionPreference='Stop'
+          foreach($mode in @('bundle-tamper','bundle-recover-interrupted','bundle-recover','bundle-replay')){
+            $ErrorActionPreference='Continue'
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test -Mode $mode -FixtureRoot $f
+            $rc=$LASTEXITCODE
+            $ErrorActionPreference='Stop'
+            $expected=if($mode -eq 'bundle-recover-interrupted'){74}else{0}
+            if($rc -ne $expected){throw ('native old-case '+$mode+' failed exit '+$rc+' expected '+$expected)}
+          }
+          Write-Host 'NATIVE_BUNDLE_V022_PRIOR_V020_NATIVE_OFFICIAL_ROLLBACK_MATRIX_PASS'
+      - name: Confirm frozen main and no production mutation
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main was modified'}
+          Write-Host 'NATIVE_BUNDLE_V022_HOSTED_WINDOWS_ONLY_ZERO_PRODUCTION_AUTHORITY_PASS'

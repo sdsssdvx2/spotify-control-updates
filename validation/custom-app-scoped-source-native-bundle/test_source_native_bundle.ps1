@@ -1,5 +1,5 @@
 # Independent host-only restart contract for genuine official Spicetify.
-param([Parameter(Mandatory=$true)][ValidateSet('bundle-mutate','bundle-tamper','bundle-recover-interrupted','bundle-recover','bundle-replay')][string]$Mode,
+param([Parameter(Mandatory=$true)][ValidateSet('bundle-mutate','bundle-tamper','bundle-early-crash','bundle-preintent-tamper','bundle-recover-interrupted','bundle-recover','bundle-replay')][string]$Mode,
       [Parameter(Mandatory=$true)][string]$FixtureRoot,
       [string]$OfficialExecutable)
 $ErrorActionPreference='Stop'
@@ -55,7 +55,7 @@ $baseJson='BEFORE_ALPHA_ROUTE_JSON'
 $baseBystander='BEFORE_BETA_MUST_NOT_CHANGE'
 $baseSentinel='BEFORE_UNRELATED_USER_ASSET'
 $pinArgs=@{HostedCiRoot=$store;HostedCiLocalAppDataRoot=$local;HostedCiAppDataRoot=$roaming}
-if($Mode -ceq 'bundle-mutate'){
+if($Mode -in @('bundle-mutate','bundle-early-crash')){
     $official=[IO.Path]::GetFullPath($OfficialExecutable)
     if(-not$official.StartsWith(($runner+'\'),[StringComparison]::OrdinalIgnoreCase) -or
        -not[IO.File]::Exists($official) -or
@@ -173,6 +173,12 @@ if($Mode -ceq 'bundle-mutate'){
         }
         Write-Host 'NATIVE_SCOPED_V018_SNAPSHOT_BEFORE_CAS_PREPARED_JOURNAL_PASS'
         Write-CustomAppUserTxnBytesV010 -Path ([string]$session.paths.pending) -Bytes ([Text.Encoding]::ASCII.GetBytes($pendingText))
+        if($Mode -ceq 'bundle-early-crash'){
+            # This exits 75 AFTER durable journal CAS revision 1, BEFORE
+            # creation of either V018 or V020 final intent marker.
+            [void](Invoke-CustomAppScopedBundleNativeV020 -Session $session -HeldCrossEngineSession $global @pinArgs -HostedCiExitAfterCasBeforeFinalIntent)
+            throw 'BUNDLE_V022_EXPECTED_EARLY_EXIT_DID_NOT_HAPPEN'
+        }
         $result=Invoke-CustomAppScopedBundleNativeV020 -Session $session -HeldCrossEngineSession $global @pinArgs
         if(-not[bool]$result.ok -or [bool]$result.production_execution_authorized -or
            -not[bool]$result.recovery_required -or
@@ -204,6 +210,42 @@ if($Mode -ceq 'bundle-mutate'){
 }
 
 if(-not[IO.Directory]::Exists($root)){throw 'BUNDLE_RECOVERY_FIXTURE_MISSING'}
+if($Mode -ceq 'bundle-preintent-tamper'){
+    $stateDir=Join-Path (Join-Path $store 'SpotifyControlUpdates-CustomApp-State') (
+      Get-CustomAppUserTxnSha256V010 ([IO.Path]::GetFullPath($live).TrimEnd('\','/').ToLowerInvariant()))
+    $stem='native-bundle-'+('a'*64)
+    $pre=Join-Path $stateDir ($stem+'.preintent.dpapi')
+    $native=Join-Path $stateDir ('native-snapshot-'+('a'*64)+'.intent')
+    $bundleIntent=Join-Path $stateDir ($stem+'.intent')
+    if(-not[IO.File]::Exists($pre) -or [IO.File]::Exists($bundleIntent)){
+        throw 'BUNDLE_V022_EARLY_CAS_PREINTENT_MISSING_OR_FINAL_INTENT_PRESENT'
+    }
+    if([IO.File]::ReadAllText($source) -cne 'console.log("ORIGINAL_BUNDLE_ALPHA_V0");' -or
+       [IO.File]::ReadAllText($target) -cne $baseTarget){
+        throw 'BUNDLE_V022_EARLY_CAS_CHANGED_SOURCE_OR_XPUI_PREMATURELY'
+    }
+    $phase=Read-CustomAppDurableRecoveryJournalReadOnlyV012 -AllowedRoot $root -StoreDirectory $journal
+    if(-not[bool]$phase.ok -or [long]$phase.revision -ne 1 -or
+       [string]$phase.entry.phase -cne 'atomic-mutation-starting'){
+        throw 'BUNDLE_V022_EARLY_CAS_JOURNAL_NOT_DURABLE'
+    }
+    $bytes=[IO.File]::ReadAllBytes($pre)
+    try{
+        $tampered=New-Object byte[] $bytes.Length
+        [Array]::Copy($bytes,$tampered,$bytes.Length)
+        $tampered[12]=$tampered[12] -bxor 1
+        [IO.File]::WriteAllBytes($pre,$tampered)
+        $denied=$false
+        try{[void](Invoke-CustomAppScopedBundleIndependentRecoveryV020 @pinArgs)}catch{$denied=$true}
+        if(-not$denied){throw 'BUNDLE_V022_TAMPERED_PREINTENT_NOT_DENIED'}
+    }finally{[IO.File]::WriteAllBytes($pre,$bytes)}
+    if([IO.File]::Exists($bundleIntent) -or
+       [IO.File]::ReadAllText($source) -cne 'console.log("ORIGINAL_BUNDLE_ALPHA_V0");'){
+        throw 'BUNDLE_V022_TAMPERED_PREINTENT_CREATED_MARKERS_OR_MUTATED_SOURCE'
+    }
+    Write-Host 'NATIVE_BUNDLE_V022_DPAPI_PREINTENT_TAMPER_FAIL_CLOSED_PASS'
+    exit 0
+}
 if($Mode -ceq 'bundle-tamper'){
     if(-not[IO.File]::ReadAllText($source).Contains('NEW_SCOPED_ALPHA_V17') -or
        -not[IO.File]::ReadAllText($target).Contains('NEW_SCOPED_ALPHA_V17')){
@@ -214,7 +256,8 @@ if($Mode -ceq 'bundle-tamper'){
     $stem='native-bundle-'+('a'*64)
     $seal=Join-Path $stateDir ($stem+'.dpapi')
     $intent=Join-Path $stateDir ($stem+'.intent')
-    foreach($path in @($seal,$intent)){
+    $preintent=Join-Path $stateDir ($stem+'.preintent.dpapi')
+    foreach($path in @($seal,$intent,$preintent)){
         if(-not[IO.File]::Exists($path)){throw 'BUNDLE_REQUIRED_DURABLE_RECEIPT_NOT_PRESENT'}
     }
     $originalOutside=[IO.File]::ReadAllBytes($sentinel)
@@ -233,7 +276,7 @@ if($Mode -ceq 'bundle-tamper'){
     if(-not$denied -or -not[IO.File]::ReadAllText($target).Contains('NEW_SCOPED_ALPHA_V17')){
         throw 'BUNDLE_OUTSIDER_SOURCE_CHANGE_NOT_DENIED'
     }
-    foreach($file in @($seal,$intent)){
+    foreach($file in @($seal,$intent,$preintent)){
         $original=[IO.File]::ReadAllBytes($file)
         $bad=New-Object byte[] $original.Length
         [Array]::Copy($original,$bad,$original.Length)
