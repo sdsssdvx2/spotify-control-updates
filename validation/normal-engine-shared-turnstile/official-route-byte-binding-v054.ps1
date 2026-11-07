@@ -74,6 +74,8 @@ function Test-CustomAppV054OfficialSourceBoundRoutes {
    if($stream.Length -gt 33554432){throw 'V054_JS_BUNDLE_TOO_LARGE'}
    $stream.Position=0
    $expectedJs=([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-','').ToLowerInvariant()
+   # Diagnostic is in-memory only; do not emit route contents or paths.
+   $expectedJsBytes=$stream.ToArray()
    $expectedManifest=([BitConverter]::ToString($sha.ComputeHash($manifestBytes))).Replace('-','').ToLowerInvariant()
    $expectedStyle=([BitConverter]::ToString($sha.ComputeHash($expectedCss))).Replace('-','').ToLowerInvariant()
  }finally{
@@ -83,7 +85,21 @@ function Test-CustomAppV054OfficialSourceBoundRoutes {
  $actualJs=[string]$byName[$r+'.js'].sha256
  $actualCss=[string]$byName[$r+'.css'].sha256
  $actualManifest=[string]$byName[$r+'.json'].sha256
- if($actualJs -cne $expectedJs){throw 'V054_VENDOR_ROUTE_JS_NOT_SOURCE_DERIVED'}
+ if($actualJs -cne $expectedJs){
+   if($env:V054_CI_DIAGNOSTIC -ceq '1' -and $env:GITHUB_ACTIONS -ceq 'true'){
+     $actualBytes=[IO.File]::ReadAllBytes((Join-Path $root ($r+'.js')))
+     $limit=[Math]::Min($expectedJsBytes.Length,$actualBytes.Length)
+     $first=0
+     while($first -lt $limit -and $expectedJsBytes[$first] -eq $actualBytes[$first]){$first++}
+     $left=if($first -lt $expectedJsBytes.Length){[int]$expectedJsBytes[$first]}else{-1}
+     $right=if($first -lt $actualBytes.Length){[int]$actualBytes[$first]}else{-1}
+     Write-Host ('V054_HOSTED_ROUTE_BYTE_DIFF expected_length='+$expectedJsBytes.Length+
+       ';actual_length='+$actualBytes.Length+';first_byte_index='+$first+
+       ';expected_byte='+$left+';actual_byte='+$right+
+       ';expected_sha256='+$expectedJs+';actual_sha256='+$actualJs)
+   }
+   throw 'V054_VENDOR_ROUTE_JS_NOT_SOURCE_DERIVED'
+ }
  if($actualCss -cne $expectedStyle){throw 'V054_VENDOR_ROUTE_CSS_NOT_SOURCE_DERIVED'}
  if($actualManifest -cne $expectedManifest){throw 'V054_VENDOR_ROUTE_MANIFEST_NOT_SOURCE_DERIVED'}
  $sourceAgain=Get-CustomAppUpdateTreeSnapshotV010 -Root $source

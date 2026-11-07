@@ -101,6 +101,7 @@ jobs:
           $ErrorActionPreference='Stop'
           $log=Join-Path $env:RUNNER_TEMP 'v054-targeted-native-source.log'
           $ErrorActionPreference='Continue'
+          $env:V054_CI_DIAGNOSTIC='1'
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/normal-engine-shared-turnstile/test-hosted-cutover-rollback-v052.ps1' -OfficialExecutable $env:V054_OFFICIAL_EXE *>&1 |
              Tee-Object -FilePath $log | Out-Null
           $rc=$LASTEXITCODE;$ErrorActionPreference='Stop'
