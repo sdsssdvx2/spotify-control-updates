@@ -1,4 +1,6 @@
-# V052 dedicated scoped integration; reuses V051 fixture, not installed Spotify.
+# V054: V052/V053 actual official 2.46.4 candidate-byte integration.
+# The real CLI runs only inside disposable RUNNER_TEMP (not user Spotify).
+param([Parameter(Mandatory=$true)][string]$OfficialExecutable)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows' -or
@@ -6,43 +8,101 @@ if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows' -or
     throw 'V052_TEST_REAL_USER_PROFILE_FORBIDDEN'
 }
 . (Join-Path $PSScriptRoot 'test-private-detached-recovery-v051.ps1')
+. (Join-Path $PSScriptRoot 'official-route-byte-binding-v054.ps1')
 . (Join-Path $PSScriptRoot 'hosted-cutover-rollback-v052.ps1')
 function Assert-V052([bool]$Ok,[string]$Reason){if(-not$Ok){throw ('V052_TEST_'+$Reason)}}
-# Preserve all 610 original XPUI members and change only the official
-# V044 manifest-owned output set. The three route files are synthetic
-# stand-ins, NOT proof the official vendor CLI executed in this test.
-$candidateX=Join-Path $env:RUNNER_TEMP ('v052-candidate-x-'+[guid]::NewGuid().ToString('N'))
-$candidateApp=Join-Path $env:RUNNER_TEMP ('v052-candidate-app-'+[guid]::NewGuid().ToString('N'))
+# Make the real upstream pinned Spicetify v2.46.4 render the candidate.
+# Do not simulate trusted route content or use the old source app as proof.
+$official=[IO.Path]::GetFullPath($OfficialExecutable)
+$runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\','/')
+if(-not$official.StartsWith(($runner+'\'),[StringComparison]::OrdinalIgnoreCase) -or
+   -not[IO.File]::Exists($official) -or
+   (Get-FileHash -LiteralPath $official -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+     '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+ throw 'V054_REAL_OFFICIAL_VENDOR_EXECUTABLE_PIN_OR_RUNNER_PATH_INVALID'
+}
+$nativeRoot=Join-Path $env:RUNNER_TEMP ('v054-native-candidate-'+[guid]::NewGuid().ToString('N'))
+$vendorRoot=Join-Path $nativeRoot 'VendorCLI'
+$candidateApp=Join-Path $vendorRoot 'CustomApps\ivlyrics'
+$nativeSpotify=Join-Path $nativeRoot 'FakeSpotify'
+$candidateX=Join-Path $nativeSpotify 'Apps\xpui'
+$cfgRoot=Join-Path $nativeRoot 'PrivateConfig'
+$stateRoot=Join-Path $nativeRoot 'PrivateState'
+$prefsNative=Join-Path $nativeRoot 'prefs'
+$nativeRoaming=Join-Path $nativeRoot 'Roaming'
+$nativeLocal=Join-Path $nativeRoot 'Local'
+foreach($d in @($nativeRoot,$vendorRoot,$cfgRoot,$stateRoot,$nativeRoaming,$nativeLocal,(Join-Path $cfgRoot 'Backup'))){
+ [IO.Directory]::CreateDirectory($d)|Out-Null
+}
 [void](Copy-CustomAppV050BoundTree -Source $xpui -Destination $candidateX)
 [void](Copy-CustomAppV050BoundTree -Source (Join-Path $cliApps 'ivlyrics') -Destination $candidateApp)
-$scope=Get-ApprovedNativeManifestOwnedScopeV044 -Name 'ivlyrics' -SourceAppPath (Join-Path $cliApps 'ivlyrics')
-if(@($scope.owned_files).Count -ne 6 -or [int]$scope.declared_extensions -ne 3){
- throw 'V053_EXPECTED_SIX_NATIVE_OWNED_FILES_MISSING'
+[IO.File]::AppendAllText((Join-Path $candidateApp 'index.js'),([char]10+'// v054-owned-new-source-candidate'))
+[IO.File]::Copy($official,(Join-Path $vendorRoot 'spicetify.exe'),$false)
+$nativeExe=Join-Path $vendorRoot 'spicetify.exe'
+if((Get-FileHash $nativeExe -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+    '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+ throw 'V054_SANDBOX_OFFICIAL_EXE_COPY_MISMATCH'
 }
-foreach($owned in @($scope.owned_files)){
- $dest=Join-Path $candidateX ([string]$owned).Replace('/','\')
- [IO.Directory]::CreateDirectory((Split-Path -Parent $dest))|Out-Null
- if($scope.byte_exact_copied_outputs.ContainsKey([string]$owned)){
-   $source=Join-Path (Join-Path $cliApps 'ivlyrics\extensions') ([IO.Path]::GetFileName([string]$owned))
-   if((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -cne
-      [string]$scope.byte_exact_copied_outputs[[string]$owned]){
-      throw 'V053_OFFICIAL_MANIFEST_EXTENSION_SOURCE_NOT_PINNED'
-   }
-   [IO.File]::Copy($source,$dest,$false)
- }elseif(([string]$owned).EndsWith('.json',[StringComparison]::Ordinal)){
-   [IO.File]::Copy((Join-Path $cliApps 'ivlyrics\manifest.json'),$dest,$false)
- }else{
-   [IO.File]::WriteAllText($dest,'V053_HOSTED_SYNTHETIC_MANIFEST_OWNED_ROUTE',([Text.UTF8Encoding]::new($false)))
+[IO.File]::WriteAllText($prefsNative,('app.last-launched-version = 1.2.3'+[char]10),([Text.UTF8Encoding]::new($false)))
+[IO.File]::WriteAllBytes((Join-Path $cfgRoot 'Backup\xpui.spa'),[byte[]](0x50,0x4b))
+$nl=[Environment]::NewLine
+$conf='[Setting]'+$nl+
+      'spotify_path = '+$nativeSpotify+$nl+
+      'prefs_path = '+$prefsNative+$nl+
+      'check_spicetify_update = false'+$nl+
+      'current_theme = '+$nl+
+      '[Backup]'+$nl+
+      'version = 1.2.3'+$nl+
+      'with = 2.46.4'+$nl+
+      '[AdditionalOptions]'+$nl+
+      'custom_apps = ivlyrics'+$nl
+[IO.File]::WriteAllText((Join-Path $cfgRoot 'config-xpui.ini'),$conf,([Text.UTF8Encoding]::new($false)))
+$originalXpuiSnap=Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui
+$originalAppSnap=Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path $cliApps 'ivlyrics')
+$nativeBefore=Get-CustomAppUpdateTreeSnapshotV010 -Root $candidateX
+$psi=New-Object Diagnostics.ProcessStartInfo
+$psi.FileName=$nativeExe
+$psi.Arguments='--bypass-admin -n -a refresh'
+$psi.WorkingDirectory=$vendorRoot
+$psi.UseShellExecute=$false
+$psi.CreateNoWindow=$true
+$psi.RedirectStandardOutput=$true
+$psi.RedirectStandardError=$true
+$psi.EnvironmentVariables['SPICETIFY_CONFIG']=$cfgRoot
+$psi.EnvironmentVariables['SPICETIFY_STATE']=$stateRoot
+$psi.EnvironmentVariables['APPDATA']=$nativeRoaming
+$psi.EnvironmentVariables['LOCALAPPDATA']=$nativeLocal
+$psi.EnvironmentVariables['USERPROFILE']=$nativeRoot
+$psi.EnvironmentVariables['HOME']=$nativeRoot
+$proc=New-Object Diagnostics.Process
+try{
+ $proc.StartInfo=$psi
+ if(-not$proc.Start()){throw 'V054_REAL_VENDOR_DID_NOT_START'}
+ if(-not$proc.WaitForExit(60000)){
+  $proc.Kill();[void]$proc.WaitForExit()
+  throw 'V054_REAL_VENDOR_TIMEOUT'
  }
+ $stdout=$proc.StandardOutput.ReadToEnd()
+ $stderr=$proc.StandardError.ReadToEnd()
+ if($proc.ExitCode -ne 0){throw ('V054_REAL_VENDOR_EXIT_NONZERO_'+$proc.ExitCode)}
+ if($stdout.Length+$stderr.Length -gt 65536){throw 'V054_VENDOR_OUTPUT_TOO_LARGE'}
+}finally{$proc.Dispose()}
+if((Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui).tree_sha256 -cne $originalXpuiSnap.tree_sha256 -or
+   (Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path $cliApps 'ivlyrics')).tree_sha256 -cne $originalAppSnap.tree_sha256){
+ throw 'V054_REAL_VENDOR_TOUCHED_ORIGINAL_PREIMAGE_FIXTURE'
 }
-[IO.File]::AppendAllText((Join-Path $candidateApp 'index.js'),'v052-approved-synthetic-change')
-$sourceSnap=Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui
-$candidateSnap=Get-CustomAppUpdateTreeSnapshotV010 -Root $candidateX
-$native=Test-ApprovedNativeManifestOnlyOwnedTargetChangedV044 -Before $sourceSnap -After $candidateSnap -Name 'ivlyrics' -SourceAppPath (Join-Path $cliApps 'ivlyrics') -ExpectedSourceTreeSha256 ([string]$scope.source_tree_sha256)
+$scope=Get-ApprovedNativeManifestOwnedScopeV044 -Name 'ivlyrics' -SourceAppPath $candidateApp
+if(@($scope.owned_files).Count -ne 6 -or [int]$scope.declared_extensions -ne 3){
+ throw 'V054_OFFICIAL_MANIFEST_SIX_OUTPUT_SCOPE_CHANGED'
+}
+$nativeAfter=Get-CustomAppUpdateTreeSnapshotV010 -Root $candidateX
+$native=Test-ApprovedNativeManifestOnlyOwnedTargetChangedV044 -Before $nativeBefore -After $nativeAfter -Name 'ivlyrics' -SourceAppPath $candidateApp -ExpectedSourceTreeSha256 ([string]$scope.source_tree_sha256)
+$officialRoutes=Test-CustomAppV054OfficialSourceBoundRoutes -Name 'ivlyrics' -SourceAppPath $candidateApp -CandidateXpuiRoot $candidateX -ExpectedSourceTreeSha256 ([string]$scope.source_tree_sha256)
 Assert-V052 ([bool]$native.ok -and [bool]$native.foreign_xpui_preserved -and
- [int]$native.scoped_file_count -eq 6 -and
- [int]$native.scoped_extension_files -eq 3 -and
- -not[bool]$native.production_mutation_authorized) 'V053_NATIVE_MANIFEST_OWNED_CANDIDATE_NOT_QUALIFIED'
+ [int]$native.scoped_file_count -eq 6 -and [int]$native.scoped_extension_files -eq 3 -and
+ [bool]$officialRoutes.ok -and -not[bool]$native.production_mutation_authorized -and
+ -not[bool]$officialRoutes.production_mutation_authorized) 'V054_REAL_OFFICIAL_SOURCE_TO_XPUI_NOT_QUALIFIED'
+Write-Host 'V054_REAL_PINNED_OFFICIAL_SPICETIFY_2464_RENDERED_NEW_APP_SOURCE_EXACT_PASS'
 Write-Host 'V053_V044_SIX_DECLARED_OUTPUTS_AND_610_FOREIGN_XPUI_MEMBERS_PRESERVED_PASS'
 $candidateXpuiSha=(Get-CustomAppUpdateTreeSnapshotV010 -Root $candidateX).tree_sha256
 $candidateAppSha=(Get-CustomAppUpdateTreeSnapshotV010 -Root $candidateApp).tree_sha256
@@ -80,6 +140,18 @@ try{
    catch{if([string]$_.Exception.Message -ceq 'V044_MANIFEST_SOURCE_COPIED_BYTES_DID_NOT_MATCH'){$rejected=$true}else{throw}}
    Assert-V052 ($rejected -and -not(Test-Path $sealed)) 'ALTERED_EXTENSION_BYTES_SIGNED_AS_OFFICIAL'
  }finally{[IO.File]::WriteAllBytes($extensionOut,$originalExtension)}
+ # A route JS filename within the V044-owned set is not sufficient.
+ # The content must match the *new* source via official Go-byte layout.
+ $routeOut=Join-Path $candidateX 'spicetify-routes-ivlyrics.js'
+ $savedRoute=[IO.File]::ReadAllBytes($routeOut)
+ try{
+  [IO.File]::AppendAllText($routeOut,'V054_FORGED_ALLOWED_ROUTE_JS')
+  $blocked=$false
+  try{[void](New-CustomAppHostedCutoverIntentV052 -CutoverLease $preLease @preArgs -ExplicitHostedSimulationApproval)}
+  catch{if([string]$_.Exception.Message -ceq 'V054_VENDOR_ROUTE_JS_NOT_SOURCE_DERIVED'){$blocked=$true}else{throw}}
+  Assert-V052 ($blocked -and -not(Test-Path $sealed)) 'FORGED_V044_OWNED_ROUTE_CONTENT_SIGNED'
+ }finally{[IO.File]::WriteAllBytes($routeOut,$savedRoute)}
+ Write-Host 'V054_ALLOWED_NAME_FORGED_JS_DENIED_BEFORE_SEALED_INTENT_PASS'
  Write-Host 'V053_FOREIGN_XPUI_AND_SOURCE_COPIED_EXTENSION_MODIFICATION_BLOCKED_BEFORE_SEAL_PASS'
  $intent=New-CustomAppHostedCutoverIntentV052 -CutoverLease $preLease @preArgs -ExplicitHostedSimulationApproval
  Assert-V052 ([bool]$intent.ok -and
@@ -95,7 +167,12 @@ Assert-V052 ([bool]$sealedIntent.v044_native_manifest_fence_verified -and
  -not[bool]$sealedIntent.actual_vendor_cli_invoked -and
  -not[bool]$sealedIntent.production_mutation_authorized -and
  [int]$sealedIntent.owned_output_file_count -eq 6 -and
+ [bool]$sealedIntent.v054_official_source_route_bytes_verified -and
+ [string]$sealedIntent.official_route_js_sha256 -ceq [string]$officialRoutes.route_js_sha256 -and
+ [string]$sealedIntent.official_route_css_sha256 -ceq [string]$officialRoutes.route_css_sha256 -and
+ [string]$sealedIntent.official_route_manifest_sha256 -ceq [string]$officialRoutes.route_manifest_sha256 -and
  [string]$sealedIntent.owned_output_source_sha256 -ceq [string]$scope.source_tree_sha256 -and
+ [string]$sealedIntent.owned_output_source_sha256 -ceq [string]$sealedIntent.candidate_app_sha256 -and
  [string]$sealedIntent.owned_output_manifest_sha256 -ceq [string]$scope.manifest_sha256 -and
  [string]$sealedIntent.owned_output_scope_fingerprint -cmatch '^[a-f0-9]{64}$') 'V053_SEALED_NATIVE_MANIFEST_PROOF_NOT_BOUND'
 Write-Host 'V053_NATIVE_MANIFEST_SOURCE_AND_OUTPUT_SCOPE_PINNED_IN_DPAPI_INTENT_PASS'
@@ -126,6 +203,7 @@ try{
  $ready=Test-CustomAppV053HostedBeforeApply @stageProof
  Assert-V052 ([bool]$ready.ok -and [bool]$ready.v044_manifest_owned_output_verified -and
   [bool]$ready.same_os_lease_held -and [bool]$ready.backup_and_detached_revalidated -and
+  [bool]$ready.v054_candidate_source_official_route_bytes_verified -and
   -not[bool]$ready.real_release_provenance_verified -and
   -not[bool]$ready.older_unpatched_processes_excluded -and
   -not[bool]$ready.production_mutation_authorized -and
