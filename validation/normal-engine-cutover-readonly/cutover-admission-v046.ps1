@@ -39,7 +39,7 @@ function Get-CustomAppCutoverLegacyStateV046 {
  $root=Assert-CustomAppCutoverLocalRootV046 -Root $LocalRoot
  $legacy=Join-Path $root 'SpotifyControl'
  $new=Join-Path $root 'SpotifyControlUpdates-CustomApp-State'
- if(Test-CustomAppCutoverNamedEntryV046 -Parent $root -Name 'SpotifyControlUpdates-CustomApp-State' -or
+ if((Test-CustomAppCutoverNamedEntryV046 -Parent $root -Name 'SpotifyControlUpdates-CustomApp-State') -or
     [IO.Directory]::Exists($new) -or [IO.File]::Exists($new) -or
     (Test-Path -LiteralPath $new -ErrorAction SilentlyContinue)){
     throw 'V046_NEW_ENGINE_ALREADY_ENROLLED_REQUIRE_EXISTING_JOURNAL_RECOVERY'
