@@ -138,22 +138,54 @@ function Invoke-ApprovedNativeXpuiEscrowApplyV034 {
 }
 function Test-ApprovedNativeXpuiOnlyOwnedTargetChangedV035 {
  param($Before,$After,[string]$Name)
- # Fail closed on *any* foreign file addition, deletion or byte drift.
- # Both snapshots reject reparse points. Only one app-owned route file may differ.
- $owned=('spicetify-routes-'+$Name+'.js').ToLowerInvariant()
+ # Official v2.46.4 refresh -a can create *four precisely scoped files*
+ # and two parent directories for the one approved installed app:
+ # spicetify-routes-<app>.{js,css,json}, extensions/<app>/extension.js.
+ # No other post-vendor file/directory may appear, disappear or drift.
+ if($Name -cnotmatch '^[a-z][a-z0-9-]{1,63}$'){
+   throw 'V035_UNSAFE_OWNED_APP_NAME_FOR_XPUI'
+ }
+ $prefix=('spicetify-routes-'+$Name).ToLowerInvariant()
+ $extension=('extensions/'+$Name).ToLowerInvariant()
+ $owned=@{}
+ foreach($f in @($prefix+'.js',$prefix+'.css',$prefix+'.json',$extension+'/extension.js')){
+   $owned[$f]=$true
+ }
+ $createdDirs=@{'extensions'=$true}
+ $createdDirs[$extension]=$true
  $expected=@{}
  foreach($entry in @($Before.entries)){
    $rel=([string]$entry.path).ToLowerInvariant()
    if($expected.ContainsKey($rel)){throw 'V035_DUPLICATE_XPUI_PREIMAGE_PATH'}
-   if($rel -cne $owned){$expected[$rel]=([string]$entry.type+'|'+[string]$entry.size+'|'+[string]$entry.sha256)}
+   if(-not$owned.ContainsKey($rel)){
+      $expected[$rel]=([string]$entry.type+'|'+[string]$entry.size+'|'+[string]$entry.sha256)
+   }
  }
  $actual=@{}
  foreach($entry in @($After.entries)){
    $rel=([string]$entry.path).ToLowerInvariant()
    if($actual.ContainsKey($rel)){throw 'V035_DUPLICATE_XPUI_CURRENT_PATH'}
-   if($rel -cne $owned){$actual[$rel]=([string]$entry.type+'|'+[string]$entry.size+'|'+[string]$entry.sha256)}
+   if($owned.ContainsKey($rel)){
+      if([string]$entry.type -cne 'file'){
+        throw 'V035_OFFICIAL_OWNED_ROUTE_NOT_FILE'
+      }
+   }else{
+      $actual[$rel]=([string]$entry.type+'|'+[string]$entry.size+'|'+[string]$entry.sha256)
+   }
  }
- if($expected.Count -ne $actual.Count){throw 'V035_FOREIGN_XPUI_FILE_COUNT_CHANGED'}
+ # New parent directory *only* where it was absent in preimage.
+ # If it already existed, all foreign children remain independently pinned.
+ foreach($dir in @($createdDirs.Keys)){
+   if(-not$expected.ContainsKey($dir) -and $actual.ContainsKey($dir)){
+     if([string]$actual[$dir] -cne 'dir|0|'){
+       throw 'V035_OFFICIAL_EXTRA_PARENT_IS_NOT_DIRECTORY'
+     }
+     [void]$actual.Remove($dir)
+   }
+ }
+ if($expected.Count -ne $actual.Count){
+    throw 'V035_FOREIGN_XPUI_FILE_COUNT_CHANGED'
+ }
  foreach($key in @($expected.Keys)){
    if(-not$actual.ContainsKey($key) -or [string]$actual[$key] -cne [string]$expected[$key]){
      throw 'V035_FOREIGN_XPUI_FILE_OR_BYTES_CHANGED'
