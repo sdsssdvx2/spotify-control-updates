@@ -34,8 +34,8 @@ jobs:
           $changed=@(git diff --name-only "$base...HEAD")
           if($changed.Count -ne 3 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw 'unexpected validated file scope'}
           foreach($pin in @(
-            @("$d/scoped-signed-stage-admission.ps1",'3043fa97bdbc3095987c04c3f02bce70cfe95e77'),
-            @("$d/derive_signed_stage_bridge_test.py",'64bfb273920e9d664cb3d260ec32758154a280fb'),
+            @("$d/scoped-signed-stage-admission.ps1",'05ad94f9fa74b6a8bd27a4a6481021bb14a502f7'),
+            @("$d/derive_signed_stage_bridge_test.py",'cd8d8ce53e033e48f6eb2a3ac63551f47d7c5070'),
             @('validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/test_custom_app_production_byte_real_prepared_stage_handoff.ps1','8534c47d13ba07a2933ce6e1cc4cd16e70dae538')
           )){if((git hash-object $pin[0]).Trim() -cne $pin[1]){throw ('source pin drift: '+$pin[0])}}
           $core=(Resolve-Path "$d/scoped-signed-stage-admission.ps1").Path
