@@ -125,10 +125,25 @@ try{
  }
  $ready=Test-CustomAppV053HostedBeforeApply @stageProof
  Assert-V052 ([bool]$ready.ok -and [bool]$ready.v044_manifest_owned_output_verified -and
-  [bool]$ready.same_os_lease_held -and -not[bool]$ready.real_release_provenance_verified -and
+  [bool]$ready.same_os_lease_held -and [bool]$ready.backup_and_detached_revalidated -and
+  -not[bool]$ready.real_release_provenance_verified -and
   -not[bool]$ready.older_unpatched_processes_excluded -and
   -not[bool]$ready.production_mutation_authorized -and
   -not[bool]$ready.live_update_authorized) 'V053_BEFORE_APPLY_GRANTS_UNPROVEN_AUTHORITY'
+ # If any retained V050 DPAPI ciphertext is tampered after the sealed
+ # cutover intent, even the unchanged staged app cannot begin simulation.
+ $backedCipher=Join-Path $verified 'preimage\protected\prefs.dpapi'
+ $beforeCipher=[IO.File]::ReadAllBytes($backedCipher)
+ try{
+  [IO.File]::AppendAllText($backedCipher,'V053_COLD_BACKUP_CHANGED_AFTER_APPROVAL')
+  $blocked=$false
+  try{[void](Test-CustomAppV053HostedBeforeApply @stageProof)}
+  catch{if([string]$_.Exception.Message -ceq 'V053_BEFORE_APPLY_PRIVATE_ESCROW_OR_DETACHED_RECOVERY_DRIFT'){$blocked=$true}else{throw}}
+  Assert-V052 $blocked 'TAMPERED_COLD_BACKUP_STILL_AUTHORIZED_FOR_HOSTED_APPLY'
+ }finally{[IO.File]::WriteAllBytes($backedCipher,$beforeCipher)}
+ $ready=Test-CustomAppV053HostedBeforeApply @stageProof
+ Assert-V052 ([bool]$ready.ok -and [bool]$ready.backup_and_detached_revalidated) 'CLEAN_PRIVATE_RECOVERY_NOT_REVERIFIABLE'
+ Write-Host 'V053_BEFORE_APPLY_PRIVATE_ESCROW_CIPHERTEXT_TAMPER_DENIED_PASS'
  $file=Join-Path $candidateApp 'index.js'
  $saved=[IO.File]::ReadAllBytes($file)
  try{
