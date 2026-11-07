@@ -93,7 +93,9 @@ try{
    $tamperPaths=@(
       (Join-Path ([string]$p.app_backup) 'index.js'),
       (Join-Path ([string]$p.persistence_backup) 'Roaming\Spotify\prefs'),
-      (Join-Path ([string]$p.persist) 'Local\Spotify\Local State')
+      (Join-Path ([string]$p.persist) 'Local\Spotify\Local State'),
+      (Join-Path ([string]$acquired.stage_path) 'index.js'),
+      ([string]$acquired.archive_path)
    )
    foreach($path in $tamperPaths){
       $original=[IO.File]::ReadAllBytes($path)
@@ -119,7 +121,7 @@ try{
    Assert-V030 ([int64]$currentJournal.revision -eq 0 -and
       [string]$currentJournal.entry.phase -ceq 'prepared' -and
       [string]$currentJournal.transaction_id -ceq [string]$joined.transaction_id) 'negative tests changed existing journal history'
-   Write-Host 'V030_ORIGINAL_BACKUP_FIXTURE_PERSISTENCE_DPAPI_TAMPER_AND_REPLAY_DENIED_PASS'
+   Write-Host 'V030_STAGE_ZIP_ORIGINAL_BACKUP_PERSISTENCE_DPAPI_TAMPER_AND_REPLAY_DENIED_PASS'
    Write-Host 'V030_GENUINE_SOURCE_HMAC_ONCE_TO_PREPARED_CENTRAL_JOURNAL_FRESH_PROCESS_PASS'
    Write-Host 'V030_HOSTED_FIXTURE_ONLY_REAL_SPOTIFY_PERSISTENCE_NOT_COVERED_NO_MUTATION_AUTHORITY_PASS'
 }finally{

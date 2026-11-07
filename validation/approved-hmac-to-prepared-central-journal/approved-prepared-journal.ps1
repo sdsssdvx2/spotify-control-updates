@@ -131,6 +131,31 @@ function Read-ApprovedPreparedCentralJournalV030 {
           [string]$cons.source_provenance_sha256 -cne [string]$record.provenance_sha256){
            throw 'V030_REAL_CONSUMPTION_RECEIPT_DRIFT'
        }
+       # After a crash the issuer key is unavailable, but the sealed V030
+       # record must still bind the PREPARED journal to the exact original
+       # V029 archive and staged runtime tree. Never treat backups alone
+       # as sufficient authority to apply an altered candidate.
+       $stageArgs=[pscustomobject]@{
+           name=$Name
+           workspace_path=[string]$record.workspace_path
+           archive_path=[string]$record.archive_path
+           stage_path=[string]$record.stage_path
+       }
+       $stagePaths=Assert-ApprovedLiveHmacStagePathsV029 -Acquired $stageArgs
+       if([string]$stagePaths.root -cne [string]$j.entry.stage_workspace_path -or
+          (Get-FileHash -LiteralPath ([string]$stagePaths.archive) -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$record.archive_sha256){
+          throw 'V030_SEALED_REAL_SOURCE_ARCHIVE_OR_WORKSPACE_CHANGED_AFTER_PREPARE'
+       }
+       $staged=Get-CustomAppLocalRuntimeBaseline -Name $Name -AppPath ([string]$stagePaths.stage)
+       $stagedFull=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$stagePaths.stage)
+       if(-not[bool]$staged.safe -or -not[bool]$staged.installable -or
+          [string]$staged.manifest_name -cne [string]$record.manifest_name -or
+          [string]$staged.tree_sha256 -cne [string]$record.stage_tree_sha256 -or
+          [string]$stagedFull.tree_sha256 -cne [string]$record.stage_tree_sha256 -or
+          [int]$stagedFull.file_count -ne [int]$record.stage_file_count -or
+          [int64]$stagedFull.total_bytes -ne [int64]$record.stage_total_bytes){
+          throw 'V030_SEALED_REAL_FULL_STAGE_BYTES_CHANGED_AFTER_PREPARE'
+       }
        $live=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$p.live)
        $backup=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$p.app_backup)
        $persistence=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$p.persist)
@@ -216,6 +241,13 @@ function Invoke-ApprovedHmacToPreparedCentralJournalV030 {
        transaction_id=[string]$identity.transaction_id;consumed_token_id=[string]$Permit.token_id
        source=[string]$identity.source_identity;commit=[string]$identity.remote_commit_sha
        provenance_sha256=[string]$Permit.source_provenance_sha256
+       archive_sha256=[string]$Acquired.archive_sha256
+       workspace_path=[string]$Acquired.workspace_path
+       archive_path=[string]$Acquired.archive_path
+       stage_path=[string]$Acquired.stage_path
+       manifest_name=[string]$stage.manifest_name
+       stage_file_count=[int]$stageBefore.file_count
+       stage_total_bytes=[int64]$stageBefore.total_bytes
        stage_tree_sha256=[string]$stage.tree_sha256
        live_tree_sha256=[string]$before.tree_sha256
        persistence_tree_sha256=[string]$persistBefore.tree_sha256

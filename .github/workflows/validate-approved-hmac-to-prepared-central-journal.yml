@@ -30,9 +30,9 @@ jobs:
           $d='validation/approved-hmac-to-prepared-central-journal'
           $j='validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1'
           $pins=@{
-             "$d/approved-prepared-journal.ps1"='63f07752eb513df1cbcb44b7473b0ea6b3714a97'
-             "$d/read-prepared-journal-fresh-process.ps1"='4eea9c57138e0f8a5acb7756d3bd343381dda067'
-             "$d/test-approved-prepared-journal.ps1"='8ca4237ca0dae334b933eb04c52f302e6a4198ca'
+             "$d/approved-prepared-journal.ps1"='cfc3a52c2c59d793e207718e3f71599ddccda72f'
+             "$d/read-prepared-journal-fresh-process.ps1"='d36080b2f54258d87e32fbace860fdbca7e3a545'
+             "$d/test-approved-prepared-journal.ps1"='e56fa50b690241b7d3e86649f58847bb10e98327'
              "$j"='a3df7e5d89c594083c10e240e13029ca5640b8ae'
              'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1'='47b4d4bb08fe7b14ad43de4300556430eb638869'
              'validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1'='e91fa6a125f77352907c1119f6d9f47be9682550'
@@ -77,7 +77,7 @@ jobs:
           foreach($marker in @(
             'V030_REAL_APPROVED_HMAC_CONSUMED_EXACT_APP_AND_FIXTURE_PERSISTENCE_PREPARED_CAS_PASS',
             'V030_FRESH_PROCESS_KEYLESS_SOURCE_CONSUMPTION_AND_BOTH_BACKUPS_VERIFIED_PASS',
-            'V030_ORIGINAL_BACKUP_FIXTURE_PERSISTENCE_DPAPI_TAMPER_AND_REPLAY_DENIED_PASS',
+            'V030_STAGE_ZIP_ORIGINAL_BACKUP_PERSISTENCE_DPAPI_TAMPER_AND_REPLAY_DENIED_PASS',
             'V030_GENUINE_SOURCE_HMAC_ONCE_TO_PREPARED_CENTRAL_JOURNAL_FRESH_PROCESS_PASS',
             'V030_HOSTED_FIXTURE_ONLY_REAL_SPOTIFY_PERSISTENCE_NOT_COVERED_NO_MUTATION_AUTHORITY_PASS'
           )){if(-not$body.Contains($marker)){throw ('V030_REQUIRED_INTEGRATION_EVIDENCE_MISSING '+$marker)}}
