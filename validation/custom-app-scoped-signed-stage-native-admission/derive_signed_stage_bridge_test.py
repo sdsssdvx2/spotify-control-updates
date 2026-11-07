@@ -70,7 +70,7 @@ Assert-BRH ([string]$nativeCandidate.candidate_index_path -ceq $actualIndex -and
       [string]$script:BRHExtract.tree_sha256) 'native candidate exact staged index/tree not bound'
 $originalCandidateBytes=[IO.File]::ReadAllBytes($actualIndex)
 Assert-BRH ([bool]$nativeCandidate.candidate_is_immutable_snapshot -and
-    ([Convert]::FromBase64String([string]$nativeCandidate.candidate_index_bytes_base64) -ceq $null) -eq $false 'native snapshot payload missing'
+    -not [string]::IsNullOrWhiteSpace([string]$nativeCandidate.candidate_index_bytes_base64)) 'native snapshot payload missing'
 Assert-BRH ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$nativeCandidate.candidate_index_bytes_base64)) -ceq
     [Text.Encoding]::UTF8.GetString($originalCandidateBytes)) 'native captured bytes did not match HMAC-bound source'
 $nativeSnapshot=[string]$nativeCandidate.candidate_index_bytes_base64

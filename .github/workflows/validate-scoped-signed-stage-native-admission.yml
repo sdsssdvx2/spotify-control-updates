@@ -35,7 +35,7 @@ jobs:
           if($changed.Count -ne 3 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw 'unexpected validated file scope'}
           foreach($pin in @(
             @("$d/scoped-signed-stage-admission.ps1",'bb0c03f32eac496ad37e512f069ab0644de90712'),
-            @("$d/derive_signed_stage_bridge_test.py",'1a46c401ac28d91d50f57bba4111a33d94a76497'),
+            @("$d/derive_signed_stage_bridge_test.py",'c32de10c67660d469d216aee4210ebc6b9baf5d6'),
             @('validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/test_custom_app_production_byte_real_prepared_stage_handoff.ps1','8534c47d13ba07a2933ce6e1cc4cd16e70dae538')
           )){if((git hash-object $pin[0]).Trim() -cne $pin[1]){throw ('source pin drift: '+$pin[0])}}
           $core=(Resolve-Path "$d/scoped-signed-stage-admission.ps1").Path
@@ -79,7 +79,7 @@ jobs:
           $file='validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/ci_scoped_signed_stage_bridge_generated.ps1'
           $tokens=$null;$errors=$null
           [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$tokens,[ref]$errors)
-          if($errors.Count){throw 'derived PS5.1 syntax failure'}
+          if($errors.Count){$errors|ForEach-Object{Write-Host ("DERIVED_PS51_PARSE_ERROR line="+$_.Extent.StartLineNumber+" message="+$_.Message)};throw 'derived PS5.1 syntax failure'}
           $oldRun=$env:RUNNER_TEMP;$oldTemp=$env:TEMP;$oldTmp=$env:TMP
           $run=Join-Path $oldRun ('native-hmac-'+[Guid]::NewGuid().ToString('N'))
           [void][IO.Directory]::CreateDirectory($run)
