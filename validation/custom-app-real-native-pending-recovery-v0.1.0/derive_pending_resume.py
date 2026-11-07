@@ -19,7 +19,7 @@ GENERATED=ROOT/"validation/custom-app-production-triple-id-journaled-forward-com
 PINS={
     PARENT:"5ca7707755a499157dd0eb2560dbbb740456cc81",
     MODULE:"a0976d85164c215a6ccb45226a059df0f771858b",
-    WORKER:"596745edb03cee313651ded6d6ad641e4ad455e2",
+    WORKER:"cf727e75c383aa3b276d3d9689e5e9f4748d8b01",
 }
 PARENT_GENERATED_SHA256="51c745566ee0b5ac55b32746b844a9cdaca3e6fdd8a0ac759715d6340acc4784"
 

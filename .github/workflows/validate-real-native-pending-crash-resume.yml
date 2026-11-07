@@ -44,9 +44,10 @@ jobs:
             @('validation/custom-app-whole-tree-real-scoped-native/whole-tree-real-scoped-native.ps1','c48c15aa6c342df0f6190c0cc8ea58c238c2bd08'),
             @('validation/custom-app-production-triple-id-journaled-forward-commit-v0.1.0/test_triple_id_journaled_forward_commit.ps1','e19fbbf16eee5be3dc76cabe482f12a8132636fb'),
             @('validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1','9b039819e7b2278fe4cf15c8585336dd07a8e8e3'),
+            @('validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1','f8c91f5a566b24c82257742942bdc6fecfe68eb2'),
             @("$d/real-native-pending-recovery.ps1",'a0976d85164c215a6ccb45226a059df0f771858b'),
-            @("$d/resume-pending-fresh-process.ps1",'596745edb03cee313651ded6d6ad641e4ad455e2'),
-            @("$d/derive_pending_resume.py",'b707e47c950544db1f812fd62953fc4c5f69dded')
+            @("$d/resume-pending-fresh-process.ps1",'cf727e75c383aa3b276d3d9689e5e9f4748d8b01'),
+            @("$d/derive_pending_resume.py",'1215ff0fcde89ec1b304285f2894175dd165085d')
           )){
             if((git hash-object $pin[0]).Trim() -cne [string]$pin[1]){throw ('source blob pin drift '+$pin[0])}
           }
@@ -89,6 +90,37 @@ jobs:
             }
             if((git hash-object $p).Trim() -cne $hash){throw ('historical recovery SHA drift '+$p)}
           }
+          # Catch detached-worker dependency closure issues cheaply BEFORE
+          # running the expensive real ZIP/HMAC end-to-end suite.
+          $imports=@(
+            'validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1',
+            'validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1',
+            'validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1',
+            'validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1',
+            'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1',
+            'validation/custom-app-whole-tree-real-scoped-native/whole-tree-real-scoped-native.ps1',
+            'validation/custom-app-real-native-journaled-forward-commit/native-journal-receipt.ps1',
+            'validation/custom-app-real-native-pending-recovery-v0.1.0/real-native-pending-recovery.ps1'
+          )
+          foreach($src in $imports){
+            if(-not(Test-Path -LiteralPath $src -PathType Leaf)){throw ('detached-worker-import-missing:'+ $src)}
+            . (Resolve-Path $src).Path
+          }
+          foreach($fun in @(
+            'Get-CustomAppProductionPreApplyResultMaterialV010',
+            'Get-CustomAppRemoteStringSha256',
+            'Test-CustomAppRemoteRelativePath',
+            'Get-CustomAppLocalRuntimeBaseline',
+            'Read-CustomAppProductionRecoveryEvidenceV010',
+            'Read-CustomAppRealNativeReceiptV024',
+            'Read-CustomAppRealNativePendingSealV025',
+            'Complete-CustomAppRealNativePendingResumeV025'
+          )){
+            if(-not(Get-Command $fun -CommandType Function -ErrorAction SilentlyContinue)){
+                throw ('detached-worker-required-function-unbound:'+ $fun)
+            }
+          }
+          Write-Host 'REAL_NATIVE_V025_DETACHED_WORKER_IMPORT_CLOSURE_PASS'
           Write-Host 'REAL_NATIVE_V024_QUALIFIED_HISTORICAL_HMAC_AND_JOURNAL_SOURCES_PASS'
       - name: Pin the genuine official Spicetify 2.46.4 executable
         shell: powershell
