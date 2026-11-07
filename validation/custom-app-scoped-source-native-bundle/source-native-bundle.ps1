@@ -55,14 +55,23 @@ function Read-CustomAppScopedBundlePreIntentV022 {
     Assert-CustomAppUserTxnNoReparseV010 -Path $path
     if(-not[IO.File]::Exists($path)){throw 'scoped-preintent-not-durable'}
     $cipher=[IO.File]::ReadAllBytes($path)
-    if($cipher.Length -lt 128 -or $cipher.Length -gt 1048576){
+    if($cipher.Length -lt 160 -or $cipher.Length -gt 1048576){
         throw 'scoped-preintent-cipher-size-invalid'
+    }
+    # DPAPI can ignore unauthenticated header bytes on some Windows builds.
+    # Require integrity of EVERY ciphertext byte before asking DPAPI to open it.
+    $wrapped=New-Object byte[] ($cipher.Length-32)
+    [Array]::Copy($cipher,32,$wrapped,0,$wrapped.Length)
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try{$digest=$sha.ComputeHash($wrapped)}finally{$sha.Dispose()}
+    for($i=0;$i -lt 32;$i++){
+        if($cipher[$i] -ne $digest[$i]){throw 'scoped-preintent-outer-ciphertext-sha-invalid'}
     }
     Add-Type -AssemblyName System.Security -ErrorAction Stop
     $plain=$null
     try{
         $plain=[Security.Cryptography.ProtectedData]::Unprotect(
-            $cipher,(Get-CustomAppScopedBundlePreIntentEntropyV022 -Session $Session -Context $Context),
+            $wrapped,(Get-CustomAppScopedBundlePreIntentEntropyV022 -Session $Session -Context $Context),
             [Security.Cryptography.DataProtectionScope]::CurrentUser)
         $receipt=([Text.Encoding]::UTF8.GetString($plain)|ConvertFrom-Json -ErrorAction Stop)
     }finally{if($null-ne$plain){[Array]::Clear($plain,0,$plain.Length)}}
@@ -118,7 +127,12 @@ function Save-CustomAppScopedBundlePreIntentV022 {
             $raw,(Get-CustomAppScopedBundlePreIntentEntropyV022 -Session $Session -Context $Context),
             [Security.Cryptography.DataProtectionScope]::CurrentUser)
     }finally{[Array]::Clear($raw,0,$raw.Length)}
-    Write-CustomAppUserTxnBytesV010 -Path ([string]$Bundle.paths.preintent) -Bytes $cipher
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try{$digest=$sha.ComputeHash($cipher)}finally{$sha.Dispose()}
+    $sealed=New-Object byte[] ($cipher.Length+32)
+    [Array]::Copy($digest,0,$sealed,0,32)
+    [Array]::Copy($cipher,0,$sealed,32,$cipher.Length)
+    Write-CustomAppUserTxnBytesV010 -Path ([string]$Bundle.paths.preintent) -Bytes $sealed
     $verified=Read-CustomAppScopedBundlePreIntentV022 -Session $Session -Context $Context -Bundle $Bundle
     if(-not[bool]$verified.ok -or -not[bool]$verified.pre_cas_intent_authenticated){
         throw 'scoped-preintent-durable-readback-invalid'

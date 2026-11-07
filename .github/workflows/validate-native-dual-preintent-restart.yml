@@ -34,7 +34,7 @@ jobs:
           $wf='.github/workflows/validate-native-dual-preintent-restart.yml'
           $diff=@(git diff --name-only "$base...HEAD")
           if($diff.Count -ne 3 -or @($diff|Where-Object{$_ -notin @($core,$test,$wf)}).Count){throw 'protected source scope widened'}
-          if((git hash-object $core).Trim() -cne '50a65d644999dff36a17dd85339ade8b9a2b7eed' -or
+          if((git hash-object $core).Trim() -cne '3c12becd702f94f8f73f90fa9f6258fe20168840' -or
              (git hash-object $test).Trim() -cne '7ac66c1b007c7a4dd42096c713c2d9c21deb7e54'){
             throw 'unreviewed V022 source or test bytes'
           }
