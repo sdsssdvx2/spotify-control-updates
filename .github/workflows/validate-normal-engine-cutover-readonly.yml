@@ -1,0 +1,73 @@
+name: Actual profile dual-engine cutover pre-enrollment read-only admission (HOLD)
+on:
+  push:
+    branches: [validate/real-profile-cutover-readonly]
+    paths:
+      - 'validation/normal-engine-cutover-readonly/**'
+      - '.github/workflows/validate-normal-engine-cutover-readonly.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  native-install-readonly-gate:
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Exact V045 cumulative parent, unchanged main, minimal source and PowerShell 5.1 syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='22fc56b8020adab2c727a5e7d164ce6b49eab1d3'
+          if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+             (git merge-base $parent HEAD).Trim() -cne $parent){throw 'V046_UNEXPECTED_PARENT'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+             throw 'V046_MAIN_NOT_FROZEN'
+          }
+          $allow=@(
+            'validation/normal-engine-cutover-readonly/cutover-admission-v046.ps1',
+            'validation/normal-engine-cutover-readonly/test-cutover-admission-v046.ps1',
+            '.github/workflows/validate-normal-engine-cutover-readonly.yml')
+          $changes=@(git diff --name-only "$parent...HEAD")
+          if($changes.Count -ne 3 -or @($changes|Where-Object{$_ -notin $allow}).Count){
+            throw ('V046_UNEXPECTED_FILES '+($changes -join '|'))
+          }
+          foreach($f in @($allow|Where-Object{$_ -like '*.ps1'})){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){
+              throw ('V046_WINDOWS_PS51_PARSE '+$errors[0].Message)
+            }
+          }
+          $module=Get-Content $allow[0] -Raw
+          foreach($forbidden in @('[IO.File]::Write','[IO.Directory]::Delete',
+            '[IO.Directory]::Create','Remove-Item','Set-Content','Start-Process',
+            'Invoke-WebRequest','Invoke-RestMethod','-Initialize','-Action Update',
+            'Rollback-LastTransaction','Commit-LastTransaction')){
+            if($module.Contains($forbidden)){
+              throw ('V046_SUBJECT_MUST_BE_PURE_READONLY '+$forbidden)
+            }
+          }
+          Write-Host 'V046_FROZEN_PARENT_MAIN_AND_PS51_NO_WRITE_NO_UPDATE_ENGINE_PASS'
+      - name: Synthetic real-layout cutover admission, legacy and DPAPI collision refusal
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v046-cutover.log'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/normal-engine-cutover-readonly/test-cutover-admission-v046.ps1' *>&1 | Tee-Object -FilePath $log
+          if($LASTEXITCODE -ne 0){throw ('V046_CUTOVER_MATRIX_FAILED '+$LASTEXITCODE)}
+          $body=Get-Content $log -Raw
+          foreach($need in @(
+            'V046_FOUR_APP_READONLY_LEGACY_TO_NEW_ADMISSION_IDENTITY_PASS',
+            'V046_ACTIVE_LEGACY_JOURNAL_AND_ANY_NEW_ENROLLMENT_BLOCKED_PASS',
+            'V046_RUNNING_SPOTIFY_DEFERRED_NO_PROCESS_TERMINATION_PASS',
+            'V046_APPROVED_SOURCE_FOREIGN_XPUI_LEGACY_STATE_CHANGES_DENIED_PASS',
+            'V046_NO_REAL_SPOTIFY_NO_LEDGER_NO_NETWORK_NO_USER_PRIVACY_EXPOSURE_PASS')){
+              if(-not$body.Contains($need)){throw ('V046_MISSING_PROOF '+$need)}
+          }
+          Write-Host 'V046_REAL_PROFILE_ADMISSION_CONSERVATIVE_MATRIX_PASS'
+      - name: Original production main, Addon Manager and installed Spotify not touched
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V046_MAIN_CHANGED'}
+          Write-Host 'V046_NO_EXISTING_ADDON_MANAGER_CHANGED_NO_REGISTRATION_NO_RELEASE_PASS'
