@@ -10,6 +10,7 @@ if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows' -or
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $PSScriptRoot 'test-installed-manifest-audit-v048.ps1')
 . (Join-Path $PSScriptRoot 'guarded-profile-escrow-v050.ps1')
+. (Join-Path $PSScriptRoot 'hosted-detached-restore-v050.ps1')
 function Assert-V050([bool]$ok,[string]$reason){if(-not$ok){throw ('V050_TEST_'+$reason)}}
 $fixtureArgs=@{HostedFixtureRoot=$root;HostedFixtureCliPath=$cli}
 $additional=Join-Path $xpui 'v050-scale-assets'
@@ -77,10 +78,27 @@ try{
 # Independently loaded PowerShell reads the backup without the updater's lease
 # or any HMAC issuer key; it can never apply/restore/mutate originals.
 $child=Join-Path $PSScriptRoot 'read-guarded-escrow-child-v050.ps1'
-$output=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $child -EscrowId $id -ReceiptSha256 $receiptPin -FixtureEscrowRoot $escrow 2>&1)
+$output=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $child -EscrowId $id -ReceiptSha256 $receiptPin -FixtureEscrowRoot $escrow -HostedRestore 2>&1)
 Assert-V050 ($LASTEXITCODE -eq 0 -and
-  ($output -join [char]10).Contains('V050_FRESH_PROCESS_DPAPI_RECEIPT_XPUI_AND_APP_TREE_VERIFIED_PASS')) 'FRESH_PROCESS_DPAPI_VERIFY_FAILED'
+  ($output -join [char]10).Contains('V050_FRESH_PROCESS_DPAPI_RECEIPT_XPUI_AND_APP_TREE_VERIFIED_PASS') -and
+  ($output -join [char]10).Contains('V050_FRESH_PROCESS_XPUI_APP_AND_DPAPI_GUARD_RESTORATION_PASS')) 'FRESH_PROCESS_DPAPI_RESTORE_FAILED'
 Write-Host 'V050_SEPARATE_PROCESS_DPAPI_READER_WITHOUT_ISSUER_OR_OS_LEASE_PASS'
+$detached=Join-Path $escrow ('detached-'+$id)
+Assert-V050 (
+ (Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path $detached 'trees\xpui')).tree_sha256 -ceq $before.xpui -and
+ (Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path $detached 'trees\ivlyrics')).tree_sha256 -ceq $before.ivlyrics -and
+ (Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path $detached 'trees\better-local-files')).tree_sha256 -ceq $before.better -and
+ (Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path $detached 'trees\eternal-jukebox')).tree_sha256 -ceq $before.eternal -and
+ (Get-FileHash (Join-Path $detached 'guard\prefs') -Algorithm SHA256).Hash -ceq $before.prefs -and
+ (Get-FileHash (Join-Path $detached 'guard\config.ini') -Algorithm SHA256).Hash -ceq $before.config -and
+ (Get-FileHash (Join-Path $detached 'guard\legacy-state.json') -Algorithm SHA256).Hash -ceq $before.state
+ ) 'RECONSTRUCTED_XPUI_APP_OR_GUARD_BYTES_DIFFER'
+$collision=$false
+try{
+ [void](Invoke-CustomAppHostedDetachedRestoreV050 -HostedEscrowRoot $escrow -EscrowId $id -ExpectedReceiptSha256 $receiptPin)
+}catch{if([string]$_.Exception.Message -ceq 'V050_DETACHED_DESTINATION_ALREADY_EXISTS'){$collision=$true}else{throw}}
+Assert-V050 $collision 'DETACHED_RESTORE_DESTINATION_REUSED'
+Write-Host 'V050_INDEPENDENT_DETACHED_XPUI_AND_ALL_DPAPI_GUARDS_RESTORED_NO_OVERWRITE_PASS'
 # The readback has no relationship to today's live profile; it must survive
 # simulated post-backup user modifications without altering the originals.
 [IO.File]::AppendAllText($foreign,'v050-live-drift')
