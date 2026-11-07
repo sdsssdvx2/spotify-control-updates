@@ -18,6 +18,12 @@ $repo=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 function Assert-V046Test([bool]$ok,[string]$label){if(-not$ok){throw ('V046_TEST_'+$label)}}
 function Must-BlockV046([scriptblock]$body,[string]$reason){
  $r=& $body
+ if([string]$r.status -cne 'blocked' -or [string]$r.reason -cne $reason){
+   Write-Host ('V046_HOSTED_DENIAL_DIAG=status:'+([string]$r.status)+
+     ';reason:'+([string]$r.reason)+
+     ';expected:'+$reason+
+     ';safe-fields:'+([string](-not[bool]$r.production_mutation_authorized)))
+ }
  Assert-V046Test ([string]$r.status -ceq 'blocked' -and
   [string]$r.reason -ceq $reason -and
   -not[bool]$r.production_mutation_authorized -and
