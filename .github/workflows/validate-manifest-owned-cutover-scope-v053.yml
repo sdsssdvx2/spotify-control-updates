@@ -1,0 +1,92 @@
+name: Manifest-owned candidate and locked rollback integration (HOLD)
+on:
+  push:
+    branches: [validate/manifest-owned-cutover-scope-HOLD]
+    paths:
+      - 'validation/normal-engine-shared-turnstile/hosted-cutover-rollback-v052.ps1'
+      - 'validation/normal-engine-shared-turnstile/test-hosted-cutover-rollback-v052.ps1'
+      - '.github/workflows/validate-manifest-owned-cutover-scope-v053.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  manifest-scoped-prechange-and-crash-recovery:
+    runs-on: windows-2025
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Exact V052 lineage, unmodified operating main and PS51 syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='cfc678b061d6d7fc23825b5ae212cbaf61aed138'
+          $main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+             (git merge-base $base HEAD).Trim() -cne $base){throw 'V053_PARENT_LINEAGE_INVALID'}
+          if((git rev-parse origin/main).Trim() -cne $main){throw 'V053_OPERATING_MAIN_CHANGED'}
+          $allowed=@(
+            'validation/normal-engine-shared-turnstile/hosted-cutover-rollback-v052.ps1',
+            'validation/normal-engine-shared-turnstile/test-hosted-cutover-rollback-v052.ps1',
+            '.github/workflows/validate-manifest-owned-cutover-scope-v053.yml')
+          $changed=@(git diff --name-only "$base...HEAD")
+          if($changed.Count -ne $allowed.Count -or
+             @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('V053_UNRELATED_FILES_CHANGED_'+($changed -join '|'))}
+          foreach($p in @($allowed|Where-Object{$_ -like '*.ps1'})){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw ('V053_PS51_PARSE_FAILED_'+$p+'_'+$errors[0].Message)}
+          }
+          $code=Get-Content 'validation/normal-engine-shared-turnstile/hosted-cutover-rollback-v052.ps1' -Raw
+          foreach($f in @('Test-ApprovedNativeManifestOnlyOwnedTargetChangedV044',
+            'Test-CustomAppV053HostedBeforeApply','Get-CustomAppInstalledManifestAuditV048',
+            'Enter-CustomAppEngineTurnstileV047','production_mutation_authorized=$false',
+            'real_release_provenance_verified=$false',
+            'older_unpatched_processes_excluded=$false')){
+            if(-not$code.Contains($f)){throw ('V053_REQUIRED_SAFETY_GATE_ABSENT_'+$f)}
+          }
+          $tok=$null;$err=$null
+          $ast=[Management.Automation.Language.Parser]::ParseInput($code,[ref]$tok,[ref]$err)
+          $calls=@($ast.FindAll({param($n)$n -is [Management.Automation.Language.CommandAst]},$true)|ForEach-Object{$_.GetCommandName()})
+          foreach($forbidden in @('Start-Process','Invoke-WebRequest','Invoke-RestMethod',
+            'Remove-Item','Invoke-Expression','Update-AutoApps','Commit-LastTransaction','Rollback-LastTransaction')){
+            if($forbidden -in $calls){throw ('V053_PRODUCTION_EXECUTION_NOT_ALLOWED_'+$forbidden)}
+          }
+          Write-Host 'V053_SCOPE_PARENT_MAIN_PS51_AND_HOSTED_ONLY_AUTHORITY_PASS'
+      - name: Full 610-file fixture V044 owned candidate and V052 crash recovery
+        shell: powershell
+        timeout-minutes: 11
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v053-manifest-scoped-cutover.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/normal-engine-shared-turnstile/test-hosted-cutover-rollback-v052.ps1' *>&1 | Tee-Object -FilePath $log
+          $code=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($code -ne 0){
+            Get-Content $log -Tail 70|ForEach-Object{Write-Host $_}
+            throw ('V053_WINPS51_MANIFEST_CUTOVER_FAILED_'+$code)
+          }
+          $logText=Get-Content $log -Raw
+          foreach($proof in @(
+            'V051_USER_PROFILE_UNTOUCHED_REAL_UPDATE_AND_ROLLBACK_STILL_DISABLED_PASS',
+            'V053_V044_SIX_DECLARED_OUTPUTS_AND_610_FOREIGN_XPUI_MEMBERS_PRESERVED_PASS',
+            'V053_FOREIGN_XPUI_AND_SOURCE_COPIED_EXTENSION_MODIFICATION_BLOCKED_BEFORE_SEAL_PASS',
+            'V053_NATIVE_MANIFEST_SOURCE_AND_OUTPUT_SCOPE_PINNED_IN_DPAPI_INTENT_PASS',
+            'V053_POSTSEAL_STAGING_DRIFT_BLOCKED_WITH_SAME_OS_LEASE_PASS',
+            'V052_SEALED_TRANSACTION_INTENT_TAMPER_REFUSED_PASS',
+            'V052_SIMULATED_VENDOR_CHANGE_AND_V046_PRECHANGE_ADMISSION_REJECTED_PASS',
+            'V052_UNEXPECTED_FOREIGN_XPUI_DRIFT_FAIL_CLOSED_NO_WRITES_PASS',
+            'V052_AFTER_APP_QUARANTINE_CRASH_RETURNS_WITH_OLD_PREIMAGE_RETAINED_PASS',
+            'V052_FRESH_PROCESS_LOCKED_ROLLBACK_BOTH_TREES_EXACT_AND_QUARANTINED_PASS',
+            'V052_TERMINAL_FULL_CIPHERTEXT_TAMPER_REJECTED_PASS',
+            'V052_RESTART_IDEMPOTENT_NO_PROTECTED_UNMANAGED_OR_BACKUP_CHANGES_PASS',
+            'V052_HOSTED_ONLY_COMPOSITE_CUTOVER_RECOVERY_NO_REAL_SPOTIFY_MUTATION_PASS')){
+             if(-not$logText.Contains($proof)){throw ('V053_PROOF_NOT_EMITTED_'+$proof)}
+          }
+          Write-Host 'V053_SIX_OFFICIAL_MANIFEST_OUTPUTS_PREAPPLY_TAMPER_DENIAL_AND_RESTART_ROLLBACK_PASS'
+      - name: Preserve live main and no user Spotify installation
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+             throw 'V053_MAIN_CHANGED_FINAL'
+          }
+          Write-Host 'V053_NO_REAL_SPOTIFY_NO_VENDOR_APPLY_NO_RELEASE_NO_MERGE_PASS'
