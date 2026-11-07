@@ -49,6 +49,16 @@ $beforeUnknown=(Get-FileHash -LiteralPath (Join-Path $unknown 'index.js') -Algor
 $beforeForeign=(Get-FileHash -LiteralPath (Join-Path $xpui 'foreign-user-data.dat') -Algorithm SHA256).Hash
 $beforeConfig=(Get-FileHash -LiteralPath $config -Algorithm SHA256).Hash
 $good=Read-ActualSourceXpuiBindingSafeV042 @args
+if([string]$good.status -cne 'observed-readonly'){
+  Write-Host ('V042_READONLY_DIAGNOSTIC_STATUS='+[string]$good.status+
+   '; reason='+[string]$good.reason)
+}else{
+  Write-Host ('V042_READONLY_DIAGNOSTIC_COUNTS=apps:'+[string]$good.source_tree_count+
+    ';files:'+[string]$good.source_total_files+
+    ';unmanaged:'+[string]$good.unmanaged_app_count+
+    ';cli_apps:'+[string]$good.official_executable_origin_approved_count+
+    ';xpui_files:'+[string]$good.xpui_file_count)
+}
 Assert-V042 ($good.status -ceq 'observed-readonly' -and
  [string]$good.binding_sha256 -cmatch '^[a-f0-9]{64}$' -and
  $good.source_tree_count -eq 3 -and
