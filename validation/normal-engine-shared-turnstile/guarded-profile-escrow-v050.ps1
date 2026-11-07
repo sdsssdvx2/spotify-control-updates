@@ -1,4 +1,5 @@
 # V050 HOLD: real-profile-capable, BACKUP-ONLY preimage capture.
+# Schema 2 pins full ciphertext bytes as DPAPI can ignore appended payload.
 # No auto-update entrypoint, Spotify launch/kill, rollback, apply, release
 # provenance, new-engine enrollment or production mutation permit is included.
 # Manual opt-in is mandatory for a real-profile backup. The only real writes
@@ -128,12 +129,15 @@ function Protect-CustomAppV050GuardFile {
    if($original.Length -ne [int64]$item.Length){throw 'V050_GUARD_SOURCE_RACED'}
    $pin=Get-CustomAppV050BytesHash -Data $original
    $cipher=ConvertTo-CustomAppV050Sealed -Plain $original -Purpose $Purpose
-   try{Write-CustomAppV050NewBytes -Path $dst -Bytes $cipher}
-   finally{[Array]::Clear($cipher,0,$cipher.Length)}
-   if((Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash.ToLowerInvariant() -cne $pin){
-     throw 'V050_GUARD_SOURCE_CHANGED_AFTER_SEAL'
+   try{
+      $cipherPin=Get-CustomAppV050BytesHash -Data $cipher
+      Write-CustomAppV050NewBytes -Path $dst -Bytes $cipher
+   }finally{[Array]::Clear($cipher,0,$cipher.Length)}
+   if((Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash.ToLowerInvariant() -cne $pin -or
+      (Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash.ToLowerInvariant() -cne $cipherPin){
+     throw 'V050_GUARD_SOURCE_OR_CIPHERTEXT_CHANGED_AFTER_SEAL'
    }
-   return $pin
+   return [pscustomobject]@{plain_sha256=$pin;cipher_sha256=$cipherPin}
  }finally{[Array]::Clear($original,0,$original.Length)}
 }
 function Test-CustomAppV050Escrow {
@@ -176,7 +180,7 @@ function Test-CustomAppV050Escrow {
    finally{[Array]::Clear($plain,0,$plain.Length);[Array]::Clear($cipher,0,$cipher.Length)}
    $allowed=@('ivlyrics','better-local-files','eternal-jukebox','playlist-maker')
    $names=@($r.approved_names)
-   if([int]$r.schema -ne 1 -or [string]$r.owner -cne 'spotify-profile-preimage-v050' -or
+   if([int]$r.schema -ne 2 -or [string]$r.owner -cne 'spotify-profile-preimage-v050' -or
       [string]$r.escrow_id -cne $EscrowId -or
       [bool]$r.production_mutation_authorized -or
       [string]$r.profile_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
@@ -214,6 +218,219 @@ function Test-CustomAppV050Escrow {
        throw 'V050_PROTECTED_CIPHER_NOT_TRUSTED'
      }
      $enc=[IO.File]::ReadAllBytes($p)
+     if([string]$r.protected_cipher_sha256.$key -cnotmatch '^[a-f0-9]{64}
+     try{
+       if((Get-CustomAppV050BytesHash -Data $value) -cne [string]$r.protected_sha256.$key){
+         throw 'V050_PROTECTED_FILE_SHA_CHANGED'
+       }
+     }finally{[Array]::Clear($enc,0,$enc.Length);[Array]::Clear($value,0,$value.Length)}
+   }
+   return [pscustomobject]@{
+     ok=$true;status='verified-detached-preimage';escrow_id=$EscrowId
+     approved_count=$names.Count;xpui_preimage_sha256=[string]$r.tree_sha256.xpui
+     independent_keyless_readback=$true;user_profile_modified=$false
+     release_provenance_verified=$false;rollback_authorized=$false
+     live_update_authorized=$false;production_mutation_authorized=$false
+   }
+ }catch{
+   return [pscustomobject]@{
+     ok=$false;status='blocked';reason='V050_BACKUP_OR_RECEIPT_UNVERIFIED'
+     rollback_authorized=$false;live_update_authorized=$false
+     production_mutation_authorized=$false
+   }
+ }
+}
+function New-CustomAppProfilePreimageEscrowV050 {
+ param([Parameter(Mandatory=$true)]$CutoverLease,
+       [Parameter(Mandatory=$true)][string]$ExpectedProfileSha256,
+       [switch]$ExplicitBackupAuthorization,
+       [string]$HostedFixtureRoot=$null,
+       [string]$HostedFixtureCliPath=$null,
+       [string]$HostedEscrowRoot=$null)
+ if([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
+    -not$ExplicitBackupAuthorization -or
+    $ExpectedProfileSha256 -cnotmatch '^[a-f0-9]{64}$'){
+    throw 'V050_EXPLICIT_BACKUP_APPROVAL_OR_WINDOWS_REQUIRED'
+ }
+ $fixture=-not[string]::IsNullOrWhiteSpace($HostedFixtureRoot)
+ if($fixture){
+   if([string]::IsNullOrWhiteSpace($HostedFixtureCliPath) -or
+      [string]::IsNullOrWhiteSpace($HostedEscrowRoot)){
+     throw 'V050_HOSTED_FIXTURE_ARGUMENTS_INCOMPLETE'
+   }
+   $base=Assert-CustomAppV050Path -Path $HostedFixtureRoot -FixtureRoot $HostedFixtureRoot
+   $cli=Assert-CustomAppV050Path -Path $HostedFixtureCliPath -FixtureRoot $HostedFixtureRoot
+   $local=Assert-CustomAppV050Path -Path (Join-Path $base 'Local')
+   $config=Assert-CustomAppV050Path -Path (Join-Path $base 'Roaming\spicetify\config-xpui.ini')
+   $vault=Assert-CustomAppV050Path -Path $HostedEscrowRoot -FixtureRoot $HostedEscrowRoot
+ }else{
+   if(-not[string]::IsNullOrWhiteSpace($HostedFixtureCliPath) -or
+      -not[string]::IsNullOrWhiteSpace($HostedEscrowRoot) -or
+      $env:GITHUB_ACTIONS -ceq 'true'){
+      throw 'V050_REAL_PROFILE_PATH_OVERRIDES_FORBIDDEN'
+   }
+   $local=Assert-CustomAppV050Path -Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData))
+   $config=Assert-CustomAppV050Path -Path (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)) 'spicetify\config-xpui.ini')
+   $cliList=@(Get-Command spicetify -CommandType Application -All -ErrorAction Stop|ForEach-Object{[string]$_.Source}|Sort-Object -Unique)
+   if($cliList.Count -ne 1){throw 'V050_OFFICIAL_CLI_NOT_UNIQUE'}
+   $cli=Assert-CustomAppV050Path -Path $cliList[0]
+   if((Get-FileHash -LiteralPath $cli -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+      throw 'V050_OFFICIAL_CLI_PIN_CHANGED'
+   }
+   $vault=Assert-CustomAppV050Path -Path (Join-Path $local 'SpotifyControlUpdates-NativeEscrows')
+ }
+ # Before any write: immutable installed profile, manifest and OS lease.
+ $args=@{}
+ if($fixture){$args=@{HostedFixtureRoot=$base;HostedFixtureCliPath=$cli}}
+ $qualified=Get-CustomAppInstalledManifestAuditV048 -CutoverLease $CutoverLease -ExpectedProfileSha256 $ExpectedProfileSha256 @args
+ if([string]$qualified.status -cne 'observed-readonly' -or
+    [int]$qualified.approved_manifest_count -lt 1 -or
+    [int]$qualified.approved_manifest_count -gt 4 -or
+    -not[bool]$qualified.os_turnstile_held_during_audit -or
+    [bool]$qualified.production_mutation_authorized){
+    throw 'V050_INSTALLED_MANIFEST_OR_SHARED_LOCK_NOT_QUALIFIED'
+ }
+ $ini=Read-XpuiReadOnlyIniV036 -Path $config
+ $spotify=Assert-CustomAppV050Path -Path ([string]$ini['setting.spotify_path'])
+ $prefs=Assert-CustomAppV050Path -Path ([string]$ini['setting.prefs_path'])
+ $xpui=Assert-CustomAppV050Path -Path (Join-Path $spotify 'Apps\xpui')
+ $state=Assert-CustomAppV050Path -Path (Join-Path $local 'SpotifyControl\addons-state.json')
+ $userApps=Assert-CustomAppV050Path -Path (Join-Path (Split-Path -Parent $config) 'CustomApps')
+ $cliApps=Assert-CustomAppV050Path -Path (Join-Path (Split-Path -Parent $cli) 'CustomApps')
+ if(-not[IO.Directory]::Exists($xpui)){throw 'V050_EXTRACTED_XPUI_REQUIRED'}
+ $names=@()
+ $roots=@{}
+ $all=@(([string]$ini['additionaloptions.custom_apps']) -split '\|'|Where-Object{$_})
+ foreach($item in $all){
+   $n=$item.Trim().ToLowerInvariant()
+   if($n -notin @('ivlyrics','better-local-files','eternal-jukebox','playlist-maker')){continue}
+   if($roots.ContainsKey($n)){throw 'V050_APPROVED_NAME_DUPLICATE'}
+   $p=Assert-CustomAppV050Path -Path (Join-Path $userApps $n)
+   $q=Assert-CustomAppV050Path -Path (Join-Path $cliApps $n)
+   $a=[IO.Directory]::Exists($p);$b=[IO.Directory]::Exists($q)
+   if($a -eq $b){throw 'V050_APPROVED_SOURCE_ORIGIN_AMBIGUOUS'}
+   $root=if($a){$p}else{$q}
+   $selected=Get-ApprovedAppOriginNestedV041 -Root $root
+   if([bool]$selected.nested){throw 'V050_NESTED_UNQUALIFIED'}
+   $root=Assert-CustomAppV050Path -Path ([string]$selected.path)
+   $manifest=Get-ApprovedNativeManifestOwnedScopeV044 -Name $n -SourceAppPath $root -InstalledReadOnlyAudit
+   if([string]$manifest.source_tree_sha256 -cnotmatch '^[a-f0-9]{64}$'){
+      throw 'V050_MANIFEST_SOURCE_NOT_PINNED'
+   }
+   $names+= $n;$roots[$n]=$root
+ }
+ if($names.Count -ne [int]$qualified.approved_manifest_count){
+   throw 'V050_CONFIGURED_APPROVED_SET_CHANGED'
+ }
+ foreach($v in @($xpui,$state,$config,$prefs)+@($roots.Values)){
+   if(Test-CustomAppUpdatePathsOverlapV010 -A $v -B $vault){
+      throw 'V050_ESCROW_OVERLAPS_PROTECTED_INPUT'
+   }
+ }
+ $total=[int64]0;$pre=@{}
+ $pre['xpui']=Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui
+ $total += [int64]$pre['xpui'].total_bytes
+ foreach($name in $names){
+   $pre[$name]=Get-CustomAppUpdateTreeSnapshotV010 -Root $roots[$name]
+   $total += [int64]$pre[$name].total_bytes
+ }
+ if($total -lt 1 -or $total -gt 805306368){throw 'V050_BACKUP_SIZE_OUT_OF_BOUNDS'}
+ foreach($p in @($config,$state,$prefs)){
+   $info=Get-Item -LiteralPath $p -Force -ErrorAction Stop
+   if($info.PSIsContainer -or ($info.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+      [int64]$info.Length -gt 4194304 -or [int64]$info.Length -lt 1){
+      throw 'V050_PROTECTED_INPUT_FILE_NOT_BOUNDED'
+   }
+   $total += [int64]$info.Length
+ }
+ $drive=New-Object IO.DriveInfo ([IO.Path]::GetPathRoot($vault))
+ if([int64]$drive.AvailableFreeSpace -lt ($total*2+134217728)){
+    throw 'V050_INSUFFICIENT_DISK_FOR_SAFE_ESCROW'
+ }
+ if(-not[bool](Test-CustomAppCutoverReadOnlyAdmissionV046 -ExpectedProfileSha256 $ExpectedProfileSha256 @args).ok){
+   throw 'V050_PROFILE_CHANGED_BEFORE_FIRST_WRITE'
+ }
+ # A new backup root must never double as new-engine DPAPI enrollment.
+ if(-not[IO.Directory]::Exists($vault)){
+    $vault=Assert-CustomAppV050PrivateVault -Path $vault -Initialize
+ }else{
+    $vault=Assert-CustomAppV050PrivateVault -Path $vault
+ }
+ $id=[Guid]::NewGuid().ToString('N')
+ $stage=Join-Path $vault ('pending-'+$id)
+ $final=Join-Path $vault ('verified-'+$id)
+ if([IO.Directory]::Exists($stage) -or [IO.Directory]::Exists($final) -or
+    [IO.File]::Exists($stage) -or [IO.File]::Exists($final)){
+    throw 'V050_ESCROW_TRANSACTION_COLLISION'
+ }
+ [IO.Directory]::CreateDirectory($stage)|Out-Null
+ $preRoot=Join-Path $stage 'preimage'
+ $trees=Join-Path $preRoot 'trees'
+ $protect=Join-Path $preRoot 'protected'
+ [IO.Directory]::CreateDirectory($trees)|Out-Null
+ [IO.Directory]::CreateDirectory($protect)|Out-Null
+ $written=@{}
+ $written['xpui']=Copy-CustomAppV050BoundTree -Source $xpui -Destination (Join-Path $trees 'xpui')
+ foreach($name in $names){
+    $written[$name]=Copy-CustomAppV050BoundTree -Source $roots[$name] -Destination (Join-Path $trees $name)
+ }
+ $shaGuard=@{};$cipherGuard=@{}
+ foreach($key in @('config','prefs','state')){
+   $src=switch($key){'config'{$config};'prefs'{$prefs};'state'{$state}}
+   $result=Protect-CustomAppV050GuardFile -Source $src -Destination (Join-Path $protect ($key+'.dpapi')) -Purpose ($id+'|'+$key)
+   $shaGuard[$key]=[string]$result.plain_sha256
+   $cipherGuard[$key]=[string]$result.cipher_sha256
+ }
+ foreach($key in @('xpui')+$names){
+   if([string]$pre[$key].tree_sha256 -cne [string]$written[$key].tree_sha256){
+      throw 'V050_PREWRITE_SOURCE_AND_BACKUP_DIFFER'
+   }
+ }
+ $after=Get-CustomAppInstalledManifestAuditV048 -CutoverLease $CutoverLease -ExpectedProfileSha256 $ExpectedProfileSha256 @args
+ if([string]$after.status -cne 'observed-readonly' -or
+    [string]$after.manifest_footprint_sha256 -cne [string]$qualified.manifest_footprint_sha256){
+   throw 'V050_PROFILE_CHANGED_DURING_COPY'
+ }
+ $treePins=@{}
+ foreach($key in @('xpui')+$names){$treePins[$key]=[string]$pre[$key].tree_sha256}
+ $sourceOrigins=@{}
+ foreach($key in $names){$sourceOrigins[$key]=$roots[$key]}
+ $receipt=[ordered]@{
+   schema=2;owner='spotify-profile-preimage-v050';escrow_id=$id
+   profile_sha256=$ExpectedProfileSha256
+   manifest_footprint_sha256=[string]$qualified.manifest_footprint_sha256
+   approved_names=$names;tree_sha256=$treePins
+   protected_sha256=$shaGuard;protected_cipher_sha256=$cipherGuard
+   original_xpui=$xpui;original_custom_apps=$sourceOrigins
+   original_config=$config;original_prefs=$prefs;original_state=$state
+   production_mutation_authorized=$false
+ }
+ $payload=[Text.UTF8Encoding]::new($false).GetBytes(($receipt|ConvertTo-Json -Compress -Depth 8))
+ try{
+   $sealed=ConvertTo-CustomAppV050Sealed -Plain $payload -Purpose ('receipt|'+$id)
+   try{Write-CustomAppV050NewBytes -Path (Join-Path $stage 'receipt.dpapi') -Bytes $sealed}
+   finally{[Array]::Clear($sealed,0,$sealed.Length)}
+ }finally{[Array]::Clear($payload,0,$payload.Length)}
+ # Directory.Move fails if another process creates the target; never merge.
+ [IO.Directory]::Move($stage,$final)
+ $pin=(Get-FileHash -LiteralPath (Join-Path $final 'receipt.dpapi') -Algorithm SHA256).Hash.ToLowerInvariant()
+ $readArgs=@{EscrowId=$id;ExpectedReceiptSha256=$pin}
+ if($fixture){$readArgs.HostedEscrowRoot=$vault}
+ $checked=Test-CustomAppV050Escrow @readArgs
+ if(-not[bool]$checked.ok){throw 'V050_PUBLISHED_BACKUP_FAILED_INDEPENDENT_RECHECK'}
+ return [pscustomobject]@{
+    status='durable-private-backup-only';escrow_id=$id;receipt_sha256=$pin
+    approved_count=$names.Count;xpui_file_count=[int]$pre['xpui'].file_count
+    backup_private_acl_verified=$true;guard_files_dpapi_sealed=$true
+    user_originals_unchanged=$true;backup_ready_for_manual_recovery=$true
+    new_engine_enrollment_created=$false;rollback_authorized=$false
+    live_update_authorized=$false;production_mutation_authorized=$false
+ }
+}
+ -or
+        (Get-CustomAppV050BytesHash -Data $enc) -cne [string]$r.protected_cipher_sha256.$key){
+        throw 'V050_PROTECTED_CIPHERTEXT_FULL_BYTES_CHANGED'
+     }
      $value=ConvertFrom-CustomAppV050Sealed -Cipher $enc -Purpose ($EscrowId+'|'+$key)
      try{
        if((Get-CustomAppV050BytesHash -Data $value) -cne [string]$r.protected_sha256.$key){
