@@ -1,0 +1,160 @@
+name: DPAPI authentic native success pending CAS cold resume (HOLD)
+on:
+  push:
+    branches: [validate/real-native-pending-crash-resume]
+    paths:
+      - 'validation/custom-app-real-native-pending-recovery-v0.1.0/**'
+      - '.github/workflows/validate-real-native-pending-crash-resume.yml'
+  pull_request:
+    branches: [validate/real-native-journaled-forward-commit]
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  official-scoped-journaled-forward:
+    runs-on: windows-2025
+    timeout-minutes: 130
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Prove exact HMAC lineage and frozen production scope
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $head='${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'
+          $base='32a7083dacbdd67ad2992707d021c0c7095efd4b'
+          if((git rev-parse HEAD).Trim() -cne $head -or (git merge-base $base HEAD).Trim() -cne $base){throw 'V024 qualified parent or actual head drift'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'frozen operating main drift'}
+          $d='validation/custom-app-real-native-pending-recovery-v0.1.0'
+          $allowed=@(
+            "$d/real-native-pending-recovery.ps1",
+            "$d/resume-pending-fresh-process.ps1",
+            "$d/derive_pending_resume.py",
+            '.github/workflows/validate-real-native-pending-crash-resume.yml')
+          $changed=@(git diff --name-only "$base...HEAD")
+          if($changed.Count -ne $allowed.Count -or @($changed|Where-Object{$_ -notin $allowed}).Count){
+            throw ('unexpected production source or scope: '+($changed -join ','))
+          }
+          foreach($pin in @(
+            @("$d/native-journal-admission.ps1",'10a423e39eee0a2e176e3d5f65a496ac40961377'),
+            @("$d/native-journal-receipt.ps1",'3829336185ea9f39682cc06d43dce1a498895fcb'),
+            @("$d/verify-native-receipt-fresh-process.ps1",'5f1e4a430dcbc4b410ec8325b418ad5b7e100df6'),
+            @("$d/derive_real_native_journal_test.py",'5ca7707755a499157dd0eb2560dbbb740456cc81'),
+            @('validation/custom-app-whole-tree-real-scoped-native/whole-tree-real-scoped-native.ps1','c48c15aa6c342df0f6190c0cc8ea58c238c2bd08'),
+            @('validation/custom-app-production-triple-id-journaled-forward-commit-v0.1.0/test_triple_id_journaled_forward_commit.ps1','e19fbbf16eee5be3dc76cabe482f12a8132636fb'),
+            @("$d/real-native-pending-recovery.ps1",'a0976d85164c215a6ccb45226a059df0f771858b'),
+            @("$d/resume-pending-fresh-process.ps1",'eb57647d1b46bb89607be7bb62c3b276812828f4'),
+            @("$d/derive_pending_resume.py",'dfea174fd88df1683082076aa0f3056e166f7d46')
+          )){
+            if((git hash-object $pin[0]).Trim() -cne [string]$pin[1]){throw ('source blob pin drift '+$pin[0])}
+          }
+          foreach($p in @("$d/real-native-pending-recovery.ps1","$d/resume-pending-fresh-process.ps1",'validation/custom-app-real-native-journaled-forward-commit/native-journal-receipt.ps1')){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|ForEach-Object{Write-Host ("PS51_PARSE file="+$p+" line="+$_.Extent.StartLineNumber+" error="+$_.Message)};throw 'V024 PowerShell5.1 parse failed'}
+          }
+          Write-Host 'REAL_NATIVE_V024_SCOPE_PS51_FROZEN_MAIN_PASS'
+      - name: Restore qualified historical HMAC and journal dependencies
+        shell: powershell
+        timeout-minutes: 50
+        run: |
+          $ErrorActionPreference='Stop'
+          $prep='validation/custom-app-production-dual-id-new-permit-readiness-v0.1.0/prepare_custom_app_production_dual_id_new_permit_readiness.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $prep -RepoRoot $PWD.Path -RunnerTemp $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'qualified historical source restore failed'}
+          $historical=@(
+            @('e2b80822835bf5d59dc179e345e098b5bd79759e','validation/custom-app-production-atomic-live-swap-mutation-v0.1.0/test_custom_app_production_atomic_live_swap_mutation.ps1','d15e0768162b0659c57602eaf0242b035b48b0c7'),
+            @('7e26187e2360089024e9d72d0701be6f1577a1ef','validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1','a3df7e5d89c594083c10e240e13029ca5640b8ae'),
+            @('993af44afee9adb0c28e5fb702cb6ccfbd7cd99c','validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1','910b1c500d33d6d6e0ad403c701f4c08f473f1a3'),
+            @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-mutation.ps1','79580da78443a18bd281d4fce61c4a57d958a196'),
+            @('2c6fc111bc6cb9d7fb4b2cb54f0f660d756177cf','validation/custom-app-production-journal-aware-atomic-mutation-v0.1.0/custom-app-production-journal-aware-atomic-repair-v011.ps1','210c4dda2311eb5defcbcd74977e4f4148ea7c38'),
+            @('b266bad660d4b7bc87e7093c5b12f0cff1dc466f','validation/custom-app-production-recovery-plan-contract-v0.1.0/custom-app-production-recovery-plan.ps1','ae49409973164052d5830b981d804707f9d62b6c'),
+            @('ffb5aad4a605691ee7b80392498b0cb6fa4e4052','validation/custom-app-production-recovery-preflight-v0.1.0/custom-app-production-recovery-preflight.ps1','b1816a24849a559b4da2537aa1b2436124fbee50'),
+            @('ffb5aad4a605691ee7b80392498b0cb6fa4e4052','validation/custom-app-production-recovery-execution-admission-v0.1.0/custom-app-production-recovery-execution-admission.ps1','e8804a7c53ad0d3e5420e037d468d9c397e52529'),
+            @('5232e5adeb13e6942acb210b3cd13058e1eaaf05','validation/custom-app-production-recovery-evidence-admission-integration-v0.1.0/custom-app-production-recovery-evidence-admission-integration.ps1','c92c727b5a2217f5b84a1072608bfc4662e68926'),
+            @('d3969a746ed1736fe93586bd025116c2526fbff5','validation/custom-app-production-recovery-cleanup-resume-admission-v0.1.0/custom-app-production-recovery-cleanup-resume-admission.ps1','387d97b10d493b3794b24fba2bac67cf39491444'),
+            @('d9a1face71511bdaeeef4e8c761415ef9ec95fc0','validation/custom-app-production-recovery-restore-resume-admission-v0.1.0/custom-app-production-recovery-restore-resume-admission.ps1','0273d7e28a56759b1d0ec9cbf037483b04d98d63')
+          )
+          foreach($item in $historical){
+            $commit=[string]$item[0];$p=[string]$item[1];$hash=[string]$item[2]
+            if(-not(Test-Path -LiteralPath $p -PathType Leaf)){
+              git cat-file -e ($commit+'^{commit}') 2>$null
+              if($LASTEXITCODE){git fetch --no-tags origin $commit | Out-Null;if($LASTEXITCODE){throw ('historical git fetch failed '+$commit)}}
+              New-Item -ItemType Directory -Force -Path (Split-Path $p -Parent) | Out-Null
+              $env:V024_SPEC=($commit+':'+$p);$env:V024_OUT=$p
+              python -c "import os,subprocess,pathlib;pathlib.Path(os.environ['V024_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['V024_SPEC']]))"
+              if($LASTEXITCODE){throw ('historical blob materialization failed '+$p)}
+            }
+            if((git hash-object $p).Trim() -cne $hash){throw ('historical recovery SHA drift '+$p)}
+          }
+          Write-Host 'REAL_NATIVE_V024_QUALIFIED_HISTORICAL_HMAC_AND_JOURNAL_SOURCES_PASS'
+      - name: Pin the genuine official Spicetify 2.46.4 executable
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'v024-official'
+          [IO.Directory]::CreateDirectory($dir)|Out-Null
+          $zip=Join-Path $dir 'vendor.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip' -OutFile $zip
+          if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f' -or
+             (Get-Item $zip).Length -ne 7795758){throw 'official ZIP drift'}
+          $out=Join-Path $dir 'out';Expand-Archive -LiteralPath $zip -DestinationPath $out
+          $exe=@(Get-ChildItem -LiteralPath $out -File -Filter spicetify.exe -Recurse)
+          if($exe.Count -ne 1 -or (Get-FileHash $exe[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){throw 'official binary drift'}
+          "V024_VENDOR_SOURCE=$($exe[0].FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host 'REAL_NATIVE_V024_OFFICIAL_UPSTREAM_PIN_PASS'
+      - name: Execute actual HMAC whole-tree CAS and real scoped vendor forward commit
+        shell: powershell
+        timeout-minutes: 105
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          $core="$d/custom-app-production-dual-id-new-permit-reservation-persistence.ps1"
+          $parts=@($core,"$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1","$d/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1")
+          $s=($parts|ForEach-Object{[IO.File]::ReadAllText((Resolve-Path $_).Path)}) -join [Environment]::NewLine
+          [IO.File]::WriteAllText((Resolve-Path $core).Path,$s,[Text.UTF8Encoding]::new($false))
+          & python 'validation/custom-app-real-native-pending-recovery-v0.1.0/derive_pending_resume.py'
+          if($LASTEXITCODE){throw 'real native journal test source derivation failed'}
+          $file='validation/custom-app-production-triple-id-journaled-forward-commit-v0.1.0/ci_real_native_journaled_forward_generated.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|ForEach-Object{Write-Host ("DERIVED_PS51_PARSE line="+$_.Extent.StartLineNumber+" error="+$_.Message)};throw 'derived journal source parse failure'}
+          $outer=$env:RUNNER_TEMP;$temp=$env:TEMP;$tmp=$env:TMP
+          $run=Join-Path $outer ('v024-j-'+[Guid]::NewGuid().ToString('N').Substring(0,8))
+          [IO.Directory]::CreateDirectory($run)|Out-Null
+          $exe=Join-Path $run 'spicetify.exe'
+          [IO.File]::Copy($env:V024_VENDOR_SOURCE,$exe,$false)
+          if((Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){throw 'official worker copy SHA mismatch'}
+          $log=Join-Path $outer 'v024-real-journal.log'
+          try{
+            $env:RUNNER_TEMP=$run;$env:TEMP=$run;$env:TMP=$run;$env:V024_OFFICIAL_EXE=$exe
+            $ErrorActionPreference='Continue'
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $file *>&1 | Tee-Object -FilePath $log | Out-Null
+            $exit=$LASTEXITCODE
+          }finally{
+            $ErrorActionPreference='Stop'
+            $env:RUNNER_TEMP=$outer;$env:TEMP=$temp;$env:TMP=$tmp
+            [Environment]::SetEnvironmentVariable('V024_OFFICIAL_EXE',$null,'Process')
+            if([IO.File]::Exists($file)){[IO.File]::Delete($file)}
+          }
+          if($exit -ne 0){Get-Content -LiteralPath $log -Tail 95 | ForEach-Object{Write-Host $_};throw ('HMAC real native journal integration failed '+$exit)}
+          $body=Get-Content -LiteralPath $log -Raw
+          foreach($marker in @(
+            'REAL_NATIVE_V024_WRONG_HMAC_AND_JOURNAL_ANCHOR_DENIED_PASS',
+            'REAL_NATIVE_V024_OFFICIAL_SUCCESS_RECEIPT_DURABLE_BEFORE_APPLY_VERIFIED_PASS',
+            'REAL_NATIVE_V024_FRESH_PROCESS_NO_KEY_OFFICIAL_RECEIPT_AND_JOURNAL_PASS',
+            'REAL_NATIVE_V024_HMAC_ZIP_WHOLE_TREE_OFFICIAL_SCOPED_APPLY_VERIFIED_PASS',
+            'REAL_NATIVE_V024_OFFICIAL_SCOPED_FORWARD_COMMITTED_CLEAN_PASS',
+            'REAL_NATIVE_V025_TAMPERED_SEAL_WRONG_ID_AND_XPUI_DRIFT_DENIED_PASS',
+            'REAL_NATIVE_V025_FRESH_PROCESS_DPAPI_PENDING_TO_APPLY_VERIFIED_CAS_PASS',
+            'REAL_NATIVE_V025_FRESH_PROCESS_KEYLESS_JOURNAL_PROGRESS_NO_REAPPLY_PASS',
+            'REAL_NATIVE_V025_DPAPI_COLD_RESUME_OFFICIAL_VENDOR_ONCE_PASS'
+          )){if(-not$body.Contains($marker)){throw ('native verified phase evidence missing '+$marker)}}
+          Write-Host 'REAL_NATIVE_V025_REAL_VENDOR_COLD_RESUME_CENTRAL_JOURNAL_COMMIT_PASS'
+      - name: Assert operating main and user PC not touched
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main moved'}
+          Write-Host 'REAL_NATIVE_V025_HOSTED_ONLY_MAIN_UNCHANGED_PASS'
