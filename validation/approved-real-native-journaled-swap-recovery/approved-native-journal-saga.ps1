@@ -154,7 +154,8 @@ function Invoke-ApprovedNativeJournalApplyV032 {
           [Parameter(Mandatory=$true)][string]$ReceiptStore,
           [Parameter(Mandatory=$true)][string]$OfficialExecutable,
           [Parameter(Mandatory=$true)][string]$VendorPrivateRoot,
-          [ValidateSet('none','after-live-move-before-journal','before-official-cli')][string]$FailurePoint='none')
+          [AllowNull()][scriptblock]$NativePreLaunchGuard=$null,
+          [ValidateSet('none','after-live-move-before-journal','before-official-cli','after-official-cli-before-pending')][string]$FailurePoint='none')
     Assert-ApprovedNativeSagaHostedV032
     $fail={param([string]$Reason,[string]$Phase)
        return [pscustomobject]@{ok=$false;reason=$Reason;phase=$Phase
@@ -248,7 +249,7 @@ function Invoke-ApprovedNativeJournalApplyV032 {
         if($FailurePoint -ceq 'before-official-cli'){
             throw 'V032_INJECTED_CRASH_AFTER_APPLY_STARTING_BARRIER'
         }
-        $vendor=Invoke-ApprovedCustomAppScopedNativeHostedV026 -Item $Item -CandidateAppPath ([string]$p.live) -ExpectedRuntimeTreeSha256 ([string]$e.proof.stage_tree_sha256) -OfficialExecutable $OfficialExecutable -PrivateRoot $VendorPrivateRoot
+        $vendor=Invoke-ApprovedCustomAppScopedNativeHostedV026 -Item $Item -CandidateAppPath ([string]$p.live) -ExpectedRuntimeTreeSha256 ([string]$e.proof.stage_tree_sha256) -OfficialExecutable $OfficialExecutable -PrivateRoot $VendorPrivateRoot -NativePreLaunchGuard $NativePreLaunchGuard
         if(-not[bool]$vendor.ok -or
            -not[bool]$vendor.vendor_started -or
            -not[bool]$vendor.official_native_scoped_output_verified -or
@@ -258,6 +259,11 @@ function Invoke-ApprovedNativeJournalApplyV032 {
            [string]$vendor.target_xpui_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
            [bool]$vendor.production_mutation_authorized){
            throw ('V032_PINNED_GENUINE_OFFICIAL_SCOPED_NATIVE_FAILED:'+ [string]$vendor.reason)
+        }
+        # Crash test after the genuine vendor has already changed isolated XPUI,
+        # but before the journal can assert success. V034 must restore XPUI too.
+        if($FailurePoint -ceq 'after-official-cli-before-pending'){
+            throw 'V034_INJECTED_CRASH_AFTER_GENUINE_XPUI_MUTATION_BEFORE_CAS'
         }
         $current=Append-ApprovedNativeSagaPhaseV032 -Paths $p -Current $current -Phase 'apply-returned-success-pending-verification'
         $phase='apply-returned-success-pending-verification'

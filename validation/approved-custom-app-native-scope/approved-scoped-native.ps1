@@ -101,7 +101,8 @@ function Invoke-ApprovedCustomAppScopedNativeHostedV026 {
         [Parameter(Mandatory=$true)][string]$CandidateAppPath,
         [Parameter(Mandatory=$true)][string]$ExpectedRuntimeTreeSha256,
         [Parameter(Mandatory=$true)][string]$OfficialExecutable,
-        [Parameter(Mandatory=$true)][string]$PrivateRoot
+        [Parameter(Mandatory=$true)][string]$PrivateRoot,
+        [AllowNull()][scriptblock]$NativePreLaunchGuard=$null
     )
     $deny={param([string]$why,[bool]$started=$false)
         return [pscustomobject]@{ok=$false;reason=$why;vendor_started=$started
@@ -193,6 +194,11 @@ function Invoke-ApprovedCustomAppScopedNativeHostedV026 {
             '[AdditionalOptions]'+[Environment]::NewLine+
             'custom_apps = '+$app+[Environment]::NewLine
         [IO.File]::WriteAllText($nativeConfig,$ini,[Text.UTF8Encoding]::new($false))
+        # Optional hosted-only exact XPUI preimage escrow hook. It must complete
+        # durably before the official executable is allowed to start.
+        if($null-ne$NativePreLaunchGuard){
+            & $NativePreLaunchGuard $root $xpui $target | Out-Null
+        }
         $handle=[IO.File]::Open($exe,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
         $hash=[Security.Cryptography.SHA256]::Create()
         try{$actual=([BitConverter]::ToString($hash.ComputeHash($handle))).Replace('-','').ToLowerInvariant()}

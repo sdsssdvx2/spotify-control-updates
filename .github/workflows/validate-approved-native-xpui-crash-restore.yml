@@ -1,0 +1,92 @@
+name: Approved native prelaunch XPUI sealed backup and post-vendor crash restore (HOLD)
+on:
+  push:
+    branches: [validate/approved-native-xpui-crash-restore]
+    paths:
+      - 'validation/approved-real-native-xpui-crash-restore/**'
+      - 'validation/approved-custom-app-native-scope/approved-scoped-native.ps1'
+      - 'validation/approved-real-native-journaled-swap-recovery/approved-native-journal-saga.ps1'
+      - '.github/workflows/validate-approved-native-xpui-crash-restore.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  real-native-crash-xpui-rollback:
+    runs-on: windows-2025
+    timeout-minutes: 42
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, ref: "${{ github.sha }}"}
+      - name: Frozen parent, no production change, PowerShell 5.1 parse
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='603099208a118c44b20ae653684f2711cc6169c9'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.sha }}' -or
+             (git merge-base $base HEAD).Trim() -cne $base){throw 'V034_PARENT_CHANGED'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V034_MAIN_CHANGED'}
+          $dir='validation/approved-real-native-xpui-crash-restore'
+          $allowed=@("$dir/native-xpui-escrow-recovery.ps1",
+             "$dir/recover-xpui-fresh-process.ps1","$dir/test-native-xpui-postvendor-crash.ps1",
+             'validation/approved-custom-app-native-scope/approved-scoped-native.ps1',
+             'validation/approved-real-native-journaled-swap-recovery/approved-native-journal-saga.ps1',
+             '.github/workflows/validate-approved-native-xpui-crash-restore.yml')
+          $changed=@(git diff --name-only "$base...HEAD")
+          if($changed.Count -ne 6 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('V034_UNEXPECTED_CHANGE '+($changed -join ','))}
+          foreach($f in @($allowed|Where-Object{$_ -like '*.ps1'})){
+            $t=$null;$e=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$t,[ref]$e)
+            if($e.Count){$e|Select-Object -First 4|ForEach-Object{Write-Host $_.Message};throw ('V034_WINDOWS_PS51_SYNTAX_ERROR '+$f)}
+          }
+          Write-Host 'V034_ONLY_PRELAUNCH_BACKUP_NATIVE_CRASH_AND_RECOVERY_CHANGED_PASS'
+      - name: Rebuild original App manager and pin
+        shell: powershell
+        timeout-minutes: 18
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/custom-app-normal-entrypoint-transaction-integration/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'V034_BUILD_FAILED'}
+          $p='validation/custom-app-normal-entrypoint-transaction-integration/out/bin/addon-manager.ps1'
+          if((Get-Item $p).Length -ne 1453028 -or (Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0cb2362dd14772f19ba2970e5f4c2bc07bf0512c0de31494af7b01cb2a98fdd6'){throw 'V034_ADDON_DRIFT'}
+          "V034_ADDON=$((Resolve-Path $p).Path)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+      - name: Download exact pinned official free native CLI once
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $d=Join-Path $env:RUNNER_TEMP 'v034-official'
+          [IO.Directory]::CreateDirectory($d)|Out-Null
+          $z=Join-Path $d 'official.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip' -OutFile $z
+          if((Get-Item $z).Length -ne 7795758 -or (Get-FileHash $z -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f'){throw 'V034_OFFICIAL_ZIP_CHANGED'}
+          Expand-Archive -LiteralPath $z -DestinationPath (Join-Path $d 'expanded')
+          $e=@(Get-ChildItem (Join-Path $d 'expanded') -Recurse -File -Filter spicetify.exe)
+          if($e.Count -ne 1 -or (Get-FileHash $e[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){throw 'V034_OFFICIAL_EXE_CHANGED'}
+          "V034_EXE=$($e[0].FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+      - name: One real-source native post-vendor crash, fresh-process XPUI+app recovery
+        shell: powershell
+        timeout-minutes: 19
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v034-targeted.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/approved-real-native-xpui-crash-restore/test-native-xpui-postvendor-crash.ps1' -OriginalAddonPath $env:V034_ADDON -OfficialExecutable $env:V034_EXE *>&1 | Tee-Object -FilePath $log | Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 0){Get-Content $log -Tail 100 | ForEach-Object{Write-Host $_};throw ('V034_INTEGRATION_FAILED '+$rc)}
+          $s=Get-Content $log -Raw
+          foreach($mark in @(
+            'V032_GENUINE_OFFICIAL_SCOPED_IN_SINGLE_CAS_AND_TWO_RESTART_RECOVERIES_PASS',
+            'V034_FRESH_PROCESS_KEYLESS_POST_VENDOR_REAL_CLI_XPUI_AND_APP_RECOVERED_PASS',
+            'V034_POST_OFFICIAL_REAL_NATIVE_PREIMAGE_SEALED_AND_RECOVERED_PASS',
+            'V034_INDEPENDENT_KEYLESS_XPUI_APP_AND_SPOTIFY_GUARD_BYTE_EXACT_PASS',
+            'V034_REPEAT_IDEMPOTENT_SEAL_TAMPER_FAIL_CLOSED_NO_CLEANUP_PASS',
+            'V034_FAKE_XPUI_ONLY_NO_REAL_SPOTIFY_NO_PRODUCTION_AUTHORITY_PASS'
+          )){
+             if(-not$s.Contains($mark)){throw ('V034_MISSING_CI_PROOF '+$mark)}
+          }
+          Write-Host 'V034_POST_VENDOR_NATIVE_CRASH_XPUI_RESTORATION_PASS'
+      - name: Main and original user environment preserved
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V034_MAIN_CHANGED'}
+          Write-Host 'V034_NO_REAL_SPOTIFY_NO_PRODUCTION_INSTALL_NO_FINAL_CLEANUP_PASS'
