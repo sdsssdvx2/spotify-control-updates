@@ -1,0 +1,104 @@
+name: Actual Addon Manager legacy manual terminal engine exclusivity (HOLD)
+on:
+  push:
+    branches: [validate/actual-addon-legacy-terminal-exclusivity]
+    paths:
+      - 'validation/custom-app-normal-manual-entrypoint-exclusivity/**'
+      - '.github/workflows/validate-actual-addon-manual-terminal-fence.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  actual-manual-entrypoint-compatibility:
+    runs-on: windows-2025
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, ref: "${{ github.sha }}"}
+      - name: Pin exact three-file scope and unchanged operating stable version
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='a470bf0c2d7ae1f965a5e2bbf04c22b5069678b2'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.sha }}' -or
+             (git merge-base $base HEAD).Trim() -cne $base){
+            throw 'MANUAL_TERMINAL_FENCE_PINNED_QUALIFIED_BASE_DRIFT'
+          }
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'MANUAL_TERMINAL_FENCE_PRODUCTION_MAIN_CHANGED'
+          }
+          $p='validation/custom-app-normal-manual-entrypoint-exclusivity'
+          $pins=@{
+            "$p/integrate-legacy-terminal-fence.ps1"='c99bcb05331252f66089d8ef3f10db0192ec2805'
+            "$p/test-targeted-terminal-fence.ps1"='1fe55139aa24823e7df00365a187d4a8c7153ac5'
+          }
+          $allow=@($pins.Keys)+@('.github/workflows/validate-actual-addon-manual-terminal-fence.yml')
+          $changed=@(git diff --name-only "$base...HEAD")
+          if($changed.Count -ne 3 -or @($changed|Where-Object{$_ -notin $allow}).Count){
+             throw ('MANUAL_TERMINAL_FENCE_CHANGED_OUTSIDE_TEST_SCOPE '+($changed -join ','))
+          }
+          foreach($path in $pins.Keys){
+            if((git hash-object $path).Trim() -cne $pins[$path]){throw ('MANUAL_TERMINAL_FENCE_NEW_SOURCE_PIN_DRIFT '+$path)}
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|ForEach-Object{Write-Host $_.Message};throw ('MANUAL_TERMINAL_FENCE_PS51_PARSE_FAILURE '+$path)}
+          }
+          Write-Host 'MANUAL_TERMINAL_FENCE_SOURCE_PIN_PS51_MAIN_FROZEN_PASS'
+      - name: Regenerate EXACT prior qualified Addon Manager candidate (do not retest its established matrix)
+        shell: powershell
+        timeout-minutes: 35
+        run: |
+          $ErrorActionPreference='Stop'
+          python 'validation/custom-app-normal-entrypoint-transaction-integration/build_candidate.py'
+          if($LASTEXITCODE -ne 0){throw 'INHERITED_QUALIFIED_ADDON_GENERATOR_FAILED'}
+          $p='validation/custom-app-normal-entrypoint-transaction-integration/out/bin/addon-manager.ps1'
+          if((Get-Item $p).Length -ne 1453028 -or
+             (Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                '0cb2362dd14772f19ba2970e5f4c2bc07bf0512c0de31494af7b01cb2a98fdd6'){
+            throw 'INHERITED_QUALIFIED_ACTUAL_ADDON_BYTES_DRIFT'
+          }
+          Write-Host 'ACTUAL_ADDON_INHERITED_APPROVED_AUTO_UPDATE_FENCE_REUSED_PASS'
+      - name: Surgical integration of the same ownership fence into actual manual transaction handlers
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/custom-app-normal-manual-entrypoint-exclusivity'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$p/integrate-legacy-terminal-fence.ps1" -ParentCandidate 'validation/custom-app-normal-entrypoint-transaction-integration/out/bin/addon-manager.ps1' -OutputDirectory "$p/out/bin"
+          if($LASTEXITCODE -ne 0){throw 'MANUAL_TERMINAL_REAL_ADDON_AST_INTEGRATION_FAILED'}
+          $r=Get-Content "$p/out/bin/terminal-fence-report.json" -Raw | ConvertFrom-Json
+          $file="$p/out/bin/addon-manager.ps1"
+          if((Get-Item $file).Length -ne [int64]$r.result_bytes -or
+             (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$r.result_sha256 -or
+             -not[bool]$r.all_original_content_exact_inverse -or
+             -not[bool]$r.exact_original_param_blocks -or
+             -not[bool]$r.manual_rollback_and_commit_guard_first -or
+             [bool]$r.new_engine_activation_authorized){
+            throw 'MANUAL_TERMINAL_QUALIFIED_ADDON_OUTPUT_INTEGRITY_FAILED'
+          }
+          Write-Host 'ACTUAL_ADDON_MANUAL_COMMIT_ROLLBACK_GUARD_EXACT_INVERSE_PASS'
+      - name: Targeted real function AST and enrolled-store denial; no long V025 native rerun
+        shell: powershell
+        timeout-minutes: 12
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/custom-app-normal-manual-entrypoint-exclusivity'
+          $log=Join-Path $env:RUNNER_TEMP 'manual-terminal-test.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$p/test-targeted-terminal-fence.ps1" -CandidatePath "$p/out/bin/addon-manager.ps1" -ParentPath 'validation/custom-app-normal-entrypoint-transaction-integration/out/bin/addon-manager.ps1' *>&1 |
+             Tee-Object -FilePath $log|Out-Null
+          $exit=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($exit -ne 0){
+             Get-Content $log -Tail 60|ForEach-Object{Write-Host $_}
+             throw ('TARGETED_REAL_HANDLER_GUARD_FAILED '+$exit)
+          }
+          $result=Get-Content $log -Raw
+          foreach($m in @('LEGACY_MANUAL_TERMINAL_TARGETED_REAL_HANDLER_AST_PASS','LEGACY_MANUAL_TERMINAL_NEW_ENGINE_ENROLLMENT_DENIED_PASS','LEGACY_MANUAL_TERMINAL_ACTUAL_GENERATED_HANDLERS_FAIL_CLOSED_PASS','LEGACY_MANUAL_TERMINAL_FENCE_TARGETED_PASS')){
+            if(-not$result.Contains($m)){throw ('TARGETED_REAL_HANDLER_MISSING_PROOF '+$m)}
+          }
+          Write-Host 'ACTUAL_ADDON_ALL_LEGACY_MUTATING_ENTRYPOINTS_NEW_OWNER_FENCE_PASS'
+      - name: Frozen stable and no promotion
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'PRODUCTION_MAIN_MOVED'}
+          Write-Host 'ACTUAL_ADDON_MANUAL_OWNER_FENCE_HOLD_NO_PRODUCTION_INSTALL_PASS'
