@@ -248,6 +248,18 @@ function Test-CustomAppV053HostedBeforeApply {
     [bool]$intent.production_mutation_authorized){
     throw 'V053_BEFORE_APPLY_INTENT_NOT_BOUND'
  }
+ # A sealed intent is not enough if the only usable backup has since been
+ # tampered with. Re-attest BOTH immutable V050 source and V051 independent
+ # restored bytes under the still-live OS cutover lease before any apply.
+ $escrow=Test-CustomAppV050Escrow -EscrowId $EscrowId -ExpectedReceiptSha256 ([string]$intent.backup_receipt_sha256) -HostedEscrowRoot $p.vault
+ $recovered=Test-CustomAppV051DetachedRecovery -EscrowId $EscrowId -ReceiptSha256 ([string]$intent.backup_receipt_sha256) -HostedEscrowRoot $p.vault
+ if(-not[bool]$escrow.ok -or -not[bool]$recovered.ok -or
+    [int]$recovered.approved_app_count -ne 3 -or
+    -not[bool]$recovered.no_operating_rollback -or
+    [bool]$escrow.production_mutation_authorized -or
+    [bool]$recovered.production_mutation_authorized){
+    throw 'V053_BEFORE_APPLY_PRIVATE_ESCROW_OR_DETACHED_RECOVERY_DRIFT'
+ }
  $audit=Get-CustomAppInstalledManifestAuditV048 -CutoverLease $CutoverLease -ExpectedProfileSha256 $ExpectedProfileSha256 -HostedFixtureRoot $p.base -HostedFixtureCliPath $p.cli
  if([string]$audit.status -cne 'observed-readonly' -or
     [string]$audit.manifest_footprint_sha256 -cne [string]$intent.manifest_footprint_sha256){
@@ -284,7 +296,8 @@ function Test-CustomAppV053HostedBeforeApply {
  return [pscustomobject]@{
     ok=$true;status='hosted-manifest-owned-candidate-unchanged-before-simulation'
     source_and_xpui_pinned=$true;v044_manifest_owned_output_verified=$true
-    same_os_lease_held=$true;actual_vendor_cli_executed=$false
+    same_os_lease_held=$true;backup_and_detached_revalidated=$true
+    actual_vendor_cli_executed=$false
     real_release_provenance_verified=$false;older_unpatched_processes_excluded=$false
     production_mutation_authorized=$false;live_update_authorized=$false
  }
