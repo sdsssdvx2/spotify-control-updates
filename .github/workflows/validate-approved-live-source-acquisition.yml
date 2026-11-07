@@ -1,0 +1,91 @@
+name: Real registered Custom App live source acquisition - no installation (HOLD)
+on:
+  push:
+    branches: [validate/approved-live-source-acquisition]
+    paths:
+      - 'validation/approved-live-source-acquisition/**'
+      - '.github/workflows/validate-approved-live-source-acquisition.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  real-approved-source-acquisition:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, ref: "${{ github.sha }}"}
+      - name: Frozen source pins and Windows PowerShell 5.1 syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='9afc2574aa8cebc086cad114985238a21cf1be48'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.sha }}' -or (git merge-base $base HEAD).Trim() -cne $base){
+            throw 'V028_QUALIFIED_ACTUAL_SOURCE_PARENT_DRIFT'
+          }
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'V028_OPERATING_MAIN_MOVED'
+          }
+          $d='validation/approved-live-source-acquisition'
+          $pins=@{
+            "$d/approved-live-source-acquisition.ps1"='b11532ffe67b160a77403cbbddbd64946df482a7'
+            "$d/test-live-acquisition.ps1"='7f3450bc10f7333648a9531dd5d31ae7506428ec'
+            'validation/approved-custom-app-native-scope/approved-scoped-native.ps1'='b5266bebd6b8ea87067d1587a5556de85d7a148a'
+            'validation/v0.6.21/addon_policy_registry.ps1.inc'='4cfdaaee5e8401e6e47f266585a0f0201ce9fc30'
+            'validation/v0.6.22/addon_source_adapter_engine.ps1.inc'='1ea670ddf5c2747bcddc15a3c02b357a0dd1733c'
+            'validation/marketplace-source-topology-v0.1.0/marketplace-source-topology.ps1'='fff349f3fc765e2fc187b9ccdc249b48e09df6c8'
+            'validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1'='f8c91f5a566b24c82257742942bdc6fecfe68eb2'
+            'validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1'='3a49ceebd13fa993b086eb2643130fb02c746bd1'
+            'validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1'='e2f2fc656235883d2a82b106289973f6ded409a5'
+            'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1'='83156d9c14e40061a0728d28b582c1e65684a4a2'
+          }
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allowed=@("$d/approved-live-source-acquisition.ps1","$d/test-live-acquisition.ps1",'.github/workflows/validate-approved-live-source-acquisition.yml')
+          if($changed.Count -ne 3 -or @($changed|Where-Object{$_ -notin $allowed}).Count){
+            throw ('V028_SOURCE_DIFF_ESCAPED_SCOPE '+($changed -join ','))
+          }
+          foreach($file in $pins.Keys){
+            if((git hash-object $file).Trim() -cne $pins[$file]){throw ('V028_SOURCE_PIN_CHANGED '+$file)}
+          }
+          foreach($file in @("$d/approved-live-source-acquisition.ps1","$d/test-live-acquisition.ps1")){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){
+               $errors|Select-Object -First 8|ForEach-Object{Write-Host ($_.Extent.StartLineNumber.ToString()+': '+$_.Message)}
+               throw 'V028_CURRENT_MODULE_POWERSHELL_51_PARSE_FAILED'
+            }
+          }
+          Write-Host 'V028_SOURCE_PINS_PS51_APPROVED_REGISTRY_MAIN_FROZEN_PASS'
+      - name: Verify four real online refs; acquire only one sample per source type, no Spicetify
+        shell: powershell
+        timeout-minutes: 18
+        run: |
+          $ErrorActionPreference='Stop'
+          $file='validation/approved-live-source-acquisition/test-live-acquisition.ps1'
+          $log=Join-Path $env:RUNNER_TEMP 'v028-live-acquisition-only.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $file *>&1 |
+             Tee-Object -FilePath $log | Out-Null
+          $exit=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($exit -ne 0){
+            Get-Content -LiteralPath $log -Tail 85 | ForEach-Object{Write-Host $_}
+            throw ('V028_SOURCE_ADAPTER_ACCEPTANCE_FAILURE '+$exit)
+          }
+          $logText=Get-Content -LiteralPath $log -Raw
+          foreach($required in @(
+              'V028_LIVE_SOURCE_METADATA_PIN_PASS app=better-local-files',
+              'V028_LIVE_SOURCE_METADATA_PIN_PASS app=eternal-jukebox',
+              'V028_LIVE_SOURCE_METADATA_PIN_PASS app=playlist-maker',
+              'V028_LIVE_SOURCE_METADATA_PIN_PASS app=ivLyrics',
+              'V028_PROTECTED_AND_ABSENT_INSTALLED_SOURCE_DENIAL_PASS',
+              'V028_LIVE_ZIP_FULL_TREE_STAGED_PASS app=better-local-files',
+              'V028_LIVE_ZIP_FULL_TREE_STAGED_PASS app=ivLyrics',
+              'V028_TWO_REAL_LIVE_ADAPTERS_SOURCE_ACQUISITION_REVALIDATED_PASS',
+              'V028_NO_PRETEND_HMAC_NO_USER_INSTALL_NO_SPOTIFY_CHANGES_NO_NEW_NATIVE_REGRESSION_PASS'
+          )){if(-not$logText.Contains($required)){throw ('V028_LIVE_SOURCE_PROOF_MISSING '+$required)}}
+          Write-Host 'V028_REAL_LIVE_APPROVED_SOURCE_ACQUISITION_AND_DENIALS_PASS'
+      - name: No user data, Spicetify, real install or production changes
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V028_STABLE_MAIN_CHANGED'}
+          Write-Host 'V028_NO_OLD_FULL_REGRESSION_NO_NEW_VERSION_NO_PRODUCTION_MUTATION_PASS'
