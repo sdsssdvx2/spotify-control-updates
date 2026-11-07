@@ -28,7 +28,7 @@ jobs:
           }
           $d='validation/approved-real-native-journaled-swap-recovery'
           $pins=@{
-            "$d/approved-native-journal-saga.ps1"='c3ad614a1a915d314c94bdd1dee0c58ec67d9a90'
+            "$d/approved-native-journal-saga.ps1"='f667683582ef77ec33e6e13782e42cd999efed63'
             "$d/read-rollback-fresh-process.ps1"='10d1f86a7ea5b1382e8b5db016aa14cccb06d50c'
             "$d/test-approved-native-journal-saga.ps1"='26516c6d6835aa4e33a91423242a98a6cdaf0bff'
             'validation/approved-real-persistence-adapter/real-addon-persistence-core.ps1'='94f03befd68583c3124365d31dc6e920522aa705'

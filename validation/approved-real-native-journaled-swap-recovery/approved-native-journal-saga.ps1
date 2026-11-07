@@ -294,6 +294,46 @@ function Invoke-ApprovedNativeJournalApplyV032 {
     }catch{return & $fail ([string]$_.Exception.Message) $phase}
     finally{if($null-ne$lease){$lease.Dispose()}}
 }
+function Get-ApprovedNativeRecoveryPathsV032 {
+    param([Parameter(Mandatory=$true)][string]$WorkRoot,
+          [Parameter(Mandatory=$true)][string]$Name,
+          [Parameter(Mandatory=$true)][string]$TokenId)
+    Assert-ApprovedNativeSagaHostedV032
+    if($Name -notin @('ivLyrics','better-local-files','eternal-jukebox','playlist-maker') -or
+       $TokenId -cnotmatch '^[a-f0-9]{64}$'){
+        throw 'V032_RECOVERY_UNKNOWN_NAME_OR_TOKEN'
+    }
+    # The original directory MAY be absent after a crash between two moves.
+    # Do not fabricate it to satisfy the V031 pre-mutation path helper.
+    $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\','/')
+    $work=Assert-CustomAppProductionCrashJournalPathV010 -AllowedRoot $runner -Path $WorkRoot -RequireExisting:$true
+    if([IO.Path]::GetFileName($work) -cne 'v031-fixture'){
+        throw 'V032_RECOVERY_NOT_OWNED_DISPOSABLE_FIXTURE'
+    }
+    $live=Join-Path (Join-Path $work 'CustomApps') $Name
+    if([IO.Directory]::Exists($live)){
+        return Get-ApprovedRealPersistJournalPathsV031 -WorkRoot $work -Name $Name -TokenId $TokenId
+    }
+    if(Test-Path -LiteralPath $live){throw 'V032_LIVE_REPLACED_WITH_NON_DIRECTORY'}
+    $txn=Join-Path (Join-Path $work 'transactions') $TokenId
+    $paths=[ordered]@{
+        runner=$runner;work=$work;live=$live
+        local=(Join-Path $work 'ProtectedSpotify\Local')
+        roaming=(Join-Path $work 'ProtectedSpotify\Roaming')
+        transaction=$txn;app_backup=(Join-Path $txn 'app-backup')
+        persistence_root=(Join-Path $txn 'spotify-guarded-backups')
+        journal=(Join-Path $txn 'journal')
+    }
+    foreach($key in @('live','local','roaming','transaction',
+                      'app_backup','persistence_root','journal')){
+        $exist=$key -ne 'live'
+        $paths[$key]=Assert-CustomAppProductionCrashJournalPathV010 -AllowedRoot $runner -Path ([string]$paths[$key]) -RequireExisting:$exist
+        if($exist -and -not[IO.Directory]::Exists([string]$paths[$key])){
+            throw ('V032_RECOVERY_REQUIRED_OWNED_DIRECTORY_MISSING_'+$key)
+        }
+    }
+    return [pscustomobject]$paths
+}
 function Invoke-ApprovedNativeJournalRecoveryV032 {
     param([Parameter(Mandatory=$true)][string]$WorkRoot,
           [Parameter(Mandatory=$true)][string]$Name,
@@ -304,7 +344,7 @@ function Invoke-ApprovedNativeJournalRecoveryV032 {
     $deny={param([string]$Why)
        return [pscustomobject]@{ok=$false;reason=$Why
            manual_review_required=$true;production_mutation_authorized=$false}}
-    $p=Get-ApprovedRealPersistJournalPathsV031 -WorkRoot $WorkRoot -Name $Name -TokenId $TokenId
+    $p=Get-ApprovedNativeRecoveryPathsV032 -WorkRoot $WorkRoot -Name $Name -TokenId $TokenId
     $lease=$null
     try{
         $lease=Open-ApprovedNativeSagaLeaseV032 -Paths $p
