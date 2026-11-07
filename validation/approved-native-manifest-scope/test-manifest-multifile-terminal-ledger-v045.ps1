@@ -29,6 +29,11 @@ Assert-MultiV045 ([bool]$acquired.ok -and
  [string]$acquired.runtime_tree_sha256 -cmatch '^[a-f0-9]{64}$' -and
  -not[bool]$acquired.production_mutation_authorized) 'PUBLISHED_IVLYRICS_NOT_QUALIFIED'
 $manifest=Get-ApprovedNativeManifestOwnedScopeV044 -Name ([string]$item.name) -SourceAppPath ([string]$acquired.stage_path)
+Write-Host ('V045_PUBLISHED_IVLYRICS_MANIFEST_COUNTS=owned:'+
+  [string]@($manifest.owned_files).Count+';extensions:'+
+  [string]$manifest.declared_extensions+';assets:'+
+  [string]$manifest.declared_asset_files+';stage_pin_match:'+
+  [string]([string]$manifest.source_tree_sha256 -ceq [string]$acquired.runtime_tree_sha256))
 Assert-MultiV045 (@($manifest.owned_files).Count -gt 4 -and
   [int]$manifest.declared_extensions -gt 1 -and
   [string]$manifest.source_tree_sha256 -ceq [string]$acquired.runtime_tree_sha256) 'AUTHENTIC_MULTIFILE_MANIFEST_NOT_PINNED'
