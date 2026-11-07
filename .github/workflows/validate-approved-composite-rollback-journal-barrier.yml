@@ -1,0 +1,91 @@
+name: Composite rollback journal barrier after actual official XPUI write (HOLD)
+on:
+  push:
+    branches: [validate/approved-composite-rollback-journal-barrier]
+    paths:
+      - 'validation/approved-composite-rollback-journal-barrier/**'
+      - 'validation/approved-real-native-journaled-swap-recovery/approved-native-journal-saga.ps1'
+      - 'validation/approved-real-native-journaled-swap-recovery/test-approved-native-journal-saga.ps1'
+      - 'validation/approved-real-native-xpui-crash-restore/native-xpui-escrow-recovery.ps1'
+      - '.github/workflows/validate-approved-composite-rollback-journal-barrier.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  composite-no-early-terminal:
+    runs-on: windows-2025
+    timeout-minutes: 42
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, ref: "${{ github.sha }}"}
+      - name: Check frozen parent, 5 files, Windows PowerShell 5.1 syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='4ae25d2776905c596301f8a4b15d3a392c6baac2'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.sha }}' -or
+             (git merge-base $base HEAD).Trim() -cne $base){throw 'V035_PARENT_CHANGED'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V035_MAIN_CHANGED'}
+          $allow=@(
+           'validation/approved-real-native-journaled-swap-recovery/approved-native-journal-saga.ps1',
+           'validation/approved-real-native-journaled-swap-recovery/test-approved-native-journal-saga.ps1',
+           'validation/approved-real-native-xpui-crash-restore/native-xpui-escrow-recovery.ps1',
+           'validation/approved-composite-rollback-journal-barrier/test-composite-rollback-journal.ps1',
+           '.github/workflows/validate-approved-composite-rollback-journal-barrier.yml')
+          $changed=@(git diff --name-only "$base...HEAD")
+          if($changed.Count -ne $allow.Count -or @($changed|Where-Object{$_ -notin $allow}).Count){throw ('V035_UNAUTHORIZED_FILES '+($changed -join ','))}
+          foreach($f in @($allow|Where-Object{$_ -like '*.ps1'})){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw ('V035_PS51_PARSE_FAILURE '+$f+' '+$errors[0].Message)}
+          }
+          Write-Host 'V035_FROZEN_PARENT_AND_BOUNDED_SOURCE_DIFF_PASS'
+      - name: Rebuild original Addon Manager source and prove pin
+        shell: powershell
+        timeout-minutes: 18
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/custom-app-normal-entrypoint-transaction-integration/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'V035_PINNED_APP_BUILD_FAILED'}
+          $p='validation/custom-app-normal-entrypoint-transaction-integration/out/bin/addon-manager.ps1'
+          if((Get-Item $p).Length -ne 1453028 -or (Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0cb2362dd14772f19ba2970e5f4c2bc07bf0512c0de31494af7b01cb2a98fdd6'){throw 'V035_ADDON_PIN_CHANGED'}
+          "V035_ADDON=$((Resolve-Path $p).Path)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+      - name: Retrieve and pin exact free official Spicetify binary
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $d=Join-Path $env:RUNNER_TEMP 'v035-vendor'
+          [IO.Directory]::CreateDirectory($d)|Out-Null
+          $z=Join-Path $d 'official.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip' -OutFile $z
+          if((Get-Item $z).Length -ne 7795758 -or (Get-FileHash $z -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f'){throw 'V035_OFFICIAL_RELEASE_DRIFT'}
+          Expand-Archive -LiteralPath $z -DestinationPath (Join-Path $d 'expanded')
+          $e=@(Get-ChildItem (Join-Path $d 'expanded') -Recurse -File -Filter spicetify.exe)
+          if($e.Count -ne 1 -or (Get-FileHash $e[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){throw 'V035_VENDOR_EXE_CHANGED'}
+          "V035_EXE=$($e[0].FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+      - name: Exactly one genuine native side effect and targeted 3 crash windows
+        shell: powershell
+        timeout-minutes: 18
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v035-targeted.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/approved-composite-rollback-journal-barrier/test-composite-rollback-journal.ps1' -OriginalAddonPath $env:V035_ADDON -OfficialExecutable $env:V035_EXE *>&1 | Tee-Object -FilePath $log | Out-Null
+          $rc=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($rc -ne 0){Get-Content $log -Tail 110|ForEach-Object{Write-Host $_};throw ('V035_TARGETED_FAILED '+$rc)}
+          $s=Get-Content $log -Raw
+          foreach($mark in @(
+           'V035_GENUINE_OFFICIAL_CLI_CRASH_AFTER_XPUI_MUTATION_ONCE_PASS',
+           'V035_ALL_THREE_CRASH_WINDOWS_KEEP_ROLLBACK_REQUIRED_PASS',
+           'V035_FOREIGN_XPUI_USER_WRITE_REFUSED_AND_PRESERVED_PASS',
+           'V035_INDEPENDENT_KEYLESS_APP_XPUI_GUARD_COMPOSITE_TERMINAL_CAS_PASS',
+           'V035_IDEMPOTENT_REPLAY_AND_POST_TERMINAL_UNTRUSTED_EDIT_DENIED_PASS',
+           'V035_NO_REAL_SPOTIFY_NO_CLEANUP_NO_PRODUCTION_AUTHORITY_PASS')){
+            if(-not$s.Contains($mark)){throw ('V035_REQUIRED_EVIDENCE_MISSING '+$mark)}
+          }
+          Write-Host 'V035_COMPOSITE_APP_AND_XPUI_BARRIER_TARGETED_PASS'
+      - name: No actual Spotify or main mutation
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V035_MAIN_CHANGED'}
+          Write-Host 'V035_NO_RELEASE_OR_PRODUCTION_CHANGES_PASS'

@@ -345,7 +345,8 @@ function Invoke-ApprovedNativeJournalRecoveryV032 {
           [Parameter(Mandatory=$true)][string]$Name,
           [Parameter(Mandatory=$true)][string]$TokenId,
           [Parameter(Mandatory=$true)][string]$ReceiptStore,
-          [Parameter(Mandatory=$true)][string]$TransactionId)
+          [Parameter(Mandatory=$true)][string]$TransactionId,
+          [switch]$DeferRollbackComplete)
     Assert-ApprovedNativeSagaHostedV032
     $deny={param([string]$Why)
        return [pscustomobject]@{ok=$false;reason=$Why
@@ -393,10 +394,19 @@ function Invoke-ApprovedNativeJournalRecoveryV032 {
         if([string]$r.journal.entry.phase -cne 'rollback-required'){
            throw 'V032_CENTRAL_ROLLBACK_REQUIRED_JOURNAL_DISAPPEARED'
         }
-        $current=Append-ApprovedNativeSagaPhaseV032 -Paths $p -Current $current -Phase 'rollback-complete'
+        # V035 composite rollback: do not claim rollback-complete while the
+        # official CLI's XPUI side effects have not yet been restored.
+        # The V034 coordinator owns the final CAS after independent XPUI proof.
+        if($DeferRollbackComplete){
+           $terminal='rollback-required'
+        }else{
+           $current=Append-ApprovedNativeSagaPhaseV032 -Paths $p -Current $current -Phase 'rollback-complete'
+           $terminal='rollback-complete'
+        }
         return [pscustomobject]@{ok=$true
-            reason='fresh-process-keyless-exact-source-and-guarded-persistence-recovery-complete'
-            transaction_id=$TransactionId;phase='rollback-complete'
+            reason='fresh-process-keyless-exact-original-app-and-guarded-persistence-recovered'
+            transaction_id=$TransactionId;phase=$terminal
+            xpui_recovery_still_required=[bool]$DeferRollbackComplete
             journal_revision=[int64]$current.revision
             old_app_restored_byte_exact=$true
             persistence_fingerprint_unchanged=$true

@@ -4,7 +4,8 @@
 # by independent keyless native app rollback and original Spotify guard check.
 # Legacy full suite, V027 all-app native suite are not re-run.
 param([Parameter(Mandatory=$true)][string]$OriginalAddonPath,
-      [Parameter(Mandatory=$true)][string]$OfficialExecutable)
+      [Parameter(Mandatory=$true)][string]$OfficialExecutable,
+      [switch]$LibraryOnly)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 if([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
@@ -112,6 +113,9 @@ function Create-V032PreparedCase([string]$CaseName){
        }
    }finally{[Array]::Clear($key,0,$key.Length)}
 }
+# V035 targeted test reuses the real approved source, HMAC fixture and
+# original Addon Manager without rerunning older V032 three-case suite.
+if($LibraryOnly){return}
 $success=Create-V032PreparedCase 'success'
 $officialRoot=Join-Path $env:RUNNER_TEMP ('v032-official-'+[Guid]::NewGuid().ToString('N').Substring(0,8))
 $applied=Invoke-ApprovedNativeJournalApplyV032 -Item $item -Acquired $acquired -Prepared $success.prepared -ReceiptStore $receiptStore -OfficialExecutable $OfficialExecutable -VendorPrivateRoot $officialRoot

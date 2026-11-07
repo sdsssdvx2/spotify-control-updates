@@ -1,4 +1,4 @@
-# Hosted-only V034: durable native XPUI preimage before genuine CLI side effect
+# Hosted-only V034/V035: durable native XPUI preimage before genuine CLI side effect
 # and independent post-crash byte-exact XPUI restoration. NO production authority.
 function Get-ApprovedNativeXpuiEscrowPathV034 {
  param($Paths,[string]$TransactionId)
@@ -136,9 +136,36 @@ function Invoke-ApprovedNativeXpuiEscrowApplyV034 {
  }.GetNewClosure()
  return Invoke-ApprovedNativeJournalApplyV032 -Item $Item -Acquired $Acquired -Prepared $Prepared -ReceiptStore $ReceiptStore -OfficialExecutable $OfficialExecutable -VendorPrivateRoot $VendorPrivateRoot -NativePreLaunchGuard $hook -FailurePoint $FailurePoint
 }
+function Test-ApprovedNativeXpuiOnlyOwnedTargetChangedV035 {
+ param($Before,$After,[string]$Name)
+ # Fail closed on *any* foreign file addition, deletion or byte drift.
+ # Both snapshots reject reparse points. Only one app-owned route file may differ.
+ $owned=('spicetify-routes-'+$Name+'.js').ToLowerInvariant()
+ $expected=@{}
+ foreach($entry in @($Before.entries)){
+   $rel=([string]$entry.path).ToLowerInvariant()
+   if($expected.ContainsKey($rel)){throw 'V035_DUPLICATE_XPUI_PREIMAGE_PATH'}
+   if($rel -cne $owned){$expected[$rel]=([string]$entry.type+'|'+[string]$entry.size+'|'+[string]$entry.sha256)}
+ }
+ $actual=@{}
+ foreach($entry in @($After.entries)){
+   $rel=([string]$entry.path).ToLowerInvariant()
+   if($actual.ContainsKey($rel)){throw 'V035_DUPLICATE_XPUI_CURRENT_PATH'}
+   if($rel -cne $owned){$actual[$rel]=([string]$entry.type+'|'+[string]$entry.size+'|'+[string]$entry.sha256)}
+ }
+ if($expected.Count -ne $actual.Count){throw 'V035_FOREIGN_XPUI_FILE_COUNT_CHANGED'}
+ foreach($key in @($expected.Keys)){
+   if(-not$actual.ContainsKey($key) -or [string]$actual[$key] -cne [string]$expected[$key]){
+     throw 'V035_FOREIGN_XPUI_FILE_OR_BYTES_CHANGED'
+   }
+ }
+ return $true
+}
 function Invoke-ApprovedNativeXpuiEscrowRecoveryV034 {
  param([string]$WorkRoot,[string]$Name,[string]$TokenId,
-       [string]$ReceiptStore,[string]$TransactionId,[string]$VendorPrivateRoot)
+       [string]$ReceiptStore,[string]$TransactionId,[string]$VendorPrivateRoot,
+       [ValidateSet('none','after-app-before-xpui','after-xpui-quarantine-before-copy',
+                    'after-xpui-copy-before-journal')][string]$FailurePoint='none')
  $lease=$null
  $deny={param([string]$why)
   return [pscustomobject]@{ok=$false;reason=('V034_DENIED_'+$why)
@@ -176,19 +203,23 @@ function Invoke-ApprovedNativeXpuiEscrowRecoveryV034 {
     if($phase -notin @('apply-starting','apply-returned-success-pending-verification','rollback-required')){
       throw ('V034_ROLLBACK_NOT_AUTHORIZED_FROM_'+$phase)
     }
-    $app=Invoke-ApprovedNativeJournalRecoveryV032 -WorkRoot $WorkRoot -Name $Name -TokenId $TokenId -ReceiptStore $ReceiptStore -TransactionId $TransactionId
-    if(-not[bool]$app.ok -or [string]$app.phase -cne 'rollback-complete'){
-      throw ('V034_APP_RECOVERY_FAILED_'+[string]$app.reason)
+    $app=Invoke-ApprovedNativeJournalRecoveryV032 -WorkRoot $WorkRoot -Name $Name -TokenId $TokenId -ReceiptStore $ReceiptStore -TransactionId $TransactionId -DeferRollbackComplete
+    if(-not[bool]$app.ok -or [string]$app.phase -cne 'rollback-required' -or
+      -not[bool]$app.xpui_recovery_still_required){
+      throw ('V035_DEFERRED_APP_RECOVERY_FAILED_'+[string]$app.reason)
     }
   }
   $lease=Open-ApprovedNativeSagaLeaseV032 -Paths $p
   $j=Read-ApprovedNativeSagaRecoveryEvidenceV032 -Paths $p -Name $Name -TokenId $TokenId -ReceiptStore $ReceiptStore -TransactionId $TransactionId
-  if([string]$j.journal.entry.phase -cne 'rollback-complete'){
-    throw 'V034_ROLLBACK_COMPLETE_NOT_DURABLE'
+  if([string]$j.journal.entry.phase -notin @('rollback-required','rollback-complete')){
+    throw 'V035_EXPECTED_COMPOSITE_ROLLBACK_REQUIRED'
   }
   $state=Get-ApprovedNativeSagaLiveStateV032 -Paths $p -Evidence $j
   if([string]$state.live_state -cne 'original'){
     throw 'V034_APP_NOT_RESTORED_BEFORE_XPUI'
+  }
+  if($FailurePoint -ceq 'after-app-before-xpui'){
+    throw 'V035_INJECTED_CRASH_AFTER_APP_BEFORE_XPUI'
   }
   $quarantine=Join-Path ([string]$p.transaction) 'native-xpui-after-crash-retained'
   $hasQ=([IO.Directory]::Exists($quarantine) -or [IO.File]::Exists($quarantine))
@@ -200,10 +231,28 @@ function Invoke-ApprovedNativeXpuiEscrowRecoveryV034 {
    $current=Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui
    $same=([string]$current.tree_sha256 -ceq [string]$original.tree_sha256)
   }
+  # Do not overwrite any concurrent user/Marketplace/foreign XPUI change.
+  if(-not$same -and $hasLive){
+   [void](Test-ApprovedNativeXpuiOnlyOwnedTargetChangedV035 -Before $original -After $current -Name $Name)
+  }
+  if($hasQ){
+   $kept=Get-CustomAppUpdateTreeSnapshotV010 -Root $quarantine
+   [void](Test-ApprovedNativeXpuiOnlyOwnedTargetChangedV035 -Before $original -After $kept -Name $Name)
+  }
+  if([string]$j.journal.entry.phase -ceq 'rollback-complete' -and -not$same){
+     throw 'V035_LEGACY_PREMATURE_TERMINAL_JOURNAL_NOT_RESTORED_MANUAL_REVIEW'
+  }
   if(-not$same -and $hasLive){
    if($hasQ){throw 'V034_NEW_UNTRUSTED_XPUI_AFTER_QUARANTINE'}
    [IO.Directory]::Move($xpui,$quarantine)
    $hasQ=$true
+   $kept=Get-CustomAppUpdateTreeSnapshotV010 -Root $quarantine
+   if([string]$kept.tree_sha256 -cne [string]$current.tree_sha256){
+      throw 'V035_QUARANTINE_RENAME_NOT_BYTE_EXACT'
+   }
+   if($FailurePoint -ceq 'after-xpui-quarantine-before-copy'){
+      throw 'V035_INJECTED_CRASH_AFTER_XPUI_QUARANTINE'
+   }
   }
   if(-not$same){
    $restored=Copy-CustomAppAtomicTreeV010 -Source $preimage -Destination $xpui
@@ -214,6 +263,27 @@ function Invoke-ApprovedNativeXpuiEscrowRecoveryV034 {
   $after=Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui
   if([string]$after.tree_sha256 -cne [string]$original.tree_sha256){
    throw 'V034_XPUI_BYTE_EXACT_RECOVERY_NOT_PROVEN'
+  }
+  if($FailurePoint -ceq 'after-xpui-copy-before-journal'){
+     throw 'V035_INJECTED_CRASH_AFTER_XPUI_RESTORE_BEFORE_COMMIT'
+  }
+  # First prove both restores under the same transaction lease, THEN publish
+  # V010 terminal rollback-complete with a durable CAS. No early completion.
+  $again=Read-ApprovedNativeSagaRecoveryEvidenceV032 -Paths $p -Name $Name -TokenId $TokenId -ReceiptStore $ReceiptStore -TransactionId $TransactionId
+  $fresh=Get-ApprovedNativeSagaLiveStateV032 -Paths $p -Evidence $again
+  if([string]$fresh.live_state -cne 'original' -or
+     (Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui).tree_sha256 -cne [string]$original.tree_sha256){
+     throw 'V035_FINAL_COMPOSITE_RECOVERY_CHANGED_BEFORE_CAS'
+  }
+  if([string]$again.journal.entry.phase -ceq 'rollback-required'){
+     $final=Append-ApprovedNativeSagaPhaseV032 -Paths $p -Current $again.journal -Phase 'rollback-complete'
+  }elseif([string]$again.journal.entry.phase -ceq 'rollback-complete'){
+     $final=$again.journal
+  }else{
+     throw 'V035_FINAL_JOURNAL_PHASE_RACED'
+  }
+  if([string]$final.entry.phase -cne 'rollback-complete'){
+     throw 'V035_COMPOSITE_ROLLBACK_TERMINAL_NOT_PERSISTED'
   }
   return [pscustomobject]@{
    ok=$true;phase='rollback-complete';reason='keyless-original-app-and-exact-isolated-xpui-recovered'
