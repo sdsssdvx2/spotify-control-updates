@@ -428,7 +428,7 @@ jobs:
         timeout-minutes: 12
         run: |
           $ErrorActionPreference='Stop'
-          $root=Join-Path $env:RUNNER_TEMP ('v020-coupled-source-and-xpui-'+[Guid]::NewGuid().ToString('N'))
+          $root=Join-Path $env:RUNNER_TEMP ('v020-b-'+[Guid]::NewGuid().ToString('N'))
           "SCOPED_BUNDLE_ROOT=$root"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
           $test='validation/custom-app-scoped-source-native-bundle/test_source_native_bundle.ps1'
           $log='validation/custom-app-scoped-source-native-bundle/source-and-xpui-crash.log'
