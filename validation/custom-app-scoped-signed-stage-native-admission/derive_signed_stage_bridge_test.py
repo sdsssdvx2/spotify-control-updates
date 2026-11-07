@@ -14,7 +14,7 @@ HERE=Path(__file__).resolve().parent
 OLD=ROOT/"validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/test_custom_app_production_byte_real_prepared_stage_handoff.ps1"
 OLD_BLOB="8534c47d13ba07a2933ce6e1cc4cd16e70dae538"
 MODULE=HERE/"scoped-signed-stage-admission.ps1"
-MODULE_BLOB="3043fa97bdbc3095987c04c3f02bce70cfe95e77"
+MODULE_BLOB="05ad94f9fa74b6a8bd27a4a6481021bb14a502f7"
 OUTPUT=OLD.parent/"ci_scoped_signed_stage_bridge_generated.ps1"
 
 def one(s, old, new, title):
