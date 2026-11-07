@@ -34,7 +34,7 @@ Require-V036 ((Get-FileHash $cfg -Algorithm SHA256).Hash -ceq $before -and
 $json=$ok|ConvertTo-Json -Compress
 Require-V036 (-not$json.Contains($base) -and -not$json.Contains('PRIVATE_') -and
  -not$json.Contains('spotify_path') -and -not$json.Contains('prefs_path')) 'PRIVATE_CONFIG_OUTPUT'
-[IO.File]::WriteAllText($cfg,$ini+'spotify_path = '+$s+$nl)
+[IO.File]::WriteAllText($cfg,$ini.Replace('[AdditionalOptions]',('spotify_path = '+$s+$nl+'[AdditionalOptions]')))
 $dupe=Test-InstalledXpuiReadOnlyV036 -HostedFixtureRoot $base
 Require-V036 ($dupe.status -ceq 'blocked' -and $dupe.reason -ceq 'V036_CONFIG_DUPLICATE_KEY') 'DUPLICATE_KEY_ALLOWED'
 [IO.File]::WriteAllText($cfg,$ini.Replace($s,'\\server\unc-spotify'))
