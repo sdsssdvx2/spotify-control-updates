@@ -170,50 +170,17 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main drift'}
-          $allow=@('?? validation/spicetify-real-cli-evidence/real-cli-provenance-ci.json','?? validation/spicetify-real-cli-evidence/real-cli-hosted.log','?? validation/spicetify-real-cli-evidence/candidate-validation.json','?? validation/spicetify-real-cli-evidence/addon-selftest.log','?? validation/spicetify-real-cli-evidence/out/')
-          # Recursive qualified parent builders create their own generated out/ and reports.
-          # Reject ALL tracked modifications and only permit known validation artifacts.
           $tracked=@(git diff --name-only HEAD --)
           $staged=@(git diff --cached --name-only)
           if($tracked.Count -or $staged.Count){throw ('tracked checkout changes '+(($tracked+$staged) -join ','))}
           $untracked=@(git ls-files --others --exclude-standard)
+          $reportDirs=@('sc-cover-ambience-commit-provenance-v0.1.0','splitify-release-provenance-v0.1.1','splitify-release-provenance-v0.1.2','star-ratings-release-provenance-v0.1.2','tagify-release-provenance-v0.1.0')
           $unexpected=@($untracked | Where-Object {
-            $_ -cnotmatch '^validation/[^/]+/out/.+' -and
-            $_ -cnotmatch '^validation/[^/]+/candidate-validation\.json
-            $_ -cnotmatch '^validation/spicetify-real-cli-evidence/(addon-selftest\.log|real-cli-hosted\.log|real-cli-provenance-ci\.json)$'
-          })
-          if($unexpected.Count){throw ('unexpected untracked source '+($unexpected -join ','))}
-          Write-Host 'SPICETIFY_REAL_CLI_STATIC_SOURCE_AND_OPERATING_MAIN_UNCHANGED_PASS'
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: official-spicetify-cli-isolation-${{ github.run_id }}
-          path: |
-            validation/spicetify-real-cli-evidence/candidate-validation.json
-            validation/spicetify-real-cli-evidence/addon-selftest.log
-            validation/spicetify-real-cli-evidence/real-cli-provenance-ci.json
-            validation/spicetify-real-cli-evidence/real-cli-hosted.log
-          retention-days: 14
-          if-no-files-found: warn
- -and
-            $_ -cnotmatch '^validation/(sc-cover-ambience-commit-provenance-v0\.1\.0|splitify-release-provenance-v0\.1\.[12]|star-ratings-release-provenance-v0\.1\.2|tagify-release-provenance-v0\.1\.0)/candidate-report\.json
-            $_ -cnotmatch '^validation/spicetify-real-cli-evidence/(addon-selftest\.log|real-cli-hosted\.log|real-cli-provenance-ci\.json)$'
-          })
-          if($unexpected.Count){throw ('unexpected untracked source '+($unexpected -join ','))}
-          Write-Host 'SPICETIFY_REAL_CLI_STATIC_SOURCE_AND_OPERATING_MAIN_UNCHANGED_PASS'
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: official-spicetify-cli-isolation-${{ github.run_id }}
-          path: |
-            validation/spicetify-real-cli-evidence/candidate-validation.json
-            validation/spicetify-real-cli-evidence/addon-selftest.log
-            validation/spicetify-real-cli-evidence/real-cli-provenance-ci.json
-            validation/spicetify-real-cli-evidence/real-cli-hosted.log
-          retention-days: 14
-          if-no-files-found: warn
- -and
-            $_ -cnotmatch '^validation/spicetify-real-cli-evidence/(addon-selftest\.log|real-cli-hosted\.log|real-cli-provenance-ci\.json)$'
+            $p=$_
+            if($p -cmatch '^validation/[^/]+/out/.+'){return $false}
+            if($p -cin @('validation/spicetify-real-cli-evidence/candidate-validation.json','validation/spicetify-real-cli-evidence/addon-selftest.log','validation/spicetify-real-cli-evidence/real-cli-hosted.log','validation/spicetify-real-cli-evidence/real-cli-provenance-ci.json')){return $false}
+            foreach($dir in $reportDirs){if($p -ceq ('validation/'+$dir+'/candidate-report.json')){return $false}}
+            return $true
           })
           if($unexpected.Count){throw ('unexpected untracked source '+($unexpected -join ','))}
           Write-Host 'SPICETIFY_REAL_CLI_STATIC_SOURCE_AND_OPERATING_MAIN_UNCHANGED_PASS'
