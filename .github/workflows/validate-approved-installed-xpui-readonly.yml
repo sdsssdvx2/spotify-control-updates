@@ -1,0 +1,47 @@
+name: Installed XPUI read-only mapping (HOLD)
+on:
+  push:
+    branches: [validate/approved-installed-xpui-readonly]
+    paths:
+      - 'validation/approved-installed-xpui-readonly/**'
+      - '.github/workflows/validate-approved-installed-xpui-readonly.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  profile-map-synthetic-only:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Only three new files, frozen main, Windows PowerShell 5.1 syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='3a4fa0007bf5b92d9359a556fee947e9074d7dc4'
+          if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+             (git merge-base $parent HEAD).Trim() -cne $parent){throw 'V036_PARENT_CHANGED'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V036_MAIN_CHANGED'}
+          $paths=@(
+            'validation/approved-installed-xpui-readonly/installed-xpui-readonly.ps1',
+            'validation/approved-installed-xpui-readonly/test-installed-xpui-readonly.ps1',
+            '.github/workflows/validate-approved-installed-xpui-readonly.yml')
+          $diff=@(git diff --name-only "$parent...HEAD")
+          if($diff.Count -ne 3 -or @($diff|Where-Object{$_ -notin $paths}).Count){throw 'V036_CHANGE_SCOPE_FAIL'}
+          foreach($f in @($paths|Where-Object{$_ -like '*.ps1'})){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw ('V036_PS51_PARSE_ERROR '+$errors[0].Message)}
+          }
+          $module=Get-Content $paths[0] -Raw
+          foreach($bad in @('Invoke-WebRequest','Invoke-RestMethod','Start-Process','Remove-Item','Move-Item','Copy-Item','Set-Content','Set-Item')){
+            if($module.Contains($bad)){throw ('V036_MUTATING_OPERATION_'+$bad)}
+          }
+          Write-Host 'V036_ONLY_READONLY_MODULE_AND_TARGETED_TEST_ADDED_PASS'
+      - name: Synthetic fixture read-only and negative control checks
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/approved-installed-xpui-readonly/test-installed-xpui-readonly.ps1'
+          if($LASTEXITCODE -ne 0){throw ('V036_CASES_FAILED '+$LASTEXITCODE)}
+          Write-Host 'V036_CI_READONLY_ADMISSION_PASS'
