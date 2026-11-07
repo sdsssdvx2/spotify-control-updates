@@ -1,0 +1,88 @@
+name: V052 hosted locked crash-resumable composite rollback (HOLD)
+on:
+  push:
+    branches: [validate/hosted-cutover-rollback-v052-HOLD]
+    paths:
+      - 'validation/normal-engine-shared-turnstile/hosted-cutover-rollback-v052.ps1'
+      - 'validation/normal-engine-shared-turnstile/hosted-cutover-rollback-child-v052.ps1'
+      - 'validation/normal-engine-shared-turnstile/test-hosted-cutover-rollback-v052.ps1'
+      - '.github/workflows/validate-hosted-cutover-rollback-v052.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  hosted-composite-rollback:
+    runs-on: windows-2025
+    timeout-minutes: 13
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Exact approved V051 parent, unchanged main, held-scope PS 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='329b485a0ddda1857e921c81404ba0c181c8bb02'
+          $main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+             (git merge-base $base HEAD).Trim() -cne $base){throw 'V052_UNEXPECTED_PARENT'}
+          if((git rev-parse origin/main).Trim() -cne $main){throw 'V052_OPERATING_MAIN_CHANGED'}
+          $allowed=@(
+           'validation/normal-engine-shared-turnstile/hosted-cutover-rollback-v052.ps1',
+           'validation/normal-engine-shared-turnstile/hosted-cutover-rollback-child-v052.ps1',
+           'validation/normal-engine-shared-turnstile/test-hosted-cutover-rollback-v052.ps1',
+           '.github/workflows/validate-hosted-cutover-rollback-v052.yml')
+          $delta=@(git diff --name-only "$base...HEAD")
+          if($delta.Count -ne $allowed.Count -or @($delta|Where-Object{$_ -notin $allowed}).Count){
+             throw ('V052_SCOPE_ESCAPED '+($delta -join '|'))
+          }
+          foreach($file in @($allowed|Where-Object{$_ -like '*.ps1'})){
+            $token=$null;$err=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$token,[ref]$err)
+            if($err.Count){throw ('V052_PS51_PARSE_FAILED_'+$file+'_'+$err[0].Message)}
+          }
+          $subject=Get-Content 'validation/normal-engine-shared-turnstile/hosted-cutover-rollback-v052.ps1' -Raw
+          if(-not$subject.Contains('V052_HOSTED_WINDOWS_ONLY_NO_REAL_PROFILE') -or
+             -not$subject.Contains('Enter-CustomAppEngineTurnstileV047') -or
+             -not$subject.Contains('Get-CustomAppInstalledManifestAuditV048') -or
+             -not$subject.Contains('Test-CustomAppV051DetachedRecovery') -or
+             -not$subject.Contains('production_mutation_authorized=$false')){
+              throw 'V052_MISSING_STRICT_HOSTED_OR_PREIMAGE_BARRIERS'
+          }
+          foreach($forbidden in @('Start-Process','Invoke-Expression','Invoke-WebRequest','Invoke-RestMethod','Remove-Item','Update-AutoApps','Rollback-LastTransaction','Commit-LastTransaction')){
+            $tk=$null;$er=$null
+            $ast=[Management.Automation.Language.Parser]::ParseInput($subject,[ref]$tk,[ref]$er)
+            $calls=@($ast.FindAll({param($node)$node -is [Management.Automation.Language.CommandAst]},$true)|ForEach-Object{$_.GetCommandName()})
+            if($forbidden -in $calls){throw ('V052_NOT_ALLOWED_TO_CALL_PRODUCTION_'+$forbidden)}
+          }
+          Write-Host 'V052_EXACT_PARENT_AND_MAIN_IMMUTABLE_NO_REAL_PROFILE_PS51_PASS'
+      - name: Synthetic vendor apply, app crash, fresh process composite rollback
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v052-scoped-integration.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/normal-engine-shared-turnstile/test-hosted-cutover-rollback-v052.ps1' *>&1 | Tee-Object -FilePath $log
+          $code=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($code -ne 0){
+            Get-Content $log -Tail 85|ForEach-Object{Write-Host $_}
+            throw ('V052_WINDOWS_COMPOSITE_ROLLBACK_TEST_FAILED_'+$code)
+          }
+          $output=Get-Content $log -Raw
+          foreach($expected in @(
+            'V051_PRIVATE_DETACHED_610_FILE_WITH_DPAPI_RESTORE_PASS',
+            'V052_EXPLICIT_PRECHANGE_V048_AND_V051_BOUND_SEALED_INTENT_PASS',
+            'V052_SEALED_TRANSACTION_INTENT_TAMPER_REFUSED_PASS',
+            'V052_SIMULATED_VENDOR_CHANGE_AND_V046_PRECHANGE_ADMISSION_REJECTED_PASS',
+            'V052_UNEXPECTED_FOREIGN_XPUI_DRIFT_FAIL_CLOSED_NO_WRITES_PASS',
+            'V052_AFTER_APP_QUARANTINE_CRASH_RETURNS_WITH_OLD_PREIMAGE_RETAINED_PASS',
+            'V052_FRESH_PROCESS_LOCKED_ROLLBACK_BOTH_TREES_EXACT_AND_QUARANTINED_PASS',
+            'V052_RESTART_IDEMPOTENT_NO_PROTECTED_UNMANAGED_OR_BACKUP_CHANGES_PASS',
+            'V052_HOSTED_ONLY_COMPOSITE_CUTOVER_RECOVERY_NO_REAL_SPOTIFY_MUTATION_PASS')){
+              if(-not$output.Contains($expected)){throw ('V052_REQUIRED_PROOF_MISSING_'+$expected)}
+          }
+          Write-Host 'V052_HOSTED_SHARED_LOCK_COMPOSITE_RESTART_RECOVERY_PASS'
+      - name: Confirm main and user installation unchanged
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V052_MAIN_CHANGED'}
+          Write-Host 'V052_NO_REAL_SPOTIFY_NO_RELEASE_NO_MERGE_NO_INSTALL_PASS'
