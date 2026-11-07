@@ -1,0 +1,80 @@
+name: Official CLI executable CustomApps fallback scoped refresh (HOLD)
+on:
+  push:
+    branches: [validate/official-executable-customapps-fallback]
+    paths:
+      - 'validation/approved-installed-xpui-readonly/test-official-fallback-refresh-v043.ps1'
+      - '.github/workflows/validate-real-cli-fallback-customapps-scope.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  one-official-native-in-executable-origin:
+    runs-on: windows-2025
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Exact V042 parent, minimal files, PowerShell syntax, production main unchanged
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='0019edca745b5ce3e13c276d29737d95b5193726'
+          if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+             (git merge-base $parent HEAD).Trim() -cne $parent){throw 'V043_PARENT_CHANGED'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V043_MAIN_CHANGED'}
+          $paths=@(
+           'validation/approved-installed-xpui-readonly/test-official-fallback-refresh-v043.ps1',
+           '.github/workflows/validate-real-cli-fallback-customapps-scope.yml')
+          $diff=@(git diff --name-only "$parent...HEAD")
+          if($diff.Count -ne 2 -or @($diff|Where-Object{$_ -notin $paths}).Count){
+            throw 'V043_UNRELATED_SOURCE_CHANGES'
+          }
+          $tk=$null;$er=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $paths[0]).Path,[ref]$tk,[ref]$er)
+          if($er.Count){throw ('V043_PS51_PARSE_FAILED '+$er[0].Message)}
+          Write-Host 'V043_EXACT_PARENT_MAIN_AND_POWERSHELL51_SYNTAX_PASS'
+      - name: Pinned free official Spicetify 2.46.4
+        shell: powershell
+        timeout-minutes: 8
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'v043-upstream-download'
+          [IO.Directory]::CreateDirectory($dir)|Out-Null
+          $zip=Join-Path $dir 'official.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip' -OutFile $zip
+          if((Get-Item $zip).Length -ne 7795758 -or
+            (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f'){
+             throw 'V043_OFFICIAL_ARCHIVE_SHA_CHANGED'
+          }
+          Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $dir 'extracted')
+          $exe=@(Get-ChildItem (Join-Path $dir 'extracted') -Recurse -File -Filter spicetify.exe)
+          if($exe.Count -ne 1 -or
+            (Get-FileHash $exe[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+             throw 'V043_OFFICIAL_EXECUTABLE_SHA_CHANGED'
+          }
+          "V043_EXE=$($exe[0].FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+      - name: Single genuine native fallback refresh, V035 non-target ownership, V042 snapshot drift
+        shell: powershell
+        timeout-minutes: 4
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v043-fallback.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/approved-installed-xpui-readonly/test-official-fallback-refresh-v043.ps1' -OfficialExecutable $env:V043_EXE *>&1 | Tee-Object -FilePath $log | Out-Null
+          $code=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($code -ne 0){Get-Content $log -Tail 90|ForEach-Object{Write-Host $_};throw ('V043_NATIVE_FALLBACK_FAILED '+$code)}
+          $content=Get-Content $log -Raw
+          foreach($proof in @(
+           'V043_REAL_OFFICIAL_CLI_EXECUTABLE_ROOT_CUSTOMAPPS_FALLBACK_PASS',
+           'V043_ONE_APPROVED_APP_ONLY_OTHER_APPROVED_AND_UNMANAGED_XPUI_UNCHANGED_PASS',
+           'V043_ORIGINAL_CONFIG_PREFS_FOUR_APP_SOURCES_UNCHANGED_PASS',
+           'V043_V042_PRELAUNCH_IMMUTABLE_HASH_DRIFT_AND_REBASE_PASS',
+           'V043_FAKE_SPOTIFY_ONLY_NO_LEDGER_NO_PRODUCTION_AUTHORITY_PASS')){
+             if(-not$content.Contains($proof)){throw ('V043_MISSING_PROOF '+$proof)}
+          }
+          Write-Host 'V043_OFFICIAL_EXE_ROOT_SCOPED_NATIVE_REFRESH_TARGETED_PASS'
+      - name: Production main untouched
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V043_MAIN_NOT_FROZEN'}
+          Write-Host 'V043_NO_USER_APPLY_NO_USER_LEDGER_NO_PRODUCTION_RELEASE_PASS'
