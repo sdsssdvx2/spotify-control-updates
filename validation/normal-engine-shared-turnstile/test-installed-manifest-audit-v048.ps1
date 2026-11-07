@@ -99,6 +99,11 @@ try{
  if($null-ne$lease.lock_handle){$lease.lock_handle.Dispose()}
 }
 $closed=Get-CustomAppInstalledManifestAuditV048 -CutoverLease $lease -ExpectedProfileSha256 $expected @fixtureArgs
+if($closed.status -cne 'blocked' -or
+   $closed.reason -cne 'V048_OS_TURNSTILE_HANDLE_NOT_LIVE_OR_WRONG_PROFILE'){
+  Write-Host ('V048_HOSTED_CLOSED_HANDLE_DIAG=status:'+([string]$closed.status)+
+    ';reason:'+([string]$closed.reason))
+}
 Assert-V048 ($closed.status -ceq 'blocked' -and
  $closed.reason -ceq 'V048_OS_TURNSTILE_HANDLE_NOT_LIVE_OR_WRONG_PROFILE') 'DISPOSED_LOCK_WAS_ACCEPTED'
 Assert-V048 ((Get-FileHash $foreign -Algorithm SHA256).Hash -ceq $foreignOriginal -and

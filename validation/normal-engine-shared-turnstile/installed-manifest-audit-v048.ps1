@@ -75,9 +75,9 @@ function Get-CustomAppInstalledManifestAuditV048 {
              [string]::Equals([IO.Path]::GetFullPath([string]$handle.Name),
                [IO.Path]::GetFullPath($lock),[StringComparison]::OrdinalIgnoreCase))
       }
-   }catch [System.ObjectDisposedException]{
-      $lockValid=$false
-   }catch [System.IO.IOException]{
+   }catch{
+      # PowerShell may wrap disposed .NET property access in a
+      # MethodInvocationException. Every inspection failure must deny.
       $lockValid=$false
    }
    if(-not$lockValid){
