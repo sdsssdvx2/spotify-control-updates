@@ -132,8 +132,7 @@ Write-Host 'V047_EXISTING_LEGACY_NO_NEW_ENGINE_START_OR_INSTALLED_SPOTIFY_TOUCH_
 . (Join-Path $PSScriptRoot 'locked-cutover-admission-v047.ps1')
 $admission=Get-CustomAppCutoverReadOnlyAdmissionV046 @fixtureArgs
 Assert-V047 ($admission.status -ceq 'observed-readonly' -and
- $admission.profile_sha256 -cmatch '^[a-f0-9]{64}
-) 'V046_FIXTURE_NOT_COHERENT_AFTER_ADMISSION_TESTS'
+ $admission.profile_sha256 -cmatch '^[a-f0-9]{64}$') 'V046_FIXTURE_NOT_COHERENT_AFTER_ADMISSION_TESTS'
 $expected=[string]$admission.profile_sha256
 $session=Open-CustomAppCutoverReadOnlyLeaseV047 -ExpectedProfileSha256 $expected @fixtureArgs
 Assert-V047 ($session.status -ceq 'locked-readonly' -and
