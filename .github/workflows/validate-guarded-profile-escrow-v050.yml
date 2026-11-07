@@ -56,7 +56,7 @@ jobs:
             if($subject.Contains($forbidden)){throw ('V050_FORBIDDEN_FILE_MUTATION '+$forbidden)}
           }
           if(-not$subject.Contains('V050_REAL_PROFILE_PATH_OVERRIDES_FORBIDDEN') -or
-             -not$subject.Contains("production_mutation_authorized=$false")){
+             -not$subject.Contains('production_mutation_authorized=$false')){
             throw 'V050_REAL_PROFILE_FENCE_OR_NO_AUTHORITY_MISSING'
           }
           Write-Host 'V050_EXACT_PARENT_MAIN_PRESERVED_PS51_AND_NO_ORIGINAL_DELETE_PASS'
