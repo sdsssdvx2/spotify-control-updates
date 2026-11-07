@@ -1,0 +1,95 @@
+name: Exact original Addon Manager Spotify persistence backup to approved central CAS (HOLD)
+on:
+  push:
+    branches: [validate/approved-real-persistence-adapter]
+    paths:
+      - 'validation/approved-real-persistence-adapter/**'
+      - '.github/workflows/validate-approved-real-persistence-adapter.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  real-original-persistence:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, ref: "${{ github.sha }}"}
+      - name: Freeze production and new original-function adapters; strict PowerShell 5.1 parse
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='53156a282e94291507a2e83921aa66bcfa1abea7'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.sha }}' -or (git merge-base $base HEAD).Trim() -cne $base){
+             throw 'V031_QUALIFIED_CENTRAL_PREPARED_PARENT_DRIFT'
+          }
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V031_OPERATING_MAIN_MOVED'}
+          $d='validation/approved-real-persistence-adapter'
+          $pins=@{
+            "$d/real-addon-persistence-core.ps1"='94f03befd68583c3124365d31dc6e920522aa705'
+            "$d/approved-real-persistence-journal.ps1"='ab449e494625e1b4873c00dbb5ea334be822eb47'
+            "$d/read-original-persistence-fresh-process.ps1"='815368e720a954f63be914d18d4baebcc2ccc93b'
+            "$d/test-real-addon-persistence-prepared.ps1"='2bd53ed91af3b62e85ead258a3365dd1cac2e2b2'
+            'validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1'='9b039819e7b2278fe4cf15c8585336dd07a8e8e3'
+            'validation/approved-hmac-to-prepared-central-journal/approved-prepared-journal.ps1'='cfc3a52c2c59d793e207718e3f71599ddccda72f'
+            'validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1'='a3df7e5d89c594083c10e240e13029ca5640b8ae'
+            'validation/approved-live-hmac-consumed-stage/approved-live-hmac-stage.ps1'='952023357202fe67230dc7fd491a6dfa8eebba72'
+            'validation/approved-live-source-acquisition/approved-live-source-acquisition.ps1'='b11532ffe67b160a77403cbbddbd64946df482a7'
+          }
+          $new=@("$d/real-addon-persistence-core.ps1","$d/approved-real-persistence-journal.ps1","$d/read-original-persistence-fresh-process.ps1","$d/test-real-addon-persistence-prepared.ps1")
+          $diff=@(git diff --name-only "$base...HEAD")
+          $allow=@($new)+@('.github/workflows/validate-approved-real-persistence-adapter.yml')
+          if($diff.Count -ne 5 -or @($diff|Where-Object{$_ -notin $allow}).Count){
+              throw ('V031_OUT_OF_SCOPE_CHANGED_FILES '+($diff -join ','))
+          }
+          foreach($name in $pins.Keys){if((git hash-object $name).Trim() -cne [string]$pins[$name]){throw ('V031_SOURCE_HASH_DRIFT '+$name)}}
+          foreach($name in $new){
+             $t=$null;$errors=$null
+             [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $name).Path,[ref]$t,[ref]$errors)
+             if($errors.Count){$errors|Select-Object -First 8|ForEach-Object{Write-Host ($_.Extent.StartLineNumber.ToString()+': '+$_.Message)};throw ('V031_PS51_PARSE_FAILED '+$name)}
+          }
+          Write-Host 'V031_EXACT_SOURCE_PINS_AND_PS51_FROZEN_PRODUCTION_PASS'
+      - name: Regenerate real qualified Addon Manager (no execution/install, no prior test suite)
+        shell: powershell
+        timeout-minutes: 18
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/custom-app-normal-entrypoint-transaction-integration/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'V031_EXACT_QUALIFIED_ORIGINAL_REBUILD_FAILED'}
+          $file='validation/custom-app-normal-entrypoint-transaction-integration/out/bin/addon-manager.ps1'
+          if((Get-Item $file).Length -ne 1453028 -or
+             (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0cb2362dd14772f19ba2970e5f4c2bc07bf0512c0de31494af7b01cb2a98fdd6'){
+              throw 'V031_ORIGINAL_ADDON_FUNCTIONS_BYTE_PIN_DRIFT'
+          }
+          "V031_ORIGINAL_ADDON=$((Resolve-Path $file).Path)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host 'V031_EXACT_ORIGINAL_ADDON_PERSISTENCE_SOURCE_GENERATED_PASS'
+      - name: Targeted genuine original persistence backup and central journal accepted, independent keyless read, corruption denial
+        shell: powershell
+        timeout-minutes: 18
+        run: |
+          $ErrorActionPreference='Stop'
+          $test='validation/approved-real-persistence-adapter/test-real-addon-persistence-prepared.ps1'
+          $log=Join-Path $env:RUNNER_TEMP 'v031-original-guarded-backup-acceptance.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test -OriginalAddonPath $env:V031_ORIGINAL_ADDON *>&1 | Tee-Object -FilePath $log | Out-Null
+          $exit=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($exit -ne 0){
+              Get-Content -LiteralPath $log -Tail 125|ForEach-Object{Write-Host $_}
+              throw ('V031_REAL_ORIGINAL_ADDON_GUARDED_PERSISTENCE_INTEGRATION_FAILED '+$exit)
+          }
+          $output=Get-Content -LiteralPath $log -Raw
+          foreach($required in @(
+             'V031_REAL_GENERATED_ADDON_PERSISTENCE_SURFACES_GUARDED_BACKUP_PREPARED_PASS',
+             'V031_FRESH_PROCESS_REAL_ADDON_GUARDED_PERSISTENCE_BACKUP_NO_HMAC_KEY_PASS',
+             'V031_REAL_SPOTIFY_GUARD_MANIFEST_BACKUP_STAGE_APP_DPAPI_TAMPER_AND_REPLAY_DENIED_PASS',
+             'V031_REAL_ADDON_PERSISTENCE_FUNCTIONS_WITH_ACTUAL_RELEASE_HMAC_CENTRAL_PREPARED_PASS',
+             'V031_HOLD_ORIGINAL_ADDON_EXACT_SNAPSHOT_ONLY_NO_USER_SPOTIFY_NATIVE_APPLY_OR_MUTATION_PASS'
+          )){
+              if(-not$output.Contains($required)){throw ('V031_ORIGINAL_PERSISTENCE_PROOF_MISSING '+$required)}
+          }
+          Write-Host 'V031_ACTUAL_GENERATED_ADDON_GUARDED_PERSISTENCE_CENTRAL_PREPARED_PASS'
+      - name: Final frozen main and no release or user installation
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V031_MAIN_CHANGED'}
+          Write-Host 'V031_NO_REAL_PC_SPOTIFY_PROFILE_NO_VENDOR_APPLY_NO_NEW_RELEASE_PASS'
