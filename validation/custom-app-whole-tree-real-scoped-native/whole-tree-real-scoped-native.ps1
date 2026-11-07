@@ -41,7 +41,8 @@ function Invoke-CustomAppQualifiedWholeTreeScopedNativeV023 {
         [Parameter(Mandatory=$true)][string]$Name,
         [Parameter(Mandatory=$true)][string]$LiveAppPath,
         [Parameter(Mandatory=$true)]$StageExecutorResult,
-        [Parameter(Mandatory=$true)][hashtable]$PostSwapCommon,
+        [AllowNull()][hashtable]$PostSwapCommon=$null,
+        [AllowNull()][hashtable]$JournalProof=$null,
         [Parameter(Mandatory=$true)][DateTimeOffset]$Now,
         [Parameter(Mandatory=$true)][string]$OfficialExecutable,
         [Parameter(Mandatory=$true)][string]$ExpectedOfficialSha256,
@@ -76,40 +77,57 @@ function Invoke-CustomAppQualifiedWholeTreeScopedNativeV023 {
          $ExpectedOfficialSha256){
         return (& $deny 'whole-tree-native-genuine-executable-hash-denied')
     }
-    if(-not$PostSwapCommon.ContainsKey('Name') -or
-       ([string]$PostSwapCommon.Name) -cne $Name -or
-       -not$PostSwapCommon.ContainsKey('StageExecutorResult') -or
-       -not$PostSwapCommon.ContainsKey('FinalizationResult') -or
-       -not$PostSwapCommon.ContainsKey('PreparedResult') -or
-       -not$PostSwapCommon.ContainsKey('SessionKey')){
-        return (& $deny 'whole-tree-native-signed-postswap-input-incomplete')
-    }
-    if([string]$PostSwapCommon.StageExecutorResult.result_fingerprint -cne
-         [string]$StageExecutorResult.result_fingerprint -or
-       [string]$PostSwapCommon.ExpectedConsumptionId -cne
-         [string]$StageExecutorResult.consumption_id){
-        return (& $deny 'whole-tree-native-stage-or-consumption-mismatch')
-    }
-    # This invokes the PRE-EXISTING HMAC, durable single-use consumption,
-    # provenance, backup, source-tree and current lifecycle revalidation.
-    try{$admission=Resolve-CustomAppProductionPostSwapApplyAdmissionV010 @PostSwapCommon -Now $Now}
-    catch{return (& $deny 'whole-tree-native-existing-postswap-admission-threw')}
-    if($null-eq$admission -or -not[bool]$admission.ok -or
-       -not[bool]$admission.apply_eligible -or
-       [bool]$admission.production_mutation_authorized -or
-       [bool]$admission.spicetify_apply_authorized -or
-       [string]$admission.decision.consumption_id -cne [string]$StageExecutorResult.consumption_id -or
-       [string]$admission.decision.live_tree_sha256 -cne
-            [string]$StageExecutorResult.remote_tree_sha256 -or
-       [string]$admission.decision.source_identity -cne
-            [string]$StageExecutorResult.source_identity -or
-       [string]$admission.decision.remote_commit_sha -cne
-            [string]$StageExecutorResult.remote_commit_sha){
-        return (& $deny ('whole-tree-native-existing-signed-postswap-admission-denied:'+[string]$admission.reason))
-    }
-    if(-not $live.Equals(([IO.Path]::GetFullPath([string]$PostSwapCommon.FinalizationResult.live_path).TrimEnd('\','/')),
-          [StringComparison]::OrdinalIgnoreCase)){
-        return (& $deny 'whole-tree-native-not-the-admitted-live-app')
+    $journalAdmission=$null
+    if($null-ne$JournalProof){
+        if($null-ne$PostSwapCommon -or
+           -not(Get-Command Test-CustomAppRealNativeJournalAdmissionV024 -CommandType Function -ErrorAction SilentlyContinue)){
+            return (& $deny 'whole-tree-native-invalid-dual-or-missing-journal-gate')
+        }
+        try{$journalAdmission=Test-CustomAppRealNativeJournalAdmissionV024 -Proof $JournalProof -ExpectedPhase 'apply-starting'}
+        catch{return (& $deny ('whole-tree-native-journal-gate-threw:'+[string]$_.Exception.Message))}
+        if(-not[bool]$journalAdmission.ok -or
+           [string]$journalAdmission.consumption_id -cne [string]$StageExecutorResult.consumption_id -or
+           [string]$journalAdmission.source_tree_sha256 -cne [string]$StageExecutorResult.remote_tree_sha256 -or
+           -not $live.Equals(([IO.Path]::GetFullPath([string]$JournalProof.LiveAppPath).TrimEnd('\\','/')),[StringComparison]::OrdinalIgnoreCase)){
+            return (& $deny ('whole-tree-native-qualified-current-journal-denied:'+[string]$journalAdmission.reason))
+        }
+    }else{
+        if($null-eq$PostSwapCommon){return (& $deny 'whole-tree-native-postswap-or-journal-proof-required')}
+        if(-not$PostSwapCommon.ContainsKey('Name') -or
+           ([string]$PostSwapCommon.Name) -cne $Name -or
+           -not$PostSwapCommon.ContainsKey('StageExecutorResult') -or
+           -not$PostSwapCommon.ContainsKey('FinalizationResult') -or
+           -not$PostSwapCommon.ContainsKey('PreparedResult') -or
+           -not$PostSwapCommon.ContainsKey('SessionKey')){
+            return (& $deny 'whole-tree-native-signed-postswap-input-incomplete')
+        }
+        if([string]$PostSwapCommon.StageExecutorResult.result_fingerprint -cne
+             [string]$StageExecutorResult.result_fingerprint -or
+           [string]$PostSwapCommon.ExpectedConsumptionId -cne
+             [string]$StageExecutorResult.consumption_id){
+            return (& $deny 'whole-tree-native-stage-or-consumption-mismatch')
+        }
+        # This invokes the PRE-EXISTING HMAC, durable single-use consumption,
+        # provenance, backup, source-tree and current lifecycle revalidation.
+        try{$admission=Resolve-CustomAppProductionPostSwapApplyAdmissionV010 @PostSwapCommon -Now $Now}
+        catch{return (& $deny 'whole-tree-native-existing-postswap-admission-threw')}
+        if($null-eq$admission -or -not[bool]$admission.ok -or
+           -not[bool]$admission.apply_eligible -or
+           [bool]$admission.production_mutation_authorized -or
+           [bool]$admission.spicetify_apply_authorized -or
+           [string]$admission.decision.consumption_id -cne [string]$StageExecutorResult.consumption_id -or
+           [string]$admission.decision.live_tree_sha256 -cne
+                [string]$StageExecutorResult.remote_tree_sha256 -or
+           [string]$admission.decision.source_identity -cne
+                [string]$StageExecutorResult.source_identity -or
+           [string]$admission.decision.remote_commit_sha -cne
+                [string]$StageExecutorResult.remote_commit_sha){
+            return (& $deny ('whole-tree-native-existing-signed-postswap-admission-denied:'+[string]$admission.reason))
+        }
+        if(-not $live.Equals(([IO.Path]::GetFullPath([string]$PostSwapCommon.FinalizationResult.live_path).TrimEnd('\','/')),
+              [StringComparison]::OrdinalIgnoreCase)){
+            return (& $deny 'whole-tree-native-not-the-admitted-live-app')
+        
     }
     try{$baseline=Get-CustomAppLocalRuntimeBaseline -Name $Name -AppPath $live}
     catch{return (& $deny 'whole-tree-native-live-runtime-read-denied')}
@@ -178,6 +196,20 @@ function Invoke-CustomAppQualifiedWholeTreeScopedNativeV023 {
           'custom_apps = tagify'+[Environment]::NewLine
         [IO.File]::WriteAllText($config,$ini,([Text.UTF8Encoding]::new($false)))
     }catch{return (& $deny ('whole-tree-native-disposable-setup-denied:'+[string]$_.Exception.Message))}
+    # Protect the official binary against a hash-check-to-process-start race.
+    # Keep a no-delete/no-write read handle open until the vendor exits.
+    $exeHandle=$null
+    try{
+        $exeHandle=[IO.File]::Open($exe,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+        $exeHash=[Security.Cryptography.SHA256]::Create()
+        try{
+            $pinned=([BitConverter]::ToString($exeHash.ComputeHash($exeHandle))).Replace('-','').ToLowerInvariant()
+        }finally{$exeHash.Dispose()}
+        if($pinned -cne $ExpectedOfficialSha256){throw 'official-binary-drift-before-process-start'}
+    }catch{
+        if($null-ne$exeHandle){$exeHandle.Dispose()}
+        return (& $deny ('whole-tree-native-locked-executable-denied:'+[string]$_.Exception.Message))
+    }
     # Only these private surfaces may be changed by the official CLI.
     $psi=New-Object Diagnostics.ProcessStartInfo
     $psi.FileName=$exe
@@ -192,6 +224,7 @@ function Invoke-CustomAppQualifiedWholeTreeScopedNativeV023 {
     $psi.EnvironmentVariables['APPDATA']=(Join-Path $native 'Roaming')
     $psi.EnvironmentVariables['LOCALAPPDATA']=(Join-Path $native 'Local')
     $started=$false
+    $startedAt=[DateTimeOffset]::UtcNow
     $p=$null
     try{
         $p=New-Object Diagnostics.Process
@@ -203,6 +236,7 @@ function Invoke-CustomAppQualifiedWholeTreeScopedNativeV023 {
             throw 'whole-tree-native-official-cli-timed-out'
         }
         if([int]$p.ExitCode -ne 0){throw ('whole-tree-native-official-cli-exit-'+$p.ExitCode)}
+        $finishedAt=[DateTimeOffset]::UtcNow
         # Pin the exact content of THIS qualified fixture's prepared stage,
         # not the older BRH (different ZIP) demonstration string.
         $needle='prepared-stage-standard-executor-v2'
@@ -231,6 +265,13 @@ function Invoke-CustomAppQualifiedWholeTreeScopedNativeV023 {
             consumption_id=[string]$StageExecutorResult.consumption_id
             source_tree_sha256=[string]$baseline.tree_sha256
             native_xpui_target_sha256=(Get-FileHash $target -Algorithm SHA256).Hash.ToLowerInvariant()
+            native_xpui_target_path=$target
+            native_private_root=$native
+            native_vendor_executable_sha256=$pinned
+            native_started_at=$startedAt.ToUniversalTime().ToString('o')
+            native_finished_at=$finishedAt.ToUniversalTime().ToString('o')
+            journal_transaction_id=$(if($null-ne$journalAdmission){[string]$journalAdmission.journal_transaction_id}else{$null})
+            native_journal_entry_sha256=$(if($null-ne$journalAdmission){[string]$journalAdmission.journal_entry_sha256}else{$null})
             vendor_started=$true;real_official_native_scoped_refresh_verified=$true
             signed_permit_and_whole_tree_bound=$true
             full_tree_file_count=[int]$baseline.file_count
@@ -240,5 +281,5 @@ function Invoke-CustomAppQualifiedWholeTreeScopedNativeV023 {
             commit_authorized=$false
         }
     }catch{return (& $deny ('whole-tree-native-hosted-official-refresh-failed:'+[string]$_.Exception.Message) $started)}
-    finally{if($null-ne$p){$p.Dispose()}}
+    finally{if($null-ne$p){$p.Dispose()};if($null-ne$exeHandle){$exeHandle.Dispose()}}
 }
