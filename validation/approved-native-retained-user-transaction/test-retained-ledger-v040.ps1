@@ -40,7 +40,34 @@ $applied=Invoke-ApprovedNativeXpuiEscrowApplyV034 -Item $item -Acquired $acquire
 Assert-V040 ([bool]$applied.ok -and [string]$applied.phase -ceq 'apply-verified' -and
   [int64]$applied.journal_revision -eq 8) 'REAL_OFFICIAL_NATIVE_RESULT_UNVERIFIED'
 $nativeSeal=Save-ApprovedNativeFullOutputReceiptV037 @args
-Assert-V040 ([bool]$nativeSeal.ok -and [bool]$nativeSeal.entire_official_output_verified) 'ALL_FOUR_OFFICIAL_OUTPUTS_NOT_SEALED'
+Assert-V040 ([bool]$nativeSeal.ok -and [bool]$nativeSeal.entire_official_output_verified -and
+ [bool]$nativeSeal.manifest_scoped_output_verified -and
+ [int]$nativeSeal.exact_official_owned_files -eq 4 -and
+ [int]$nativeSeal.declared_extension_files -eq 1 -and
+ [int]$nativeSeal.declared_asset_files -eq 0 -and
+ [string]$nativeSeal.source_tree_sha256 -ceq [string]$acquired.runtime_tree_sha256 -and
+ [string]$nativeSeal.manifest_owned_set_sha256 -cmatch '^[a-f0-9]{64}$') 'V045_MANIFEST_SEALED_CHAIN_NOT_DURABLE'
+# V045 regression: once the V037 schema-2 manifest/native receipt exists,
+# changed staged assets or a changed generated extension deny terminal
+# without a central journal transition or user-ledger mutation.
+$sourceFile=Join-Path ([string]$acquired.stage_path) 'manifest.json'
+$sourceOrig=[IO.File]::ReadAllBytes($sourceFile)
+[IO.File]::AppendAllText($sourceFile,' ')
+try{
+ $tampered=Read-ApprovedNativeFullOutputReceiptV037 @args
+ Assert-V040 (-not[bool]$tampered.ok -and
+   -not[bool]$tampered.final_commit_authorized) 'SOURCE_MANIFEST_CHANGED_BUT_DPAPI_ACCEPTED'
+}finally{[IO.File]::WriteAllBytes($sourceFile,$sourceOrig)}
+$xpuiExt=Join-Path (Join-Path $vendor 'FakeSpotify\Apps\xpui') ('extensions\'+[string]$item.name+'\extension.js')
+$extensionOriginal=[IO.File]::ReadAllBytes($xpuiExt)
+[IO.File]::AppendAllText($xpuiExt,'/*V045_TAMPER*/')
+try{
+ $denied=Invoke-ApprovedNativeRetainedTerminalV039 @args
+ Assert-V040 (-not[bool]$denied.ok -and -not[bool]$denied.cleanup_performed) 'TAMPERED_MANIFEST_OUTPUT_TERMINAL_ACCEPTED'
+}finally{[IO.File]::WriteAllBytes($xpuiExt,$extensionOriginal)}
+$still=Read-ApprovedNativeFullOutputReceiptV037 @args
+Assert-V040 ([bool]$still.ok -and [bool]$still.manifest_scoped_output_verified) 'RESTORED_V045_NATIVE_EVIDENCE_INVALID'
+Write-Host 'V045_MANIFEST_SOURCE_AND_GENERATED_EXTENSION_TAMPER_REJECTED_BEFORE_TERMINAL_PASS'
 $terminal=Invoke-ApprovedNativeRetainedTerminalV039 @args
 Assert-V040 ([bool]$terminal.ok -and [string]$terminal.phase -ceq 'committed-retained' -and
   [int64]$terminal.terminal_revision -eq 9 -and [bool]$terminal.all_backups_preserved) 'NATIVE_RETAINED_TERMINAL_FAILED'
@@ -108,6 +135,7 @@ Assert-V040 ([string]$journal.entry.entry_sha256 -ceq $head -and
  [string](Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path ([string]$p.transaction) 'native-xpui-preimage')).tree_sha256 -ceq [string]$pre.tree_sha256 -and
  [string](Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path $vendor 'FakeSpotify\Apps\xpui')).tree_sha256 -ceq [string]$xpui.tree_sha256 -and
  [string]$persist.fingerprint -ceq [string]$f.initial_persistence_sha256) 'CLAIM_RETIREMENT_DID_NOT_PRESERVE_BACKUPS_OR_JOURNAL'
+Write-Host 'V045_V037_MANIFEST_SCOPE_V039_TERMINAL_V040_LEDGER_ATOMIC_CHAIN_PASS'
 Write-Host 'V040_REAL_OFFICIAL_NATIVE_TERMINAL_SINGLE_USE_LEDGER_BOUND_PASS'
 Write-Host 'V040_PRETERMINAL_WRONG_ID_WRONG_TX_DENIED_PASS'
 Write-Host 'V040_DPAPI_BEFORE_AFTER_REPLACE_CRASH_RESUME_PASS'

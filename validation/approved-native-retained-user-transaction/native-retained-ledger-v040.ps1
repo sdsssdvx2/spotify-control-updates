@@ -77,6 +77,9 @@ function Commit-ApprovedNativeRetainedUserLedgerV040 {
    if(-not[bool]$proof.ok -or
       [string]$proof.phase -cne 'committed-retained' -or
       -not[bool]$proof.entire_official_output_verified -or
+      -not[bool]$proof.manifest_scoped_output_verified -or
+      [int]$proof.exact_official_owned_files -lt 3 -or
+      [string]$proof.manifest_owned_set_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
       [bool]$proof.final_commit_authorized -or
       [bool]$proof.production_mutation_authorized){
       throw 'V040_INDEPENDENT_NATIVE_DPAPI_OUTPUT_NOT_VERIFIED'

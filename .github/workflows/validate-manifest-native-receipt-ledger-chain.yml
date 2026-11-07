@@ -1,0 +1,109 @@
+name: Manifest-owned authenticated native output through retained terminal and DPAPI ledger (HOLD)
+on:
+  push:
+    branches: [validate/manifest-native-receipt-ledger-chain]
+    paths:
+      - 'validation/approved-native-complete-output-proof/full-native-output-proof-v037.ps1'
+      - 'validation/approved-native-retained-terminal/retained-terminal-v039.ps1'
+      - 'validation/approved-native-retained-user-transaction/**'
+      - '.github/workflows/validate-manifest-native-receipt-ledger-chain.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  one-official-native-to-dpapi-ledger:
+    runs-on: windows-2025
+    timeout-minutes: 44
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Verify frozen V044 parent; only 4 existing scripts + 1 CI and PowerShell 5.1 parse
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='3f38441255c46e6ba8d5e4c3914d6d5a37bd29f1'
+          if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+             (git merge-base $parent HEAD).Trim() -cne $parent){throw 'V040_PARENT_CHANGED'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V040_MAIN_CHANGED'}
+          $allowed=@(
+           'validation/approved-native-complete-output-proof/full-native-output-proof-v037.ps1',
+           'validation/approved-native-retained-terminal/retained-terminal-v039.ps1',
+           'validation/approved-native-retained-user-transaction/native-retained-ledger-v040.ps1',
+           'validation/approved-native-retained-user-transaction/test-retained-ledger-v040.ps1',
+           '.github/workflows/validate-manifest-native-receipt-ledger-chain.yml')
+          $changed=@(git diff --name-only "$parent...HEAD")
+          if($changed.Count -ne $allowed.Count -or @($changed|Where-Object{$_ -notin $allowed}).Count){
+            throw ('V040_SCOPE_CHANGED '+($changed -join ','))
+          }
+          foreach($file in @($allowed|Where-Object{$_ -like '*.ps1'})){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw ('V040_POWERSHELL51_SYNTAX_FAILURE '+$errors[0].Message)}
+          }
+          $source=Get-Content $allowed[0] -Raw
+          foreach($deny in @('Remove-Item','Remove-CustomAppAtomicDirectoryV010','[IO.File]::Delete(', '[IO.Directory]::Delete(', 'Invoke-WebRequest','Invoke-RestMethod','Start-Process','spicetify apply','spicetify restore')){
+            if($source.Contains($deny)){throw ('V040_UNEXPECTED_DESTRUCTIVE_OR_NETWORK_CODE '+$deny)}
+          }
+          Write-Host 'V040_SOURCE_PARENT_BOUNDARY_AND_PS51_PARSE_PASS'
+      - name: Rebuild one original Addon Manager SHA pinned, no installation
+        shell: powershell
+        timeout-minutes: 17
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/custom-app-normal-entrypoint-transaction-integration/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'V040_ORIGINAL_ADDON_BUILD_FAILED'}
+          $p='validation/custom-app-normal-entrypoint-transaction-integration/out/bin/addon-manager.ps1'
+          if((Get-Item $p).Length -ne 1453028 -or
+             (Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0cb2362dd14772f19ba2970e5f4c2bc07bf0512c0de31494af7b01cb2a98fdd6'){
+            throw 'V040_ORIGINAL_ADDON_SHA_CHANGED'
+          }
+          "V040_ADDON=$((Resolve-Path $p).Path)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+      - name: Retrieve exact SHA-pinned official free Spicetify 2.46.4
+        shell: powershell
+        timeout-minutes: 9
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'v040-official'
+          [IO.Directory]::CreateDirectory($dir)|Out-Null
+          $zip=Join-Path $dir 'spicetify.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip' -OutFile $zip
+          if((Get-Item $zip).Length -ne 7795758 -or
+             (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f'){
+            throw 'V040_OFFICIAL_ARCHIVE_CHANGED'
+          }
+          Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $dir 'expanded')
+          $exe=@(Get-ChildItem (Join-Path $dir 'expanded') -Recurse -File -Filter spicetify.exe)
+          if($exe.Count -ne 1 -or
+             (Get-FileHash $exe[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+            throw 'V040_OFFICIAL_BINARY_CHANGED'
+          }
+          "V040_EXE=$($exe[0].FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+      - name: One official native apply, retained terminal, DPAPI ledger crash and fresh readback
+        shell: powershell
+        timeout-minutes: 19
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v040-targeted.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/approved-native-retained-user-transaction/test-retained-ledger-v040.ps1' -OriginalAddonPath $env:V040_ADDON -OfficialExecutable $env:V040_EXE *>&1 | Tee-Object -FilePath $log | Out-Null
+          $code=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($code -ne 0){Get-Content $log -Tail 110|ForEach-Object{Write-Host $_};throw ('V040_TARGETED_FAIL '+$code)}
+          $s=Get-Content $log -Raw
+          foreach($marker in @(
+            'V045_MANIFEST_SOURCE_AND_GENERATED_EXTENSION_TAMPER_REJECTED_BEFORE_TERMINAL_PASS',
+            'V045_V037_MANIFEST_SCOPE_V039_TERMINAL_V040_LEDGER_ATOMIC_CHAIN_PASS',
+            'V040_REAL_OFFICIAL_NATIVE_TERMINAL_SINGLE_USE_LEDGER_BOUND_PASS',
+            'V040_PRETERMINAL_WRONG_ID_WRONG_TX_DENIED_PASS',
+            'V040_DPAPI_BEFORE_AFTER_REPLACE_CRASH_RESUME_PASS',
+            'V040_FRESH_PROCESS_ATOMIC_LEDGER_CONSUMED_AND_REPLAY_BLOCKED_PASS',
+            'V040_INDEPENDENT_FRESH_PROCESS_REPLAY_DENIED_PASS',
+            'V040_NEXT_DIFFERENT_ID_RESERVABLE_OLD_CONSUMED_PASS',
+            'V040_APP_SPOTIFY_GUARD_XPUI_BACKUPS_NOT_CHANGED_PASS',
+            'V040_FIXTURE_ONLY_NO_REAL_SPOTIFY_NO_PRODUCTION_AUTO_ENABLE_PASS')){
+            if(-not$s.Contains($marker)){throw ('V040_MARKER_MISSING '+$marker)}
+          }
+          Write-Host 'V045_MANIFEST_DPAPI_RECEIPT_RETAINED_CAS_AND_USER_LEDGER_PASS'
+      - name: Ensure main and real Spotify unchanged
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V040_MAIN_CHANGED'}
+          Write-Host 'V040_NO_USER_APP_SETTINGS_INSTALL_RELEASE_OR_PRODUCTION_CHANGES_PASS'

@@ -1,6 +1,8 @@
 # V037: DPAPI-sealed complete official CLI owned-output proof, hosted only.
-# Uses the original V010 central CAS, V033 independent JS proof,
-# V034 pre-native escrow and V035 strict foreign file exclusion.
+# V045: manifest-scoped authenticated native result replacing fixed-4 proof.
+# V044 rejects undeclared output and preserves all foreign XPUI bytes.
+# Historical schema-1 proofs are never silently upgraded.
+. (Join-Path $PSScriptRoot '..\approved-native-manifest-scope\manifest-owned-xpui-v044.ps1')
 # This proves a *synthetic* XPUI precommit state, not installed Spotify.
 function Get-ApprovedNativeOutputProofPathV037 {
  param($Paths,[string]$TransactionId)
@@ -61,24 +63,38 @@ function Get-ApprovedNativeFullOutputEvidenceV037 {
       throw 'V037_ORIGINAL_XPUI_ESCROW_IMAGE_TAMPERED'
    }
    $after=Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui
-   [void](Test-ApprovedNativeXpuiOnlyOwnedTargetChangedV035 -Before $before -After $after -Name $Name)
-   $expected=@(
-     ('spicetify-routes-'+$Name+'.js'),
-     ('spicetify-routes-'+$Name+'.css'),
-     ('spicetify-routes-'+$Name+'.json'),
-     ('extensions/'+$Name+'/extension.js')
-   )
+   $sourcePin=[string]$e.proof.stage_tree_sha256
+   $scope=Test-ApprovedNativeManifestOnlyOwnedTargetChangedV044 -Before $before -After $after -Name $Name -SourceAppPath ([string]$e.stage_path) -ExpectedSourceTreeSha256 $sourcePin
+   if(-not[bool]$scope.ok -or -not[bool]$scope.foreign_xpui_preserved){
+      throw 'V045_OFFICIAL_MANIFEST_SCOPE_DENIED'
+   }
+   $manifest=Get-ApprovedNativeManifestOwnedScopeV044 -Name $Name -SourceAppPath ([string]$e.stage_path)
+   $expected=@($manifest.owned_files)
+   if($expected.Count -lt 3 -or $expected.Count -gt 256 -or
+      [int]$scope.scoped_file_count -ne $expected.Count -or
+      [string]$manifest.manifest_sha256 -cne [string]$scope.manifest_sha256 -or
+      [string]$manifest.source_tree_sha256 -cne $sourcePin){
+      throw 'V045_OFFICIAL_MANIFEST_SET_UNBOUNDED'
+   }
    $files=@()
    foreach($rel in $expected){
      $found=@($after.entries|Where-Object{
-       [string]$_.path -ceq $rel -and [string]$_.type -ceq 'file'})
+       ([string]$_.path).Replace('\','/').ToLowerInvariant() -ceq [string]$rel -and
+       [string]$_.type -ceq 'file'})
      if($found.Count -ne 1 -or
         [string]$found[0].sha256 -cnotmatch '^[a-f0-9]{64}$' -or
         [int64]$found[0].size -le 0){
-       throw 'V037_EXPECTED_OFFICIAL_APP_OWNED_OUTPUT_MISSING'
+       throw 'V045_OFFICIAL_MANIFEST_DECLARED_FILE_MISSING'
      }
-     $files+=([pscustomobject]@{relative=$rel;sha256=[string]$found[0].sha256;bytes=[int64]$found[0].size})
+     $files+=([pscustomobject]@{relative=[string]$rel;sha256=[string]$found[0].sha256;bytes=[int64]$found[0].size})
    }
+   $scopeDigest=Get-CustomAppProductionCrashJournalSha256V010 (
+     (@('manifest-native-owned-v045',$TransactionId,$Name,$sourcePin,
+       [string]$manifest.manifest_sha256,[string]$before.tree_sha256,
+       [string]$after.tree_sha256)+@($files|ForEach-Object{
+         [string]$_.relative+'|'+[string]$_.sha256+'|'+[string]$_.bytes
+       })) -join [char]10
+   )
    $live=Get-ApprovedNativeSagaLiveStateV032 -Paths $p -Evidence $e
    if([string]$live.live_state -cne 'candidate' -or [string]$live.old_state -cne 'original'){
      throw 'V037_V010_ORIGINAL_ROLLBACK_APP_NOT_RETAINED'
@@ -95,6 +111,12 @@ function Get-ApprovedNativeFullOutputEvidenceV037 {
      after_file_count=[int]$after.file_count;after_total_bytes=[int64]$after.total_bytes
      official_binary_sha256='3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'
      approved_files=$files
+     approved_file_count=$files.Count
+     source_tree_sha256=$sourcePin
+     manifest_sha256=[string]$manifest.manifest_sha256
+     manifest_owned_set_sha256=$scopeDigest
+     declared_extension_files=[int]$scope.scoped_extension_files
+     declared_asset_files=[int]$scope.scoped_asset_files
      old_app_retained=$true;spotify_guard_retained=$true
      production_mutation_authorized=$false
    }
@@ -132,7 +154,7 @@ function Read-ApprovedNativeFullOutputReceiptV037 {
      $plain=[Security.Cryptography.ProtectedData]::Unprotect($cipher,$ent,[Security.Cryptography.DataProtectionScope]::CurrentUser)
      $record=[Text.Encoding]::UTF8.GetString($plain)|ConvertFrom-Json -ErrorAction Stop
    }finally{if($null-ne$plain){[Array]::Clear($plain,0,$plain.Length)}}
-   if([int]$record.schema -ne 1 -or
+   if([int]$record.schema -ne 2 -or
      [string]$record.managed_by -cne 'approved-entire-native-output-v037' -or
      [string]$record.transaction_id -cne $TransactionId -or
      [string]$record.name -cne $Name -or
@@ -144,15 +166,20 @@ function Read-ApprovedNativeFullOutputReceiptV037 {
    foreach($field in @('apply_verified_entry_sha256','apply_result_fingerprint',
      'native_apply_start_entry_sha256','native_root','xpui_path',
      'original_xpui_sha256','after_xpui_sha256','after_file_count','after_total_bytes',
-     'official_binary_sha256')){
+     'official_binary_sha256','source_tree_sha256','manifest_sha256',
+     'manifest_owned_set_sha256','declared_extension_files','declared_asset_files',
+     'approved_file_count')){
        if([string]$record.$field -cne [string]$live.$field){
          throw ('V037_DURABLE_POST_NATIVE_EVIDENCE_DRIFT_'+$field)
        }
    }
-   if(@($record.approved_files).Count -ne 4 -or @($live.approved_files).Count -ne 4){
-      throw 'V037_SEALED_OWNED_FILE_SET_WRONG'
+   $count=[int]$live.approved_file_count
+   if($count -lt 3 -or $count -gt 256 -or
+      @($record.approved_files).Count -ne $count -or
+      @($live.approved_files).Count -ne $count){
+      throw 'V045_SEALED_MANIFEST_FILE_COUNT_CHANGED'
    }
-   for($i=0;$i -lt 4;$i++){
+   for($i=0;$i -lt $count;$i++){
      foreach($key in @('relative','sha256','bytes')){
        if([string]$record.approved_files[$i].$key -cne [string]$live.approved_files[$i].$key){
          throw 'V037_COMPLETE_OFFICIAL_FILE_BYTE_OR_IDENTITY_DRIFT'
@@ -164,7 +191,13 @@ function Read-ApprovedNativeFullOutputReceiptV037 {
      phase=[string]$live.phase;journal_entry_sha256=[string]$live.apply_verified_entry_sha256
      after_xpui_sha256=[string]$live.after_xpui_sha256
      original_xpui_sha256=[string]$live.original_xpui_sha256
-     exact_official_owned_files=4;entire_official_output_verified=$true
+     exact_official_owned_files=$count;entire_official_output_verified=$true
+     manifest_scoped_output_verified=$true
+     source_tree_sha256=[string]$live.source_tree_sha256
+     manifest_sha256=[string]$live.manifest_sha256
+     manifest_owned_set_sha256=[string]$live.manifest_owned_set_sha256
+     declared_extension_files=[int]$live.declared_extension_files
+     declared_asset_files=[int]$live.declared_asset_files
      original_xpui_recovery_preimage_retained=$true
      original_custom_app_recovery_retained=$true
      foreign_xpui_untouched=$true
@@ -185,7 +218,7 @@ function Save-ApprovedNativeFullOutputReceiptV037 {
  $data=Get-ApprovedNativeFullOutputEvidenceV037 -WorkRoot $WorkRoot -Name $Name -TokenId $TokenId -ReceiptStore $ReceiptStore -TransactionId $TransactionId -VendorPrivateRoot $VendorPrivateRoot -OfficialExecutable $OfficialExecutable
  $p=Get-ApprovedNativeRecoveryPathsV032 -WorkRoot $WorkRoot -Name $Name -TokenId $TokenId
  $entry=[pscustomobject]@{
-  schema=1;managed_by='approved-entire-native-output-v037'
+  schema=2;managed_by='approved-entire-native-output-v037'
   transaction_id=$TransactionId;token_id=$TokenId;name=$Name
   apply_verified_entry_sha256=$data.apply_verified_entry_sha256
   apply_result_fingerprint=$data.apply_result_fingerprint
@@ -195,7 +228,14 @@ function Save-ApprovedNativeFullOutputReceiptV037 {
   after_xpui_sha256=$data.after_xpui_sha256
   after_file_count=$data.after_file_count;after_total_bytes=$data.after_total_bytes
   official_binary_sha256=$data.official_binary_sha256
-  approved_files=$data.approved_files;production_mutation_authorized=$false
+  approved_files=$data.approved_files
+  approved_file_count=$data.approved_file_count
+  source_tree_sha256=$data.source_tree_sha256
+  manifest_sha256=$data.manifest_sha256
+  manifest_owned_set_sha256=$data.manifest_owned_set_sha256
+  declared_extension_files=$data.declared_extension_files
+  declared_asset_files=$data.declared_asset_files
+  production_mutation_authorized=$false
  }
  $raw=[Text.Encoding]::UTF8.GetBytes(($entry|ConvertTo-Json -Compress -Depth 8))
  Add-Type -AssemblyName System.Security -ErrorAction Stop

@@ -28,6 +28,9 @@ function Invoke-ApprovedNativeRetainedTerminalV039 {
   # values inside an exclusive V032 transaction lease before central CAS.
   $proof=Read-ApprovedNativeFullOutputReceiptV037 -WorkRoot $WorkRoot -Name $Name -TokenId $TokenId -ReceiptStore $ReceiptStore -TransactionId $TransactionId -VendorPrivateRoot $VendorPrivateRoot -OfficialExecutable $OfficialExecutable
   if(-not[bool]$proof.ok -or -not[bool]$proof.entire_official_output_verified -or
+    -not[bool]$proof.manifest_scoped_output_verified -or
+    [int]$proof.exact_official_owned_files -lt 3 -or
+    [string]$proof.manifest_owned_set_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
     [string]$proof.phase -notin @('apply-verified','committed-retained') -or
     [bool]$proof.final_commit_authorized -or [bool]$proof.production_mutation_authorized){
     throw 'V039_WHOLE_NATIVE_OUTPUT_DPAPI_READBACK_REJECTED'
