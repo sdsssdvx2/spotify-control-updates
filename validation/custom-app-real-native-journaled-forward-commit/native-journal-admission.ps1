@@ -24,7 +24,7 @@ function Test-CustomAppRealNativeJournalAdmissionV024 {
     }
     $required=@('Name','LiveAppPath','AllowedRoot','JournalStoreDirectory',
       'ConsumptionStoreDirectory','ExpectedJournalTransactionId',
-      'ExpectedFinalizationFingerprint','Permit','SessionKey','PreparedResult',
+      'ExpectedFinalizationFingerprint','ExpectedGitTreeSha256','Permit','SessionKey','PreparedResult',
       'StageExecutorResult','EvidenceBoundAtomicResult','LifecycleRow',
       'ProvenanceRow','BindingRow','LocalAppDataRoot','AppDataRoot','Now')
     foreach($key in $required){
@@ -104,7 +104,7 @@ function Test-CustomAppRealNativeJournalAdmissionV024 {
        [string]$live.manifest_name -cne [string]$Proof.BindingRow.binding.manifest_name -or
        [string]$old.tree_sha256 -cne [string]$prepared.app_backup_tree_sha256 -or
        [string]$backup.tree_sha256 -cne [string]$prepared.app_backup_tree_sha256 -or
-       [string]$git.tree_sha256 -cne [string]$atomic.preserved_git_tree_sha256 -or
+       [string]$git.tree_sha256 -cne [string]$Proof.ExpectedGitTreeSha256 -or
        [string]$persist.fingerprint -cne [string]$prepared.persistence_fingerprint){
         return (& $deny 'v024-current-whole-tree-backup-git-or-persistence-drift')
     }
