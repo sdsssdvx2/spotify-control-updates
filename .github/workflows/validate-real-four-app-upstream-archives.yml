@@ -1,0 +1,106 @@
+name: Actual ivLyrics release and Pithaya dist archives scoped official refresh (HOLD)
+on:
+  push:
+    branches: [validate/real-four-app-upstream-archives]
+    paths:
+      - 'validation/real-four-app-upstream-archives/**'
+      - '.github/workflows/validate-real-four-app-upstream-archives.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  actual-upstream-archives:
+    runs-on: windows-2025
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.sha }}"
+      - name: Pin unchanged stable production, source bytes and inherited qualified contracts
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='2e49e223e8e199cf22986063fdcb0f9776587ced'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.sha }}' -or
+             (git merge-base $base HEAD).Trim() -cne $base){
+             throw 'V027_SOURCE_BASE_OR_HEAD_CHANGED'
+          }
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+             throw 'V027_OPERATING_STABLE_MAIN_MOVED'
+          }
+          $test='validation/real-four-app-upstream-archives/test-real-upstream-scoped.ps1'
+          $pins=@{
+             "$test"='465237e7890ad530d3c843cf6477df6a3784acbf'
+             'validation/approved-custom-app-native-scope/approved-scoped-native.ps1'='b5266bebd6b8ea87067d1587a5556de85d7a148a'
+             'validation/v0.6.21/addon_policy_registry.ps1.inc'='4cfdaaee5e8401e6e47f266585a0f0201ce9fc30'
+             'validation/v0.6.22/addon_source_adapter_engine.ps1.inc'='1ea670ddf5c2747bcddc15a3c02b357a0dd1733c'
+             'validation/marketplace-source-topology-v0.1.0/marketplace-source-topology.ps1'='fff349f3fc765e2fc187b9ccdc249b48e09df6c8'
+             'validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1'='f8c91f5a566b24c82257742942bdc6fecfe68eb2'
+             'validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1'='3a49ceebd13fa993b086eb2643130fb02c746bd1'
+             'validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1'='e2f2fc656235883d2a82b106289973f6ded409a5'
+             'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1'='83156d9c14e40061a0728d28b582c1e65684a4a2'
+          }
+          foreach($p in $pins.Keys){if((git hash-object $p).Trim() -cne $pins[$p]){throw ('V027_INHERITED_VALIDATED_MODULE_DRIFT '+$p)}}
+          $changes=@(git diff --name-only "$base...HEAD")
+          $allowed=@("$test",'.github/workflows/validate-real-four-app-upstream-archives.yml')
+          if($changes.Count -ne 2 -or @($changes|Where-Object{$_ -notin $allowed}).Count){
+              throw ('V027_UNEXPECTED_PRODUCTION_OR_VALIDATION_CHANGES '+($changes -join ','))
+          }
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $test).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){
+             $errors|Select-Object -First 8|ForEach-Object{Write-Host ("V027_PARSE line="+$_.Extent.StartLineNumber+' '+$_.Message)}
+             throw 'V027_WINPOWERSHELL51_TEST_PARSE_FAILED'
+          }
+          Write-Host 'V027_FROZEN_MAIN_ACTUAL_SOURCE_AND_DEPENDENCIES_PINNED_PASS'
+      - name: Download exact upstream official free Spicetify Windows x64 2.46.4
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'v027-pinned-official-cli'
+          [IO.Directory]::CreateDirectory($dir)|Out-Null
+          $zip=Join-Path $dir 'cli.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip' -OutFile $zip
+          if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f' -or
+             (Get-Item $zip).Length -ne 7795758){throw 'V027_OFFICIAL_SNAPSHOT_ZIP_CHANGED'}
+          $dest=Join-Path $dir 'cli'
+          Expand-Archive -LiteralPath $zip -DestinationPath $dest
+          $binary=@(Get-ChildItem -LiteralPath $dest -Recurse -File -Filter spicetify.exe)
+          if($binary.Count -ne 1 -or
+             (Get-FileHash $binary[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+             throw 'V027_OFFICIAL_UNPACKED_BINARY_CHANGED'
+          }
+          "V027_OFFICIAL_EXE=$($binary[0].FullName)"|Out-File -FilePath $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host 'V027_OFFICIAL_CLI_CODE_BYTES_VERIFIED_PASS'
+      - name: Clone three exact real Pithaya dist commits plus true ivLyrics release zip; safely extract and scoped-refresh
+        shell: powershell
+        timeout-minutes: 30
+        run: |
+          $ErrorActionPreference='Stop'
+          $test='validation/real-four-app-upstream-archives/test-real-upstream-scoped.ps1'
+          $log=Join-Path $env:RUNNER_TEMP 'v027-real-upstream-archives.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test -OfficialExecutable $env:V027_OFFICIAL_EXE *>&1 |
+              Tee-Object -FilePath $log | Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 0){
+              Get-Content -LiteralPath $log -Tail 95|ForEach-Object{Write-Host $_}
+              throw ('V027_ACTUAL_UPSTREAM_ARCHIVE_E2E_FAILED '+$rc)
+          }
+          $all=Get-Content -LiteralPath $log -Raw
+          foreach($marker in @(
+             'V027_REAL_UPSTREAM_ARCHIVE_OFFICIAL_SCOPED_PASS app=better-local-files',
+             'V027_REAL_UPSTREAM_ARCHIVE_OFFICIAL_SCOPED_PASS app=eternal-jukebox',
+             'V027_REAL_UPSTREAM_ARCHIVE_OFFICIAL_SCOPED_PASS app=playlist-maker',
+             'V027_REAL_UPSTREAM_ARCHIVE_OFFICIAL_SCOPED_PASS app=ivLyrics',
+             'V027_ALL_FOUR_ACTUAL_UPSTREAM_SOURCE_ZIPS_SAFE_EXTRACTED_REAL_SCOPED_OUTPUT_PASS',
+             'V027_ONLY_ORIGINAL_PINNED_FREE_CLI_NO_USER_SPOTIFY_NO_HMAC_PERMIT_PRODUCTION_AUTHORITY_FALSE'
+          )){if(-not$all.Contains($marker)){throw ('V027_ONE_REAL_SOURCE_OR_SAFETY_MARKER_MISSING '+$marker)}}
+          Write-Host 'V027_FOUR_ACTUAL_UPSTREAM_DISTRIBUTIONS_FULL_TREE_OFFICIAL_NATIVE_PASS'
+      - name: No operating mutation or new release artifact
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V027_MAIN_CHANGED'}
+          Write-Host 'V027_VALIDATE_ONLY_REAL_UPSTREAM_NO_PRODUCTION_NO_SPOTIFY_INSTALL_PASS'
