@@ -1,0 +1,106 @@
+name: Real upstream scoped refresh after authenticated whole-app ZIP swap
+on:
+  push:
+    branches: [validate/whole-tree-real-scoped-native]
+    paths: ['validation/custom-app-whole-tree-real-scoped-native/**', '.github/workflows/validate-whole-tree-real-scoped-native.yml']
+  pull_request:
+    branches: [validate/native-dual-preintent-restart]
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  native:
+    runs-on: windows-2025
+    timeout-minutes: 130
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"}
+      - name: Immutable lineage and PS 5.1 contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='f2cd5a93b78bc945e01b188d516767bca05f4df9'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}' -or (git merge-base $base HEAD).Trim() -cne $base){throw 'qualified checkout mismatch'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main changed'}
+          $p='validation/custom-app-whole-tree-real-scoped-native'
+          $wf='.github/workflows/validate-whole-tree-real-scoped-native.yml'
+          $changes=@(git diff --name-only "$base...HEAD")
+          if($changes.Count -ne 3 -or @($changes|Where-Object{$_ -notin @("$p/whole-tree-real-scoped-native.ps1","$p/derive_whole_tree_native_test.py",$wf)}).Count){throw 'validated scope widened'}
+          foreach($pin in @(
+            @("$p/whole-tree-real-scoped-native.ps1",'6ae80bfb7d974f1ec85a8380f97342d7d6641505'),
+            @("$p/derive_whole_tree_native_test.py",'528c6e37bf22d05a38dedba1bea27c17d5654aa1'),
+            @('validation/custom-app-production-triple-id-apply-cleanup-e2e-v0.1.0/test_triple_id_apply_cleanup_e2e.ps1','0d36b5781574535fe3fea3b060b1d7c470d18f40')
+          )){if((git hash-object $pin[0]).Trim() -cne $pin[1]){throw ('pinned source drift '+$pin[0])}}
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path "$p/whole-tree-real-scoped-native.ps1").Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|ForEach-Object{Write-Host ("PS51_PARSE_ERROR line="+$_.Extent.StartLineNumber+" msg="+$_.Message)};throw 'module PS51 parse failed'}
+          Write-Host 'WHOLE_TREE_V023_PINNED_PS51_SCOPE_PASS'
+      - name: Restore qualified HMAC fixture dependencies
+        shell: powershell
+        timeout-minutes: 50
+        run: |
+          $ErrorActionPreference='Stop'
+          $prep='validation/custom-app-production-dual-id-new-permit-readiness-v0.1.0/prepare_custom_app_production_dual_id_new_permit_readiness.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $prep -RepoRoot $PWD.Path -RunnerTemp $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'historical HMAC dependencies failed'}
+          Write-Host 'WHOLE_TREE_V023_QUALIFIED_HMAC_DEPENDENCIES_PASS'
+      - name: Fetch exact vendor binary and SHA-256 verify
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP 'v023-cli'
+          [IO.Directory]::CreateDirectory($root)|Out-Null
+          $zip=Join-Path $root 'official.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip' -OutFile $zip
+          if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f' -or (Get-Item $zip).Length -ne 7795758){throw 'official ZIP changed'}
+          $out=Join-Path $root 'out'
+          Expand-Archive -LiteralPath $zip -DestinationPath $out
+          $exes=@(Get-ChildItem -LiteralPath $out -Recurse -File -Filter 'spicetify.exe')
+          if($exes.Count -ne 1 -or (Get-FileHash $exes[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){throw 'official executable changed'}
+          "V023_EXE=$($exes[0].FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host 'WHOLE_TREE_V023_PINNED_OFFICIAL_EXE_PASS'
+      - name: Real ZIP permit and full directory swap then real scoped CLI and retained fake commit
+        shell: powershell
+        timeout-minutes: 110
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          $core="$d/custom-app-production-dual-id-new-permit-reservation-persistence.ps1"
+          $parts=@($core,"$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1","$d/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1")
+          $joined=($parts|ForEach-Object{[IO.File]::ReadAllText((Resolve-Path $_).Path)}) -join [Environment]::NewLine
+          [IO.File]::WriteAllText((Resolve-Path $core).Path,$joined,[Text.UTF8Encoding]::new($false))
+          & python 'validation/custom-app-whole-tree-real-scoped-native/derive_whole_tree_native_test.py'
+          if($LASTEXITCODE -ne 0){throw 'derived verified fixture failed'}
+          $test='validation/custom-app-production-triple-id-apply-cleanup-e2e-v0.1.0/ci_real_scoped_native_after_triple_id_generated.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $test).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|ForEach-Object{Write-Host ("DERIVED_PARSE line="+$_.Extent.StartLineNumber+" "+$_.Message)};throw 'derived PS51 parse failed'}
+          $outer=$env:RUNNER_TEMP;$oldTemp=$env:TEMP;$oldTmp=$env:TMP
+          $sandbox=Join-Path $outer 'v023-test'
+          [IO.Directory]::CreateDirectory($sandbox)|Out-Null
+          $exe=Join-Path $sandbox 'spicetify.exe'
+          [IO.File]::Copy($env:V023_EXE,$exe,$false)
+          $log=Join-Path $outer 'v023-result.log'
+          try{
+            $env:RUNNER_TEMP=$sandbox;$env:TEMP=$sandbox;$env:TMP=$sandbox
+            $env:V023_PINNED_EXE=$exe
+            $ErrorActionPreference='Continue'
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test *>&1 | Tee-Object -FilePath $log | Out-Null
+            $rc=$LASTEXITCODE
+          }finally{
+            $ErrorActionPreference='Stop'
+            $env:RUNNER_TEMP=$outer;$env:TEMP=$oldTemp;$env:TMP=$oldTmp
+            [Environment]::SetEnvironmentVariable('V023_PINNED_EXE',$null,'Process')
+            if([IO.File]::Exists($test)){[IO.File]::Delete($test)}
+          }
+          if($rc -ne 0){Get-Content $log -Tail 85|ForEach-Object{Write-Host $_};throw ('real whole-tree native test failed exit '+$rc)}
+          $logs=Get-Content $log -Raw
+          foreach($marker in @('WHOLE_TREE_V023_REAL_HMAC_STAGE_FULL_DIR_OFFICIAL_SCOPED_REFRESH_PASS','TRIPLE_ID_V023_REAL_ZIP_HMAC_WHOLE_TREE_OFFICIAL_SCOPED_REFRESH_PASS','TRIPLE_ID_REAL_ZIP_FAKE_APPLY_CLEANUP_E2E_PASS cases=9')){
+            if(-not$logs.Contains($marker)){throw ('required vendor or commit proof absent '+$marker)}
+          }
+          Write-Host 'WHOLE_TREE_V023_OFFICIAL_NATIVE_AFTER_HMAC_SWAP_AND_FAKE_COMMIT_VERIFIED_PASS'
+      - name: Frozen production
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main changed'}
+          Write-Host 'WHOLE_TREE_V023_PRODUCTION_UNCHANGED_PASS'
