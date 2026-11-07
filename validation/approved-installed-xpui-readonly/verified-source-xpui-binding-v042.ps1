@@ -21,9 +21,9 @@ function Get-ActualSourceXpuiBindingV042 {
       [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)){
       throw 'V042_HOSTED_FIXTURE_NOT_AUTHORIZED_HERE'
    }
-   $home=Assert-XpuiReadOnlyCanonicalV036 -Path $HostedFixtureRoot -Label 'FIXTURE'
+   $fixtureBase=Assert-XpuiReadOnlyCanonicalV036 -Path $HostedFixtureRoot -Label 'FIXTURE'
    $cli=Assert-XpuiReadOnlyCanonicalV036 -Path $HostedFixtureCliPath -Label 'CLI'
-   $config=Assert-XpuiReadOnlyCanonicalV036 -Path (Join-Path $home 'Roaming\spicetify\config-xpui.ini') -Label 'CONFIG'
+   $config=Assert-XpuiReadOnlyCanonicalV036 -Path (Join-Path $fixtureBase 'Roaming\spicetify\config-xpui.ini') -Label 'CONFIG'
  }else{
    if(-not[string]::IsNullOrWhiteSpace($env:SPICETIFY_CONFIG) -or
       -not[string]::IsNullOrWhiteSpace($HostedFixtureCliPath) -or
