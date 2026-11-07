@@ -1,0 +1,94 @@
+name: V051 current-user private detached recovery integration (HOLD)
+on:
+  push:
+    branches: [validate/private-recovery-staging-HOLD]
+    paths:
+      - 'validation/normal-engine-shared-turnstile/guarded-profile-escrow-v050.ps1'
+      - 'validation/normal-engine-shared-turnstile/private-detached-recovery-v051.ps1'
+      - 'validation/normal-engine-shared-turnstile/private-detached-recovery-child-v051.ps1'
+      - 'validation/normal-engine-shared-turnstile/test-private-detached-recovery-v051.ps1'
+      - '.github/workflows/validate-private-detached-recovery-v051.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  detached-private-recovery:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Exact V050 provenance, isolated files and PowerShell 5.1 syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='4689a8f8873a300e3a702b3cae503f2b34d64323'
+          $main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+             (git merge-base $base HEAD).Trim() -cne $base){throw 'V051_BASE_MISMATCH'}
+          if((git rev-parse origin/main).Trim() -cne $main){throw 'V051_OPERATING_MAIN_CHANGED'}
+          $allowed=@(
+            'validation/normal-engine-shared-turnstile/guarded-profile-escrow-v050.ps1',
+            'validation/normal-engine-shared-turnstile/private-detached-recovery-v051.ps1',
+            'validation/normal-engine-shared-turnstile/private-detached-recovery-child-v051.ps1',
+            'validation/normal-engine-shared-turnstile/test-private-detached-recovery-v051.ps1',
+            '.github/workflows/validate-private-detached-recovery-v051.yml')
+          $changes=@(git diff --name-only "$base...HEAD")
+          if($changes.Count -ne $allowed.Count -or @($changes|Where-Object{$_ -notin $allowed}).Count){
+            throw ('V051_UNRELATED_FILES_CHANGED '+($changes -join '|'))
+          }
+          foreach($file in @($allowed|Where-Object{$_ -like '*.ps1'})){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw ('V051_WINDOWS_PS51_PARSE_FAILED_'+$file+'_'+$errors[0].Message)}
+          }
+          $code=Get-Content 'validation/normal-engine-shared-turnstile/private-detached-recovery-v051.ps1' -Raw
+          foreach($forbidden in @('Start-Process','Invoke-Expression','Invoke-WebRequest',
+            'Invoke-RestMethod','Update-AutoApps','Rollback-LastTransaction',
+            'Commit-LastTransaction','Remove-Item','Open-CustomAppCutoverReadOnlyLeaseV047',
+            'Invoke-ApprovedNativeXpuiEscrowApplyV034')){
+             if($code.Contains($forbidden)){throw ('V051_UNEXPECTED_EXECUTOR_OR_DELETE_'+$forbidden)}
+          }
+          if(-not$code.Contains('V051_EXPLICIT_DETACHED_RECOVERY_AUTHORIZATION_REQUIRED') -or
+             -not$code.Contains('production_mutation_authorized=$false') -or
+             -not$code.Contains("Assert-CustomAppV050PrivateVault -Path ")){
+            throw 'V051_BOUNDARY_OR_NO_AUTHORITY_NOT_VISIBLE'
+          }
+          $v050=Get-Content 'validation/normal-engine-shared-turnstile/guarded-profile-escrow-v050.ps1' -Raw
+          if(-not$v050.Contains('[IO.Directory]::CreateDirectory($p,$acl)') -or
+              $v050.Contains('(Get-Item -LiteralPath $p -Force).SetAccessControl($acl)')){
+             throw 'V051_PRIVATE_VAULT_DACL_NOT_ATOMIC'
+          }
+          Write-Host 'V051_EXACT_PARENT_UNCHANGED_OPERATING_MAIN_AND_DACL_PS51_PASS'
+      - name: Single V050 baseline fixture + V051 standalone reconstruction acceptance
+        shell: powershell
+        timeout-minutes: 9
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v051-recovery-targeted.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/normal-engine-shared-turnstile/test-private-detached-recovery-v051.ps1' *>&1 | Tee-Object -FilePath $log
+          $code=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($code -ne 0){
+             Get-Content $log -Tail 75 | ForEach-Object{Write-Host $_}
+             throw ('V051_HOSTED_RESTORE_TEST_FAILED '+$code)
+          }
+          $output=Get-Content $log -Raw
+          foreach($marker in @(
+            'V050_APPROVED_PROFILE_REAL_LAYOUT_SCOPED_PRIVATE_ESCROW_COMPLETE_PASS',
+            'V051_NO_EXPLICIT_APPROVAL_NO_RECOVERY_BYTES_WRITTEN_PASS',
+            'V051_FULL_CIPHERTEXT_TAMPER_DENIED_BEFORE_ANY_RECOVERY_WRITE_PASS',
+            'V051_INVALID_RECEIPT_AND_OS_LOCK_COLLISION_DENIED_PASS',
+            'V051_FULL_XPUI_APPS_AND_THREE_GUARDS_RECONSTRUCTED_BYTE_EXACT_PASS',
+            'V051_NO_OVERWRITE_AND_INDEPENDENT_OUTPUT_TAMPER_DENIAL_PASS',
+            'V051_ORIGINAL_SPOTIFY_LEGACY_UNKNOWN_APP_AND_BACKUP_UNCHANGED_PASS',
+            'V051_USER_PROFILE_UNTOUCHED_REAL_UPDATE_AND_ROLLBACK_STILL_DISABLED_PASS')){
+             if(-not$output.Contains($marker)){throw ('V051_MISSING_PROOF_'+$marker)}
+          }
+          Write-Host 'V051_PRIVATE_DETACHED_610_FILE_WITH_DPAPI_RESTORE_PASS'
+      - name: No main, release, Spotify, or production enrollment changes
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'V051_OPERATING_MAIN_CHANGED_FINAL'
+          }
+          Write-Host 'V051_NO_USER_SPOTIFY_OR_ACTIVE_ADDON_MANAGER_MUTATION_PASS'
