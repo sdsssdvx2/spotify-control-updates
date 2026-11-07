@@ -1,0 +1,64 @@
+name: Official custom app fallback origin mapping read-only (HOLD)
+on:
+  push:
+    branches: [validate/actual-custom-app-origins-readonly]
+    paths:
+      - 'validation/approved-installed-xpui-readonly/actual-custom-app-origins-v041.ps1'
+      - 'validation/approved-installed-xpui-readonly/test-actual-custom-app-origins-v041.ps1'
+      - '.github/workflows/validate-actual-custom-app-origins-readonly.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  isolated-synthetic-source-roots:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Pin V040 parent, unchanged main and Windows PowerShell 5.1 syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='368648c854d5e09305af442ee9fb66acfc4fa40b'
+          if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+             (git merge-base $parent HEAD).Trim() -cne $parent){throw 'V041_PARENT_CHANGED'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V041_MAIN_CHANGED'}
+          $allowed=@(
+            'validation/approved-installed-xpui-readonly/actual-custom-app-origins-v041.ps1',
+            'validation/approved-installed-xpui-readonly/test-actual-custom-app-origins-v041.ps1',
+            '.github/workflows/validate-actual-custom-app-origins-readonly.yml')
+          $diff=@(git diff --name-only "$parent...HEAD")
+          if($diff.Count -ne 3 -or @($diff|Where-Object{$_ -notin $allowed}).Count){
+            throw ('V041_UNBOUNDED_SOURCE_CHANGE '+($diff -join ','))
+          }
+          foreach($f in @($allowed|Where-Object{$_ -like '*.ps1'})){
+            $t=$null;$e=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$t,[ref]$e)
+            if($e.Count){throw ('V041_POWERSHELL51_PARSE_FAILURE '+$e[0].Message)}
+          }
+          $module=Get-Content $allowed[0] -Raw
+          foreach($danger in @('Invoke-WebRequest','Invoke-RestMethod','Start-Process','Remove-Item','Move-Item','Copy-Item','Set-Item','Set-Content','[IO.Directory]::Delete(','[IO.File]::Delete(','spicetify apply','spicetify restore')){
+            if($module.Contains($danger)){throw ('V041_UNEXPECTED_MUTATING_CODE '+$danger)}
+          }
+          Write-Host 'V041_FROZEN_PARENT_ONLY_READONLY_SOURCE_AND_PS51_SYNTAX_PASS'
+      - name: Synthetic user/CLI-root precedence, nested source and strict negatives
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v041-targeted.log'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/approved-installed-xpui-readonly/test-actual-custom-app-origins-v041.ps1' *>&1 | Tee-Object -FilePath $log
+          if($LASTEXITCODE -ne 0){throw ('V041_TARGETED_CASES_FAILED '+$LASTEXITCODE)}
+          $out=Get-Content $log -Raw
+          foreach($proof in @(
+            'V041_OFFICIAL_PRIMARY_VS_EXECUTABLE_FALLBACK_AND_NESTED_RESOLUTION_PASS',
+            'V041_SHADOWED_USER_PRIMARY_WINS_AND_UNMANAGED_APP_UNTOUCHED_PASS',
+            'V041_INCOMPLETE_MISSING_DUPLICATE_NESTED_AND_OUTSIDE_ROOT_FAIL_CLOSED_PASS',
+            'V041_NO_APP_CONTENT_READ_NO_CONFIG_WRITE_NO_SPOTIFY_NO_PROCESS_NO_NETWORK_PASS')){
+            if(-not$out.Contains($proof)){throw ('V041_EXPECTED_PROOF_MISSING '+$proof)}
+          }
+          Write-Host 'V041_CUSTOMAPP_SOURCE_ORIGIN_DISCOVERY_TARGETED_PASS'
+      - name: Production main unchanged, no installed user enrollment
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V041_MAIN_CHANGED_AFTER_TEST'}
+          Write-Host 'V041_NO_REAL_PROFILE_NO_ACTUAL_CLI_EXECUTION_NO_LEGACY_GATE_ENROLLMENT_PASS'
