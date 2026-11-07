@@ -105,10 +105,19 @@ if(@($nextFuncs).Count -ne $expectedNames.Count -or
    @($nextFuncs|Where-Object{$_.Name -notin $expectedNames}).Count){
  throw 'V047_UNEXPECTED_FUNCTIONS_IN_GENERATED_PROGRAM'
 }
-foreach($old in @($originalFuncs)){
- $matches=@($nextFuncs|Where-Object{$_.Name -ceq $old.Name})
- if($matches.Count -ne 1){throw ('V047_ORIGINAL_FUNCTION_IDENTITY_CHANGED_'+$old.Name)}
- $new=$matches[0]
+# Original generated Addon Manager intentionally includes some repeated
+# helper FUNCTION NAMES (different modules). Preserve each definition in
+# AST document order; do not silently merge or demand name uniqueness for
+# unrelated original helpers. Only the three mutating handlers are unique.
+$newOriginalFuncs=@($nextFuncs|Where-Object{$_.Name -cne 'Enter-CustomAppEngineTurnstileV047'})
+if($newOriginalFuncs.Count -ne $originalFuncs.Count){
+ throw 'V047_ORIGINAL_FUNCTION_SEQUENCE_COUNT_CHANGED'
+}
+for($i=0;$i -lt $originalFuncs.Count;$i++){
+ $old=$originalFuncs[$i];$new=$newOriginalFuncs[$i]
+ if([string]$old.Name -cne [string]$new.Name){
+   throw ('V047_ORIGINAL_FUNCTION_ORDER_CHANGED_AT_'+[string]$i)
+ }
  $pOld=if($null-ne$old.Body.ParamBlock){[string]$old.Body.ParamBlock.Extent.Text}else{''}
  $pNew=if($null-ne$new.Body.ParamBlock){[string]$new.Body.ParamBlock.Extent.Text}else{''}
  if($pOld -cne $pNew){throw ('V047_ORIGINAL_SIGNATURE_CHANGED_'+$old.Name)}
