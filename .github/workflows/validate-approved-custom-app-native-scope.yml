@@ -1,0 +1,84 @@
+name: Four authorized installed-only Custom Apps official scoped native refresh
+on:
+  push:
+    branches: [validate/approved-custom-app-native-scope]
+    paths: ['validation/approved-custom-app-native-scope/**','.github/workflows/validate-approved-custom-app-native-scope.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  scoped-apps:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, ref: "${{ github.sha }}"}
+      - name: Pin no production changes and tested policy and new sources
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='b00233d07ba5207207239642c8dcab9fd5864f38'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.sha }}' -or (git merge-base $base HEAD).Trim() -cne $base){throw 'V026_QUALIFIED_PARENT_CHANGED'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V026_MAIN_CHANGED'}
+          $d='validation/approved-custom-app-native-scope'
+          $pins=@{
+            "$d/approved-scoped-native.ps1"='b5266bebd6b8ea87067d1587a5556de85d7a148a'
+            "$d/test-approved-scoped-native.ps1"='c69a35bdfca645d6ea6cc9b6e465c9c6e16c9b9c'
+            'validation/v0.6.21/addon_policy_registry.ps1.inc'='4cfdaaee5e8401e6e47f266585a0f0201ce9fc30'
+            'validation/v0.6.22/addon_source_adapter_engine.ps1.inc'='1ea670ddf5c2747bcddc15a3c02b357a0dd1733c'
+            'validation/marketplace-source-topology-v0.1.0/marketplace-source-topology.ps1'='fff349f3fc765e2fc187b9ccdc249b48e09df6c8'
+            'validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1'='f8c91f5a566b24c82257742942bdc6fecfe68eb2'
+            'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1'='83156d9c14e40061a0728d28b582c1e65684a4a2'
+          }
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allow=@("$d/approved-scoped-native.ps1","$d/test-approved-scoped-native.ps1",'.github/workflows/validate-approved-custom-app-native-scope.yml')
+          if($changed.Count -ne 3 -or @($changed|Where-Object{$_ -notin $allow}).Count){throw ('V026_UNQUALIFIED_FILE_CHANGE '+($changed -join ','))}
+          foreach($file in $pins.Keys){if((git hash-object $file).Trim() -cne $pins[$file]){throw ('V026_SOURCE_PIN_DRIFT '+$file)}}
+          foreach($file in @("$d/approved-scoped-native.ps1","$d/test-approved-scoped-native.ps1")){
+             $tokens=$null;$errors=$null
+             [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$tokens,[ref]$errors)
+             if($errors.Count){$errors|ForEach-Object{Write-Host ($_.Extent.StartLineNumber.ToString()+': '+$_.Message)};throw 'V026_PS51_PARSE_FAILED'}
+          }
+          Write-Host 'V026_SCOPED_SOURCE_AND_POLICY_PS51_PIN_PASS'
+      - name: Download exact genuine official free Spicetify CLI, no install
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $d=Join-Path $env:RUNNER_TEMP 'v026-upstream-official'
+          [IO.Directory]::CreateDirectory($d)|Out-Null
+          $zip=Join-Path $d 'upstream.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip' -OutFile $zip
+          if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f' -or (Get-Item $zip).Length -ne 7795758){throw 'V026_OFFICIAL_ZIP_DRIFT'}
+          $out=Join-Path $d 'binary'
+          Expand-Archive -LiteralPath $zip -DestinationPath $out
+          $exes=@(Get-ChildItem $out -Recurse -File -Filter 'spicetify.exe')
+          if($exes.Count -ne 1 -or (Get-FileHash $exes[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){throw 'V026_OFFICIAL_EXE_DRIFT'}
+          "V026_OFFICIAL_EXE=$($exes[0].FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host 'V026_GENUINE_PINNED_OFFICIAL_BINARY_PASS'
+      - name: Four real scope refreshes and actual policy negative matrix
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/approved-custom-app-native-scope/test-approved-scoped-native.ps1'
+          $log=Join-Path $env:RUNNER_TEMP 'v026-results.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $p -OfficialExecutable $env:V026_OFFICIAL_EXE *>&1 | Tee-Object -FilePath $log|Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 0){Get-Content $log -Tail 70|ForEach-Object{Write-Host $_};throw ('V026_TARGETED_NATIVE_MATRIX_FAIL '+$rc)}
+          $text=Get-Content $log -Raw
+          foreach($marker in @('V026_EXISTING_REAL_REGISTRY_FOUR_INSTALLED_APPS_AND_PROTECTED_NEGATIVES_PASS',
+                               'V026_OFFICIAL_SCOPED_NATIVE_SOURCE_OUTPUT_PASS app=ivLyrics',
+                               'V026_OFFICIAL_SCOPED_NATIVE_SOURCE_OUTPUT_PASS app=better-local-files',
+                               'V026_OFFICIAL_SCOPED_NATIVE_SOURCE_OUTPUT_PASS app=eternal-jukebox',
+                               'V026_OFFICIAL_SCOPED_NATIVE_SOURCE_OUTPUT_PASS app=playlist-maker',
+                               'V026_FOUR_APPROVED_INSTALLED_ONLY_CUSTOM_APP_REAL_OFFICIAL_SCOPED_OUTPUT_PASS')){
+             if(-not$text.Contains($marker)){throw ('V026_REAL_VENDOR_PROOF_MISSING '+$marker)}
+          }
+          Write-Host 'V026_FOUR_APPROVED_NATIVE_REFRESHES_AND_DENIALS_PASS'
+      - name: Operating main and default authority remain frozen
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V026_MAIN_MOVED'}
+          Write-Host 'V026_NO_RELEASE_NO_PRODUCTION_WRITE_NO_HMAC_AUTHORITY_PASS'
