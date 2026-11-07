@@ -1,0 +1,93 @@
+name: V050 private DPAPI guarded profile escrow readback (HOLD)
+on:
+  push:
+    branches: [validate/guarded-real-profile-escrow-HOLD]
+    paths:
+      - 'validation/normal-engine-shared-turnstile/guarded-profile-escrow-v050.ps1'
+      - 'validation/normal-engine-shared-turnstile/read-guarded-escrow-child-v050.ps1'
+      - 'validation/normal-engine-shared-turnstile/test-guarded-profile-escrow-v050.ps1'
+      - '.github/workflows/validate-guarded-profile-escrow-v050.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  scoped-backup-only:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Exact V049 parent and immutable production main; PowerShell 5.1 parse
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='67eb8bac4dff5c66ddaadaa6e50ff5e44c48e13e'
+          $main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+             (git merge-base $base HEAD).Trim() -cne $base){throw 'V050_UNEXPECTED_PARENT'}
+          if((git rev-parse origin/main).Trim() -cne $main){throw 'V050_OPERATING_MAIN_CHANGED'}
+          $allowed=@(
+            'validation/normal-engine-shared-turnstile/guarded-profile-escrow-v050.ps1',
+            'validation/normal-engine-shared-turnstile/read-guarded-escrow-child-v050.ps1',
+            'validation/normal-engine-shared-turnstile/test-guarded-profile-escrow-v050.ps1',
+            '.github/workflows/validate-guarded-profile-escrow-v050.yml')
+          $changes=@(git diff --name-only "$base...HEAD")
+          if($changes.Count -ne $allowed.Count -or @($changes|Where-Object{$_ -notin $allowed}).Count){
+            throw ('V050_UNRELATED_FILES_CHANGED '+($changes -join '|'))
+          }
+          foreach($f in @($allowed|Where-Object{$_ -like '*.ps1'})){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw ('V050_PS51_PARSE_FAILED '+$f+' '+$errors[0].Message)}
+          }
+          # This backup-only module may create a private vault and copies.
+          # It may NEVER update/delete/move real source or execute a CLI.
+          $subject=Get-Content 'validation/normal-engine-shared-turnstile/guarded-profile-escrow-v050.ps1' -Raw
+          $ts=$null;$errs=$null
+          $ast=[Management.Automation.Language.Parser]::ParseInput($subject,[ref]$ts,[ref]$errs)
+          $calls=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst]},$true)|
+             ForEach-Object{$_.GetCommandName()})
+          foreach($forbidden in @('Start-Process','Remove-Item','Copy-Item','Move-Item','Invoke-Expression',
+            'Invoke-WebRequest','Invoke-RestMethod','Update-AutoApps','Rollback-LastTransaction',
+            'Commit-LastTransaction','Invoke-ApprovedNativeXpuiEscrowApplyV034')){
+            if($forbidden -in $calls){throw ('V050_FORBIDDEN_CALL '+$forbidden)}
+          }
+          foreach($forbidden in @('[IO.File]::Delete','[IO.Directory]::Delete','[IO.File]::Move',
+            '[IO.File]::WriteAllText','[IO.File]::AppendAllText','[IO.File]::WriteAllBytes','[IO.File]::Replace')){
+            if($subject.Contains($forbidden)){throw ('V050_FORBIDDEN_FILE_MUTATION '+$forbidden)}
+          }
+          if(-not$subject.Contains('V050_REAL_PROFILE_PATH_OVERRIDES_FORBIDDEN') -or
+             -not$subject.Contains("production_mutation_authorized=$false")){
+            throw 'V050_REAL_PROFILE_FENCE_OR_NO_AUTHORITY_MISSING'
+          }
+          Write-Host 'V050_EXACT_PARENT_MAIN_PRESERVED_PS51_AND_NO_ORIGINAL_DELETE_PASS'
+      - name: Private backup + independent process DPAPI and source-integrity acceptance
+        shell: powershell
+        timeout-minutes: 7
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v050-targeted.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/normal-engine-shared-turnstile/test-guarded-profile-escrow-v050.ps1' *>&1 | Tee-Object -FilePath $log
+          $code=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($code -ne 0){
+            Get-Content $log -Tail 110|ForEach-Object{Write-Host $_}
+            throw ('V050_HOSTED_SCOPED_BACKUP_TEST_FAILED '+$code)
+          }
+          $logText=Get-Content $log -Raw
+          foreach($proof in @(
+            'V048_REAL_PROFILE_MANIFEST_READONLY_ONLY_NO_CLI_NO_USER_SPOTIFY_PASS',
+            'V050_610FILE_PRIVATE_ACL_DPAPI_CONFIG_PREFS_STATE_BACKUP_PASS',
+            'V050_SEPARATE_PROCESS_DPAPI_READER_WITHOUT_ISSUER_OR_OS_LEASE_PASS',
+            'V050_BACKUP_INDEPENDENT_OF_LATER_LIVE_FILE_CHANGES_PASS',
+            'V050_APP_TREE_PREFS_CIPHERTEXT_AND_RECEIPT_TAMPER_DENIAL_PASS',
+            'V050_PENDING_LEGACY_TRANSACTION_BLOCKED_BEFORE_BACKUP_CREATED_PASS',
+            'V050_ORIGINAL_XPUI_ALL_APPROVED_APPS_UNMANAGED_APP_PREFS_LEGACY_UNCHANGED_PASS',
+            'V050_BACKUP_ONLY_REAL_EXECUTOR_DISABLED_NO_USER_INSTALL_PASS')){
+             if(-not$logText.Contains($proof)){throw ('V050_PROOF_MISSING '+$proof)}
+          }
+          Write-Host 'V050_APPROVED_PROFILE_REAL_LAYOUT_SCOPED_PRIVATE_ESCROW_COMPLETE_PASS'
+      - name: Verify no operating release or main change
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V050_OPERATING_MAIN_CHANGED_LATE'}
+          Write-Host 'V050_USER_SPOTIFY_UNTOUCHED_NO_RELEASE_NO_LIVE_ENGINE_ENABLE_PASS'
