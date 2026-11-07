@@ -127,7 +127,7 @@ function Read-ApprovedPreparedCentralJournalV030 {
        $cons=Read-ApprovedLiveHmacConsumedReceiptV029 -Store $ReceiptStore -TokenId $TokenId
        if(-not[bool]$cons.ok -or -not[bool]$cons.single_use_consumed -or
           [string]$cons.name -cne $Name -or
-          [string]$cons.runtime_tree_sha256 -cne [string]$record.stage_tree_sha256 -or
+          [string]$cons.runtime_tree_sha256 -cne [string]$record.stage_runtime_tree_sha256 -or
           [string]$cons.source_provenance_sha256 -cne [string]$record.provenance_sha256){
            throw 'V030_REAL_CONSUMPTION_RECEIPT_DRIFT'
        }
@@ -150,7 +150,7 @@ function Read-ApprovedPreparedCentralJournalV030 {
        $stagedFull=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$stagePaths.stage)
        if(-not[bool]$staged.safe -or -not[bool]$staged.installable -or
           [string]$staged.manifest_name -cne [string]$record.manifest_name -or
-          [string]$staged.tree_sha256 -cne [string]$record.stage_tree_sha256 -or
+          [string]$staged.tree_sha256 -cne [string]$record.stage_runtime_tree_sha256 -or
           [string]$stagedFull.tree_sha256 -cne [string]$record.stage_tree_sha256 -or
           [int]$stagedFull.file_count -ne [int]$record.stage_file_count -or
           [int64]$stagedFull.total_bytes -ne [int64]$record.stage_total_bytes){
@@ -206,8 +206,11 @@ function Invoke-ApprovedHmacToPreparedCentralJournalV030 {
     $before=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$p.live)
     $persistBefore=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$p.persist)
     $stageBefore=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$Acquired.stage_path)
-    if([string]$stageBefore.tree_sha256 -cne [string]$stage.tree_sha256){
-        throw 'V030_REMOTE_STAGE_FULL_TREE_NOT_SAME_AS_AUTHENTICATED_RUNTIME'
+    # Source runtime digest hashes files only; V010 also includes directory
+    # rows. Preserve BOTH instead of wrongly requiring hash equality.
+    if([string]$stage.tree_sha256 -cne [string]$cons.runtime_tree_sha256 -or
+       [string]$stageBefore.tree_sha256 -cnotmatch '^[a-f0-9]{64}$'){
+       throw 'V046_SOURCE_RUNTIME_OR_FULL_TREE_NOT_AUTHENTICATED'
     }
     [IO.Directory]::CreateDirectory([string]$p.transaction)|Out-Null
     $appBackup=Copy-CustomAppAtomicTreeV010 -Source ([string]$p.live) -Destination ([string]$p.app_backup)
@@ -248,7 +251,8 @@ function Invoke-ApprovedHmacToPreparedCentralJournalV030 {
        manifest_name=[string]$stage.manifest_name
        stage_file_count=[int]$stageBefore.file_count
        stage_total_bytes=[int64]$stageBefore.total_bytes
-       stage_tree_sha256=[string]$stage.tree_sha256
+       stage_tree_sha256=[string]$stageBefore.tree_sha256
+       stage_runtime_tree_sha256=[string]$stage.tree_sha256
        live_tree_sha256=[string]$before.tree_sha256
        persistence_tree_sha256=[string]$persistBefore.tree_sha256
        stage_fingerprint=$stageFp;preparation_fingerprint=$prepFp

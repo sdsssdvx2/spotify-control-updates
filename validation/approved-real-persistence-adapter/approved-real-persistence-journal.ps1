@@ -60,7 +60,7 @@ function Read-ApprovedRealPersistPreparedV031 {
        $receipt=Read-ApprovedLiveHmacConsumedReceiptV029 -Store $ReceiptStore -TokenId $TokenId
        if(-not[bool]$receipt.ok -or -not[bool]$receipt.single_use_consumed -or
           [string]$receipt.name -cne $Name -or
-          [string]$receipt.runtime_tree_sha256 -cne [string]$proof.stage_tree_sha256 -or
+          [string]$receipt.runtime_tree_sha256 -cne [string]$proof.stage_runtime_tree_sha256 -or
           [string]$receipt.source_provenance_sha256 -cne [string]$proof.source_provenance_sha256){
            throw 'V031_SPENT_GENUINE_SOURCE_HMAC_DID_NOT_MATCH'
        }
@@ -74,11 +74,13 @@ function Read-ApprovedRealPersistPreparedV031 {
            throw 'V031_GITHUB_SOURCE_ZIP_OR_WORKSPACE_CHANGED'
        }
        $stage=Get-CustomAppLocalRuntimeBaseline -Name $Name -AppPath ([string]$paths.stage)
+       $stageFull=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$paths.stage)
        $live=Get-CustomAppLocalRuntimeBaseline -Name $Name -AppPath ([string]$p.live)
        $liveFull=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$p.live)
        $backup=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$p.app_backup)
        if(-not[bool]$stage.safe -or -not[bool]$stage.installable -or
-          [string]$stage.tree_sha256 -cne [string]$proof.stage_tree_sha256 -or
+          [string]$stage.tree_sha256 -cne [string]$proof.stage_runtime_tree_sha256 -or
+          [string]$stageFull.tree_sha256 -cne [string]$proof.stage_tree_sha256 -or
           [string]$stage.manifest_name -cne [string]$proof.manifest_name -or
           [string]$live.manifest_name -cne [string]$stage.manifest_name -or
           [string]$liveFull.tree_sha256 -cne [string]$proof.original_tree_sha256 -or
@@ -144,8 +146,9 @@ function Invoke-ApprovedRealPersistPreparedV031 {
     }
     $oldTree=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$p.live)
     $newTree=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$Acquired.stage_path)
-    if([string]$newTree.tree_sha256 -cne [string]$new.tree_sha256){
-       throw 'V031_SIGNED_RUNTIME_AND_FULL_CANDIDATE_TREE_DIFFER'
+    if([string]$new.tree_sha256 -cne [string]$Permit.runtime_tree_sha256 -or
+       [string]$newTree.tree_sha256 -cnotmatch '^[a-f0-9]{64}$'){
+       throw 'V046_SIGNED_RUNTIME_OR_FULL_CANDIDATE_SOURCE_INVALID'
     }
     [IO.Directory]::CreateDirectory([string]$p.transaction)|Out-Null
     $copied=Copy-CustomAppAtomicTreeV010 -Source ([string]$p.live) -Destination ([string]$p.app_backup)
@@ -188,6 +191,7 @@ function Invoke-ApprovedRealPersistPreparedV031 {
        stage_fingerprint=$stageFp;preparation_fingerprint=$prepFp
        source_provenance_sha256=[string]$Permit.source_provenance_sha256
        stage_tree_sha256=[string]$newTree.tree_sha256
+       stage_runtime_tree_sha256=[string]$new.tree_sha256
        original_tree_sha256=[string]$oldTree.tree_sha256
        archive_sha256=[string]$Acquired.archive_sha256
        manifest_name=[string]$new.manifest_name

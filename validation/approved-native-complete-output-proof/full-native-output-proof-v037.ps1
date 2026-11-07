@@ -66,11 +66,12 @@ function Get-ApprovedNativeFullOutputEvidenceV037 {
    # The authenticated release's runtime SHA hashes all FILES; V010
    # additionally hashes directory rows. Both must be preserved, not
    # compared as if they were the same algorithm.
-   $runtimePin=[string]$e.proof.stage_tree_sha256
+   $runtimePin=[string]$e.proof.stage_runtime_tree_sha256
+   $sourcePin=[string]$e.proof.stage_tree_sha256
    $completeStage=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$e.stage_path)
-   $sourcePin=[string]$completeStage.tree_sha256
    if($runtimePin -cnotmatch '^[a-f0-9]{64}$' -or
       $sourcePin -cnotmatch '^[a-f0-9]{64}$' -or
+      [string]$completeStage.tree_sha256 -cne $sourcePin -or
       [int]$completeStage.file_count -lt 2){
       throw 'V045_SOURCE_RUNTIME_OR_FULL_TREE_PIN_INVALID'
    }

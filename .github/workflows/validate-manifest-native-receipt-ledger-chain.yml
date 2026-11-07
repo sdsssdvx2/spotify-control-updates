@@ -26,6 +26,10 @@ jobs:
              (git merge-base $parent HEAD).Trim() -cne $parent){throw 'V040_PARENT_CHANGED'}
           if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V040_MAIN_CHANGED'}
           $allowed=@(
+           'validation/approved-hmac-to-prepared-central-journal/approved-prepared-journal.ps1',
+           'validation/approved-real-persistence-adapter/approved-real-persistence-journal.ps1',
+           'validation/approved-real-native-journaled-swap-recovery/approved-native-journal-saga.ps1',
+           'validation/approved-real-native-verified-readback/verified-official-readback-v033.ps1',
            'validation/approved-native-complete-output-proof/full-native-output-proof-v037.ps1',
            'validation/approved-native-retained-terminal/retained-terminal-v039.ps1',
            'validation/approved-native-retained-user-transaction/native-retained-ledger-v040.ps1',

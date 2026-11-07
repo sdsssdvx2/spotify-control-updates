@@ -58,7 +58,7 @@ function Read-ApprovedNativeSagaRecoveryEvidenceV032 {
     $spent=Read-ApprovedLiveHmacConsumedReceiptV029 -Store $ReceiptStore -TokenId $TokenId
     if(-not[bool]$spent.ok -or -not[bool]$spent.single_use_consumed -or
        [string]$spent.name -cne $Name -or
-       [string]$spent.runtime_tree_sha256 -cne [string]$proof.stage_tree_sha256 -or
+       [string]$spent.runtime_tree_sha256 -cne [string]$proof.stage_runtime_tree_sha256 -or
        [string]$spent.source_provenance_sha256 -cne [string]$proof.source_provenance_sha256){
         throw 'V032_ORIGINAL_DURABLY_CONSUMED_HMAC_SOURCE_CHANGED'
     }
@@ -71,8 +71,10 @@ function Read-ApprovedNativeSagaRecoveryEvidenceV032 {
         throw 'V032_OFFICIAL_SOURCE_ZIP_CHANGED_SINCE_PREPARED'
     }
     $stage=Get-CustomAppLocalRuntimeBaseline -Name $Name -AppPath ([string]$staged.stage)
+    $fullStage=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$staged.stage)
     if(-not[bool]$stage.safe -or -not[bool]$stage.installable -or
-       [string]$stage.tree_sha256 -cne [string]$proof.stage_tree_sha256 -or
+       [string]$stage.tree_sha256 -cne [string]$proof.stage_runtime_tree_sha256 -or
+       [string]$fullStage.tree_sha256 -cne [string]$proof.stage_tree_sha256 -or
        [string]$stage.manifest_name -cne [string]$proof.manifest_name){
         throw 'V032_PREPARED_AUTHENTIC_SOURCE_FULL_TREE_CHANGED'
     }
@@ -230,7 +232,7 @@ function Invoke-ApprovedNativeJournalApplyV032 {
         if([int64]$e.journal.revision -ne 0 -or [string]$e.journal.entry.phase -cne 'prepared'){
            throw 'V032_CENTRAL_JOURNAL_ALREADY_ADVANCED'
         }
-        if([string]$e.proof.stage_tree_sha256 -cne [string]$Acquired.runtime_tree_sha256 -or
+        if([string]$e.proof.stage_runtime_tree_sha256 -cne [string]$Acquired.runtime_tree_sha256 -or
            [string]$e.proof.source_provenance_sha256 -cne [string]$Acquired.source_provenance_sha256){
            throw 'V032_SIGNED_ACTUAL_SOURCE_TO_PREPARED_RECEIPT_DRIFT'
         }
@@ -301,12 +303,12 @@ function Invoke-ApprovedNativeJournalApplyV032 {
         if($FailurePoint -ceq 'before-official-cli'){
             throw 'V032_INJECTED_CRASH_AFTER_APPLY_STARTING_BARRIER'
         }
-        $vendor=Invoke-ApprovedCustomAppScopedNativeHostedV026 -Item $Item -CandidateAppPath ([string]$p.live) -ExpectedRuntimeTreeSha256 ([string]$e.proof.stage_tree_sha256) -OfficialExecutable $OfficialExecutable -PrivateRoot $VendorPrivateRoot -NativePreLaunchGuard $NativePreLaunchGuard
+        $vendor=Invoke-ApprovedCustomAppScopedNativeHostedV026 -Item $Item -CandidateAppPath ([string]$p.live) -ExpectedRuntimeTreeSha256 ([string]$e.proof.stage_runtime_tree_sha256) -OfficialExecutable $OfficialExecutable -PrivateRoot $VendorPrivateRoot -NativePreLaunchGuard $NativePreLaunchGuard
         if(-not[bool]$vendor.ok -or
            -not[bool]$vendor.vendor_started -or
            -not[bool]$vendor.official_native_scoped_output_verified -or
            [string]$vendor.name -cne $name -or
-           [string]$vendor.runtime_tree_sha256 -cne [string]$e.proof.stage_tree_sha256 -or
+           [string]$vendor.runtime_tree_sha256 -cne [string]$e.proof.stage_runtime_tree_sha256 -or
            [string]$vendor.official_binary_sha256 -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db' -or
            [string]$vendor.target_xpui_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
            [bool]$vendor.production_mutation_authorized){

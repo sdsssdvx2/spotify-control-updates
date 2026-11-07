@@ -81,7 +81,7 @@ function Test-ApprovedNativeAppliedReadbackV033 {
   }
   $copy=Get-CustomAppLocalRuntimeBaseline -Name $Name -AppPath $clone
   if(-not[bool]$copy.safe -or -not[bool]$copy.installable -or
-    [string]$copy.tree_sha256 -cne [string]$e.proof.stage_tree_sha256){
+    [string]$copy.tree_sha256 -cne [string]$e.proof.stage_runtime_tree_sha256){
     throw 'V033_OFFICIAL_CLONE_NOT_APPROVED_FULL_TREE'
   }
   # Journal source is normalized to lowercase, native receipt is original-case.
@@ -92,7 +92,7 @@ function Test-ApprovedNativeAppliedReadbackV033 {
   $th=(Get-FileHash $target -Algorithm SHA256).Hash.ToLowerInvariant()
   $expected=Get-CustomAppProductionCrashJournalSha256V010 (@(
     'v032-real-official-pinned-scoped-output',$TransactionId,$Name,
-    $nativeSource,[string]$e.proof.stage_tree_sha256,
+    $nativeSource,[string]$e.proof.stage_runtime_tree_sha256,
     $pin,$th,[string]$e.proof.persistence_fingerprint
   ) -join ([char]10))
   if([string]$j.apply_result_fingerprint -cne $expected){
