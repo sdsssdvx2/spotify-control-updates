@@ -52,10 +52,15 @@ function Test-ApprovedNativeAppliedReadbackV033 {
     [string]$copy.tree_sha256 -cne [string]$e.proof.stage_tree_sha256){
     throw 'V033_OFFICIAL_CLONE_NOT_APPROVED_FULL_TREE'
   }
+  # Journal source is normalized to lowercase, native receipt is original-case.
+  $nativeSource=if($Name -ceq 'ivLyrics'){'ivLis-Studio/ivLyrics'}else{'Pithaya/spicetify-apps-dist'}
+  if([string]$e.proof.source -cne $nativeSource.ToLowerInvariant()){
+    throw 'V033_NATIVE_SOURCE_AND_SIGNED_JOURNAL_DISAGREE'
+  }
   $th=(Get-FileHash $target -Algorithm SHA256).Hash.ToLowerInvariant()
   $expected=Get-CustomAppProductionCrashJournalSha256V010 (@(
     'v032-real-official-pinned-scoped-output',$TransactionId,$Name,
-    [string]$e.proof.source,[string]$e.proof.stage_tree_sha256,
+    $nativeSource,[string]$e.proof.stage_tree_sha256,
     $pin,$th,[string]$e.proof.persistence_fingerprint
   ) -join ([char]10))
   if([string]$j.apply_result_fingerprint -cne $expected){
