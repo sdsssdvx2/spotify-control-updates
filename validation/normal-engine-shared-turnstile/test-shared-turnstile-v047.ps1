@@ -123,3 +123,45 @@ try{
  }
 }
 Write-Host 'V047_EXISTING_LEGACY_NO_NEW_ENGINE_START_OR_INSTALLED_SPOTIFY_TOUCH_PASS'
+
+# Close the former V046 standalone readiness gap: the new candidate must
+# recheck the SAME real profile snapshot under the SAME lock used by
+# generated old Update/Commit/Rollback. Reuse the already qualified hosted
+# V046 source+XPUI fixture, without downloading or modifying real Spotify.
+. (Join-Path $PSScriptRoot '..\normal-engine-cutover-readonly/test-cutover-admission-v046.ps1')
+. (Join-Path $PSScriptRoot 'locked-cutover-admission-v047.ps1')
+$admission=Get-CustomAppCutoverReadOnlyAdmissionV046 @fixtureArgs
+Assert-V047 ($admission.status -ceq 'observed-readonly' -and
+ $admission.profile_sha256 -cmatch '^[a-f0-9]{64}
+) 'V046_FIXTURE_NOT_COHERENT_AFTER_ADMISSION_TESTS'
+$expected=[string]$admission.profile_sha256
+$session=Open-CustomAppCutoverReadOnlyLeaseV047 -ExpectedProfileSha256 $expected @fixtureArgs
+Assert-V047 ($session.status -ceq 'locked-readonly' -and
+ $session.lock_handle -is [IO.FileStream] -and
+ $session.binding_sha256 -ceq $expected -and
+ $session.cooperative_legacy_engine_lease_held -and
+ -not$session.older_unpatched_processes_excluded -and
+ -not$session.production_mutation_authorized -and
+ -not$session.enrollment_authorized -and
+ -not$session.backup_preimage_durable) 'NEW_ENGINE_LOCKED_ADMISSION_GRANTED_UNQUALIFIED_AUTHORITY'
+$childBlocked=Invoke-Child-V047 -Probe $childPath -Module $modulePath -HostedRoot (Join-Path $root 'Local')
+Assert-V047 ($childBlocked -eq 17) 'OLD_ENGINE_CAN_ENTER_WHILE_NEW_CUTOVER_HOLDS_SAME_LEASE'
+$session.lock_handle.Dispose()
+Assert-V047 ((Invoke-Child-V047 -Probe $childPath -Module $modulePath -HostedRoot (Join-Path $root 'Local')) -eq 0) 'NEW_CUTOVER_LEASE_NOT_RELEASED'
+Write-Host 'V047_LOCKED_PROFILE_ADMISSION_RECHECK_AND_CROSS_ENGINE_EXCLUSIVITY_PASS'
+[IO.File]::WriteAllText($pending,'{"status":"awaiting-apply"}')
+try{
+ Must-Throw-V047 {Open-CustomAppCutoverReadOnlyLeaseV047 -ExpectedProfileSha256 $expected @fixtureArgs} 'V047_LOCKED_PROFILE_NOT_QUALIFIED'
+ Assert-V047 ([IO.File]::Exists($pending)) 'NEW_ADMISSION_ERASED_OLD_PENDING_TRANSACTION'
+}finally{[IO.File]::Delete($pending)}
+$defer=@{};foreach($k in $fixtureArgs.Keys){$defer[$k]=$fixtureArgs[$k]}
+$defer.SimulatedSpotifyRunning=$true
+Must-Throw-V047 {Open-CustomAppCutoverReadOnlyLeaseV047 -ExpectedProfileSha256 $expected @defer} 'V047_LOCKED_PROFILE_NOT_QUALIFIED'
+Must-Throw-V047 {Open-CustomAppCutoverReadOnlyLeaseV047 -ExpectedProfileSha256 ('0'*64) @fixtureArgs} 'V047_LOCKED_PROFILE_NOT_QUALIFIED'
+Assert-V047 ((Invoke-Child-V047 -Probe $childPath -Module $modulePath -HostedRoot (Join-Path $root 'Local')) -eq 0) 'FAILED_NEW_ADMISSION_LEAKED_EXCLUSIVE_LOCK'
+Write-Host 'V047_PENDING_LEGACY_RUNNING_SPOTIFY_AND_CHANGED_BINDING_RELEASE_LOCK_PASS'
+Assert-V047 (-not[IO.Directory]::Exists((Join-Path $root 'Local\SpotifyControlUpdates-CustomApp-State')) -and
+ -not[IO.File]::Exists($pending) -and
+ (Get-FileHash $state -Algorithm SHA256).Hash -ceq $legacyStart) 'NEW_ENGINE_ADMISSION_WROTE_ACTIVE_OR_OLD_STATE'
+Write-Host 'V047_NEW_ENGINE_NO_ENROLLMENT_NO_SPOTIFY_CHANGE_NO_USER_MUTATION_PASS'
+

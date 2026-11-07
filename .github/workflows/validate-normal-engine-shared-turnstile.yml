@@ -26,11 +26,12 @@ jobs:
           }
           $allowed=@(
            'validation/normal-engine-shared-turnstile/engine-turnstile-v047.ps1',
+           'validation/normal-engine-shared-turnstile/locked-cutover-admission-v047.ps1',
            'validation/normal-engine-shared-turnstile/build-locked-addon-v047.ps1',
            'validation/normal-engine-shared-turnstile/test-shared-turnstile-v047.ps1',
            '.github/workflows/validate-normal-engine-shared-turnstile.yml')
           $changed=@(git diff --name-only "$parent...HEAD")
-          if($changed.Count -ne 4 -or @($changed|Where-Object{$_ -notin $allowed}).Count){
+          if($changed.Count -ne 5 -or @($changed|Where-Object{$_ -notin $allowed}).Count){
             throw ('V047_SCOPE_CHANGED '+($changed -join ','))
           }
           foreach($file in @($allowed|Where-Object{$_ -like '*.ps1'})){
@@ -88,7 +89,10 @@ jobs:
             'V047_CROSS_PROCESS_FILESHARE_EXCLUSIVITY_RELEASE_AND_REOPEN_PASS',
             'V047_MALFORMED_LOCK_FAIL_CLOSED_AND_NO_FORCED_DELETE_PASS',
             'V047_ACTUAL_ADDON_ACTION_UPDATE_IN_LEASE_THEN_OLD_NEW_FENCE_DENIED_PASS',
-            'V047_EXISTING_LEGACY_NO_NEW_ENGINE_START_OR_INSTALLED_SPOTIFY_TOUCH_PASS')){
+            'V047_EXISTING_LEGACY_NO_NEW_ENGINE_START_OR_INSTALLED_SPOTIFY_TOUCH_PASS',
+            'V047_LOCKED_PROFILE_ADMISSION_RECHECK_AND_CROSS_ENGINE_EXCLUSIVITY_PASS',
+            'V047_PENDING_LEGACY_RUNNING_SPOTIFY_AND_CHANGED_BINDING_RELEASE_LOCK_PASS',
+            'V047_NEW_ENGINE_NO_ENROLLMENT_NO_SPOTIFY_CHANGE_NO_USER_MUTATION_PASS')){
               if(-not$s.Contains($marker)){throw ('V047_MISSING_PROOF '+$marker)}
           }
           Write-Host 'V047_ACTUAL_PROGRAM_SHARED_TURNSTILE_TARGETED_WINDOWS_PASS'
