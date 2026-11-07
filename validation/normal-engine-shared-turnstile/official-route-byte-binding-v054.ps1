@@ -54,7 +54,9 @@ function Test-CustomAppV054OfficialSourceBoundRoutes {
  $stream=New-Object IO.MemoryStream
  $sha=[Security.Cryptography.SHA256]::Create()
  try {
-   $prefix='((e)=>{const t=e.rspackChunk||e.rspackChunkclient_web||e.webpackChunkclient_web||[];return e.rspackChunk=e.rspackChunk||t,e.rspackChunkclient_web=e.rspackChunkclient_web||t,e.webpackChunkclient_web=e.webpackChunkclient_web||t,t})("undefined"!=typeof self?self:globalThis).push([["'+$n+'"],{"'+$n+'":(e,t,n)=>{'+[char]10+'"use strict";n.r(t),n.d(t,{default:()=>render});'+[char]10
+   # Upstream RefreshApps passes appName='spicetify-routes-'+app to BOTH
+   # fmt.Sprintf identifiers; the Go source never uses the bare app id here.
+   $prefix='((e)=>{const t=e.rspackChunk||e.rspackChunkclient_web||e.webpackChunkclient_web||[];return e.rspackChunk=e.rspackChunk||t,e.rspackChunkclient_web=e.rspackChunkclient_web||t,e.webpackChunkclient_web=e.webpackChunkclient_web||t,t})("undefined"!=typeof self?self:globalThis).push([["'+$r+'"],{"'+$r+'":(e,t,n)=>{'+[char]10+'"use strict";n.r(t),n.d(t,{default:()=>render});'+[char]10
    $pre=$utf8.GetBytes($prefix)
    $stream.Write($pre,0,$pre.Length)
    $main=[IO.File]::ReadAllBytes($idx)
