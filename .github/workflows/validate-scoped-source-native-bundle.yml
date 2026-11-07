@@ -1,12 +1,12 @@
 name: Experimental single-source swap plus real official Spicetify refresh and independent dual rollback
 on:
   push:
-    branches: [validate/scoped-source-native-bundle-recovery]
+    branches: [validate/scoped-native-pre-cas-preflight]
     paths:
       - 'validation/custom-app-scoped-source-native-bundle/**'
       - '.github/workflows/validate-scoped-source-native-bundle.yml'
   pull_request:
-    branches: [validate/spicetify-native-inert-addon]
+    branches: [validate/scoped-source-native-bundle-recovery]
     paths:
       - 'validation/custom-app-scoped-source-native-bundle/**'
       - '.github/workflows/validate-scoped-source-native-bundle.yml'
@@ -73,8 +73,8 @@ jobs:
           }
           $bundle='validation/custom-app-scoped-source-native-bundle/source-native-bundle.ps1'
           $bundleTest='validation/custom-app-scoped-source-native-bundle/test_source_native_bundle.ps1'
-          if((git hash-object $bundle).Trim() -cne '93345e2bb5b64c69104a786453234ccae9f3e9fb' -or
-             (git hash-object $bundleTest).Trim() -cne '47e3bd6a8426db53c9f9eda08daf9b07890f7b28'){
+          if((git hash-object $bundle).Trim() -cne 'eaf34efa55468d646471ab93cb64f2bb4c340b3d' -or
+             (git hash-object $bundleTest).Trim() -cne '19ff013eb03d105513e32280080dba46782012df'){
             throw 'V020 synthetic source+native bundle file hash drift'
           }
           foreach($file in @($bundle,$bundleTest)){
