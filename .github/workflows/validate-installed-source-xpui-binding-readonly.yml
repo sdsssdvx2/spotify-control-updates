@@ -1,0 +1,65 @@
+name: Installed physical app source and XPUI hash binding (read-only HOLD)
+on:
+  push:
+    branches: [validate/installed-source-xpui-binding-readonly]
+    paths:
+      - 'validation/approved-installed-xpui-readonly/verified-source-xpui-binding-v042.ps1'
+      - 'validation/approved-installed-xpui-readonly/test-source-xpui-binding-v042.ps1'
+      - '.github/workflows/validate-installed-source-xpui-binding-readonly.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  pinned-physical-origin-with-whole-xpui:
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Exact V041 parent, frozen main, PowerShell 5.1 parse and no mutation
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='f0dce849e8c2235876af3069c5a7fc7ddb9d8b25'
+          if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+            (git merge-base $parent HEAD).Trim() -cne $parent){throw 'V042_PARENT_MISMATCH'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V042_MAIN_CHANGED'}
+          $allowed=@(
+            'validation/approved-installed-xpui-readonly/verified-source-xpui-binding-v042.ps1',
+            'validation/approved-installed-xpui-readonly/test-source-xpui-binding-v042.ps1',
+            '.github/workflows/validate-installed-source-xpui-binding-readonly.yml')
+          $changed=@(git diff --name-only "$parent...HEAD")
+          if($changed.Count -ne 3 -or @($changed|Where-Object{$_ -notin $allowed}).Count){
+            throw ('V042_SOURCE_CHANGE_SCOPE '+($changed -join ','))
+          }
+          foreach($file in @($allowed|Where-Object{$_ -like '*.ps1'})){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw ('V042_POWERSHELL_SYNTAX '+$errors[0].Message)}
+          }
+          $source=Get-Content $allowed[0] -Raw
+          foreach($deny in @('Remove-Item','Set-Content','Set-Item','Move-Item','Copy-Item','Start-Process','Invoke-WebRequest','Invoke-RestMethod','[IO.File]::Write','[IO.Directory]::Delete','[IO.File]::Delete')){
+            if($source.Contains($deny)){throw ('V042_READONLY_CANDIDATE_HAS_SIDE_EFFECT '+$deny)}
+          }
+          Write-Host 'V042_FROZEN_MAIN_ORIGINAL_SOURCE_AND_WINDOWS_PS51_SYNTAX_PASS'
+      - name: Synthetic physical executable-root profile, hash pinning, ownership and unknown-app isolation
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v042-bind.log'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/approved-installed-xpui-readonly/test-source-xpui-binding-v042.ps1' *>&1 | Tee-Object -FilePath $log
+          if($LASTEXITCODE -ne 0){throw ('V042_TARGETED_TEST_FAILED '+$LASTEXITCODE)}
+          $all=Get-Content $log -Raw
+          foreach($required in @(
+            'V042_THREE_EXECUTABLE_ORIGIN_SOURCES_CONFIG_AND_WHOLE_XPUI_BOUND_PASS',
+            'V042_APPROVED_SOURCE_FOREIGN_XPUI_AND_CONFIG_DRIFT_REJECTED_PASS',
+            'V042_UNKNOWN_CONFIGURED_APP_UNMANAGED_AND_UNTOUCHED_BY_ATTESTER_PASS',
+            'V042_IDENTICAL_CONTENT_SOURCE_ORIGIN_SHADOW_FAIL_CLOSED_PASS',
+            'V042_NO_NETWORK_NO_EXECUTABLE_NO_PROFILE_WRITE_NO_PRODUCTION_AUTHORITY_PASS')){
+            if(-not$all.Contains($required)){throw ('V042_MISSING_PROOF '+$required)}
+          }
+          Write-Host 'V042_READONLY_PHYSICAL_INSTALLED_SOURCE_PREMUTATION_ATTESTATION_PASS'
+      - name: Verify no write to real Spotify and no enrollment
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V042_FINAL_MAIN_CHANGED'}
+          Write-Host 'V042_CANDIDATE_HOSTED_ONLY_NO_REAL_SPOTIFY_OR_LEDGER_PASS'
