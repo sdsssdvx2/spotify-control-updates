@@ -1,9 +1,10 @@
-name: V050 private DPAPI guarded profile escrow readback (HOLD)
+name: V050 guarded profile escrow and detached DPAPI cold restore (HOLD)
 on:
   push:
-    branches: [validate/guarded-real-profile-escrow-HOLD]
+    branches: [validate/guarded-profile-detached-recovery]
     paths:
       - 'validation/normal-engine-shared-turnstile/guarded-profile-escrow-v050.ps1'
+      - 'validation/normal-engine-shared-turnstile/hosted-detached-restore-v050.ps1'
       - 'validation/normal-engine-shared-turnstile/read-guarded-escrow-child-v050.ps1'
       - 'validation/normal-engine-shared-turnstile/test-guarded-profile-escrow-v050.ps1'
       - '.github/workflows/validate-guarded-profile-escrow-v050.yml'
@@ -20,13 +21,14 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          $base='67eb8bac4dff5c66ddaadaa6e50ff5e44c48e13e'
+          $base='3037f4a63457f5bd261d684b47e7a244f40b6c3c'
           $main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
           if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
              (git merge-base $base HEAD).Trim() -cne $base){throw 'V050_UNEXPECTED_PARENT'}
           if((git rev-parse origin/main).Trim() -cne $main){throw 'V050_OPERATING_MAIN_CHANGED'}
           $allowed=@(
             'validation/normal-engine-shared-turnstile/guarded-profile-escrow-v050.ps1',
+            'validation/normal-engine-shared-turnstile/hosted-detached-restore-v050.ps1',
             'validation/normal-engine-shared-turnstile/read-guarded-escrow-child-v050.ps1',
             'validation/normal-engine-shared-turnstile/test-guarded-profile-escrow-v050.ps1',
             '.github/workflows/validate-guarded-profile-escrow-v050.yml')
@@ -78,6 +80,7 @@ jobs:
             'V048_REAL_PROFILE_MANIFEST_READONLY_ONLY_NO_CLI_NO_USER_SPOTIFY_PASS',
             'V050_610FILE_PRIVATE_ACL_DPAPI_CONFIG_PREFS_STATE_BACKUP_PASS',
             'V050_SEPARATE_PROCESS_DPAPI_READER_WITHOUT_ISSUER_OR_OS_LEASE_PASS',
+            'V050_INDEPENDENT_DETACHED_XPUI_AND_ALL_DPAPI_GUARDS_RESTORED_NO_OVERWRITE_PASS',
             'V050_BACKUP_INDEPENDENT_OF_LATER_LIVE_FILE_CHANGES_PASS',
             'V050_APP_TREE_PREFS_CIPHERTEXT_AND_RECEIPT_TAMPER_DENIAL_PASS',
             'V050_PENDING_LEGACY_TRANSACTION_BLOCKED_BEFORE_BACKUP_CREATED_PASS',
