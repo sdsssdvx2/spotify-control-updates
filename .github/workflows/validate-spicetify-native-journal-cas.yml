@@ -43,8 +43,8 @@ jobs:
               throw ('PR236 historical source pin invalid '+$p)
             }
           }
-          if((git hash-object $source).Trim() -cne '23ff6f98c98379c3856fba2f37052775a24c5626' -or
-             (git hash-object $test).Trim() -cne 'e58ecd0932b474be0fa7426ce24ba391ce6227fc'){
+          if((git hash-object $source).Trim() -cne '44c432029bf76a2280db7b4794d56b2028880e4c' -or
+             (git hash-object $test).Trim() -cne 'b16bd21be10d1519b36896368297b5041a376233'){
             throw 'V018 CAS journal bound source or acceptance test SHA drift'
           }
           $changes=@(git diff --name-only "$parent...HEAD")
@@ -273,14 +273,41 @@ jobs:
           Write-Host 'NATIVE_SCOPED_V017_RECOVERY_INTERRUPTED_AFTER_PARTIAL_DURABLE_TARGET_WRITE_PASS'
           $global:LASTEXITCODE=0
           exit 0
+      - name: Kill restored-worker AFTER durable rollback-complete CAS but BEFORE separate terminal receipt
+        shell: powershell
+        timeout-minutes: 8
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/custom-app-native-scoped-crash-rollback/test_native_scoped_crash_rollback.ps1'
+          $log='validation/custom-app-native-scoped-crash-rollback/rollback-terminal-gap-exit.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Mode recover-journal-terminal-interrupted -FixtureRoot $env:SCOPED_FIXTURE_ROOT *>&1 |
+            Tee-Object -FilePath $log | Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 73){Get-Content $log -Tail 65|ForEach-Object{Write-Host $_};throw ('durable rollback-complete terminal-gap exit not observed '+$rc)}
+          if(-not(Get-Content $log -Raw).Contains('NATIVE_SCOPED_V018_HOSTED_CRASH_AFTER_ROLLBACK_COMPLETE_BEFORE_TERMINAL')){
+            throw 'required CAS completion before missing receipt injection proof absent'
+          }
+          Write-Host 'SPICETIFY_V018_INDEPENDENT_TERMINAL_GAP_KILLED_AFTER_CAS_PASS'
+          $global:LASTEXITCODE=0
+          exit 0
       - name: Independently restarted worker restores exact original target without touching state.pending
         shell: powershell
         timeout-minutes: 8
         run: |
           $ErrorActionPreference='Stop'
           $script='validation/custom-app-native-scoped-crash-rollback/test_native_scoped_crash_rollback.ps1'
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Mode recover -FixtureRoot $env:SCOPED_FIXTURE_ROOT
-          if($LASTEXITCODE -ne 0){throw 'independent crash recovery failed'}
+          $log='validation/custom-app-native-scoped-crash-rollback/terminal-gap-reconciliation.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Mode recover -FixtureRoot $env:SCOPED_FIXTURE_ROOT *>&1 |
+              Tee-Object -FilePath $log | Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 0){Get-Content $log -Tail 60|ForEach-Object{Write-Host $_};throw 'independent crash recovery failed'}
+          if(-not(Get-Content $log -Raw).Contains('NATIVE_SCOPED_V018_FRESH_PROCESS_FINALIZED_MISSING_TERMINAL_WITHOUT_REWRITING_PASS')){
+            throw 'no-write reconciliation after durable rollback-complete is not proven'
+          }
           Write-Host 'NATIVE_SCOPED_V017_REAL_OFFICIAL_NATIVE_INDEPENDENT_CRASH_RESTORE_PASS'
           Write-Host 'NATIVE_SCOPED_V018_DURABLE_ROLLBACK_REQUIRED_TO_COMPLETE_CAS_PASS'
       - name: Third independent worker rejects repeat mutation and validates durable recovered terminal
@@ -300,6 +327,8 @@ jobs:
           path: |
             validation/custom-app-native-scoped-crash-rollback/abrupt-exit.log
             validation/custom-app-native-scoped-crash-rollback/recovery-half-file-exit.log
+            validation/custom-app-native-scoped-crash-rollback/rollback-terminal-gap-exit.log
+            validation/custom-app-native-scoped-crash-rollback/terminal-gap-reconciliation.log
             validation/spicetify-real-cli-evidence/real-cli-integrated.log
             validation/spicetify-real-cli-evidence/real-cli-provenance-ci.json
             validation/spicetify-real-cli-evidence/candidate-validation.json

@@ -1,5 +1,5 @@
 # Independent host-only restart contract for genuine official Spicetify.
-param([Parameter(Mandatory=$true)][ValidateSet('mutate','tamper-denial','recover-interrupted','recover','replay')][string]$Mode,
+param([Parameter(Mandatory=$true)][ValidateSet('mutate','tamper-denial','recover-interrupted','recover-journal-terminal-interrupted','recover','replay')][string]$Mode,
       [Parameter(Mandatory=$true)][string]$FixtureRoot,
       [string]$OfficialExecutable)
 $ErrorActionPreference='Stop'
@@ -224,6 +224,12 @@ if($Mode -ceq 'recover-interrupted'){
     [void](Invoke-CustomAppScopedLabIndependentRecoveryV017 @pinArgs -HostedCiCrashAfterHalfTargetWrite)
     throw 'SCOPED_LAB_UNEXPECTEDLY_RETURNED_FROM_MIDWRITE_KILL'
 }
+if($Mode -ceq 'recover-journal-terminal-interrupted'){
+    # Parent intentionally kills this fourth/fifth worker at the durable CAS
+    # rollback-complete boundary before separate .recovered terminal creation.
+    [void](Invoke-CustomAppScopedLabIndependentRecoveryV017 @pinArgs -HostedCiCrashAfterRollbackJournalBeforeMarker)
+    throw 'NATIVE_SCOPED_V018_EXPECTED_JOURNAL_TERMINAL_BOUNDARY_KILL_MISSING'
+}
 $result=Invoke-CustomAppScopedLabIndependentRecoveryV017 @pinArgs
 $journalTerminal=Read-CustomAppDurableRecoveryJournalReadOnlyV012 -AllowedRoot $root -StoreDirectory $journal
 if(-not[bool]$journalTerminal.ok -or
@@ -251,9 +257,13 @@ if(-not[IO.File]::Exists($pending) -or
     throw 'NATIVE_SCOPED_LAB_CANONICAL_PENDING_NOT_PRESERVED'
 }
 if($Mode -ceq 'recover'){
-    if(-not[bool]$result.restored -or [string]$result.status -cne 'restored-exact-before-image'){
-        throw 'NATIVE_SCOPED_LAB_FIRST_RESTART_DID_NOT_RESTORE'
+    # Previous worker already restored bytes, CAS-appended rollback-complete,
+    # then died before writing the separate durable terminal receipt. This
+    # independent restart must NOT overwrite a single target byte.
+    if([bool]$result.restored -or [string]$result.status -cne 'recovered-after-journal-terminal'){
+        throw 'NATIVE_SCOPED_V018_RECOVERY_TRIED_REWRITING_AFTER_DURABLE_JOURNAL_TERMINAL'
     }
+    Write-Host 'NATIVE_SCOPED_V018_FRESH_PROCESS_FINALIZED_MISSING_TERMINAL_WITHOUT_REWRITING_PASS'
     Write-Host 'NATIVE_SCOPED_LAB_FRESH_PROCESS_CRASH_RECOVERY_EXACT_BEFORE_IMAGE_PASS'
 }else{
     if([bool]$result.restored -or -not[bool]$result.replay_idempotent -or

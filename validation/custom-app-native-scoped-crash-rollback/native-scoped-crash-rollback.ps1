@@ -554,7 +554,8 @@ function Restore-CustomAppScopedLabNativeV017 {
           [Parameter(Mandatory=$true)][string]$HostedCiRoot,
           [Parameter(Mandatory=$true)][string]$HostedCiLocalAppDataRoot,
           [Parameter(Mandatory=$true)][string]$HostedCiAppDataRoot,
-          [switch]$HostedCiCrashAfterHalfTargetWrite)
+          [switch]$HostedCiCrashAfterHalfTargetWrite,
+          [switch]$HostedCiCrashAfterRollbackJournalBeforeMarker)
     $ctx=Get-CustomAppScopedLabContextV017 -Session $Session -HeldCrossEngineSession $HeldCrossEngineSession -HostedCiRoot $HostedCiRoot -HostedCiLocalAppDataRoot $HostedCiLocalAppDataRoot -HostedCiAppDataRoot $HostedCiAppDataRoot
     $path=[string]$ctx.sealed_path
     if(-not[IO.File]::Exists($path)){
@@ -652,6 +653,12 @@ function Restore-CustomAppScopedLabNativeV017 {
     }
     # Rollback-complete CAS is persisted before the separate terminal marker.
     # A crash in between resumes read-only if target bytes match the snapshot.
+    if($HostedCiCrashAfterRollbackJournalBeforeMarker -and -not$recovered){
+        # Hosted-only crash window: all target bytes restored AND V010 CAS
+        # rollback-complete persisted; separate terminal marker not yet written.
+        Write-Host 'NATIVE_SCOPED_V018_HOSTED_CRASH_AFTER_ROLLBACK_COMPLETE_BEFORE_TERMINAL'
+        [Environment]::Exit(73)
+    }
     $terminal='V018_RECOVERED='+[string]$ctx.transaction_id+'|JOURNAL_SHA256='+[string]$journal.entry_sha256+[Environment]::NewLine
     if(-not$recovered){
         Write-CustomAppUserTxnBytesV010 -Path ([string]$ctx.recovered_path) -Bytes ([Text.Encoding]::ASCII.GetBytes($terminal))
@@ -670,7 +677,8 @@ function Invoke-CustomAppScopedLabIndependentRecoveryV017 {
     param([Parameter(Mandatory=$true)][string]$HostedCiRoot,
           [Parameter(Mandatory=$true)][string]$HostedCiLocalAppDataRoot,
           [Parameter(Mandatory=$true)][string]$HostedCiAppDataRoot,
-          [switch]$HostedCiCrashAfterHalfTargetWrite)
+          [switch]$HostedCiCrashAfterHalfTargetWrite,
+          [switch]$HostedCiCrashAfterRollbackJournalBeforeMarker)
     [void](Assert-CustomAppScopedLabHostedV017 -Path $HostedCiRoot)
     $global=Open-CustomAppCrossEngineTransactionLockV010 -HostedCiRoot $HostedCiRoot
     try{
@@ -708,7 +716,7 @@ function Invoke-CustomAppScopedLabIndependentRecoveryV017 {
                 ok=$true;paths=$paths;state=$state;lock_handle=$handle
                 production_execution_authorized=$false;production_mutation_authorized=$false
             }
-            return Restore-CustomAppScopedLabNativeV017 -Session $session -HeldCrossEngineSession $global -HostedCiRoot $HostedCiRoot -HostedCiLocalAppDataRoot $HostedCiLocalAppDataRoot -HostedCiAppDataRoot $HostedCiAppDataRoot -HostedCiCrashAfterHalfTargetWrite:$HostedCiCrashAfterHalfTargetWrite
+            return Restore-CustomAppScopedLabNativeV017 -Session $session -HeldCrossEngineSession $global -HostedCiRoot $HostedCiRoot -HostedCiLocalAppDataRoot $HostedCiLocalAppDataRoot -HostedCiAppDataRoot $HostedCiAppDataRoot -HostedCiCrashAfterHalfTargetWrite:$HostedCiCrashAfterHalfTargetWrite -HostedCiCrashAfterRollbackJournalBeforeMarker:$HostedCiCrashAfterRollbackJournalBeforeMarker
         }finally{if($null-ne$handle){$handle.Dispose()}}
     }finally{
         if($null-ne$global -and $null-ne$global.lock_handle){$global.lock_handle.Dispose()}
