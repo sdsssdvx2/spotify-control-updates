@@ -1,0 +1,97 @@
+name: Genuine native non-destructive retained terminal (HOLD)
+on:
+  push:
+    branches: [validate/native-retained-terminal-commit]
+    paths:
+      - 'validation/approved-native-retained-terminal/**'
+      - 'validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1'
+      - 'validation/approved-real-native-journaled-swap-recovery/approved-native-journal-saga.ps1'
+      - 'validation/approved-real-native-verified-readback/verified-official-readback-v033.ps1'
+      - 'validation/approved-native-complete-output-proof/full-native-output-proof-v037.ps1'
+      - '.github/workflows/validate-native-retained-terminal-commit.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  one-genuine-native-retained-cas:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Freeze V038 and production SHA; validate minimal 7-file change
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='3e6b3d33045a3f6fb009583d193531365fd93112'
+          if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+             (git merge-base $parent HEAD).Trim() -cne $parent){throw 'V039_PARENT_CHANGED'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V039_MAIN_CHANGED'}
+          $allowed=@(
+           'validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1',
+           'validation/approved-real-native-journaled-swap-recovery/approved-native-journal-saga.ps1',
+           'validation/approved-real-native-verified-readback/verified-official-readback-v033.ps1',
+           'validation/approved-native-complete-output-proof/full-native-output-proof-v037.ps1',
+           'validation/approved-native-retained-terminal/retained-terminal-v039.ps1',
+           'validation/approved-native-retained-terminal/test-retained-terminal-v039.ps1',
+           '.github/workflows/validate-native-retained-terminal-commit.yml')
+          $changed=@(git diff --name-only "$parent...HEAD")
+          if($changed.Count -ne $allowed.Count -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('V039_UNAUTHORIZED_FILE_CHANGE '+($changed -join ','))}
+          foreach($f in @($allowed|Where-Object{$_ -like '*.ps1'})){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw ('V039_POWERSHELL51_SYNTAX_ERROR '+$errors[0].Message)}
+          }
+          $source=Get-Content 'validation/approved-native-retained-terminal/retained-terminal-v039.ps1' -Raw
+          foreach($forbidden in @('Remove-Item','Remove-CustomApp','Delete(','DeleteDirectory','DeleteFile','Start-Process','Invoke-WebRequest','Invoke-RestMethod','[IO.File]::Delete','[IO.Directory]::Delete')){
+            if($source.Contains($forbidden)){throw ('V039_TERMINAL_MUTATING_FUNCTION_'+$forbidden)}
+          }
+          Write-Host 'V039_BOUNDED_SOURCE_NON_DESTRUCTIVE_PS51_PARSE_PASS'
+      - name: Rebuild SHA-pinned original Addon Manager once, no install
+        shell: powershell
+        timeout-minutes: 18
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/custom-app-normal-entrypoint-transaction-integration/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'V039_ADDON_BUILD_FAILED'}
+          $p='validation/custom-app-normal-entrypoint-transaction-integration/out/bin/addon-manager.ps1'
+          if((Get-Item $p).Length -ne 1453028 -or (Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0cb2362dd14772f19ba2970e5f4c2bc07bf0512c0de31494af7b01cb2a98fdd6'){throw 'V039_ADDON_HASH_CHANGED'}
+          "V039_ADDON=$((Resolve-Path $p).Path)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+      - name: SHA-pinned free official Spicetify 2.46.4
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'v039-vendor'
+          [IO.Directory]::CreateDirectory($dir)|Out-Null
+          $zip=Join-Path $dir 'pinned.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip' -OutFile $zip
+          if((Get-Item $zip).Length -ne 7795758 -or (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f'){throw 'V039_ARCHIVE_PIN_MISMATCH'}
+          Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $dir 'expanded')
+          $exe=@(Get-ChildItem (Join-Path $dir 'expanded') -Recurse -File -Filter spicetify.exe)
+          if($exe.Count -ne 1 -or (Get-FileHash $exe[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){throw 'V039_OFFICIAL_EXE_PIN_MISMATCH'}
+          "V039_EXE=$($exe[0].FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+      - name: One genuine native apply, retained terminal, interrupted CAS, fresh process
+        shell: powershell
+        timeout-minutes: 20
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v039-targeted.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/approved-native-retained-terminal/test-retained-terminal-v039.ps1' -OriginalAddonPath $env:V039_ADDON -OfficialExecutable $env:V039_EXE *>&1 | Tee-Object -FilePath $log | Out-Null
+          $rc=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($rc -ne 0){Get-Content $log -Tail 100|ForEach-Object{Write-Host $_};throw ('V039_TARGETED_TEST_FAIL '+$rc)}
+          $body=Get-Content $log -Raw
+          foreach($marker in @(
+           'V039_OFFICIAL_NATIVE_AND_ALL_FOUR_OUTPUTS_RETENTION_TERMINAL_PASS',
+           'V039_CAS_CRASH_BEFORE_AFTER_AND_IDEMPOTENT_REPLAY_PASS',
+           'V039_KEYLESS_TERMINAL_READBACK_AND_FOREIGN_TAMPER_REFUSAL_PASS',
+           'V039_APP_SPOTIFY_GUARD_XPUI_SOURCE_ZIP_BACKUPS_NOT_DELETED_PASS',
+           'V039_NO_REAL_SPOTIFY_NO_PRODUCTION_AUTHORITY_NO_VERSION_CHANGE_PASS')){
+            if(-not$body.Contains($marker)){throw ('V039_EVIDENCE_MARKER_MISSING '+$marker)}
+          }
+          Write-Host 'V039_RETENTION_CAS_CRASH_SAFE_NO_DELETION_TARGETED_PASS'
+      - name: Final check protected main SHA
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V039_MAIN_CHANGED'}
+          Write-Host 'V039_DEVELOPMENT_ONLY_OPERATIONAL_SPOTIFY_UNCHANGED_PASS'

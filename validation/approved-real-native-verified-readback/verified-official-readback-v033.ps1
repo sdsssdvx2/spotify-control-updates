@@ -15,14 +15,35 @@ function Test-ApprovedNativeAppliedReadbackV033 {
   $lease=Open-ApprovedNativeSagaLeaseV032 -Paths $p
   $e=Read-ApprovedNativeSagaRecoveryEvidenceV032 -Paths $p -Name $Name -TokenId $TokenId -ReceiptStore $ReceiptStore -TransactionId $TransactionId
   $j=$e.journal.entry
-  if([string]$j.phase -cne 'apply-verified' -or
-     [int64]$e.journal.revision -notin @(7,8)){
-    throw 'V033_APPLY_VERIFIED_NOT_DURABLE'
+  $phase=[string]$j.phase
+  $revision=[int64]$e.journal.revision
+  if(-not(($phase -ceq 'apply-verified' -and $revision -in @(7,8)) -or
+           ($phase -ceq 'committed-retained' -and $revision -eq 9))){
+    throw 'V039_VERIFIED_OR_RETAINED_PHASE_NOT_DURABLE'
+  }
+  # The complete central V010 chain is independently validated above.
+  # Terminal revision 9 must be a direct child of the original proven
+  # apply-verified revision 8; otherwise do not reuse V033 native evidence.
+  $verifiedEntry=$j
+  if($phase -ceq 'committed-retained'){
+    $history=Join-Path ([string]$p.journal) 'history'
+    $files=@(Get-ChildItem -LiteralPath $history -File -Force -Filter ('{0:D20}-*.json' -f 8))
+    if($files.Count -ne 1){throw 'V039_VERIFIED_REV8_NOT_UNIQUE'}
+    $verifiedEntry=(ConvertFrom-CustomAppProductionCrashJournalFileV010 -AllowedRoot ([string]$p.runner) -Path ([string]$files[0].FullName)).entry
+    if([string]$verifiedEntry.phase -cne 'apply-verified' -or
+       [int64]$verifiedEntry.revision -ne 8 -or
+       [string]$verifiedEntry.transaction_id -cne $TransactionId -or
+       [string]$j.previous_entry_sha256 -cne [string]$verifiedEntry.entry_sha256 -or
+       [string]$verifiedEntry.apply_result_fingerprint -cne [string]$j.apply_result_fingerprint -or
+       [string]$verifiedEntry.finalization_fingerprint -cne [string]$j.finalization_fingerprint -or
+       [string]$j.cleanup_result_fingerprint -ceq ('0'*64)){
+      throw 'V039_RETAINED_HEAD_NOT_DESCENDANT_OF_VERIFIED_NATIVE'
+    }
   }
   # Rev8 is a native-intent-anchored V010 transaction. Rev7 is the older
   # app-only synthetic fixture and must NOT pretend it owns native XPUI.
   $intent=Read-ApprovedNativeSagaIntentWitnessV038 -Paths $p -TransactionId $TransactionId
-  if([int64]$e.journal.revision -eq 8){
+  if([int64]$e.journal.revision -in @(8,9)){
     if(-not[bool]$intent.present){throw 'V038_NATIVE_VERIFIED_WITHOUT_INTENT_WITNESS'}
     [void](Assert-ApprovedNativeSagaSealedIntentV038 -Paths $p -TransactionId $TransactionId)
   }elseif([bool]$intent.present -or
@@ -88,8 +109,9 @@ function Test-ApprovedNativeAppliedReadbackV033 {
   }
   return [pscustomobject]@{
     ok=$true;reason='V033_VENDOR_XPUI_AND_JOURNAL_READBACK_MATCH'
-    phase='apply-verified';revision=[int64]$e.journal.revision
-    entry_sha256=[string]$j.entry_sha256
+    phase=$phase;revision=[int64]$e.journal.revision
+    entry_sha256=[string]$verifiedEntry.entry_sha256
+    current_entry_sha256=[string]$j.entry_sha256
     independent_without_issuer_key=$true;read_only=$true
     vendor_root_durably_bound=$false;final_commit_authorized=$false
     real_spotify_xpui_covered=$false;production_mutation_authorized=$false

@@ -101,7 +101,8 @@ function Append-ApprovedNativeSagaPhaseV032 {
     param([Parameter(Mandatory=$true)]$Paths,[Parameter(Mandatory=$true)]$Current,
           [Parameter(Mandatory=$true)][string]$Phase,
           [string]$FinalizationFingerprint=$null,
-          [string]$ApplyResultFingerprint=$null)
+          [string]$ApplyResultFingerprint=$null,
+          [string]$CleanupResultFingerprint=$null)
     $args=@{
        AllowedRoot=[string]$Paths.runner
        StoreDirectory=[string]$Paths.journal
@@ -114,6 +115,9 @@ function Append-ApprovedNativeSagaPhaseV032 {
     }
     if(-not[string]::IsNullOrWhiteSpace($ApplyResultFingerprint)){
        $args.ApplyResultFingerprint=$ApplyResultFingerprint
+    }
+    if(-not[string]::IsNullOrWhiteSpace($CleanupResultFingerprint)){
+       $args.CleanupResultFingerprint=$CleanupResultFingerprint
     }
     $a=Append-CustomAppProductionCrashJournalPhaseV010 @args
     if(-not[bool]$a.ok -or -not[bool]$a.persisted -or

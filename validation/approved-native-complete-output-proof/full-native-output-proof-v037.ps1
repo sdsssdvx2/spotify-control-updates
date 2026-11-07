@@ -25,9 +25,12 @@ function Get-ApprovedNativeFullOutputEvidenceV037 {
    $lease=Open-ApprovedNativeSagaLeaseV032 -Paths $p
    $e=Read-ApprovedNativeSagaRecoveryEvidenceV032 -Paths $p -Name $Name -TokenId $TokenId -ReceiptStore $ReceiptStore -TransactionId $TransactionId
    $j=$e.journal.entry
-   if([string]$j.phase -cne 'apply-verified' -or [int64]$e.journal.revision -ne 8 -or
-      [string]$j.entry_sha256 -cne [string]$base.entry_sha256){
-      throw 'V037_CENTRAL_VERIFIED_HEAD_DRIFT'
+   $isFresh=([string]$j.phase -ceq 'apply-verified' -and [int64]$e.journal.revision -eq 8 -and
+      [string]$j.entry_sha256 -ceq [string]$base.entry_sha256)
+   $isRetained=([string]$j.phase -ceq 'committed-retained' -and [int64]$e.journal.revision -eq 9 -and
+      [string]$j.previous_entry_sha256 -ceq [string]$base.entry_sha256)
+   if(-not($isFresh -or $isRetained)){
+      throw 'V039_CENTRAL_VERIFIED_OR_RETAINED_HEAD_DRIFT'
    }
    [void](Assert-ApprovedNativeSagaSealedIntentV038 -Paths $p -TransactionId $TransactionId)
    $escrow=Read-ApprovedNativeXpuiEscrowV034 -Paths $p -TransactionId $TransactionId
@@ -82,7 +85,8 @@ function Get-ApprovedNativeFullOutputEvidenceV037 {
    }
    return [pscustomobject]@{
      transaction_id=$TransactionId;token_id=$TokenId;name=$Name
-     apply_verified_entry_sha256=[string]$j.entry_sha256
+     apply_verified_entry_sha256=[string]$base.entry_sha256
+     phase=[string]$j.phase
      apply_result_fingerprint=[string]$j.apply_result_fingerprint
      native_apply_start_entry_sha256=[string]$escrow.journal_start_entry_sha256
      native_root=$vendor;xpui_path=$xpui
@@ -157,7 +161,9 @@ function Read-ApprovedNativeFullOutputReceiptV037 {
    }
    return [pscustomobject]@{
      ok=$true;reason='v010-v033-v034-v035-all-four-official-files-durable-keyless-readback'
-     phase='apply-verified';journal_entry_sha256=[string]$live.apply_verified_entry_sha256
+     phase=[string]$live.phase;journal_entry_sha256=[string]$live.apply_verified_entry_sha256
+     after_xpui_sha256=[string]$live.after_xpui_sha256
+     original_xpui_sha256=[string]$live.original_xpui_sha256
      exact_official_owned_files=4;entire_official_output_verified=$true
      original_xpui_recovery_preimage_retained=$true
      original_custom_app_recovery_retained=$true
