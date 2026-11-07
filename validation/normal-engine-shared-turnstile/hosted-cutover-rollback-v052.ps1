@@ -223,6 +223,72 @@ function New-CustomAppHostedCutoverIntentV052 {
    source_preimage_retained=$true;version_or_release_provenance_verified=$false
    production_mutation_authorized=$false;live_update_authorized=$false}
 }
+# V053 independent admission immediately before synthetic application, with
+# the SAME V047 lease kept open across the first test side effect. A prior
+# sealed intent alone is not a live execution authority.
+function Test-CustomAppV053HostedBeforeApply {
+ param([Parameter(Mandatory=$true)]$CutoverLease,
+       [Parameter(Mandatory=$true)][string]$ExpectedProfileSha256,
+       [Parameter(Mandatory=$true)][string]$HostedFixtureRoot,
+       [Parameter(Mandatory=$true)][string]$HostedFixtureCliPath,
+       [Parameter(Mandatory=$true)][string]$HostedEscrowRoot,
+       [Parameter(Mandatory=$true)][string]$EscrowId,
+       [Parameter(Mandatory=$true)][string]$IntentSha256,
+       [Parameter(Mandatory=$true)][string]$CandidateXpuiRoot,
+       [Parameter(Mandatory=$true)][string]$CandidateAppRoot)
+ $p=Assert-CustomAppV052Fixture -HostedFixtureRoot $HostedFixtureRoot -HostedFixtureCliPath $HostedFixtureCliPath -HostedEscrowRoot $HostedEscrowRoot
+ if(-not(Test-CustomAppV052LiveTurnstile -Handle $CutoverLease.lock_handle -Paths $p) -or
+    [string]$CutoverLease.binding_sha256 -cne $ExpectedProfileSha256){
+    throw 'V053_BEFORE_APPLY_OS_LEASE_OR_BINDING_NOT_LIVE'
+ }
+ $intent=Get-CustomAppV052SealedIntent -Paths $p -EscrowId $EscrowId -IntentSha256 $IntentSha256
+ if([string]$intent.expected_profile_sha256 -cne $ExpectedProfileSha256 -or
+    -not[bool]$intent.v044_native_manifest_fence_verified -or
+    [bool]$intent.actual_vendor_cli_invoked -or
+    [bool]$intent.production_mutation_authorized){
+    throw 'V053_BEFORE_APPLY_INTENT_NOT_BOUND'
+ }
+ $audit=Get-CustomAppInstalledManifestAuditV048 -CutoverLease $CutoverLease -ExpectedProfileSha256 $ExpectedProfileSha256 -HostedFixtureRoot $p.base -HostedFixtureCliPath $p.cli
+ if([string]$audit.status -cne 'observed-readonly' -or
+    [string]$audit.manifest_footprint_sha256 -cne [string]$intent.manifest_footprint_sha256){
+    throw 'V053_BEFORE_APPLY_SOURCE_PROFILE_CHANGED'
+ }
+ $app=Join-Path $p.apps ([string]$intent.app_name)
+ $currentApp=Get-CustomAppUpdateTreeSnapshotV010 -Root $app
+ $currentXpui=Get-CustomAppUpdateTreeSnapshotV010 -Root $p.xpui
+ $candidateApp=Get-CustomAppUpdateTreeSnapshotV010 -Root (Assert-CustomAppV050Path -Path $CandidateAppRoot -FixtureRoot $CandidateAppRoot)
+ $candidateXpui=Get-CustomAppUpdateTreeSnapshotV010 -Root (Assert-CustomAppV050Path -Path $CandidateXpuiRoot -FixtureRoot $CandidateXpuiRoot)
+ if([string]$currentApp.tree_sha256 -cne [string]$intent.preimage_app_sha256 -or
+    [string]$currentXpui.tree_sha256 -cne [string]$intent.preimage_xpui_sha256 -or
+    [string]$candidateApp.tree_sha256 -cne [string]$intent.candidate_app_sha256 -or
+    [string]$candidateXpui.tree_sha256 -cne [string]$intent.candidate_xpui_sha256){
+     throw 'V053_BEFORE_APPLY_ORIGINAL_OR_CANDIDATE_HASH_CHANGED'
+ }
+ [void](Get-CustomAppV052OnlyChanged -Before $currentApp -After $candidateApp -OnlyRelativePath 'index.js')
+ $proof=Test-ApprovedNativeManifestOnlyOwnedTargetChangedV044 -Before $currentXpui -After $candidateXpui -Name ([string]$intent.app_name) -SourceAppPath $app -ExpectedSourceTreeSha256 ([string]$intent.owned_output_source_sha256)
+ $fingerprint=Get-CustomAppUpdateStringSha256V010 -Text (
+  (@('v053-native-manifest-owned-candidate',
+    [string]$proof.source_tree_sha256,[string]$proof.manifest_sha256,
+    [string]$proof.scoped_file_count,[string]$proof.scoped_extension_files,
+    [string]$proof.scoped_asset_files,[string]$proof.pre_xpui_sha256,
+    [string]$proof.post_xpui_sha256)) -join [char]10)
+ if(-not[bool]$proof.ok -or -not[bool]$proof.foreign_xpui_preserved -or
+    [string]$proof.manifest_sha256 -cne [string]$intent.owned_output_manifest_sha256 -or
+    [int]$proof.scoped_file_count -ne [int]$intent.owned_output_file_count -or
+    $fingerprint -cne [string]$intent.owned_output_scope_fingerprint -or
+    [bool]$proof.production_mutation_authorized){
+    throw 'V053_BEFORE_APPLY_NATIVE_OWNERSHIP_FINGERPRINT_CHANGED'
+ }
+ # Never convert this observation into a production permit or source release
+ # attestation. Only the CI test may simulate applying these fixture bytes.
+ return [pscustomobject]@{
+    ok=$true;status='hosted-manifest-owned-candidate-unchanged-before-simulation'
+    source_and_xpui_pinned=$true;v044_manifest_owned_output_verified=$true
+    same_os_lease_held=$true;actual_vendor_cli_executed=$false
+    real_release_provenance_verified=$false;older_unpatched_processes_excluded=$false
+    production_mutation_authorized=$false;live_update_authorized=$false
+ }
+}
 function Get-CustomAppV052TreeStatus {
  param([string]$Live,[string]$Quarantine,[string]$PreimageSha,[string]$CandidateSha)
  $livePresent=[IO.Directory]::Exists($Live)
