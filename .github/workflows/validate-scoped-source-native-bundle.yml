@@ -73,8 +73,8 @@ jobs:
           }
           $bundle='validation/custom-app-scoped-source-native-bundle/source-native-bundle.ps1'
           $bundleTest='validation/custom-app-scoped-source-native-bundle/test_source_native_bundle.ps1'
-          if((git hash-object $bundle).Trim() -cne 'e168059add3f7d7e6d55bac72f26f54fcc2a475f' -or
-             (git hash-object $bundleTest).Trim() -cne 'd88711672eba891639e334ae2047fa8f4ee14fd3'){
+          if((git hash-object $bundle).Trim() -cne '93345e2bb5b64c69104a786453234ccae9f3e9fb' -or
+             (git hash-object $bundleTest).Trim() -cne '47e3bd6a8426db53c9f9eda08daf9b07890f7b28'){
             throw 'V020 synthetic source+native bundle file hash drift'
           }
           foreach($file in @($bundle,$bundleTest)){

@@ -24,8 +24,10 @@ function Get-CustomAppScopedBundlePathsV020 {
         recovered=(Join-Path $dir ($stem+'.recovered'))
         swap_temp=$temp
         restore_temp=$restore
+        swap_backup=(Join-Path $parent ('.'+$stem+'.swap.before.bak'))
+        restore_backup=(Join-Path $parent ('.'+$stem+'.restore.candidate.bak'))
     }
-    foreach($v in @($paths.sealed,$paths.intent,$paths.recovered,$paths.swap_temp,$paths.restore_temp)){
+    foreach($v in @($paths.sealed,$paths.intent,$paths.recovered,$paths.swap_temp,$paths.restore_temp,$paths.swap_backup,$paths.restore_backup)){
         Assert-CustomAppUserTxnNoReparseV010 -Path ([string]$v)
     }
     return $paths
@@ -121,7 +123,7 @@ function Save-CustomAppScopedBundleV020 {
     }
     Assert-CustomAppUserTxnNoReparseV010 -Path $candidate
     $paths=Get-CustomAppScopedBundlePathsV020 -Session $Session -Context $ctx
-    foreach($p in @($paths.sealed,$paths.intent,$paths.recovered,$paths.swap_temp,$paths.restore_temp)){
+    foreach($p in @($paths.sealed,$paths.intent,$paths.recovered,$paths.swap_temp,$paths.restore_temp,$paths.swap_backup,$paths.restore_backup)){
         if([IO.File]::Exists([string]$p)){throw 'scoped-bundle-duplicate-or-existing-intent'}
     }
     if(-not[IO.File]::Exists([string]$ctx.sealed_path)){
@@ -232,7 +234,9 @@ function Invoke-CustomAppScopedBundleNativeV020 {
         throw 'scoped-bundle-candidate-private-clone-drift'
     }
     if([IO.File]::Exists([string]$bundle.paths.swap_temp) -or
-       [IO.File]::Exists([string]$bundle.paths.restore_temp)){
+       [IO.File]::Exists([string]$bundle.paths.restore_temp) -or
+       [IO.File]::Exists([string]$bundle.paths.swap_backup) -or
+       [IO.File]::Exists([string]$bundle.paths.restore_backup)){
         throw 'scoped-bundle-temp-path-reused-before-mutation'
     }
     # The stage temp is in the SOURCE'S PARENT (same volume) so the following
@@ -258,7 +262,10 @@ function Invoke-CustomAppScopedBundleNativeV020 {
     Write-CustomAppUserTxnBytesV010 -Path ([string]$bundle.paths.intent) -Bytes $bundleIntent
     # Crash after the journal CAS but before either intent is ambiguous:
     # worker MUST reject missing markers without changing source or XPUI.
-    [IO.File]::Replace([string]$bundle.paths.swap_temp,[string]$ctx.source_index,$null)
+    [IO.File]::Replace([string]$bundle.paths.swap_temp,[string]$ctx.source_index,[string]$bundle.paths.swap_backup)
+    if((Get-CustomAppSpicetifyPassiveFileSha256V015 -Path ([string]$bundle.paths.swap_backup)) -cne [string]$bundle.snapshot.before_sha256){
+        throw 'scoped-bundle-atomic-original-source-backup-drift'
+    }
     if((Get-CustomAppSpicetifyPassiveFileSha256V015 -Path ([string]$ctx.source_index)) -cne
        [string]$bundle.snapshot.candidate_sha256){
         throw 'scoped-bundle-atomic-live-source-swap-not-verified'
@@ -376,7 +383,10 @@ function Restore-CustomAppScopedBundleV020 {
            [string]$bundle.snapshot.before_sha256){
             throw 'scoped-bundle-old-source-recovery-file-sha-invalid'
         }
-        [IO.File]::Replace([string]$bundle.paths.restore_temp,[string]$ctx.source_index,$null)
+        [IO.File]::Replace([string]$bundle.paths.restore_temp,[string]$ctx.source_index,[string]$bundle.paths.restore_backup)
+        if((Get-CustomAppSpicetifyPassiveFileSha256V015 -Path ([string]$bundle.paths.restore_backup)) -cne [string]$bundle.snapshot.candidate_sha256){
+            throw 'scoped-bundle-candidate-before-rollback-backup-drift'
+        }
         $now=Get-CustomAppSpicetifyPassiveFileSha256V015 -Path ([string]$ctx.source_index)
         if($now -cne [string]$bundle.snapshot.before_sha256){
             throw 'scoped-bundle-source-rollback-not-byte-exact'
@@ -403,6 +413,20 @@ function Restore-CustomAppScopedBundleV020 {
        (Get-CustomAppSpicetifyPassiveFileSha256V015 -Path ([string]$ctx.source_index)) -cne
          [string]$bundle.snapshot.before_sha256){
         throw 'scoped-bundle-source-and-xpui-not-durably-reconciled'
+    }
+    # Exact transaction-owned backup files, verified before cleanup. This is
+    # safe and repeatable even if this worker crashes before terminal receipt.
+    foreach($record in @(
+        [pscustomobject]@{path=[string]$bundle.paths.swap_backup;sha=[string]$bundle.snapshot.before_sha256},
+        [pscustomobject]@{path=[string]$bundle.paths.restore_backup;sha=[string]$bundle.snapshot.candidate_sha256}
+    )){
+        Assert-CustomAppUserTxnNoReparseV010 -Path ([string]$record.path)
+        if([IO.File]::Exists([string]$record.path)){
+            if((Get-CustomAppSpicetifyPassiveFileSha256V015 -Path ([string]$record.path)) -cne [string]$record.sha){
+                throw 'scoped-bundle-private-source-swap-backup-not-authentic'
+            }
+            [IO.File]::Delete([string]$record.path)
+        }
     }
     $receipt='V020_SOURCE_AND_XPUI_RECOVERED='+[string]$ctx.transaction_id+'|JOURNAL_SHA256='+[string]$final.entry_sha256+[Environment]::NewLine
     $repeated=[IO.File]::Exists([string]$bundle.paths.recovered)

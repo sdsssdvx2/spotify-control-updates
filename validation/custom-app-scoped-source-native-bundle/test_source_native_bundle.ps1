@@ -149,6 +149,11 @@ if($Mode -ceq 'bundle-mutate'){
             throw 'SCOPED_LAB_NATIVE_STARTED_WHILE_CENTRAL_JOURNAL_PREPARED'
         }
         Write-Host 'NATIVE_SCOPED_V018_OFFICIAL_NATIVE_EFFECT_MATCHED_CAS_REV1_PASS'
+        $swapBackup=Join-Path (Split-Path $live -Parent) ('.native-bundle-'+('a'*64)+'.swap.before.bak')
+        if(-not[IO.File]::Exists($swapBackup) -or
+           [IO.File]::ReadAllText($swapBackup) -cne 'console.log("ORIGINAL_BUNDLE_ALPHA_V0");'){
+            throw 'BUNDLE_SOURCE_SWAP_ATOMIC_BACKUP_NOT_IDENTICAL_TO_ORIGINAL'
+        }
         Write-Host 'NATIVE_BUNDLE_V020_SOURCE_AND_VENDOR_OUTPUT_APPLIED_JOURNAL_REV1_PASS'
         [Environment]::Exit(73)
     }finally{
@@ -234,6 +239,12 @@ if(-not[IO.File]::Exists($pending) -or
    [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($pending)) -cne $pendingText){
     throw 'BUNDLE_UNRELATED_PENDING_STATE_NOT_PRESERVED'
 }
+$originalBackup=Join-Path (Split-Path $live -Parent) ('.native-bundle-'+('a'*64)+'.swap.before.bak')
+$candidateBackup=Join-Path (Split-Path $live -Parent) ('.native-bundle-'+('a'*64)+'.restore.candidate.bak')
+if([IO.File]::Exists($originalBackup) -or [IO.File]::Exists($candidateBackup)){
+    throw 'BUNDLE_TRANSACTION_OWNED_SOURCE_BACKUPS_NOT_CLEANED_ON_RECOVERY'
+}
+Write-Host 'NATIVE_BUNDLE_V020_ATOMIC_FILE_REPLACE_BACKUPS_VERIFIED_AND_CLEANED_PASS'
 if($Mode -ceq 'bundle-recover'){
     if([bool]$result.replay_idempotent){throw 'BUNDLE_FIRST_RECOVERY_MARKED_REPLAY'}
     Write-Host 'NATIVE_BUNDLE_V020_FRESH_PROCESS_SOURCE_PLUS_XPUI_RESTORED_BYTE_EXACT_PASS'
