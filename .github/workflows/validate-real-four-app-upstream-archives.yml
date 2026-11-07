@@ -30,7 +30,7 @@ jobs:
           }
           $test='validation/real-four-app-upstream-archives/test-real-upstream-scoped.ps1'
           $pins=@{
-             "$test"='465237e7890ad530d3c843cf6477df6a3784acbf'
+             "$test"='a62e4a0a7eaa5611c804654abc7ed4d8b44ab7e2'
              'validation/approved-custom-app-native-scope/approved-scoped-native.ps1'='b5266bebd6b8ea87067d1587a5556de85d7a148a'
              'validation/v0.6.21/addon_policy_registry.ps1.inc'='4cfdaaee5e8401e6e47f266585a0f0201ce9fc30'
              'validation/v0.6.22/addon_source_adapter_engine.ps1.inc'='1ea670ddf5c2747bcddc15a3c02b357a0dd1733c'

@@ -11,6 +11,13 @@ if([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
    [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)){
     throw 'V027_REAL_ARCHIVE_ACCEPTANCE_REQUIRES_HOSTED_WINDOWS'
 }
+# The shared V026 vendor admission deliberately permits ONLY RUNNER_TEMP.
+# .NET's ordinary user TEMP can be a different path on hosted Windows.
+# Constrain both the legacy stage workspace and the vendor's input to one
+# disposable runner-owned root; do NOT broaden the vendor path allowlist.
+$env:TEMP=[IO.Path]::GetFullPath($env:RUNNER_TEMP)
+$env:TMP=$env:TEMP
+if(-not[IO.Directory]::Exists($env:TEMP)){throw 'V027_RUNNER_TEMP_NOT_A_DIRECTORY'}
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . ([ScriptBlock]::Create([IO.File]::ReadAllText((Join-Path $root 'validation/v0.6.21/addon_policy_registry.ps1.inc'),[Text.Encoding]::UTF8)))
 . ([ScriptBlock]::Create([IO.File]::ReadAllText((Join-Path $root 'validation/v0.6.22/addon_source_adapter_engine.ps1.inc'),[Text.Encoding]::UTF8)))
@@ -54,7 +61,10 @@ $expectedNames=@('better-local-files','eternal-jukebox','playlist-maker','ivLyri
 Assert-V027 ((@($script:SourceMatrix|ForEach-Object{[string]$_.name}) -join '|') -ceq ($expectedNames -join '|')) 'four pinned app identities changed'
 $owner=Join-Path $env:RUNNER_TEMP ('v027-upstream-'+[Guid]::NewGuid().ToString('N').Substring(0,8))
 [IO.Directory]::CreateDirectory($owner)|Out-Null
+$stageRoot=Get-CustomAppStageWorkspaceRootV010
+[void](Assert-ApprovedCustomAppHostedPathV026 -Path $stageRoot -RunnerRoot $env:RUNNER_TEMP)
 $workspace=New-CustomAppStageWorkspaceV010
+[void](Assert-ApprovedCustomAppHostedPathV026 -Path $workspace -RunnerRoot $env:RUNNER_TEMP)
 $policyFingerprint=Get-AddonPolicyRegistryFingerprint
 [System.Collections.Generic.List[object]]$results=New-Object 'System.Collections.Generic.List[object]'
 foreach($row in $script:SourceMatrix){
