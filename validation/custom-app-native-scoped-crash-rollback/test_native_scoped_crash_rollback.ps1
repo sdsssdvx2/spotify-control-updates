@@ -119,6 +119,11 @@ if($Mode -ceq 'mutate'){
         if(-not[bool]$saved.ok -or [bool]$saved.intent_written){
             throw 'SCOPED_LAB_SNAPSHOT_DURABILITY_BEFORE_INTENT_FAILED'
         }
+        $beforePhase=Get-CustomAppScopedLabJournalV018 -Session $session -HeldCrossEngineSession $global -Context $saved.context
+        if([string]$beforePhase.phase -cne 'prepared' -or [long]$beforePhase.revision -ne 0){
+            throw 'SCOPED_LAB_SNAPSHOT_DID_NOT_RETAIN_PREPARED_PHASE'
+        }
+        Write-Host 'NATIVE_SCOPED_V018_SNAPSHOT_BEFORE_CAS_PREPARED_JOURNAL_PASS'
         Write-CustomAppUserTxnBytesV010 -Path ([string]$session.paths.pending) -Bytes ([Text.Encoding]::ASCII.GetBytes($pendingText))
         $result=Invoke-CustomAppScopedLabNativeV017 -Session $session -HeldCrossEngineSession $global @pinArgs
         if(-not[bool]$result.ok -or [bool]$result.production_execution_authorized -or
@@ -128,6 +133,14 @@ if($Mode -ceq 'mutate'){
            [IO.File]::ReadAllText($sentinel) -cne $baseSentinel){
             throw 'SCOPED_LAB_NATIVE_OFFICIAL_EXECUTION_POSTSTATE_FAIL'
         }
+        $mutationPhase=Get-CustomAppScopedLabJournalV018 -Session $session -HeldCrossEngineSession $global -Context $saved.context
+        $markerText=[Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes([string]$saved.context.intent_path))
+        if([string]$mutationPhase.phase -cne 'atomic-mutation-starting' -or
+           [long]$mutationPhase.revision -ne 1 -or
+           -not $markerText.Contains(('FIRST_JOURNAL_SHA256='+[string]$mutationPhase.entry_sha256))){
+            throw 'SCOPED_LAB_NATIVE_STARTED_WHILE_CENTRAL_JOURNAL_PREPARED'
+        }
+        Write-Host 'NATIVE_SCOPED_V018_OFFICIAL_NATIVE_EFFECT_MATCHED_CAS_REV1_PASS'
         Write-Host 'NATIVE_SCOPED_LAB_REAL_OFFICIAL_APPLIED_AND_INTENT_DURABLE_PASS'
         [Environment]::Exit(71)
     }finally{
@@ -188,6 +201,20 @@ if($Mode -ceq 'tamper-denial'){
         throw 'SCOPED_LAB_MISSING_JOURNAL_LOCK_CREATED_OR_FAIL_OPEN'
     }
     Write-Host 'NATIVE_SCOPED_LAB_DPAPI_SNAPSHOT_TAMPER_AND_MISSING_JOURNAL_LOCK_DENIED_PASS'
+    $journalBefore=Read-CustomAppDurableRecoveryJournalReadOnlyV012 -AllowedRoot $root -StoreDirectory $journal
+    if(-not[bool]$journalBefore.ok -or [long]$journalBefore.revision -ne 1 -or
+       [string]$journalBefore.entry.phase -cne 'atomic-mutation-starting'){
+        throw 'SCOPED_LAB_NEGATIVE_TESTS_MISSTATED_CAS_PHASE'
+    }
+    $invisibleIntent=Join-Path $root 'intent-temporarily-moved-for-denial'
+    [IO.File]::Move($intent,$invisibleIntent)
+    $denied=$false
+    try{[void](Invoke-CustomAppScopedLabIndependentRecoveryV017 @pinArgs)}catch{$denied=$true}
+    finally{[IO.File]::Move($invisibleIntent,$intent)}
+    if(-not$denied -or -not[IO.File]::ReadAllText($target).Contains('NEW_SCOPED_ALPHA_V17')){
+        throw 'SCOPED_LAB_SNAPSHOT_WITH_CAS_AND_MISSING_INTENT_UNSAFE_NOOP'
+    }
+    Write-Host 'NATIVE_SCOPED_V018_CAS_ATOMIC_WITH_MISSING_INTENT_DENIED_PASS'
     Write-Host 'NATIVE_SCOPED_LAB_FRESH_PROCESS_DENIED_OUTSIDER_AND_INTENT_TAMPER_PASS'
     exit 0
 }
@@ -198,6 +225,13 @@ if($Mode -ceq 'recover-interrupted'){
     throw 'SCOPED_LAB_UNEXPECTEDLY_RETURNED_FROM_MIDWRITE_KILL'
 }
 $result=Invoke-CustomAppScopedLabIndependentRecoveryV017 @pinArgs
+$journalTerminal=Read-CustomAppDurableRecoveryJournalReadOnlyV012 -AllowedRoot $root -StoreDirectory $journal
+if(-not[bool]$journalTerminal.ok -or
+   [string]$journalTerminal.entry.phase -cne 'rollback-complete' -or
+   [long]$journalTerminal.revision -ne 3){
+    throw 'NATIVE_SCOPED_V018_CAS_TERMINAL_NOT_DURABLE_BY_FRESH_PROCESS'
+}
+Write-Host 'NATIVE_SCOPED_V018_CAS_ROLLBACK_COMPLETE_REV3_FRESH_PROCESS_PASS'
 if(-not[bool]$result.ok -or [bool]$result.production_execution_authorized -or
    [bool]$result.production_mutation_authorized -or
    [IO.File]::ReadAllText($target) -cne $baseTarget -or

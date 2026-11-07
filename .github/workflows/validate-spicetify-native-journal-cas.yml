@@ -1,0 +1,308 @@
+name: V018 append-only CAS native journal before mutation and independent rollback Windows validation
+on:
+  push:
+    branches: [validate/spicetify-native-journal-cas-cumulative]
+    paths:
+      - 'validation/custom-app-native-scoped-crash-rollback/**'
+      - '.github/workflows/validate-spicetify-native-journal-cas.yml'
+  pull_request:
+    branches: [validate/spicetify-provenance-rollback-cumulative]
+    paths:
+      - 'validation/custom-app-native-scoped-crash-rollback/**'
+      - '.github/workflows/validate-spicetify-native-journal-cas.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  official-native-crash-restarter:
+    runs-on: windows-2025
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}"
+      - name: Pin both prior qualified branches and frozen main without changing production
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='ceccee6ed1773d334e6c235299143ed31e289ea5'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}'){throw 'unqualified head checked out'}
+          if((git merge-base $parent HEAD).Trim() -cne $parent){throw 'qualified PR241 cumulative parent not ancestor'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'operating main moved'}
+          $source='validation/custom-app-native-scoped-crash-rollback/native-scoped-crash-rollback.ps1'
+          $test='validation/custom-app-native-scoped-crash-rollback/test_native_scoped_crash_rollback.ps1'
+          $workflow='.github/workflows/validate-spicetify-native-journal-cas.yml'
+          $pins=@{
+            'validation/spicetify-real-cli-evidence/static-spicetify-provenance.ps1'='acf2c32f8fd8611b36b00bb81e39dd5367593cfb'
+            'validation/spicetify-real-cli-evidence/build_candidate.py'='970db9fe85ef59a38c1be35b42a78b3f47d73d22'
+            'validation/spicetify-real-cli-evidence/ci_spicetify_release_v2464.ps1'='43fc7cde228263647757b1d8a9e71798e951bbd7'
+            '.github/workflows/validate-spicetify-real-cli-evidence.yml'='26a912ed1a1c19536b781580f73b9eb12c7d3826'
+          }
+          foreach($p in $pins.Keys){
+            if((git hash-object $p).Trim() -cne [string]$pins[$p]){
+              throw ('PR236 historical source pin invalid '+$p)
+            }
+          }
+          if((git hash-object $source).Trim() -cne '23ff6f98c98379c3856fba2f37052775a24c5626' -or
+             (git hash-object $test).Trim() -cne 'e58ecd0932b474be0fa7426ce24ba391ce6227fc'){
+            throw 'V018 CAS journal bound source or acceptance test SHA drift'
+          }
+          $changes=@(git diff --name-only "$parent...HEAD")
+          if($changes.Count -ne 3 -or @($changes|Where-Object{$_ -notin @($source,$test,$workflow)}).Count){
+            throw 'production source scope expanded unexpectedly'
+          }
+          foreach($file in @($source,$test,'validation/spicetify-real-cli-evidence/static-spicetify-provenance.ps1','validation/spicetify-real-cli-evidence/ci_spicetify_release_v2464.ps1')){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){$errors|ForEach-Object{Write-Host ('PARSER='+[string]$_.Message)};throw ('Windows PowerShell 5.1 parse failure '+$file)}
+          }
+          $module=[IO.File]::ReadAllText((Resolve-Path $source).Path)
+          foreach($required in @('Read-CustomAppSpicetifySealedPinV016','Write-CustomAppUserTxnBytesV010',
+              'Invoke-CustomAppScopedLabIndependentRecoveryV017','Restore-CustomAppScopedLabNativeV017',
+              'Get-CustomAppSealedStartupRecoveryAssessmentV013','[Environment]::GetFolderPath')){
+            if(-not$module.Contains($required) -and $required -ne '[Environment]::GetFolderPath'){
+              throw ('V017 missing authenticated boundary '+$required)
+            }
+          }
+          foreach($denied in @('Open-CustomAppUserTxnStoreV010 -Name','$script:CustomAppProductionPipelineEnabled = $true')){
+            if($module.Contains($denied)){throw ('V017 forbidden legacy mutating entrypoint '+$denied)}
+          }
+          Write-Host 'SPICETIFY_V018_INTEGRATED_CAS_MAIN_FROZEN_AND_PINS_PASS'
+      - name: Restore pinned historical journal source used by V016
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $rev='7e26187e2360089024e9d72d0701be6f1577a1ef'
+          $path='validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1'
+          $expected='a3df7e5d89c594083c10e240e13029ca5640b8ae'
+          if(-not(Test-Path -LiteralPath $path -PathType Leaf)){
+            git cat-file -e ($rev+'^{commit}') 2>$null
+            if($LASTEXITCODE -ne 0){git fetch --no-tags origin $rev|Out-Null;if($LASTEXITCODE -ne 0){throw 'historic journal commit unavailable'}}
+            New-Item -ItemType Directory -Force (Split-Path $path -Parent)|Out-Null
+            $env:PIN_OLD_BLOB=($rev+':'+$path)
+            $env:PIN_OLD_OUT=$path
+            python -c "import os,subprocess,pathlib;pathlib.Path(os.environ['PIN_OLD_OUT']).write_bytes(subprocess.check_output(['git','cat-file','blob',os.environ['PIN_OLD_BLOB']]))"
+            if($LASTEXITCODE -ne 0){throw 'historic crash journal blob restore failed'}
+          }
+          if((git hash-object $path).Trim() -cne $expected){throw 'historic journal source not authenticated'}
+          Write-Host 'NATIVE_SCOPED_V017_HISTORICAL_JOURNAL_PINNED_PASS'
+      - name: Fetch real upstream official Spicetify 2.46.4 Windows x64 into RUNNER_TEMP
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP ('native-scoped-official-'+[guid]::NewGuid().ToString('N'))
+          [void][IO.Directory]::CreateDirectory($root)
+          $zip=Join-Path $root 'official.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip' -OutFile $zip
+          if((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f' -or
+             (Get-Item $zip).Length -ne 7795758){throw 'official upstream ZIP SHA/size drift'}
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z=[IO.Compression.ZipFile]::OpenRead($zip)
+          try{
+            $total=[long]0
+            foreach($f in $z.Entries){
+              $relative=$f.FullName.Replace('/','\')
+              if([IO.Path]::IsPathRooted($relative) -or $relative.StartsWith('\') -or
+                 $relative.Contains('..\') -or $relative.Contains(':')){throw 'unsafe upstream ZIP entry'}
+              $total+=[long]$f.Length
+              if($total -gt 104857600){throw 'upstream ZIP expansion exceeds bound'}
+            }
+          }finally{$z.Dispose()}
+          $dir=Join-Path $root 'unzipped'
+          Expand-Archive -LiteralPath $zip -DestinationPath $dir
+          $exes=@(Get-ChildItem -LiteralPath $dir -Recurse -File -Filter spicetify.exe)
+          if($exes.Count -ne 1 -or
+             (Get-FileHash -LiteralPath $exes[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+              '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+            throw 'official Spicetify.exe checksum mismatch'
+          }
+          "SCOPED_OFFICIAL_EXE=$($exes[0].FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host 'NATIVE_SCOPED_V017_EXACT_OFFICIAL_VENDOR_BINARY_PASS'
+      - name: Independently regenerate BOTH previously qualified Addon Managers and preserve V016 as canonical
+        shell: powershell
+        timeout-minutes: 35
+        run: |
+          $ErrorActionPreference='Stop'
+          $legacy='validation/spicetify-real-cli-evidence'
+          $current='validation/custom-app-spicetify-sealed-enrollment'
+          python "$legacy/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'PR236 historical qualified builder failed'}
+          $prior="$legacy/out/bin/addon-manager.ps1"
+          $p=(Get-FileHash -LiteralPath $prior -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($p -cne '183fbf67041bb77b28aa2dcbd896df320438636f7a3684d1438e3130b63029c8' -or
+             (Get-Item $prior).Length -ne 1550140){throw 'PR236 Addon Manager byte-identical pin invalid'}
+          $a=Get-Content "$legacy/candidate-validation.json" -Raw|ConvertFrom-Json
+          if(-not[bool]$a.fullchain_hard_disabled -or -not[bool]$a.exact_previous_candidate_inverse -or
+             -not[bool]$a.no_mutation_authority){throw 'PR236 prohibited update authority'}
+          python "$current/build_candidate.py"
+          if($LASTEXITCODE -ne 0){throw 'V016 qualified cumulative builder failed'}
+          $latest="$current/out/bin/addon-manager.ps1"
+          $q=(Get-FileHash -LiteralPath $latest -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($q -cne '70639fb47ca038d3e745c78cae0c2344c0ab92d2f98bbdee9c0b8766fe675d85' -or
+             (Get-Item $latest).Length -ne 1573812){throw 'V016 Addon Manager byte-identical pin invalid'}
+          $b=Get-Content "$current/candidate-validation.json" -Raw|ConvertFrom-Json
+          if(-not[bool]$b.fullchain_hard_disabled -or
+             -not[bool]$b.exact_previous_candidate_inverse -or
+             -not[bool]$b.no_mutation_authority -or
+             -not[bool]$b.prepared_only_immutable_spicetify_pin_available -or
+             -not[bool]$b.sealed_pin_restart_no_create_revalidation_available){
+            throw 'V016 immutable DPAPI registration contract invalid'
+          }
+          foreach($file in @($prior,$latest)){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw ('actual generated Addon parse errors '+$file)}
+          }
+          $priorCode=[IO.File]::ReadAllText((Resolve-Path $prior).Path)
+          $latestCode=[IO.File]::ReadAllText((Resolve-Path $latest).Path)
+          if(-not$priorCode.Contains('Get-CustomAppSpicetifyCanonicalEvidenceV015') -or
+             -not$latestCode.Contains('Get-CustomAppSpicetifyPassiveObservationV015') -or
+             -not$latestCode.Contains('Read-CustomAppSpicetifySealedPinV016') -or
+             $latestCode.Contains('Get-CustomAppSpicetifyCanonicalEvidenceV015')){
+            throw 'cross-branch evidence must be independent, avoid redundant production module'
+          }
+          "SPICETIFY_CUMULATIVE_236_SHA=$p"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          "SPICETIFY_CUMULATIVE_238_SHA=$q"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host 'SPICETIFY_CUMULATIVE_BOTH_QUALIFIED_REAL_ADDON_REBUILDS_EXACT_PASS'
+      - name: Re-run PR236 actual official CLI isolated canonical-profile behavior with current cumulative tree
+        shell: powershell
+        timeout-minutes: 17
+        run: |
+          $ErrorActionPreference='Stop'
+          $release=Invoke-RestMethod -Uri 'https://api.github.com/repos/spicetify/cli/releases/tags/v2.46.4' -Headers @{'User-Agent'='spotify-crossbranch-provenance'}
+          $assets=@($release.assets|Where-Object{$_.name -ceq 'spicetify-2.46.4-windows-x64.zip'})
+          if($assets.Count -ne 1 -or [string]$assets[0].digest -cne
+              'sha256:0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f'){
+            throw 'official upstream release metadata changed from pinned digest'
+          }
+          $d='validation/spicetify-real-cli-evidence'
+          $log="$d/real-cli-integrated.log"
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$d/ci_spicetify_release_v2464.ps1" *>&1 |
+            Tee-Object -FilePath $log|Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 0){Get-Content $log -Tail 60|ForEach-Object{Write-Host $_};throw ('PR236 release canonical profile test failed '+$rc)}
+          $s=Get-Content $log -Raw
+          foreach($marker in @('SPICETIFY_CANONICAL_CURRENTUSER_EXE_SNAPSHOT_PASS',
+              'SPICETIFY_REAL_CLI_HOSTED_ISOLATED_PROVENANCE_PASS')){
+            if(-not$s.Contains($marker)){throw ('canonical profile proof missing '+$marker)}
+          }
+          $r=Get-Content "$d/real-cli-provenance-ci.json" -Raw|ConvertFrom-Json
+          if([string]$r.extracted_executable_sha256 -cne
+              '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db' -or
+             -not[bool]$r.canonical_profile_executable_read_only_verified -or
+             -not[bool]$r.wrong_hash_denied -or
+             -not[bool]$r.no_cli_apply_or_spotify_execution){
+            throw 'canonical profile official exe SHA/read no-create guard wrong'
+          }
+          Write-Host 'SPICETIFY_CUMULATIVE_REAL_OFFICIAL_CLI_PR236_V015_CROSS_PROOF_PASS'
+      - name: Repeat both exact Addon builds and assert no tracked source or operating main changes
+        shell: powershell
+        timeout-minutes: 35
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($d in @('validation/spicetify-real-cli-evidence',
+              'validation/custom-app-spicetify-sealed-enrollment')){
+            python "$d/build_candidate.py"
+            if($LASTEXITCODE -ne 0){throw ('repeat Addon build failed '+$d)}
+          }
+          if((Get-FileHash 'validation/spicetify-real-cli-evidence/out/bin/addon-manager.ps1' -Algorithm SHA256).Hash.ToLowerInvariant() -cne $env:SPICETIFY_CUMULATIVE_236_SHA -or
+             (Get-FileHash 'validation/custom-app-spicetify-sealed-enrollment/out/bin/addon-manager.ps1' -Algorithm SHA256).Hash.ToLowerInvariant() -cne $env:SPICETIFY_CUMULATIVE_238_SHA){
+            throw 'qualified candidate cross-branch build nondeterministic'
+          }
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2' -or
+             @(git diff --name-only HEAD --).Count -or @(git diff --cached --name-only).Count){
+            throw 'operating main or tracked repository source changed'
+          }
+          Write-Host 'SPICETIFY_CUMULATIVE_BOTH_PROVENANCE_BUILD_REPEAT_AND_MAIN_FROZEN_PASS'
+      - name: Real native scoped mutation then terminate updater WITHOUT finally
+        shell: powershell
+        timeout-minutes: 12
+        run: |
+          $ErrorActionPreference='Stop'
+          $f=Join-Path $env:RUNNER_TEMP ('native-scoped-crash-'+[guid]::NewGuid().ToString('N'))
+          "SCOPED_FIXTURE_ROOT=$f"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          $script='validation/custom-app-native-scoped-crash-rollback/test_native_scoped_crash_rollback.ps1'
+          $log='validation/custom-app-native-scoped-crash-rollback/abrupt-exit.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Mode mutate -FixtureRoot $f -OfficialExecutable $env:SCOPED_OFFICIAL_EXE *>&1 |
+            Tee-Object -FilePath $log|Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 71){Get-Content $log -Tail 50|ForEach-Object{Write-Host $_};throw ('actual native mutated child did not die at injected interruption '+$rc)}
+          $raw=Get-Content $log -Raw
+          if(-not$raw.Contains('NATIVE_SCOPED_LAB_REAL_OFFICIAL_APPLIED_AND_INTENT_DURABLE_PASS')){
+            throw 'official native mutation proof missing despite exit 71'
+          }
+          if(-not$raw.Contains('NATIVE_SCOPED_V018_OFFICIAL_NATIVE_EFFECT_MATCHED_CAS_REV1_PASS') -or
+             -not$raw.Contains('NATIVE_SCOPED_V018_APPEND_ONLY_CAS_PHASE_BEFORE_NATIVE_EFFECT_PASS')){
+            throw 'central V010 CAS must be durable before the official native side effect'
+          }
+          Write-Host 'NATIVE_SCOPED_V017_OFFICIAL_APPLIED_THEN_ABRUPT_TERMINATION_PASS'
+          # The updater's 71 is expected and verified; do not leak it as the runner shell result.
+          $global:LASTEXITCODE=0
+          exit 0
+      - name: Fresh process denies unrelated asset mutation and tampered durable intent without touching target
+        shell: powershell
+        timeout-minutes: 8
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/custom-app-native-scoped-crash-rollback/test_native_scoped_crash_rollback.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Mode tamper-denial -FixtureRoot $env:SCOPED_FIXTURE_ROOT
+          if($LASTEXITCODE -ne 0){throw 'new-process fail-closed tamper test failed'}
+          Write-Host 'NATIVE_SCOPED_V017_INDEPENDENT_TAMPER_DENIAL_PASS'
+          Write-Host 'NATIVE_SCOPED_V018_FRESH_PROCESS_CAS_PHASE_AND_MISSING_INTENT_DENIAL_PASS'
+      - name: Intentionally terminate independent recovery midway through an existing JS file write
+        shell: powershell
+        timeout-minutes: 8
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/custom-app-native-scoped-crash-rollback/test_native_scoped_crash_rollback.ps1'
+          $log='validation/custom-app-native-scoped-crash-rollback/recovery-half-file-exit.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Mode recover-interrupted -FixtureRoot $env:SCOPED_FIXTURE_ROOT *>&1 |
+            Tee-Object -FilePath $log|Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 72){Get-Content $log -Tail 45|ForEach-Object{Write-Host $_};throw ('half-write recovery interruption not observed '+$rc)}
+          if(-not(Get-Content $log -Raw).Contains('NATIVE_SCOPED_LAB_HOSTED_RESTORE_EXIT_MID_TARGET_FILE')){
+            throw 'missing independent recovery half-write flush proof'
+          }
+          Write-Host 'NATIVE_SCOPED_V017_RECOVERY_INTERRUPTED_AFTER_PARTIAL_DURABLE_TARGET_WRITE_PASS'
+          $global:LASTEXITCODE=0
+          exit 0
+      - name: Independently restarted worker restores exact original target without touching state.pending
+        shell: powershell
+        timeout-minutes: 8
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/custom-app-native-scoped-crash-rollback/test_native_scoped_crash_rollback.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Mode recover -FixtureRoot $env:SCOPED_FIXTURE_ROOT
+          if($LASTEXITCODE -ne 0){throw 'independent crash recovery failed'}
+          Write-Host 'NATIVE_SCOPED_V017_REAL_OFFICIAL_NATIVE_INDEPENDENT_CRASH_RESTORE_PASS'
+          Write-Host 'NATIVE_SCOPED_V018_DURABLE_ROLLBACK_REQUIRED_TO_COMPLETE_CAS_PASS'
+      - name: Third independent worker rejects repeat mutation and validates durable recovered terminal
+        shell: powershell
+        timeout-minutes: 8
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/custom-app-native-scoped-crash-rollback/test_native_scoped_crash_rollback.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Mode replay -FixtureRoot $env:SCOPED_FIXTURE_ROOT
+          if($LASTEXITCODE -ne 0){throw 'recovery terminal replay not idempotent'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'main changed'}
+          Write-Host 'NATIVE_SCOPED_V017_CROSS_PROCESS_RECOVERY_IDEMPOTENT_MAIN_FROZEN_PASS'
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spicetify-v018-native-journal-cas-${{ github.run_id }}
+          path: |
+            validation/custom-app-native-scoped-crash-rollback/abrupt-exit.log
+            validation/custom-app-native-scoped-crash-rollback/recovery-half-file-exit.log
+            validation/spicetify-real-cli-evidence/real-cli-integrated.log
+            validation/spicetify-real-cli-evidence/real-cli-provenance-ci.json
+            validation/spicetify-real-cli-evidence/candidate-validation.json
+            validation/custom-app-spicetify-sealed-enrollment/candidate-validation.json
+          retention-days: 14
+          if-no-files-found: warn

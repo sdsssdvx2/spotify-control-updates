@@ -384,6 +384,94 @@ function Save-CustomAppScopedLabSnapshotV017 {
 }
 
 
+
+# V018 append-only CAS journal binding for hosted-only real native refresh.
+function Get-CustomAppScopedLabJournalV018 {
+    param([Parameter(Mandatory=$true)]$Session,
+          [Parameter(Mandatory=$true)]$HeldCrossEngineSession,
+          [Parameter(Mandatory=$true)]$Context)
+    [void](Assert-CustomAppScopedLabHostedV017 -Path ([string]$Session.paths.root))
+    [void](Assert-CustomAppSpicetifyPinLocksV016 -Session $Session -HeldCrossEngineSession $HeldCrossEngineSession -HostedCiRoot ([string]$Session.paths.root))
+    $locator=Read-CustomAppUserTxnJournalLocatorV010 -Session $Session
+    if(-not[bool]$locator.ok -or $null-eq$locator.record){
+        throw 'native-scoped-journal-locator-not-authenticated'
+    }
+    $r=$locator.record
+    $j=Read-CustomAppDurableRecoveryJournalReadOnlyV012 -AllowedRoot ([string]$r.allowed_root) -StoreDirectory ([string]$r.store_directory)
+    if(-not[bool]$j.ok -or
+       -not[bool]$j.reloaded_from_persistent_store -or
+       [string]$j.entry.transaction_id -cne [string]$Context.transaction_id -or
+       [string]$j.entry.consumption_id -cne [string]$Context.consumption_id -or
+       [string]$j.entry.name -cne [string]$Context.target -or
+       [string]$j.entry.live_path -cne [string]$Session.paths.live -or
+       [string]$j.transaction_id -cne [string]$Context.transaction_id -or
+       [long]$j.revision -ne [long]$j.entry.revision -or
+       [bool]$j.production_mutation_authorized){
+        throw 'native-scoped-journal-readonly-triple-id-drift'
+    }
+    return [pscustomobject]@{
+        allowed_root=[string]$r.allowed_root
+        store_directory=[string]$r.store_directory
+        revision=[long]$j.revision
+        phase=[string]$j.entry.phase
+        entry_sha256=[string]$j.entry.entry_sha256
+        transaction_id=[string]$j.transaction_id
+        result_is_authority=$false
+        production_mutation_authorized=$false
+    }
+}
+function Move-CustomAppScopedLabJournalV018 {
+    param([Parameter(Mandatory=$true)]$Session,
+          [Parameter(Mandatory=$true)]$HeldCrossEngineSession,
+          [Parameter(Mandatory=$true)]$Context,
+          [Parameter(Mandatory=$true)]
+          [ValidateSet('atomic-mutation-starting','rollback-required','rollback-complete')]
+          [string]$NextPhase)
+    $before=Get-CustomAppScopedLabJournalV018 -Session $Session -HeldCrossEngineSession $HeldCrossEngineSession -Context $Context
+    switch($NextPhase){
+        'atomic-mutation-starting' {$from='prepared';$rev=[long]0}
+        'rollback-required' {$from='atomic-mutation-starting';$rev=[long]1}
+        'rollback-complete' {$from='rollback-required';$rev=[long]2}
+    }
+    if([string]$before.phase -cne $from -or [long]$before.revision -ne $rev){
+        throw ('native-scoped-journal-illegal-stage-or-revision-'+$NextPhase)
+    }
+    $paths=Get-CustomAppProductionCrashJournalPathsV010 -AllowedRoot ([string]$before.allowed_root) -StoreDirectory ([string]$before.store_directory)
+    Assert-CustomAppUserTxnNoReparseV010 -Path ([string]$paths.lock)
+    if(-not[IO.File]::Exists([string]$paths.lock)){
+        throw 'native-scoped-journal-existing-lock-required-before-append'
+    }
+    $write=Append-CustomAppProductionCrashJournalPhaseV010 -AllowedRoot ([string]$before.allowed_root) -StoreDirectory ([string]$before.store_directory) -ExpectedRevision ([long]$before.revision) -ExpectedEntrySha256 ([string]$before.entry_sha256) -Phase $NextPhase
+    if(-not[bool]$write.ok){
+        throw ('native-scoped-journal-cas-append-failed-'+[string]$write.reason)
+    }
+    $after=Get-CustomAppScopedLabJournalV018 -Session $Session -HeldCrossEngineSession $HeldCrossEngineSession -Context $Context
+    if([long]$after.revision -ne ($rev+1) -or
+       [string]$after.phase -cne $NextPhase -or
+       [string]$after.entry_sha256 -cne [string]$write.entry.entry_sha256){
+        throw 'native-scoped-journal-durable-phase-readback-invalid'
+    }
+    return $after
+}
+function Get-CustomAppScopedLabFirstMutationEntryV018 {
+    param([Parameter(Mandatory=$true)]$Journal)
+    $paths=Get-CustomAppProductionCrashJournalPathsV010 -AllowedRoot ([string]$Journal.allowed_root) -StoreDirectory ([string]$Journal.store_directory)
+    $files=@(Get-ChildItem -LiteralPath ([string]$paths.history) -File -Filter '00000000000000000001-*.json' -Force -ErrorAction Stop)
+    if($files.Count -ne 1){throw 'native-scoped-journal-first-side-effect-history-not-unique'}
+    $entry=ConvertFrom-CustomAppProductionCrashJournalFileV010 -AllowedRoot ([string]$Journal.allowed_root) -Path ([string]$files[0].FullName)
+    if([string]$entry.entry.phase -cne 'atomic-mutation-starting' -or
+       [long]$entry.entry.revision -ne 1 -or
+       [string]$entry.entry.transaction_id -cne [string]$Journal.transaction_id -or
+       [string]$entry.entry.entry_sha256 -cnotmatch '^[0-9a-f]{64}$'){
+        throw 'native-scoped-journal-first-mutation-entry-not-authenticated'
+    }
+    if([long]$Journal.revision -eq 1 -and
+       [string]$Journal.entry_sha256 -cne [string]$entry.entry.entry_sha256){
+        throw 'native-scoped-journal-first-mutation-head-mismatch'
+    }
+    return [string]$entry.entry.entry_sha256
+}
+
 function Invoke-CustomAppScopedLabNativeV017 {
     param([Parameter(Mandatory=$true)]$Session,
           [Parameter(Mandatory=$true)]$HeldCrossEngineSession,
@@ -408,11 +496,14 @@ function Invoke-CustomAppScopedLabNativeV017 {
        -not[IO.File]::ReadAllText($clonedConfig).Contains(('custom_apps = '+$ctx.target))){
         throw 'native-scoped-lab-staged-config-drift'
     }
+    # CAS phase must become durable BEFORE the first official CLI mutation.
+    $start=Move-CustomAppScopedLabJournalV018 -Session $Session -HeldCrossEngineSession $HeldCrossEngineSession -Context $ctx -NextPhase 'atomic-mutation-starting'
     $sealed=[IO.File]::ReadAllBytes([string]$ctx.sealed_path)
     $sealSha=Get-CustomAppScopedLabShaV017 -Bytes $sealed
-    $intent=[Text.Encoding]::ASCII.GetBytes(('V017_INTENT_SHA256='+$sealSha+[Environment]::NewLine))
-    # The durable marker is the last state write before executing native code.
+    $intent=[Text.Encoding]::ASCII.GetBytes(('V018_INTENT_SHA256='+$sealSha+'|FIRST_JOURNAL_SHA256='+[string]$start.entry_sha256+[Environment]::NewLine))
+    # Crash after journal CAS but before intent is ambiguous and MUST fail closed.
     Write-CustomAppUserTxnBytesV010 -Path ([string]$ctx.intent_path) -Bytes $intent
+    Write-Host 'NATIVE_SCOPED_V018_APPEND_ONLY_CAS_PHASE_BEFORE_NATIVE_EFFECT_PASS'
     $p=New-Object Diagnostics.ProcessStartInfo
     $p.FileName=[string]$ctx.executable_path
     # --bypass-admin is hosted-only in this mandatory sandbox guard.
@@ -476,27 +567,47 @@ function Restore-CustomAppScopedLabNativeV017 {
     $snapshot=Read-CustomAppScopedLabSnapshotV017 -Context $ctx -Session $Session
     Assert-CustomAppUserTxnNoReparseV010 -Path ([string]$ctx.intent_path)
     Assert-CustomAppUserTxnNoReparseV010 -Path ([string]$ctx.recovered_path)
+    $journal=Get-CustomAppScopedLabJournalV018 -Session $Session -HeldCrossEngineSession $HeldCrossEngineSession -Context $ctx
     if(-not[IO.File]::Exists([string]$ctx.intent_path)){
+        if([string]$journal.phase -cne 'prepared' -or [long]$journal.revision -ne 0){
+            throw 'native-scoped-journal-side-effect-possible-but-intent-missing-manual-hold'
+        }
         return [pscustomobject]@{
             ok=$true;status='snapshot-prepared-no-mutation-intent'
             restored=$false;result_is_authority=$false
             production_execution_authorized=$false;production_mutation_authorized=$false
         }
     }
+    if([string]$journal.phase -notin @('atomic-mutation-starting','rollback-required','rollback-complete') -or
+       [long]$journal.revision -notin @(1,2,3)){
+        throw 'native-scoped-journal-phase-not-recoverable-for-this-scoped-transaction'
+    }
+    $firstMutationHash=Get-CustomAppScopedLabFirstMutationEntryV018 -Journal $journal
     $sealed=[IO.File]::ReadAllBytes($path)
-    $expected='V017_INTENT_SHA256='+(Get-CustomAppScopedLabShaV017 -Bytes $sealed)+[Environment]::NewLine
+    $expected='V018_INTENT_SHA256='+(Get-CustomAppScopedLabShaV017 -Bytes $sealed)+'|FIRST_JOURNAL_SHA256='+$firstMutationHash+[Environment]::NewLine
     $actual=[Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes([string]$ctx.intent_path))
-    if($actual -cne $expected){throw 'native-scoped-lab-intent-not-bound-to-sealed-snapshot'}
+    if($actual -cne $expected){throw 'native-scoped-lab-intent-not-bound-to-sealed-snapshot-and-journal'}
     [void](Assert-CustomAppScopedLabOutsideUnchangedV017 -Context $ctx -Snapshot $snapshot)
     if((Get-CustomAppSpicetifyPassiveFileSha256V015 -Path ([string]$ctx.source_index)) -cne
        [string]$snapshot.source_sha256){
         throw 'native-scoped-lab-source-changed-after-intent'
     }
     $recovered=[IO.File]::Exists([string]$ctx.recovered_path)
+    if($recovered -and [string]$journal.phase -cne 'rollback-complete'){
+        throw 'native-scoped-journal-terminal-marker-before-rollback-complete'
+    }
+    if([string]$journal.phase -ceq 'atomic-mutation-starting'){
+        $journal=Move-CustomAppScopedLabJournalV018 -Session $Session -HeldCrossEngineSession $HeldCrossEngineSession -Context $ctx -NextPhase 'rollback-required'
+        Write-Host 'NATIVE_SCOPED_V018_CAS_ROLLBACK_REQUIRED_BEFORE_RECOVERY_WRITE_PASS'
+    }
+    $skipRestore=([string]$journal.phase -ceq 'rollback-complete')
+    if([string]$journal.phase -cne 'rollback-required' -and -not$skipRestore){
+        throw 'native-scoped-journal-rollback-required-not-durably-recorded'
+    }
     foreach($saved in @($snapshot.targets)){
         $targetPath=Join-Path ([string]$ctx.xpui) ([string]$saved.rel)
         Assert-CustomAppUserTxnNoReparseV010 -Path $targetPath
-        if($recovered){continue}
+        if($recovered -or $skipRestore){continue}
         # Retryable even if the previous restore process crashed mid-write:
         # marker is only created AFTER complete byte-exact revalidation.
         if([bool]$saved.existed){
@@ -532,17 +643,25 @@ function Restore-CustomAppScopedLabNativeV017 {
             throw 'native-scoped-lab-restore-created-target-persisted'
         }
     }
+    if([string]$journal.phase -ceq 'rollback-required'){
+        $journal=Move-CustomAppScopedLabJournalV018 -Session $Session -HeldCrossEngineSession $HeldCrossEngineSession -Context $ctx -NextPhase 'rollback-complete'
+        Write-Host 'NATIVE_SCOPED_V018_CAS_ROLLBACK_COMPLETE_AFTER_EXACT_BYTES_PASS'
+    }
+    if([string]$journal.phase -cne 'rollback-complete' -or [long]$journal.revision -ne 3){
+        throw 'native-scoped-journal-rollback-complete-not-durably-reloaded'
+    }
+    # Rollback-complete CAS is persisted before the separate terminal marker.
+    # A crash in between resumes read-only if target bytes match the snapshot.
+    $terminal='V018_RECOVERED='+[string]$ctx.transaction_id+'|JOURNAL_SHA256='+[string]$journal.entry_sha256+[Environment]::NewLine
     if(-not$recovered){
-        Write-CustomAppUserTxnBytesV010 -Path ([string]$ctx.recovered_path) -Bytes (
-            [Text.Encoding]::ASCII.GetBytes(('V017_RECOVERED='+[string]$ctx.transaction_id+[Environment]::NewLine)))
+        Write-CustomAppUserTxnBytesV010 -Path ([string]$ctx.recovered_path) -Bytes ([Text.Encoding]::ASCII.GetBytes($terminal))
     }else{
-        $terminal='V017_RECOVERED='+[string]$ctx.transaction_id+[Environment]::NewLine
         if([Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes([string]$ctx.recovered_path)) -cne
            $terminal){throw 'native-scoped-lab-terminal-marker-corrupt'}
     }
     return [pscustomobject]@{
-        ok=$true;status=$(if($recovered){'already-recovered-verified'}else{'restored-exact-before-image'})
-        restored=(-not$recovered);replay_idempotent=$recovered
+        ok=$true;status=$(if($recovered){'already-recovered-verified'}elseif($skipRestore){'recovered-after-journal-terminal'}else{'restored-exact-before-image'})
+        restored=(-not$recovered -and -not$skipRestore);replay_idempotent=$recovered
         result_is_authority=$false;production_execution_authorized=$false
         production_mutation_authorized=$false
     }
@@ -602,7 +721,9 @@ function Test-CustomAppScopedLabSelfTestV017 {
     foreach($name in @('Get-CustomAppScopedLabContextV017',
         'Save-CustomAppScopedLabSnapshotV017','Read-CustomAppScopedLabSnapshotV017',
         'Invoke-CustomAppScopedLabNativeV017','Restore-CustomAppScopedLabNativeV017',
-        'Invoke-CustomAppScopedLabIndependentRecoveryV017')){
+        'Invoke-CustomAppScopedLabIndependentRecoveryV017',
+        'Get-CustomAppScopedLabJournalV018','Move-CustomAppScopedLabJournalV018',
+        'Get-CustomAppScopedLabFirstMutationEntryV018')){
         if(-not(Get-Command -Name $name -CommandType Function -ErrorAction SilentlyContinue)){
             throw ('native-scoped-lab-function-missing-'+$name)
         }
