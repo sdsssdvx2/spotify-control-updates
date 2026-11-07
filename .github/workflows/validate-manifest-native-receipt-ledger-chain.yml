@@ -6,6 +6,7 @@ on:
       - 'validation/approved-native-complete-output-proof/full-native-output-proof-v037.ps1'
       - 'validation/approved-native-retained-terminal/retained-terminal-v039.ps1'
       - 'validation/approved-native-retained-user-transaction/**'
+      - 'validation/approved-native-manifest-scope/test-manifest-multifile-terminal-ledger-v045.ps1'
       - '.github/workflows/validate-manifest-native-receipt-ledger-chain.yml'
   workflow_dispatch:
 permissions: {contents: read}
@@ -16,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
-      - name: Verify frozen V044 parent; only 4 existing scripts + 1 CI and PowerShell 5.1 parse
+      - name: Verify frozen V044 parent; 4 existing scripts, focused ivLyrics case and CI parse
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -29,6 +30,7 @@ jobs:
            'validation/approved-native-retained-terminal/retained-terminal-v039.ps1',
            'validation/approved-native-retained-user-transaction/native-retained-ledger-v040.ps1',
            'validation/approved-native-retained-user-transaction/test-retained-ledger-v040.ps1',
+           'validation/approved-native-manifest-scope/test-manifest-multifile-terminal-ledger-v045.ps1',
            '.github/workflows/validate-manifest-native-receipt-ledger-chain.yml')
           $changed=@(git diff --name-only "$parent...HEAD")
           if($changed.Count -ne $allowed.Count -or @($changed|Where-Object{$_ -notin $allowed}).Count){
@@ -102,6 +104,26 @@ jobs:
             if(-not$s.Contains($marker)){throw ('V040_MARKER_MISSING '+$marker)}
           }
           Write-Host 'V045_MANIFEST_DPAPI_RECEIPT_RETAINED_CAS_AND_USER_LEDGER_PASS'
+      - name: Independent authentic ivLyrics many-extension manifest through V037 V039 V040
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v045-ivlyrics-many-file.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/approved-native-manifest-scope/test-manifest-multifile-terminal-ledger-v045.ps1' -OriginalAddonPath $env:V040_ADDON -OfficialExecutable $env:V040_EXE *>&1 | Tee-Object -FilePath $log | Out-Null
+          $code=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($code -ne 0){Get-Content $log -Tail 100|ForEach-Object{Write-Host $_};throw ('V045_IVLYRICS_MULTIFILE_FAILED '+$code)}
+          $body=Get-Content $log -Raw
+          foreach($mark in @(
+           'V045_REAL_IVLYRICS_PUBLISHED_MANIFEST_HAS_MULTIPLE_OWNED_OUTPUTS_PASS',
+           'V045_REAL_OFFICIAL_IVLYRICS_MULTIFILE_MANIFEST_DPAPI_SEAL_PASS',
+           'V045_IVLYRICS_MULTIFILE_RETAINED_TERMINAL_AND_DPAPI_LEDGER_PASS',
+           'V045_IVLYRICS_ORIGINAL_APP_XPUI_SPOTIFY_GUARD_PRESERVED_PASS',
+           'V045_IVLYRICS_GITHUB_HOSTED_ONLY_NO_USER_PROFILE_NO_PRODUCTION_AUTHORITY_PASS')){
+            if(-not$body.Contains($mark)){throw ('V045_IVLYRICS_PROOF_MISSING '+$mark)}
+          }
+          Write-Host 'V045_MANIFEST_MANY_FILES_FULL_RETAINED_LEDGER_INTEGRATION_PASS'
       - name: Ensure main and real Spotify unchanged
         shell: powershell
         run: |
