@@ -97,111 +97,7 @@ Assert-V052 ([bool]$sealedIntent.v044_native_manifest_fence_verified -and
  [int]$sealedIntent.owned_output_file_count -eq 6 -and
  [string]$sealedIntent.owned_output_source_sha256 -ceq [string]$scope.source_tree_sha256 -and
  [string]$sealedIntent.owned_output_manifest_sha256 -ceq [string]$scope.manifest_sha256 -and
- [string]$sealedIntent.owned_output_scope_fingerprint -cmatch '^[a-f0-9]{64}
-# The sealed pre-change witness MUST reject even appended DPAPI bytes.
-$oldIntent=[IO.File]::ReadAllBytes($sealed)
-try{
- [IO.File]::AppendAllText($sealed,'tamper')
- $blocked=$false
- try{
-   $p=Assert-CustomAppV052Fixture -HostedFixtureRoot $root -HostedFixtureCliPath $cli -HostedEscrowRoot $escrow
-   [void](Get-CustomAppV052SealedIntent -Paths $p -EscrowId $id -IntentSha256 $intentSha)
- }catch{if([string]$_.Exception.Message -ceq 'V052_FULL_INTENT_CIPHERTEXT_SHA_CHANGED'){$blocked=$true}else{throw}}
- Assert-V052 $blocked 'FULL_DPAPI_INTENT_CIPHERTEXT_NOT_BOUND'
-}finally{[IO.File]::WriteAllBytes($sealed,$oldIntent)}
-Write-Host 'V052_SEALED_TRANSACTION_INTENT_TAMPER_REFUSED_PASS'
-# Simulation of a vendor candidate: the candidate is *test-only* and never
-# becomes release authorization. Every actual synthetic source mutation
-# happens with the same V047 OS FileShare.None lock.
-$sim=Enter-CustomAppEngineTurnstileV047 -HostedCiRoot (Join-Path $root 'Local')
-try{
- $oldApp=Join-Path $escrow ('sim-v052-before-app-'+$id)
- $oldXpui=Join-Path $escrow ('sim-v052-before-xpui-'+$id)
- [IO.Directory]::Move((Join-Path $cliApps 'ivlyrics'),$oldApp)
- [void](Copy-CustomAppV050BoundTree -Source $candidateApp -Destination (Join-Path $cliApps 'ivlyrics'))
- [IO.Directory]::Move($xpui,$oldXpui)
- [void](Copy-CustomAppV050BoundTree -Source $candidateX -Destination $xpui)
- Assert-V052 ((Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui).tree_sha256 -ceq $candidateXpuiSha -and
-  (Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path $cliApps 'ivlyrics')).tree_sha256 -ceq $candidateAppSha) 'SIMULATED_APPLY_INCOMPLETE'
-}finally{$sim.Dispose()}
-# After applying, V046 cannot readmit the original profile. Recovery must
-# use V050/V051 pinned preimage and the pre-change V052 witness instead.
-$drift=Test-CustomAppCutoverReadOnlyAdmissionV046 -ExpectedProfileSha256 $pin @fixtureArgs
-Assert-V052 (-not[bool]$drift.ok -and -not[bool]$drift.production_mutation_authorized) 'PRECHANGE_IDENTITY_WAS_REUSED_AFTER_APPLY'
-Write-Host 'V052_SIMULATED_VENDOR_CHANGE_AND_V046_PRECHANGE_ADMISSION_REJECTED_PASS'
-$act=@{HostedFixtureRoot=$root;HostedFixtureCliPath=$cli
- HostedEscrowRoot=$escrow;EscrowId=$id;IntentSha256=$intentSha}
-# Unknown after-apply mutation must block before ANY quarantine or rollback.
-$foreignOriginal=[IO.File]::ReadAllBytes($foreign)
-try{
- [IO.File]::AppendAllText($foreign,'FOREIGN_DRIFT')
- $blocked=$false
- try{[void](Invoke-CustomAppHostedRollbackV052 @act)}
- catch{if([string]$_.Exception.Message -ceq 'V052_UNEXPECTED_LIVE_FOREIGN_CHANGE'){$blocked=$true}else{throw}}
- Assert-V052 ($blocked -and -not(Test-Path (Join-Path $escrow ('quarantine-v052-'+$id)))) 'UNBOUNDED_FOREIGN_CHANGE_WAS_OVERWRITTEN'
-}finally{[IO.File]::WriteAllBytes($foreign,$foreignOriginal)}
-Write-Host 'V052_UNEXPECTED_FOREIGN_XPUI_DRIFT_FAIL_CLOSED_NO_WRITES_PASS'
-# Inject power-loss-like interruption precisely AFTER candidate app quarantine
-# but BEFORE original app directory publication.
-$crashed=$false
-try{[void](Invoke-CustomAppHostedRollbackV052 @act -InjectedCrash 'after-app-quarantine')}
-catch{if([string]$_.Exception.Message -ceq 'V052_CONTROLLED_CRASH_AFTER_QUARANTINE'){$crashed=$true}else{throw}}
-$q=Join-Path $escrow ('quarantine-v052-'+$id)
-Assert-V052 ($crashed -and
- -not[IO.Directory]::Exists((Join-Path $cliApps 'ivlyrics')) -and
- [IO.Directory]::Exists((Join-Path $q 'app-candidate')) -and
- [IO.Directory]::Exists((Join-Path $q 'app-restage')) -and
- (Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path $q 'app-candidate')).tree_sha256 -ceq $candidateAppSha -and
- (Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui).tree_sha256 -ceq $candidateXpuiSha) 'QUARANTINED_APP_CRASH_STATE_NOT_BYTE_EXACT'
-Write-Host 'V052_AFTER_APP_QUARANTINE_CRASH_RETURNS_WITH_OLD_PREIMAGE_RETAINED_PASS'
-# The new process MUST not call V046 again because profile is partially
-# applied. It obtains the same raw V047 lock and uses sealed intent+V051.
-$child=Join-Path $PSScriptRoot 'hosted-cutover-rollback-child-v052.ps1'
-$output=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $child @act 2>&1)
-if($LASTEXITCODE -ne 0){
- Write-Host ('V052_CHILD_ERROR_TYPE='+($output -join [char]10))
- throw 'V052_FRESH_PROCESS_RECOVERY_NOT_VERIFIED'
-}
-Assert-V052 (($output -join [char]10).Contains('V052_FRESH_PROCESS_SHARED_LOCK_APP_AND_XPUI_ROLLBACK_COMPLETE_PASS')) 'RESTART_PROOF_MISSING'
-$terminal=Join-Path $escrow ('rollback-complete-v052-'+$id+'.dpapi')
-Assert-V052 ([IO.File]::Exists($terminal) -and
- (Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path $cliApps 'ivlyrics')).tree_sha256 -ceq $before.ivlyrics -and
- (Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui).tree_sha256 -ceq $before.xpui -and
- (Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path $q 'app-candidate')).tree_sha256 -ceq $candidateAppSha -and
- (Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path $q 'xpui-candidate')).tree_sha256 -ceq $candidateXpuiSha
- ) 'COMPOSITE_ROLLBACK_OR_QUARANTINE_MISSING'
-Write-Host 'V052_FRESH_PROCESS_LOCKED_ROLLBACK_BOTH_TREES_EXACT_AND_QUARANTINED_PASS'
-$again=Invoke-CustomAppHostedRollbackV052 @act
-Assert-V052 ([bool]$again.ok -and [string]$again.status -ceq 'hosted-rollback-already-complete' -and
- -not[bool]$again.production_mutation_authorized -and
- -not[bool]$again.live_update_authorized) 'RESTART_NOT_IDEMPOTENT'
-# Protect against Windows DPAPI accepting appended bytes on an otherwise
-# decryptable ciphertext; the completed record has a full-body SHA frame.
-$terminalBytes=[IO.File]::ReadAllBytes($terminal)
-try{
- [IO.File]::AppendAllText($terminal,'V052_TRAILER')
- $badTerminal=$false
- try{[void](Invoke-CustomAppHostedRollbackV052 @act)}
- catch{if([string]$_.Exception.Message -ceq 'V052_TERMINAL_CIPHERTEXT_NOT_EXACT'){$badTerminal=$true}else{throw}}
- Assert-V052 $badTerminal 'TERMINAL_DPAPI_APPEND_WAS_ACCEPTED'
-}finally{[IO.File]::WriteAllBytes($terminal,$terminalBytes)}
-$again=Invoke-CustomAppHostedRollbackV052 @act
-Assert-V052 ([bool]$again.ok -and [string]$again.status -ceq 'hosted-rollback-already-complete') 'TERMINAL_NOT_VERIFIABLE_AFTER_SYNTHETIC_REPAIR'
-Write-Host 'V052_TERMINAL_FULL_CIPHERTEXT_TAMPER_REJECTED_PASS'
-# Neither DPAPI guard files nor other approved apps or unknown inputs change.
-Assert-V052 ((Get-FileHash $prefs -Algorithm SHA256).Hash -ceq $before.prefs -and
- (Get-FileHash $config -Algorithm SHA256).Hash -ceq $before.config -and
- (Get-FileHash $state -Algorithm SHA256).Hash -ceq $before.state -and
- (Get-FileHash $unknown -Algorithm SHA256).Hash -ceq $before.unmanaged -and
- (Get-FileHash $foreign -Algorithm SHA256).Hash -ceq $before.foreign -and
- (Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path $cliApps 'better-local-files')).tree_sha256 -ceq $before.better -and
- (Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path $cliApps 'eternal-jukebox')).tree_sha256 -ceq $before.eternal -and
- -not(Test-Path $enrollment) -and
- [bool](Test-CustomAppV050Escrow -EscrowId $id -ExpectedReceiptSha256 $receiptPin -HostedEscrowRoot $escrow).ok
- ) 'FOREIGN_OR_BACKUP_CHANGED_AFTER_RECOVERY'
-Write-Host 'V052_RESTART_IDEMPOTENT_NO_PROTECTED_UNMANAGED_OR_BACKUP_CHANGES_PASS'
-Write-Host 'V052_HOSTED_ONLY_COMPOSITE_CUTOVER_RECOVERY_NO_REAL_SPOTIFY_MUTATION_PASS'
-) 'V053_SEALED_NATIVE_MANIFEST_PROOF_NOT_BOUND'
+ [string]$sealedIntent.owned_output_scope_fingerprint -cmatch '^[a-f0-9]{64}$') 'V053_SEALED_NATIVE_MANIFEST_PROOF_NOT_BOUND'
 Write-Host 'V053_NATIVE_MANIFEST_SOURCE_AND_OUTPUT_SCOPE_PINNED_IN_DPAPI_INTENT_PASS'
 Write-Host 'V052_EXPLICIT_PRECHANGE_V048_AND_V051_BOUND_SEALED_INTENT_PASS'
 # The sealed pre-change witness MUST reject even appended DPAPI bytes.
@@ -219,8 +115,32 @@ Write-Host 'V052_SEALED_TRANSACTION_INTENT_TAMPER_REFUSED_PASS'
 # Simulation of a vendor candidate: the candidate is *test-only* and never
 # becomes release authorization. Every actual synthetic source mutation
 # happens with the same V047 OS FileShare.None lock.
-$sim=Enter-CustomAppEngineTurnstileV047 -HostedCiRoot (Join-Path $root 'Local')
+$sim=Open-CustomAppCutoverReadOnlyLeaseV047 -ExpectedProfileSha256 $pin @fixtureArgs
 try{
+ $stageProof=@{
+  CutoverLease=$sim;ExpectedProfileSha256=$pin
+  HostedFixtureRoot=$root;HostedFixtureCliPath=$cli
+  HostedEscrowRoot=$escrow;EscrowId=$id;IntentSha256=$intentSha
+  CandidateXpuiRoot=$candidateX;CandidateAppRoot=$candidateApp
+ }
+ $ready=Test-CustomAppV053HostedBeforeApply @stageProof
+ Assert-V052 ([bool]$ready.ok -and [bool]$ready.v044_manifest_owned_output_verified -and
+  [bool]$ready.same_os_lease_held -and -not[bool]$ready.real_release_provenance_verified -and
+  -not[bool]$ready.older_unpatched_processes_excluded -and
+  -not[bool]$ready.production_mutation_authorized -and
+  -not[bool]$ready.live_update_authorized) 'V053_BEFORE_APPLY_GRANTS_UNPROVEN_AUTHORITY'
+ $file=Join-Path $candidateApp 'index.js'
+ $saved=[IO.File]::ReadAllBytes($file)
+ try{
+  [IO.File]::AppendAllText($file,'V053_RACE_AFTER_SEAL')
+  $blocked=$false
+  try{[void](Test-CustomAppV053HostedBeforeApply @stageProof)}
+  catch{if([string]$_.Exception.Message -ceq 'V053_BEFORE_APPLY_ORIGINAL_OR_CANDIDATE_HASH_CHANGED'){$blocked=$true}else{throw}}
+  Assert-V052 $blocked 'POSTSEAL_CANDIDATE_TAMPER_WAS_ACCEPTED_BEFORE_APPLY'
+ }finally{[IO.File]::WriteAllBytes($file,$saved)}
+ $ready=Test-CustomAppV053HostedBeforeApply @stageProof
+ Assert-V052 ([bool]$ready.ok -and -not[bool]$ready.production_mutation_authorized) 'STAGED_CANDIDATE_NOT_READMITTED_AFTER_REPAIR'
+ Write-Host 'V053_POSTSEAL_STAGING_DRIFT_BLOCKED_WITH_SAME_OS_LEASE_PASS'
  $oldApp=Join-Path $escrow ('sim-v052-before-app-'+$id)
  $oldXpui=Join-Path $escrow ('sim-v052-before-xpui-'+$id)
  [IO.Directory]::Move((Join-Path $cliApps 'ivlyrics'),$oldApp)
@@ -229,7 +149,7 @@ try{
  [void](Copy-CustomAppV050BoundTree -Source $candidateX -Destination $xpui)
  Assert-V052 ((Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui).tree_sha256 -ceq $candidateXpuiSha -and
   (Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path $cliApps 'ivlyrics')).tree_sha256 -ceq $candidateAppSha) 'SIMULATED_APPLY_INCOMPLETE'
-}finally{$sim.Dispose()}
+}finally{if($null-ne$sim.lock_handle){$sim.lock_handle.Dispose()}}
 # After applying, V046 cannot readmit the original profile. Recovery must
 # use V050/V051 pinned preimage and the pre-change V052 witness instead.
 $drift=Test-CustomAppCutoverReadOnlyAdmissionV046 -ExpectedProfileSha256 $pin @fixtureArgs
