@@ -16,6 +16,11 @@ $p=Get-ApprovedNativeRecoveryPathsV032 -WorkRoot $fixture.work -Name ([string]$i
 $tx=[string]$fixture.prepared.transaction_id
 $xpui=Join-Path $nativeRoot 'FakeSpotify\Apps\xpui'
 $original=Read-ApprovedNativeXpuiEscrowV034 -Paths $p -TransactionId $tx
+# The existing standalone V032 entrypoint may NOT complete a rollback
+# for a transaction in which the official native XPUI escrow exists.
+$direct=Invoke-ApprovedNativeJournalRecoveryV032 -WorkRoot $fixture.work -Name ([string]$item.name) -TokenId $fixture.token_id -ReceiptStore $receiptStore -TransactionId $tx
+Assert-V035 (-not[bool]$direct.ok -and
+  [string]$direct.reason -like '*V035_SEALED_XPUI_REQUIRES_COMPOSITE_RECOVERY*') 'OLD_APP_ONLY_ROLLBACK_BYPASS_ALLOWED'
 $before=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$original.preimage_path)
 $afterVendor=Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui
 Assert-V035 ([string]$afterVendor.tree_sha256 -cne [string]$before.tree_sha256) 'NATIVE_XPUI_NEVER_CHANGED'
@@ -45,8 +50,19 @@ Assert-V035 (-not[bool]$denied.ok -and
 $second=Invoke-ApprovedNativeXpuiEscrowRecoveryV034 @baseArgs -FailurePoint 'after-xpui-quarantine-before-copy'
 $j=Read-CustomAppProductionCrashJournalV010 -AllowedRoot $env:RUNNER_TEMP -StoreDirectory ([string]$p.journal)
 $q=Join-Path ([string]$p.transaction) 'native-xpui-after-crash-retained'
-Assert-V035 (-not[bool]$second.ok -and [string]$j.entry.phase -ceq 'rollback-required' -and
- -not[IO.Directory]::Exists($xpui) -and [IO.Directory]::Exists($q)) 'PREMATURE_COMPLETE_AFTER_QUARANTINE'
+if([bool]$second.ok -or [string]$j.entry.phase -cne 'rollback-required' -or
+   [IO.Directory]::Exists($xpui) -or -not[IO.Directory]::Exists($q)){
+  # This is an isolated synthetic profile; only relative fixture paths are logged.
+  Write-Host ('V035_DIAGNOSTIC_QUARANTINE: '+[string]$second.reason+
+    '; phase='+[string]$j.entry.phase+'; live='+[IO.Directory]::Exists($xpui)+
+    '; quarantine='+[IO.Directory]::Exists($q))
+  if([IO.Directory]::Exists($xpui)){
+    $diff=Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui
+    Write-Host ('V035_DIAGNOSTIC_RELATIVE_PREIMAGE: '+((@($before.entries)|ForEach-Object{$_.path}) -join ','))
+    Write-Host ('V035_DIAGNOSTIC_RELATIVE_AFTER_CLI: '+((@($diff.entries)|ForEach-Object{$_.path}) -join ','))
+  }
+  throw 'V035_COMPOSITE_TEST_PREMATURE_COMPLETE_AFTER_QUARANTINE'
+}
 # XPUI recreated exactly, crash before terminal CAS: still rollback-required.
 $third=Invoke-ApprovedNativeXpuiEscrowRecoveryV034 @baseArgs -FailurePoint 'after-xpui-copy-before-journal'
 $j=Read-CustomAppProductionCrashJournalV010 -AllowedRoot $env:RUNNER_TEMP -StoreDirectory ([string]$p.journal)

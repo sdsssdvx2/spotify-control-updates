@@ -355,6 +355,12 @@ function Invoke-ApprovedNativeJournalRecoveryV032 {
     $lease=$null
     try{
         $lease=Open-ApprovedNativeSagaLeaseV032 -Paths $p
+        # A V034 escrow proves a separate XPUI side effect may exist. Older
+        # app-only rollback must never publish terminal success for it.
+        $nativePreimage=Join-Path ([string]$p.journal) ('scoped-xpui-preimage-'+$TransactionId+'.dpapi')
+        if((Test-Path -LiteralPath $nativePreimage) -and -not$DeferRollbackComplete){
+           throw 'V035_SEALED_XPUI_REQUIRES_COMPOSITE_RECOVERY_NO_APP_ONLY_TERMINAL'
+        }
         $e=Read-ApprovedNativeSagaRecoveryEvidenceV032 -Paths $p -Name $Name -TokenId $TokenId -ReceiptStore $ReceiptStore -TransactionId $TransactionId
         $phase=[string]$e.journal.entry.phase
         if($phase -notin @('prepared','atomic-mutation-starting','live-moved-to-old',
