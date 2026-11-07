@@ -94,6 +94,12 @@ function Get-CustomAppV052SealedIntent {
     [string]$r.candidate_xpui_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
     [string]$r.preimage_app_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
     [string]$r.candidate_app_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
+    [string]$r.owned_output_source_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
+    [string]$r.owned_output_manifest_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
+    [string]$r.owned_output_scope_fingerprint -cnotmatch '^[a-f0-9]{64}$' -or
+    [int]$r.owned_output_file_count -lt 3 -or [int]$r.owned_output_file_count -gt 256 -or
+    -not[bool]$r.v044_native_manifest_fence_verified -or
+    [bool]$r.actual_vendor_cli_invoked -or
     [bool]$r.production_mutation_authorized){
     throw 'V052_HOSTED_INTENT_OWNER_SCHEMA_OR_SHA_UNQUALIFIED'
  }
@@ -157,10 +163,26 @@ function New-CustomAppHostedCutoverIntentV052 {
     [string]$newApp.tree_sha256 -ceq [string]$originalApp.tree_sha256){
     throw 'V052_BACKUP_OR_CANDIDATE_NOT_DISTINCTLY_PINNED'
  }
- # Exact *synthetic* delta for the first composite crash experiment.
- # This does NOT establish a real release signature or Spotify-owned output.
+ # Synthetic candidate app source may edit exactly its own index.js.
+ # The simulated XPUI output MUST pass the genuine V044 official Spicetify
+ # manifest ownership comparator, not the old foreign-file-only rehearsal.
+ # V044 verifies ALL nonowned XPUI bytes and exact extensions/assets hashes.
+ # This does not attest a real vendor execution or release provenance.
  [void](Get-CustomAppV052OnlyChanged -Before $originalApp -After $newApp -OnlyRelativePath 'index.js')
- [void](Get-CustomAppV052OnlyChanged -Before $originalXpui -After $newXpui -OnlyRelativePath 'v050-scale-assets/asset-0001.dat')
+ $native=Test-ApprovedNativeManifestOnlyOwnedTargetChangedV044 -Before $originalXpui -After $newXpui -Name $AppName -SourceAppPath $app -ExpectedSourceTreeSha256 ([string]$originalApp.tree_sha256)
+ if(-not[bool]$native.ok -or -not[bool]$native.foreign_xpui_preserved -or
+    [bool]$native.production_mutation_authorized -or
+    [int]$native.scoped_file_count -lt 3 -or
+    [string]$native.source_tree_sha256 -cne [string]$originalApp.tree_sha256 -or
+    [string]$native.manifest_sha256 -cnotmatch '^[a-f0-9]{64}$'){
+    throw 'V053_NATIVE_MANIFEST_ONLY_OWNED_OUTPUT_NOT_VERIFIED'
+ }
+ $nativeScopeFingerprint=Get-CustomAppUpdateStringSha256V010 -Text (
+     (@('v053-native-manifest-owned-candidate',
+       [string]$native.source_tree_sha256,[string]$native.manifest_sha256,
+       [string]$native.scoped_file_count,[string]$native.scoped_extension_files,
+       [string]$native.scoped_asset_files,[string]$native.pre_xpui_sha256,
+       [string]$native.post_xpui_sha256)) -join [char]10)
  $again=Get-CustomAppInstalledManifestAuditV048 -CutoverLease $CutoverLease -ExpectedProfileSha256 $ExpectedProfileSha256 -HostedFixtureRoot $p.base -HostedFixtureCliPath $p.cli
  if([string]$again.status -cne 'observed-readonly' -or
     [string]$again.manifest_footprint_sha256 -cne [string]$audit.manifest_footprint_sha256){
@@ -177,6 +199,12 @@ function New-CustomAppHostedCutoverIntentV052 {
    candidate_xpui_sha256=[string]$newXpui.tree_sha256
    preimage_app_sha256=[string]$originalApp.tree_sha256
    candidate_app_sha256=[string]$newApp.tree_sha256
+   owned_output_source_sha256=[string]$native.source_tree_sha256
+   owned_output_manifest_sha256=[string]$native.manifest_sha256
+   owned_output_scope_fingerprint=$nativeScopeFingerprint
+   owned_output_file_count=[int]$native.scoped_file_count
+   v044_native_manifest_fence_verified=$true
+   actual_vendor_cli_invoked=$false
    protected_file_sha256=$record.receipt.protected_sha256
    approved_app_tree_sha256=$record.receipt.tree_sha256
    production_mutation_authorized=$false
