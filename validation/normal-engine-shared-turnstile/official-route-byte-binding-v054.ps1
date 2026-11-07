@@ -46,7 +46,10 @@ function Test-CustomAppV054OfficialSourceBoundRoutes {
  $subfiles=@()
  $p=$parsed.PSObject.Properties['subfiles']
  if($null-ne$p -and $null-ne$p.Value){$subfiles=@($p.Value)}
- $expectedCss=if([IO.File]::Exists($style)){[IO.File]::ReadAllBytes($style)}else{[byte[]]@()}
+ # Do not use an if-expression here: WinPS5.1 unwraps an empty byte[] into
+ # $null, and StrictMode then rejects the .Length inspection.
+ [byte[]]$expectedCss=[byte[]]@()
+ if([IO.File]::Exists($style)){$expectedCss=[IO.File]::ReadAllBytes($style)}
  if($expectedCss.Length -gt 16777216){throw 'V054_CSS_TOO_LARGE'}
  $stream=New-Object IO.MemoryStream
  $sha=[Security.Cryptography.SHA256]::Create()
