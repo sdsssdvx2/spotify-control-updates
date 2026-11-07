@@ -37,10 +37,10 @@ jobs:
             throw ('unexpected production source or scope: '+($changed -join ','))
           }
           foreach($pin in @(
-            @("$d/native-journal-admission.ps1",'10a423e39eee0a2e176e3d5f65a496ac40961377'),
-            @("$d/native-journal-receipt.ps1",'3829336185ea9f39682cc06d43dce1a498895fcb'),
-            @("$d/verify-native-receipt-fresh-process.ps1",'5f1e4a430dcbc4b410ec8325b418ad5b7e100df6'),
-            @("$d/derive_real_native_journal_test.py",'5ca7707755a499157dd0eb2560dbbb740456cc81'),
+            @("validation/custom-app-real-native-journaled-forward-commit/native-journal-admission.ps1",'10a423e39eee0a2e176e3d5f65a496ac40961377'),
+            @("validation/custom-app-real-native-journaled-forward-commit/native-journal-receipt.ps1",'3829336185ea9f39682cc06d43dce1a498895fcb'),
+            @("validation/custom-app-real-native-journaled-forward-commit/verify-native-receipt-fresh-process.ps1",'5f1e4a430dcbc4b410ec8325b418ad5b7e100df6'),
+            @("validation/custom-app-real-native-journaled-forward-commit/derive_real_native_journal_test.py",'5ca7707755a499157dd0eb2560dbbb740456cc81'),
             @('validation/custom-app-whole-tree-real-scoped-native/whole-tree-real-scoped-native.ps1','c48c15aa6c342df0f6190c0cc8ea58c238c2bd08'),
             @('validation/custom-app-production-triple-id-journaled-forward-commit-v0.1.0/test_triple_id_journaled_forward_commit.ps1','e19fbbf16eee5be3dc76cabe482f12a8132636fb'),
             @("$d/real-native-pending-recovery.ps1",'a0976d85164c215a6ccb45226a059df0f771858b'),
