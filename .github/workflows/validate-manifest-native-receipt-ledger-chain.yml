@@ -84,7 +84,6 @@ jobs:
           }
           "V040_EXE=$($exe[0].FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
       - name: One official native apply, retained terminal, DPAPI ledger crash and fresh readback
-        if: false # Previously proven in pinned Windows CI #42405811535; avoid needless repeat
         shell: powershell
         timeout-minutes: 19
         run: |
