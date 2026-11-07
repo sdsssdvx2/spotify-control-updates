@@ -1,5 +1,6 @@
 # V044 - bounded manifest-driven official Spicetify 2.46.4 XPUI scope.
-# Hosted Windows sandbox only; NOT normal Addon Manager or production apply.
+# Hosted Windows sandbox for native output comparisons; read-only V048
+# may inspect installed source manifests on Windows but cannot run apply.
 # Official AppManifest keys: subfiles, subfiles_extension, assets.
 # Source tree SHA is checked before and after reading manifest. Reparse points,
 # traversal, unsafe glob syntax, unknown outputs and foreign edits all DENIED.
@@ -23,13 +24,27 @@ function Assert-ApprovedNativeManifestRelativeV044 {
 }
 function Get-ApprovedNativeManifestOwnedScopeV044 {
  param([Parameter(Mandatory=$true)][string]$Name,
-       [Parameter(Mandatory=$true)][string]$SourceAppPath)
- Assert-ApprovedNativeManifestHostedV044
+       [Parameter(Mandatory=$true)][string]$SourceAppPath,
+       [switch]$InstalledReadOnlyAudit)
+ if($InstalledReadOnlyAudit){
+    if([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT){
+       throw 'V048_INSTALLED_MANIFEST_AUDIT_WINDOWS_ONLY'
+    }
+ }else{
+    Assert-ApprovedNativeManifestHostedV044
+ }
  if($Name.ToLowerInvariant() -cnotmatch '^[a-z][a-z0-9-]{1,63}$' -or
     $Name -notin @('ivlyrics','better-local-files','eternal-jukebox','playlist-maker')){
     throw 'V044_NAME_NOT_APPROVED'
  }
- $source=Assert-CustomAppUpdateFixturePathV010 -ValidationRoot $env:RUNNER_TEMP -Path $SourceAppPath -Label 'V044_APP_SOURCE'
+ $source=if($InstalledReadOnlyAudit){
+    # Only local canonical paths, each existing ancestor checked for reparse
+    # using V036. This is read-only and never returns execution authority.
+    Assert-XpuiReadOnlyCanonicalV036 -Path $SourceAppPath -Label 'V048_SOURCE'
+ }else{
+    Assert-CustomAppUpdateFixturePathV010 -ValidationRoot $env:RUNNER_TEMP -Path $SourceAppPath -Label 'V044_APP_SOURCE'
+ }
+ if(-not[IO.Directory]::Exists($source)){throw 'V048_SOURCE_NOT_DIRECTORY'}
  $tree=Get-CustomAppUpdateTreeSnapshotV010 -Root $source
  if([int]$tree.file_count -lt 2){throw 'V044_APP_SOURCE_INCOMPLETE'}
  $map=@{}
@@ -169,6 +184,7 @@ function Get-ApprovedNativeManifestOwnedScopeV044 {
     declared_extensions=$extensionCount
     declared_asset_files=$assetsCount
     output_scope_determined_by_official_2464_manifest=$true
+    installed_readonly_audit=[bool]$InstalledReadOnlyAudit
     production_mutation_authorized=$false
  }
 }

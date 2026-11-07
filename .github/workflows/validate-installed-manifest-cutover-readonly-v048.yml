@@ -1,0 +1,75 @@
+name: V048 installed approved app manifest output footprint under shared lock (HOLD)
+on:
+  push:
+    branches: [validate/installed-manifest-cutover-readonly]
+    paths:
+      - 'validation/approved-native-manifest-scope/manifest-owned-xpui-v044.ps1'
+      - 'validation/normal-engine-shared-turnstile/installed-manifest-audit-v048.ps1'
+      - 'validation/normal-engine-shared-turnstile/test-installed-manifest-audit-v048.ps1'
+      - '.github/workflows/validate-installed-manifest-cutover-readonly-v048.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  installed-manifest-owner-audit:
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Pin cumulative V047, production main, minimal changes and PowerShell 5.1 syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='0ddb8c644c76c6c9f07bf3a03353516a1618f22a'
+          if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+             (git merge-base $base HEAD).Trim() -cne $base){throw 'V048_NOT_DESCENDED_FROM_V047'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+             throw 'V048_PRODUCTION_MAIN_CHANGED'
+          }
+          $allowed=@(
+            'validation/approved-native-manifest-scope/manifest-owned-xpui-v044.ps1',
+            'validation/normal-engine-shared-turnstile/installed-manifest-audit-v048.ps1',
+            'validation/normal-engine-shared-turnstile/test-installed-manifest-audit-v048.ps1',
+            '.github/workflows/validate-installed-manifest-cutover-readonly-v048.yml')
+          $changes=@(git diff --name-only "$base...HEAD")
+          if($changes.Count -ne $allowed.Count -or @($changes|Where-Object{$_ -notin $allowed}).Count){
+             throw ('V048_UNRELATED_FILES_CHANGED '+($changes -join '|'))
+          }
+          foreach($file in @($allowed|Where-Object{$_ -like '*.ps1'})){
+             $tok=$null;$errors=$null
+             [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$tok,[ref]$errors)
+             if($errors.Count){throw ('V048_WINDOWS_PS51_PARSE_FAILED '+$errors[0].Message)}
+          }
+          $module=Get-Content 'validation/normal-engine-shared-turnstile/installed-manifest-audit-v048.ps1' -Raw
+          foreach($forbidden in @('Remove-Item','[IO.File]::Write','[IO.Directory]::Create','[IO.Directory]::Delete','Start-Process',
+             'Invoke-WebRequest','Invoke-RestMethod','Open-CustomAppUserTxnStoreV010','-Initialize','Rollback-LastTransaction',
+             'Commit-LastTransaction','Invoke-ApprovedNativeXpuiEscrowApplyV034')){
+             if($module.Contains($forbidden)){throw ('V048_MANIFEST_SUBJECT_SIDE_EFFECT '+$forbidden)}
+          }
+          Write-Host 'V048_PARENT_MAIN_MINIMAL_SOURCE_AND_READONLY_PS51_PASS'
+      - name: Reuse V046 exact installed 3+1 source fixture; manifest extension assets, lock and negative gates
+        shell: powershell
+        timeout-minutes: 4
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v048-targeted.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/normal-engine-shared-turnstile/test-installed-manifest-audit-v048.ps1' *>&1 | Tee-Object -FilePath $log
+          $code=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($code -ne 0){Get-Content $log -Tail 80|ForEach-Object{Write-Host $_};throw ('V048_MANIFEST_AUDIT_FAILED '+$code)}
+          $text=Get-Content $log -Raw
+          foreach($marker in @(
+            'V046_FOUR_APP_READONLY_LEGACY_TO_NEW_ADMISSION_IDENTITY_PASS',
+            'V048_REAL_LAYOUT_THREE_APPROVED_MANIFESTS_FOUR_EXTENSIONS_ASSET_BOUND_PASS',
+            'V048_UNMANAGED_CONFIGURED_APP_IGNORED_AND_FOREIGN_XPUI_BOUND_PASS',
+            'V048_PENDING_LEGACY_JOURNAL_SOURCE_TRAVERSAL_AND_RACE_DENIED_PASS',
+            'V048_CLOSED_ENGINE_LEASE_REFUSED_AND_NO_USER_STATE_WRITTEN_PASS',
+            'V048_REAL_PROFILE_MANIFEST_READONLY_ONLY_NO_CLI_NO_USER_SPOTIFY_PASS')){
+             if(-not$text.Contains($marker)){throw ('V048_MISSING_PROOF '+$marker)}
+          }
+          Write-Host 'V048_INSTALLED_MANIFEST_BOUND_TO_V047_LEASE_READONLY_TARGETED_PASS'
+      - name: No installation, no release, no operating main change
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V048_FINAL_PROD_MAIN_CHANGED'}
+          Write-Host 'V048_NO_USER_SPOTIFY_NO_RELEASE_NO_MANAGED_LEDGER_ENROLLMENT_PASS'
