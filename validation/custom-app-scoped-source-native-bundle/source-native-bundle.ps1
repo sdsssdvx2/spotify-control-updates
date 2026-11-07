@@ -188,7 +188,7 @@ function Save-CustomAppScopedBundleV020 {
 # a MAX_PATH limit even on hosts with some long-path support; keep margin.
 function Assert-CustomAppScopedBundleNativePathBudgetV020 {
     param([Parameter(Mandatory=$true)][string]$WorkingDirectory)
-    $full=[IO.Path]::GetFullPath($WorkingDirectory).TrimEnd('\\','/')
+    $full=[IO.Path]::GetFullPath($WorkingDirectory).TrimEnd('\','/')
     if([string]::IsNullOrWhiteSpace($full) -or $full.Length -ge 248){
         throw 'scoped-bundle-pre-cas-working-directory-too-long'
     }
@@ -202,8 +202,8 @@ function Assert-CustomAppScopedBundleNativePreflightV020 {
     $clone=Assert-CustomAppScopedBundleNativePathBudgetV020 -WorkingDirectory ([string]$Context.scope_root)
     [void](Assert-CustomAppScopedLabHostedV017 -Path $clone)
     $config=Join-Path $clone 'config-xpui.ini'
-    $source=Join-Path $clone ('CustomApps\\'+[string]$Context.target+'\\index.js')
-    $backup=Join-Path $clone 'Backup\\xpui.spa'
+    $source=Join-Path $clone ('CustomApps\'+[string]$Context.target+'\index.js')
+    $backup=Join-Path $clone 'Backup\xpui.spa'
     foreach($path in @($config,$source,$backup,[string]$Context.executable_path,[string]$Context.config_path)){
         Assert-CustomAppUserTxnNoReparseV010 -Path $path
         if(-not[IO.File]::Exists($path)){throw 'scoped-bundle-pre-cas-native-file-missing'}
