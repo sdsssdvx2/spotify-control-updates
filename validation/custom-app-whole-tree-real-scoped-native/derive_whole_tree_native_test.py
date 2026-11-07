@@ -14,7 +14,7 @@ HERE=Path(__file__).resolve().parent
 OLD=ROOT/"validation/custom-app-production-triple-id-apply-cleanup-e2e-v0.1.0/test_triple_id_apply_cleanup_e2e.ps1"
 OLD_BLOB="0d36b5781574535fe3fea3b060b1d7c470d18f40"
 MODULE=HERE/"whole-tree-real-scoped-native.ps1"
-MODULE_BLOB="6ae80bfb7d974f1ec85a8380f97342d7d6641505"
+MODULE_BLOB="7eaa0ebed9495e8e8cefb085f3a5cb1dcf58b133"
 OUTPUT=OLD.parent/"ci_real_scoped_native_after_triple_id_generated.ps1"
 
 def once(s,old,new,label):

@@ -26,8 +26,8 @@ jobs:
           $changes=@(git diff --name-only "$base...HEAD")
           if($changes.Count -ne 3 -or @($changes|Where-Object{$_ -notin @("$p/whole-tree-real-scoped-native.ps1","$p/derive_whole_tree_native_test.py",$wf)}).Count){throw 'validated scope widened'}
           foreach($pin in @(
-            @("$p/whole-tree-real-scoped-native.ps1",'6ae80bfb7d974f1ec85a8380f97342d7d6641505'),
-            @("$p/derive_whole_tree_native_test.py",'528c6e37bf22d05a38dedba1bea27c17d5654aa1'),
+            @("$p/whole-tree-real-scoped-native.ps1",'7eaa0ebed9495e8e8cefb085f3a5cb1dcf58b133'),
+            @("$p/derive_whole_tree_native_test.py",'9308b456a637c634c630c8153080dcf2b2692d08'),
             @('validation/custom-app-production-triple-id-apply-cleanup-e2e-v0.1.0/test_triple_id_apply_cleanup_e2e.ps1','0d36b5781574535fe3fea3b060b1d7c470d18f40')
           )){if((git hash-object $pin[0]).Trim() -cne $pin[1]){throw ('pinned source drift '+$pin[0])}}
           $tokens=$null;$errors=$null

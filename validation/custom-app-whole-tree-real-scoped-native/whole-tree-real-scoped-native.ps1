@@ -192,6 +192,7 @@ function Invoke-CustomAppQualifiedWholeTreeScopedNativeV023 {
     $psi.EnvironmentVariables['APPDATA']=(Join-Path $native 'Roaming')
     $psi.EnvironmentVariables['LOCALAPPDATA']=(Join-Path $native 'Local')
     $started=$false
+    $p=$null
     try{
         $p=New-Object Diagnostics.Process
         $p.StartInfo=$psi
@@ -202,8 +203,15 @@ function Invoke-CustomAppQualifiedWholeTreeScopedNativeV023 {
             throw 'whole-tree-native-official-cli-timed-out'
         }
         if([int]$p.ExitCode -ne 0){throw ('whole-tree-native-official-cli-exit-'+$p.ExitCode)}
+        # Pin the exact content of THIS qualified fixture's prepared stage,
+        # not the older BRH (different ZIP) demonstration string.
+        $needle='prepared-stage-standard-executor-v2'
+        $sourceIndex=Join-Path $clone 'index.js'
+        if(-not[IO.File]::ReadAllText($sourceIndex).Contains($needle)){
+            throw 'whole-tree-native-approved-stage-index-marker-changed'
+        }
         if(-not[IO.File]::Exists($target) -or
-           -not[IO.File]::ReadAllText($target).Contains('tagify-version-2')){
+           -not[IO.File]::ReadAllText($target).Contains($needle)){
             throw 'whole-tree-native-official-cli-target-missing-or-unpatched'
         }
         if([IO.File]::ReadAllText($bystander) -cne $betaContent -or
