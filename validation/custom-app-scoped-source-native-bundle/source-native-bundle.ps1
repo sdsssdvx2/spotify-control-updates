@@ -183,6 +183,57 @@ function Save-CustomAppScopedBundleV020 {
 }
 
 
+# A process which cannot even start must be rejected BEFORE the durable CAS
+# barrier and before any source/XPUI mutation. Win32's lpCurrentDirectory has
+# a MAX_PATH limit even on hosts with some long-path support; keep margin.
+function Assert-CustomAppScopedBundleNativePathBudgetV020 {
+    param([Parameter(Mandatory=$true)][string]$WorkingDirectory)
+    $full=[IO.Path]::GetFullPath($WorkingDirectory).TrimEnd('\\','/')
+    if([string]::IsNullOrWhiteSpace($full) -or $full.Length -ge 248){
+        throw 'scoped-bundle-pre-cas-working-directory-too-long'
+    }
+    return $full
+}
+function Assert-CustomAppScopedBundleNativePreflightV020 {
+    param([Parameter(Mandatory=$true)]$Context,
+          [Parameter(Mandatory=$true)]$Bundle,
+          [Parameter(Mandatory=$true)][string]$HostedCiRoot)
+    [void](Assert-CustomAppScopedLabHostedV017 -Path $HostedCiRoot)
+    $clone=Assert-CustomAppScopedBundleNativePathBudgetV020 -WorkingDirectory ([string]$Context.scope_root)
+    [void](Assert-CustomAppScopedLabHostedV017 -Path $clone)
+    $config=Join-Path $clone 'config-xpui.ini'
+    $source=Join-Path $clone ('CustomApps\\'+[string]$Context.target+'\\index.js')
+    $backup=Join-Path $clone 'Backup\\xpui.spa'
+    foreach($path in @($config,$source,$backup,[string]$Context.executable_path,[string]$Context.config_path)){
+        Assert-CustomAppUserTxnNoReparseV010 -Path $path
+        if(-not[IO.File]::Exists($path)){throw 'scoped-bundle-pre-cas-native-file-missing'}
+    }
+    $official=Get-CustomAppSpicetifyPassiveFileSha256V015 -Path ([string]$Context.executable_path)
+    if($official -cne [string]$Context.exe_sha256 -or
+       $official -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+        throw 'scoped-bundle-pre-cas-official-exe-drift'
+    }
+    if((Get-CustomAppSpicetifyPassiveFileSha256V015 -Path ([string]$Context.config_path)) -cne
+          [string]$Context.config_sha256){
+        throw 'scoped-bundle-pre-cas-original-config-drift'
+    }
+    if((Get-CustomAppSpicetifyPassiveFileSha256V015 -Path $source) -cne
+       [string]$Bundle.snapshot.candidate_sha256){
+        throw 'scoped-bundle-pre-cas-private-staged-source-drift'
+    }
+    $conf=[IO.File]::ReadAllText($config)
+    if(-not$conf.Contains(('custom_apps = '+[string]$Context.target)) -or
+       -not$conf.Contains('check_spicetify_update = false')){
+        throw 'scoped-bundle-pre-cas-private-config-drift'
+    }
+    if((Get-Item -LiteralPath $backup).Length -gt 2097152){
+        throw 'scoped-bundle-pre-cas-private-backup-out-of-bound'
+    }
+    return [pscustomobject]@{ok=$true;working_directory=$clone
+       executable_sha256=$official;staged_sha256=[string]$Bundle.snapshot.candidate_sha256
+       mutation_authorized=$false;production_execution_authorized=$false}
+}
+
 function Invoke-CustomAppScopedBundleNativeV020 {
     param([Parameter(Mandatory=$true)]$Session,
           [Parameter(Mandatory=$true)]$HeldCrossEngineSession,
@@ -233,6 +284,11 @@ function Invoke-CustomAppScopedBundleNativeV020 {
        [string]$bundle.snapshot.candidate_sha256){
         throw 'scoped-bundle-candidate-private-clone-drift'
     }
+    # Launch feasibility and exact official/private bytes are checked before
+    # journal CAS, durable intent creation, or any live app source mutation.
+    $preflight=Assert-CustomAppScopedBundleNativePreflightV020 -Context $ctx -Bundle $bundle -HostedCiRoot $HostedCiRoot
+    if(-not[bool]$preflight.ok){throw 'scoped-bundle-pre-cas-native-preflight-denied'}
+    Write-Host 'NATIVE_BUNDLE_V020_NATIVE_START_PREFLIGHT_BEFORE_CAS_PASS'
     if([IO.File]::Exists([string]$bundle.paths.swap_temp) -or
        [IO.File]::Exists([string]$bundle.paths.restore_temp) -or
        [IO.File]::Exists([string]$bundle.paths.swap_backup) -or
