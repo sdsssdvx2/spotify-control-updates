@@ -148,10 +148,12 @@ function Test-ApprovedNativeXpuiOnlyOwnedTargetChangedV035 {
  $prefix=('spicetify-routes-'+$Name).ToLowerInvariant()
  $extension=('extensions/'+$Name).ToLowerInvariant()
  $owned=@{}
- foreach($f in @($prefix+'.js',$prefix+'.css',$prefix+'.json',$extension+'/extension.js')){
-   $owned[$f]=$true
- }
- $createdDirs=@{'extensions'=$true}
+ $owned[($prefix+'.js')]=$true
+ $owned[($prefix+'.css')]=$true
+ $owned[($prefix+'.json')]=$true
+ $owned[($extension+'/extension.js')]=$true
+ $createdDirs=@{}
+ $createdDirs['extensions']=$true
  $createdDirs[$extension]=$true
  $expected=@{}
  foreach($entry in @($Before.entries)){
@@ -184,7 +186,14 @@ function Test-ApprovedNativeXpuiOnlyOwnedTargetChangedV035 {
    }
  }
  if($expected.Count -ne $actual.Count){
-    throw 'V035_FOREIGN_XPUI_FILE_COUNT_CHANGED'
+    # Isolated hosted-fixture relative path keys only; no absolute paths,
+    # user profiles or source content are emitted.
+    $extras=@($actual.Keys|Where-Object{-not$expected.ContainsKey([string]$_)})
+    $missing=@($expected.Keys|Where-Object{-not$actual.ContainsKey([string]$_)})
+    throw ('V035_FOREIGN_XPUI_FILE_COUNT_CHANGED_before='+$expected.Count+
+      '_after='+$actual.Count+'_extra='+($extras -join ',')+
+      '_missing='+($missing -join ',')+
+      '_owned='+((@($owned.Keys)|Sort-Object) -join ','))
  }
  foreach($key in @($expected.Keys)){
    if(-not$actual.ContainsKey($key) -or [string]$actual[$key] -cne [string]$expected[$key]){
