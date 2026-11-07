@@ -25,10 +25,11 @@ function Get-ApprovedNativeFullOutputEvidenceV037 {
    $lease=Open-ApprovedNativeSagaLeaseV032 -Paths $p
    $e=Read-ApprovedNativeSagaRecoveryEvidenceV032 -Paths $p -Name $Name -TokenId $TokenId -ReceiptStore $ReceiptStore -TransactionId $TransactionId
    $j=$e.journal.entry
-   if([string]$j.phase -cne 'apply-verified' -or [int64]$e.journal.revision -ne 7 -or
+   if([string]$j.phase -cne 'apply-verified' -or [int64]$e.journal.revision -ne 8 -or
       [string]$j.entry_sha256 -cne [string]$base.entry_sha256){
       throw 'V037_CENTRAL_VERIFIED_HEAD_DRIFT'
    }
+   [void](Assert-ApprovedNativeSagaSealedIntentV038 -Paths $p -TransactionId $TransactionId)
    $escrow=Read-ApprovedNativeXpuiEscrowV034 -Paths $p -TransactionId $TransactionId
    $vendor=Assert-ApprovedCustomAppHostedPathV026 -Path $VendorPrivateRoot -RunnerRoot ([string]$p.runner)
    $xpui=Assert-ApprovedCustomAppHostedPathV026 -Path ([string]$escrow.xpui_path) -RunnerRoot ([string]$p.runner)

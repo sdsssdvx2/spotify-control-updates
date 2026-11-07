@@ -133,6 +133,21 @@ function Invoke-ApprovedNativeXpuiEscrowApplyV034 {
   if(-not[bool]$sealed.ok -or -not[bool]$sealed.sealed_before_vendor){
    throw 'V034_PRELAUNCH_BACKUP_AUTHORITY_NOT_DURABLE'
   }
+  # V038: persist native side-effect intent under the SAME V010 central CAS
+  # after DPAPI escrow readback but before the genuine official CLI launch.
+  $p=Get-ApprovedNativeRecoveryPathsV032 -WorkRoot $callerWork -Name $callerName -TokenId $callerToken
+  $before=Read-ApprovedNativeSagaRecoveryEvidenceV032 -Paths $p -Name $callerName -TokenId $callerToken -ReceiptStore $callerStore -TransactionId $callerTx
+  if([string]$before.journal.entry.phase -cne 'apply-starting' -or [int64]$before.journal.revision -ne 5){
+    throw 'V038_NATIVE_PRELAUNCH_EXPECTED_APPLY_STARTING_REV5'
+  }
+  $seal=Get-ApprovedNativeXpuiEscrowPathV034 -Paths $p -TransactionId $callerTx
+  $sha=(Get-FileHash -LiteralPath $seal -Algorithm SHA256).Hash.ToLowerInvariant()
+  $bound=Append-ApprovedNativeSagaPhaseV032 -Paths $p -Current $before.journal -Phase 'native-intent-sealed' -ApplyResultFingerprint $sha
+  $w=Assert-ApprovedNativeSagaSealedIntentV038 -Paths $p -TransactionId $callerTx
+  if([string]$bound.entry.entry_sha256 -cne [string]$w.intent_entry_sha256 -or
+     [string]$w.escrow_sha256 -cne $sha){
+    throw 'V038_NATIVE_INTENT_CENTRAL_READBACK_MISMATCH'
+  }
  }.GetNewClosure()
  return Invoke-ApprovedNativeJournalApplyV032 -Item $Item -Acquired $Acquired -Prepared $Prepared -ReceiptStore $ReceiptStore -OfficialExecutable $OfficialExecutable -VendorPrivateRoot $VendorPrivateRoot -NativePreLaunchGuard $hook -FailurePoint $FailurePoint
 }
@@ -240,8 +255,14 @@ function Invoke-ApprovedNativeXpuiEscrowRecoveryV034 {
     throw 'V034_ORIGINAL_XPUI_RECOVERY_IMAGE_TAMPERED'
   }
   $phase=[string]$e.journal.entry.phase
+  $intent=Read-ApprovedNativeSagaIntentWitnessV038 -Paths $p -TransactionId $TransactionId
+  if([bool]$intent.present){
+    [void](Assert-ApprovedNativeSagaSealedIntentV038 -Paths $p -TransactionId $TransactionId)
+  }elseif($phase -notin @('apply-starting','rollback-required','rollback-complete')){
+    throw 'V038_NATIVE_INTENT_MISSING_FOR_VENDOR_WINDOW'
+  }
   if($phase -cne 'rollback-complete'){
-    if($phase -notin @('apply-starting','apply-returned-success-pending-verification','rollback-required')){
+    if($phase -notin @('apply-starting','native-intent-sealed','apply-returned-success-pending-verification','rollback-required')){
       throw ('V034_ROLLBACK_NOT_AUTHORIZED_FROM_'+$phase)
     }
     $app=Invoke-ApprovedNativeJournalRecoveryV032 -WorkRoot $WorkRoot -Name $Name -TokenId $TokenId -ReceiptStore $ReceiptStore -TransactionId $TransactionId -DeferRollbackComplete

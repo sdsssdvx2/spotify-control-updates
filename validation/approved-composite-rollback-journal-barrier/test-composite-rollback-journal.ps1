@@ -11,7 +11,7 @@ function Assert-V035([bool]$pass,[string]$reason){if(-not$pass){throw ('V035_COM
 $fixture=Create-V032PreparedCase 'v035-composite-once'
 $nativeRoot=Join-Path $env:RUNNER_TEMP ('v032-official-'+[Guid]::NewGuid().ToString('N').Substring(0,8))
 $failed=Invoke-ApprovedNativeXpuiEscrowApplyV034 -Item $item -Acquired $acquired -Prepared $fixture.prepared -ReceiptStore $receiptStore -OfficialExecutable $OfficialExecutable -VendorPrivateRoot $nativeRoot -FailurePoint 'after-official-cli-before-pending'
-Assert-V035 (-not[bool]$failed.ok -and [string]$failed.phase -ceq 'apply-starting') 'GENUINE_VENDOR_CRASH_NOT_REPRODUCED'
+Assert-V035 (-not[bool]$failed.ok -and [string]$failed.phase -ceq 'native-intent-sealed') 'GENUINE_VENDOR_CRASH_NOT_REPRODUCED'
 $p=Get-ApprovedNativeRecoveryPathsV032 -WorkRoot $fixture.work -Name ([string]$item.name) -TokenId $fixture.token_id
 $tx=[string]$fixture.prepared.transaction_id
 $xpui=Join-Path $nativeRoot 'FakeSpotify\Apps\xpui'
@@ -20,7 +20,18 @@ $original=Read-ApprovedNativeXpuiEscrowV034 -Paths $p -TransactionId $tx
 # for a transaction in which the official native XPUI escrow exists.
 $direct=Invoke-ApprovedNativeJournalRecoveryV032 -WorkRoot $fixture.work -Name ([string]$item.name) -TokenId $fixture.token_id -ReceiptStore $receiptStore -TransactionId $tx
 Assert-V035 (-not[bool]$direct.ok -and
-  [string]$direct.reason -like '*V035_SEALED_XPUI_REQUIRES_COMPOSITE_RECOVERY*') 'OLD_APP_ONLY_ROLLBACK_BYPASS_ALLOWED'
+  [string]$direct.reason -like '*V038_CENTRAL_INTENT_FORBIDS_APP_ONLY_ROLLBACK*') 'OLD_APP_ONLY_ROLLBACK_BYPASS_ALLOWED'
+# Native escrow loss must not erase central intent or publish app-only success.
+$sealFile=Get-ApprovedNativeXpuiEscrowPathV034 -Paths $p -TransactionId $tx
+$hidden=$sealFile+'.fixture-test-temporarily-unavailable'
+[IO.File]::Move($sealFile,$hidden)
+try{
+  $lost=Invoke-ApprovedNativeJournalRecoveryV032 -WorkRoot $fixture.work -Name ([string]$item.name) -TokenId $fixture.token_id -ReceiptStore $receiptStore -TransactionId $tx
+  $head=Read-CustomAppProductionCrashJournalV010 -AllowedRoot $env:RUNNER_TEMP -StoreDirectory ([string]$p.journal)
+  Assert-V035 (-not[bool]$lost.ok -and
+    [string]$lost.reason -like '*V038_CENTRAL_INTENT_FORBIDS_APP_ONLY_ROLLBACK*' -and
+    [string]$head.entry.phase -ceq 'native-intent-sealed') 'MISSING_ESCROW_BYPASSED_CENTRAL_NATIVE_INTENT'
+}finally{[IO.File]::Move($hidden,$sealFile)}
 $before=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$original.preimage_path)
 $afterVendor=Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui
 Assert-V035 ([string]$afterVendor.tree_sha256 -cne [string]$before.tree_sha256) 'NATIVE_XPUI_NEVER_CHANGED'
@@ -89,6 +100,7 @@ $denyTerminal=Invoke-ApprovedNativeXpuiEscrowRecoveryV034 @baseArgs
 Assert-V035 (-not[bool]$denyTerminal.ok -and
  [IO.File]::ReadAllText($route) -ceq 'V035_FOREIGN_OR_UNKNOWN_POST_TERMINAL_CHANGE' -and
  [string](Read-CustomAppProductionCrashJournalV010 -AllowedRoot $env:RUNNER_TEMP -StoreDirectory ([string]$p.journal)).entry.entry_sha256 -ceq $head) 'POST_TERMINAL_USER_CHANGE_OVERWRITTEN'
+Write-Host 'V038_LOST_ESCROW_CENTRAL_HISTORY_DENIES_APP_ONLY_ROLLBACK_PASS'
 Write-Host 'V035_GENUINE_OFFICIAL_CLI_CRASH_AFTER_XPUI_MUTATION_ONCE_PASS'
 Write-Host 'V035_ALL_THREE_CRASH_WINDOWS_KEEP_ROLLBACK_REQUIRED_PASS'
 Write-Host 'V035_FOREIGN_XPUI_USER_WRITE_REFUSED_AND_PRESERVED_PASS'

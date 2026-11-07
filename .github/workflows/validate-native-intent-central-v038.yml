@@ -1,0 +1,125 @@
+name: Native side-effect centrally witnessed before vendor (HOLD)
+on:
+  push:
+    branches: [validate/native-intent-centrally-anchored]
+    paths:
+      - 'validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1'
+      - 'validation/approved-real-native-journaled-swap-recovery/approved-native-journal-saga.ps1'
+      - 'validation/approved-real-native-xpui-crash-restore/**'
+      - 'validation/approved-real-native-verified-readback/verified-official-readback-v033.ps1'
+      - 'validation/approved-native-complete-output-proof/full-native-output-proof-v037.ps1'
+      - 'validation/approved-composite-rollback-journal-barrier/test-composite-rollback-journal.ps1'
+      - '.github/workflows/validate-native-intent-central-v038.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  central-intent-recovery-and-full-proof:
+    runs-on: windows-2025
+    timeout-minutes: 43
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Freeze cumulative parent, main and bounded 8-file edit; parse PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='08d05165d97e171055b7c537bf31b2e15a81dca3'
+          if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+             (git merge-base $parent HEAD).Trim() -cne $parent){throw 'V038_PARENT_CHANGED'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V038_PRODUCTION_MAIN_CHANGED'}
+          $allow=@(
+            'validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1',
+            'validation/approved-real-native-journaled-swap-recovery/approved-native-journal-saga.ps1',
+            'validation/approved-real-native-xpui-crash-restore/native-xpui-escrow-recovery.ps1',
+            'validation/approved-real-native-verified-readback/verified-official-readback-v033.ps1',
+            'validation/approved-native-complete-output-proof/full-native-output-proof-v037.ps1',
+            'validation/approved-composite-rollback-journal-barrier/test-composite-rollback-journal.ps1',
+            'validation/approved-real-native-xpui-crash-restore/test-native-xpui-postvendor-crash.ps1',
+            '.github/workflows/validate-native-intent-central-v038.yml')
+          $diff=@(git diff --name-only "$parent...HEAD")
+          if($diff.Count -ne $allow.Count -or @($diff|Where-Object{$_ -notin $allow}).Count){
+            throw ('V038_CHANGED_FILE_SET_UNEXPECTED '+($diff -join ','))
+          }
+          foreach($f in @($allow|Where-Object{$_ -like '*.ps1'})){
+            $tokens=$null;$err=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tokens,[ref]$err)
+            if($err.Count){throw ('V038_POWERSHELL51_PARSE_FAILED '+$err[0].Message)}
+          }
+          Write-Host 'V038_FROZEN_PARENT_AND_SEVEN_MODIFIED_PS51_FILES_PASS'
+      - name: Rebuild pinned actual Addon Manager once
+        shell: powershell
+        timeout-minutes: 16
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/custom-app-normal-entrypoint-transaction-integration/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'V038_ORIGINAL_ADDON_BUILD_FAILED'}
+          $p='validation/custom-app-normal-entrypoint-transaction-integration/out/bin/addon-manager.ps1'
+          if((Get-Item $p).Length -ne 1453028 -or
+             (Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0cb2362dd14772f19ba2970e5f4c2bc07bf0512c0de31494af7b01cb2a98fdd6'){
+            throw 'V038_ORIGINAL_ADDON_PIN_CHANGED'
+          }
+          "V038_ADDON=$((Resolve-Path $p).Path)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+      - name: Retrieve exact official free Spicetify 2.46.4 only once
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'v038-vendor'
+          [IO.Directory]::CreateDirectory($dir)|Out-Null
+          $zip=Join-Path $dir 'spicetify.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip' -OutFile $zip
+          if((Get-Item $zip).Length -ne 7795758 -or
+             (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f'){
+            throw 'V038_OFFICIAL_ARCHIVE_CHANGED'
+          }
+          Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $dir 'expanded')
+          $exes=@(Get-ChildItem (Join-Path $dir 'expanded') -Recurse -File -Filter spicetify.exe)
+          if($exes.Count -ne 1 -or
+             (Get-FileHash $exes[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+            throw 'V038_OFFICIAL_BINARY_CHANGED'
+          }
+          "V038_EXE=$($exes[0].FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+      - name: Genuine post-vendor crash, lost DPAPI escrow, composite rollback windows
+        shell: powershell
+        timeout-minutes: 17
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v038-recovery.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/approved-composite-rollback-journal-barrier/test-composite-rollback-journal.ps1' -OriginalAddonPath $env:V038_ADDON -OfficialExecutable $env:V038_EXE *>&1 | Tee-Object -FilePath $log | Out-Null
+          $exit=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($exit -ne 0){Get-Content $log -Tail 110|ForEach-Object{Write-Host $_};throw ('V038_RECOVERY_TEST_FAILED '+$exit)}
+          $body=Get-Content $log -Raw
+          foreach($m in @(
+            'V038_LOST_ESCROW_CENTRAL_HISTORY_DENIES_APP_ONLY_ROLLBACK_PASS',
+            'V035_ALL_THREE_CRASH_WINDOWS_KEEP_ROLLBACK_REQUIRED_PASS',
+            'V035_FOREIGN_XPUI_USER_WRITE_REFUSED_AND_PRESERVED_PASS',
+            'V035_INDEPENDENT_KEYLESS_APP_XPUI_GUARD_COMPOSITE_TERMINAL_CAS_PASS',
+            'V035_NO_REAL_SPOTIFY_NO_CLEANUP_NO_PRODUCTION_AUTHORITY_PASS')){
+             if(-not$body.Contains($m)){throw ('V038_MISSING_CRASH_PROOF '+$m)}
+          }
+          Write-Host 'V038_PRE_VENDOR_CENTRAL_SIDE_EFFECT_WITNESS_AND_CRASH_RECOVERY_PASS'
+      - name: Genuine successful official refresh; V037 four-file DPAPI proof
+        shell: powershell
+        timeout-minutes: 17
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v038-success.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/approved-native-complete-output-proof/test-complete-native-output-v037.ps1' -OriginalAddonPath $env:V038_ADDON -OfficialExecutable $env:V038_EXE *>&1 | Tee-Object -FilePath $log | Out-Null
+          $exit=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($exit -ne 0){Get-Content $log -Tail 110|ForEach-Object{Write-Host $_};throw ('V038_POST_NATIVE_PROOF_FAILED '+$exit)}
+          $body=Get-Content $log -Raw
+          foreach($m in @(
+            'V037_REAL_OFFICIAL_CLI_ALL_FOUR_OWNED_OUTPUTS_BOUND_AND_SEALED_PASS',
+            'V037_KEYLESS_INDEPENDENT_CSS_EXTENSION_FOREIGN_TAMPER_REJECTED_PASS',
+            'V037_SEALED_DPAPI_TAMPER_REFUSED_V010_HEAD_UNCHANGED_PASS',
+            'V037_NO_REAL_SPOTIFY_NO_CLEANUP_NO_TERMINAL_COMMIT_AUTHORITY_PASS')){
+             if(-not$body.Contains($m)){throw ('V038_MISSING_SUCCESS_PROOF '+$m)}
+          }
+          Write-Host 'V038_CENTRALLY_ANCHORED_OFFICIAL_NATIVE_SUCCESS_PROOF_PASS'
+      - name: No user Spotify, release, production changes or backup deletion
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V038_MAIN_CHANGED'}
+          Write-Host 'V038_NO_USER_PROFILE_NO_PRODUCTION_MUTATION_NO_BACKUP_DELETION_PASS'

@@ -10,7 +10,7 @@ $fixture=Create-V032PreparedCase 'xpui-after-vendor'
 $nativeRoot=Join-Path $env:RUNNER_TEMP ('v032-official-'+[Guid]::NewGuid().ToString('N').Substring(0,8))
 $failed=Invoke-ApprovedNativeXpuiEscrowApplyV034 -Item $item -Acquired $acquired -Prepared $fixture.prepared -ReceiptStore $receiptStore -OfficialExecutable $OfficialExecutable -VendorPrivateRoot $nativeRoot -FailurePoint 'after-official-cli-before-pending'
 Assert-V034 (-not[bool]$failed.ok -and
-  [string]$failed.phase -ceq 'apply-starting' -and
+  [string]$failed.phase -ceq 'native-intent-sealed' -and
   [bool]$failed.independent_recovery_required -and
   -not[bool]$failed.production_mutation_authorized) 'EXPECTED_POST_VENDOR_STOP_NOT_OBSERVED'
 $p=Get-ApprovedNativeRecoveryPathsV032 -WorkRoot $fixture.work -Name ([string]$item.name) -TokenId $fixture.token_id

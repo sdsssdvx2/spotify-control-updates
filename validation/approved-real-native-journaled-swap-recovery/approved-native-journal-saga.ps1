@@ -124,6 +124,54 @@ function Append-ApprovedNativeSagaPhaseV032 {
     }
     return $a
 }
+
+# V038: rev6 central journal witness survives deleted/absent XPUI sidecar.
+function Read-ApprovedNativeSagaIntentWitnessV038 {
+ param([Parameter(Mandatory=$true)]$Paths,[Parameter(Mandatory=$true)][string]$TransactionId)
+ Assert-ApprovedNativeSagaHostedV032
+ $j=Read-CustomAppProductionCrashJournalV010 -AllowedRoot ([string]$Paths.runner) -StoreDirectory ([string]$Paths.journal)
+ if(-not[bool]$j.ok -or [string]$j.transaction_id -cne $TransactionId){
+    throw 'V038_NATIVE_INTENT_JOURNAL_ID_INVALID'
+ }
+ if([int64]$j.revision -lt 6){
+    return [pscustomobject]@{present=$false;journal=$j;escrow_sha256=$null}
+ }
+ $history=Join-Path ([string]$Paths.journal) 'history'
+ $items=@(Get-ChildItem -LiteralPath $history -File -Filter ('{0:D20}-*.json' -f 6) -Force)
+ if($items.Count -ne 1){throw 'V038_NATIVE_INTENT_HISTORY_REV6_MISSING_OR_DUPLICATE'}
+ $found=ConvertFrom-CustomAppProductionCrashJournalFileV010 -AllowedRoot ([string]$Paths.runner) -Path ([string]$items[0].FullName)
+ $e=$found.entry
+ if([int64]$e.revision -ne 6 -or [string]$e.transaction_id -cne $TransactionId){
+    throw 'V038_NATIVE_INTENT_HISTORY_IDENTITY_CHANGED'
+ }
+ if([string]$e.phase -cne 'native-intent-sealed'){
+    return [pscustomobject]@{present=$false;journal=$j;escrow_sha256=$null}
+ }
+ $sha=[string]$e.apply_result_fingerprint
+ if($sha -cnotmatch '^[a-f0-9]{64}$' -or $sha -ceq ('0'*64)){
+    throw 'V038_NATIVE_INTENT_SHA_INVALID'
+ }
+ return [pscustomobject]@{
+   present=$true;journal=$j;escrow_sha256=$sha
+   intent_entry_sha256=[string]$e.entry_sha256
+ }
+}
+function Assert-ApprovedNativeSagaSealedIntentV038 {
+ param([Parameter(Mandatory=$true)]$Paths,[Parameter(Mandatory=$true)][string]$TransactionId)
+ $w=Read-ApprovedNativeSagaIntentWitnessV038 -Paths $Paths -TransactionId $TransactionId
+ if(-not[bool]$w.present){throw 'V038_NATIVE_INTENT_NOT_IN_CENTRAL_JOURNAL'}
+ $f=Join-Path ([string]$Paths.journal) ('scoped-xpui-preimage-'+$TransactionId+'.dpapi')
+ $file=Get-Item -LiteralPath $f -Force -ErrorAction Stop
+ if($file.PSIsContainer -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){
+   throw 'V038_NATIVE_ESCROW_UNSAFE_FILE'
+ }
+ if((Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+   [string]$w.escrow_sha256){
+   throw 'V038_NATIVE_ESCROW_DURABLE_DIGEST_MISMATCH'
+ }
+ return $w
+}
+
 function Get-ApprovedNativeSagaLiveStateV032 {
     param([Parameter(Mandatory=$true)]$Paths,
           [Parameter(Mandatory=$true)]$Evidence)
@@ -262,6 +310,17 @@ function Invoke-ApprovedNativeJournalApplyV032 {
         }
         # Crash test after the genuine vendor has already changed isolated XPUI,
         # but before the journal can assert success. V034 must restore XPUI too.
+        if($null-ne$NativePreLaunchGuard){
+           # The prelaunch hook MUST append a durable native-intent entry
+           # under the SAME V010 CAS before the official CLI was launched.
+           $intent=Assert-ApprovedNativeSagaSealedIntentV038 -Paths $p -TransactionId ([string]$Prepared.transaction_id)
+           if([string]$intent.journal.entry.phase -cne 'native-intent-sealed' -or
+              [int64]$intent.journal.revision -ne 6){
+             throw 'V038_VENDOR_RESULT_LACKS_CENTRAL_NATIVE_INTENT'
+           }
+           $current=$intent.journal
+           $phase='native-intent-sealed'
+        }
         if($FailurePoint -ceq 'after-official-cli-before-pending'){
             throw 'V034_INJECTED_CRASH_AFTER_GENUINE_XPUI_MUTATION_BEFORE_CAS'
         }
@@ -358,13 +417,20 @@ function Invoke-ApprovedNativeJournalRecoveryV032 {
         # A V034 escrow proves a separate XPUI side effect may exist. Older
         # app-only rollback must never publish terminal success for it.
         $nativePreimage=Join-Path ([string]$p.journal) ('scoped-xpui-preimage-'+$TransactionId+'.dpapi')
-        if((Test-Path -LiteralPath $nativePreimage) -and -not$DeferRollbackComplete){
-           throw 'V035_SEALED_XPUI_REQUIRES_COMPOSITE_RECOVERY_NO_APP_ONLY_TERMINAL'
+        $intent=Read-ApprovedNativeSagaIntentWitnessV038 -Paths $p -TransactionId $TransactionId
+        # The native intent is part of central append-only V010 history;
+        # disappearance of optional DPAPI sidecar must NOT permit app-only
+        # rollback to claim full recovery.
+        if(((Test-Path -LiteralPath $nativePreimage) -or [bool]$intent.present) -and -not$DeferRollbackComplete){
+           throw 'V038_CENTRAL_INTENT_FORBIDS_APP_ONLY_ROLLBACK'
+        }
+        if($DeferRollbackComplete -and [bool]$intent.present){
+           [void](Assert-ApprovedNativeSagaSealedIntentV038 -Paths $p -TransactionId $TransactionId)
         }
         $e=Read-ApprovedNativeSagaRecoveryEvidenceV032 -Paths $p -Name $Name -TokenId $TokenId -ReceiptStore $ReceiptStore -TransactionId $TransactionId
         $phase=[string]$e.journal.entry.phase
         if($phase -notin @('prepared','atomic-mutation-starting','live-moved-to-old',
-          'candidate-live','transaction-finalized','apply-starting',
+          'candidate-live','transaction-finalized','apply-starting','native-intent-sealed',
           'apply-returned-success-pending-verification','rollback-required')){
           throw ('V032_ROLLBACK_OUTSIDE_PRECOMMIT_AMBIGUOUS_WINDOW_'+$phase)
         }

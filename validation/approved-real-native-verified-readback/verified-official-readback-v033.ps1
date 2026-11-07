@@ -15,8 +15,19 @@ function Test-ApprovedNativeAppliedReadbackV033 {
   $lease=Open-ApprovedNativeSagaLeaseV032 -Paths $p
   $e=Read-ApprovedNativeSagaRecoveryEvidenceV032 -Paths $p -Name $Name -TokenId $TokenId -ReceiptStore $ReceiptStore -TransactionId $TransactionId
   $j=$e.journal.entry
-  if([string]$j.phase -cne 'apply-verified' -or [int64]$e.journal.revision -ne 7){
+  if([string]$j.phase -cne 'apply-verified' -or
+     [int64]$e.journal.revision -notin @(7,8)){
     throw 'V033_APPLY_VERIFIED_NOT_DURABLE'
+  }
+  # Rev8 is a native-intent-anchored V010 transaction. Rev7 is the older
+  # app-only synthetic fixture and must NOT pretend it owns native XPUI.
+  $intent=Read-ApprovedNativeSagaIntentWitnessV038 -Paths $p -TransactionId $TransactionId
+  if([int64]$e.journal.revision -eq 8){
+    if(-not[bool]$intent.present){throw 'V038_NATIVE_VERIFIED_WITHOUT_INTENT_WITNESS'}
+    [void](Assert-ApprovedNativeSagaSealedIntentV038 -Paths $p -TransactionId $TransactionId)
+  }elseif([bool]$intent.present -or
+    [IO.File]::Exists((Join-Path ([string]$p.journal) ('scoped-xpui-preimage-'+$TransactionId+'.dpapi')))){
+    throw 'V038_LEGACY_VERIFIED_WITH_UNDECLARED_XPUI_ESCROW'
   }
   $state=Get-ApprovedNativeSagaLiveStateV032 -Paths $p -Evidence $e
   if([string]$state.live_state -cne 'candidate' -or [string]$state.old_state -cne 'original'){

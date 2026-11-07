@@ -4,7 +4,7 @@ $CustomAppProductionCrashRecoveryJournalQualifiedCleanupHead = '67458cbb96b5d1ed
 $CustomAppProductionCrashRecoveryJournalZeroHash = ('0' * 64)
 $CustomAppProductionCrashRecoveryJournalPhases = @(
     'prepared','atomic-mutation-starting','live-moved-to-old','candidate-live','transaction-finalized',
-    'apply-starting','apply-returned-success-pending-verification','apply-verified','cleanup-starting','committed-clean',
+    'apply-starting','native-intent-sealed','apply-returned-success-pending-verification','apply-verified','cleanup-starting','committed-clean',
     'rollback-required','rollback-complete'
 )
 
@@ -98,7 +98,7 @@ function Get-CustomAppProductionCrashJournalEntryMaterialV010 {
 function New-CustomAppProductionCrashJournalEntryV010 {
     param(
         [Parameter(Mandatory=$true)]$Identity,[Parameter(Mandatory=$true)][int64]$Revision,[Parameter(Mandatory=$true)][string]$PreviousEntrySha256,
-        [Parameter(Mandatory=$true)][ValidateSet('prepared','atomic-mutation-starting','live-moved-to-old','candidate-live','transaction-finalized','apply-starting','apply-returned-success-pending-verification','apply-verified','cleanup-starting','committed-clean','rollback-required','rollback-complete')][string]$Phase,
+        [Parameter(Mandatory=$true)][ValidateSet('prepared','atomic-mutation-starting','live-moved-to-old','candidate-live','transaction-finalized','apply-starting','native-intent-sealed','apply-returned-success-pending-verification','apply-verified','cleanup-starting','committed-clean','rollback-required','rollback-complete')][string]$Phase,
         [AllowNull()][string]$FinalizationFingerprint=$null,[AllowNull()][string]$ApplyResultFingerprint=$null,[AllowNull()][string]$CleanupResultFingerprint=$null,[DateTimeOffset]$RecordedAt=[DateTimeOffset]::UtcNow
     )
     $zero=$CustomAppProductionCrashRecoveryJournalZeroHash
@@ -126,8 +126,8 @@ function Test-CustomAppProductionCrashJournalEntryV010 {
     $identity=[pscustomobject]@{name=([string]$Entry.name).Trim().ToLowerInvariant();consumption_id=([string]$Entry.consumption_id).Trim().ToLowerInvariant();source_identity=([string]$Entry.source_identity).Trim().ToLowerInvariant();remote_commit_sha=([string]$Entry.remote_commit_sha).Trim().ToLowerInvariant();stage_result_fingerprint=([string]$Entry.stage_result_fingerprint).Trim().ToLowerInvariant();preparation_fingerprint=([string]$Entry.preparation_fingerprint).Trim().ToLowerInvariant();live_path=(Get-CustomAppProductionCrashJournalCanonicalPathV010 ([string]$Entry.live_path));transaction_root=(Get-CustomAppProductionCrashJournalCanonicalPathV010 ([string]$Entry.transaction_root));stage_workspace_path=(Get-CustomAppProductionCrashJournalCanonicalPathV010 ([string]$Entry.stage_workspace_path));app_backup_path=(Get-CustomAppProductionCrashJournalCanonicalPathV010 ([string]$Entry.app_backup_path));persistence_backup_path=(Get-CustomAppProductionCrashJournalCanonicalPathV010 ([string]$Entry.persistence_backup_path));transaction_id=$null}
     $tx=Get-CustomAppProductionCrashJournalSha256V010 (Get-CustomAppProductionCrashJournalIdentityMaterialV010 $identity);if(([string]$Entry.transaction_id).Trim().ToLowerInvariant() -cne $tx){return [pscustomobject]@{ok=$false;reason='entry-transaction-identity-mismatch'}}
     $zero=$CustomAppProductionCrashRecoveryJournalZeroHash
-    if([string]$Entry.phase -in @('transaction-finalized','apply-starting','apply-returned-success-pending-verification','apply-verified','cleanup-starting','committed-clean') -and [string]$Entry.finalization_fingerprint -ceq $zero){return [pscustomobject]@{ok=$false;reason='entry-finalization-evidence-required'}}
-    if([string]$Entry.phase -in @('apply-verified','cleanup-starting','committed-clean') -and [string]$Entry.apply_result_fingerprint -ceq $zero){return [pscustomobject]@{ok=$false;reason='entry-apply-evidence-required'}}
+    if([string]$Entry.phase -in @('transaction-finalized','apply-starting','native-intent-sealed','apply-returned-success-pending-verification','apply-verified','cleanup-starting','committed-clean') -and [string]$Entry.finalization_fingerprint -ceq $zero){return [pscustomobject]@{ok=$false;reason='entry-finalization-evidence-required'}}
+    if([string]$Entry.phase -in @('native-intent-sealed','apply-verified','cleanup-starting','committed-clean') -and [string]$Entry.apply_result_fingerprint -ceq $zero){return [pscustomobject]@{ok=$false;reason='entry-apply-evidence-required'}}
     if([string]$Entry.phase -ceq 'committed-clean' -and [string]$Entry.cleanup_result_fingerprint -ceq $zero){return [pscustomobject]@{ok=$false;reason='entry-cleanup-evidence-required'}}
     $expected=Get-CustomAppProductionCrashJournalSha256V010 (Get-CustomAppProductionCrashJournalEntryMaterialV010 $Entry);if(([string]$Entry.entry_sha256).Trim().ToLowerInvariant() -cne $expected){return [pscustomobject]@{ok=$false;reason='entry-sha256-mismatch'}}
     return [pscustomobject]@{ok=$true;reason='entry-valid-non-authoritative';revision=$rev;entry_sha256=$expected;recorded_at=$when;transaction_id=$tx}
@@ -141,7 +141,8 @@ function Test-CustomAppProductionCrashJournalTransitionV010 {
         'live-moved-to-old'=@('candidate-live','rollback-required');
         'candidate-live'=@('transaction-finalized','rollback-required');
         'transaction-finalized'=@('apply-starting','rollback-required');
-        'apply-starting'=@('apply-returned-success-pending-verification','rollback-required');
+        'apply-starting'=@('native-intent-sealed','apply-returned-success-pending-verification','rollback-required');
+        'native-intent-sealed'=@('apply-returned-success-pending-verification','rollback-required');
         'apply-returned-success-pending-verification'=@('apply-verified','rollback-required');
         'apply-verified'=@('cleanup-starting');
         'cleanup-starting'=@('committed-clean');
@@ -211,7 +212,7 @@ function Initialize-CustomAppProductionCrashJournalV010 {
 function Append-CustomAppProductionCrashJournalPhaseV010 {
     param(
         [Parameter(Mandatory=$true)][string]$AllowedRoot,[Parameter(Mandatory=$true)][string]$StoreDirectory,[Parameter(Mandatory=$true)][int64]$ExpectedRevision,[Parameter(Mandatory=$true)][string]$ExpectedEntrySha256,
-        [Parameter(Mandatory=$true)][ValidateSet('atomic-mutation-starting','live-moved-to-old','candidate-live','transaction-finalized','apply-starting','apply-returned-success-pending-verification','apply-verified','cleanup-starting','committed-clean','rollback-required','rollback-complete')][string]$Phase,
+        [Parameter(Mandatory=$true)][ValidateSet('atomic-mutation-starting','live-moved-to-old','candidate-live','transaction-finalized','apply-starting','native-intent-sealed','apply-returned-success-pending-verification','apply-verified','cleanup-starting','committed-clean','rollback-required','rollback-complete')][string]$Phase,
         [AllowNull()][string]$FinalizationFingerprint=$null,[AllowNull()][string]$ApplyResultFingerprint=$null,[AllowNull()][string]$CleanupResultFingerprint=$null,[DateTimeOffset]$Now=[DateTimeOffset]::UtcNow,
         [ValidateSet('none','after-history-before-current')][string]$FailurePoint='none'
     )
@@ -245,6 +246,7 @@ function Resolve-CustomAppProductionCrashRecoveryClassificationV010 {
         'candidate-live' {return [pscustomobject]@{ok=$true;reason='candidate-live-not-finalized';classification='exact-app-and-persistence-recovery-required';requires_fresh_filesystem_revalidation=$true;requires_recovery_executor=$true;housekeeping_only=$false;no_action=$false;journal_is_authority=$false;production_execution_authorized=$false;production_mutation_authorized=$false}}
         'transaction-finalized' {return [pscustomobject]@{ok=$true;reason='new-live-present-apply-not-started';classification='exact-app-and-persistence-recovery-required';requires_fresh_filesystem_revalidation=$true;requires_recovery_executor=$true;housekeeping_only=$false;no_action=$false;journal_is_authority=$false;production_execution_authorized=$false;production_mutation_authorized=$false}}
         'apply-starting' {return [pscustomobject]@{ok=$true;reason='apply-outcome-ambiguous-after-crash';classification='rollback-and-recovery-apply-required';requires_fresh_filesystem_revalidation=$true;requires_recovery_executor=$true;housekeeping_only=$false;no_action=$false;journal_is_authority=$false;production_execution_authorized=$false;production_mutation_authorized=$false}}
+        'native-intent-sealed' {return [pscustomobject]@{ok=$true;reason='native-escrow-centrally-witnessed-before-vendor';classification='composite-xpui-and-app-rollback-required';requires_fresh_filesystem_revalidation=$true;requires_recovery_executor=$true;housekeeping_only=$false;no_action=$false;journal_is_authority=$false;production_execution_authorized=$false;production_mutation_authorized=$false}}
         'apply-returned-success-pending-verification' {return [pscustomobject]@{ok=$true;reason='apply-returned-but-postconditions-unverified';classification='rollback-and-recovery-apply-required';requires_fresh_filesystem_revalidation=$true;requires_recovery_executor=$true;housekeeping_only=$false;no_action=$false;journal_is_authority=$false;production_execution_authorized=$false;production_mutation_authorized=$false}}
         'apply-verified' {return [pscustomobject]@{ok=$true;reason='apply-verified-before-housekeeping';classification='fresh-revalidate-then-housekeeping-only';requires_fresh_filesystem_revalidation=$true;requires_recovery_executor=$false;housekeeping_only=$true;no_action=$false;journal_is_authority=$false;production_execution_authorized=$false;production_mutation_authorized=$false}}
         'cleanup-starting' {return [pscustomobject]@{ok=$true;reason='cleanup-may-be-partial';classification='fresh-revalidate-then-idempotent-housekeeping-only';requires_fresh_filesystem_revalidation=$true;requires_recovery_executor=$false;housekeeping_only=$true;no_action=$false;journal_is_authority=$false;production_execution_authorized=$false;production_mutation_authorized=$false}}
