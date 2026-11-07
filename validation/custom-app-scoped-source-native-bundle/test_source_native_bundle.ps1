@@ -83,7 +83,7 @@ if($Mode -ceq 'bundle-mutate'){
     [IO.File]::WriteAllText($config,$ini,([Text.UTF8Encoding]::new($false)))
     [IO.File]::WriteAllText($source,'console.log("ORIGINAL_BUNDLE_ALPHA_V0");',([Text.UTF8Encoding]::new($false)))
     $candidate=Join-Path $root 'Stage\candidate-index.js'
-    [IO.File]::WriteAllText($candidate,'console.log("NEW_SCOPED_ALPHA_V17");',([Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($candidate,'console.log("NEW_SCOPED_ALPHA_V17");',([Text.UTF8Encoding]::new($false)))
     [IO.File]::WriteAllText($prefs,'app.last-launched-version = 1.2.3'+[Environment]::NewLine,([Text.UTF8Encoding]::new($false)))
     [IO.File]::WriteAllBytes($backup,[byte[]](0x50,0x4b))
     [IO.File]::WriteAllText($target,$baseTarget)
