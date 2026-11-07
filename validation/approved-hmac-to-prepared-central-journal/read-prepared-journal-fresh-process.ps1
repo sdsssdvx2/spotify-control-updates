@@ -10,6 +10,7 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 foreach($file in @(
+  'validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1',
   'validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1',
   'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1',
   'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1',

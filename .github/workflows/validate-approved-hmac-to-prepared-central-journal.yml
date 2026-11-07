@@ -31,7 +31,7 @@ jobs:
           $j='validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1'
           $pins=@{
              "$d/approved-prepared-journal.ps1"='cfc3a52c2c59d793e207718e3f71599ddccda72f'
-             "$d/read-prepared-journal-fresh-process.ps1"='d36080b2f54258d87e32fbace860fdbca7e3a545'
+             "$d/read-prepared-journal-fresh-process.ps1"='41b578b7edcc1bcc3c9cfbe2bb783df55a95a5a7'
              "$d/test-approved-prepared-journal.ps1"='e56fa50b690241b7d3e86649f58847bb10e98327'
              "$j"='a3df7e5d89c594083c10e240e13029ca5640b8ae'
              'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1'='47b4d4bb08fe7b14ad43de4300556430eb638869'
