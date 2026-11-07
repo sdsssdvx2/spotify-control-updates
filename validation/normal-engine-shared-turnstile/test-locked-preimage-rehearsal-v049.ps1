@@ -10,6 +10,15 @@ if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows' -or
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $PSScriptRoot 'test-installed-manifest-audit-v048.ps1')
 . (Join-Path $PSScriptRoot 'locked-preimage-rehearsal-v049.ps1')
+# Real user's earlier READ-ONLY inventory showed 610 XPUI files (under 64 MiB).
+# Exercise that shape without copying any personal Spotify data.
+$scaleRoot=Join-Path $xpui 'synthetic-fixture-assets'
+[IO.Directory]::CreateDirectory($scaleRoot)|Out-Null
+[byte[]]$fixtureBytes=New-Object byte[] 16384
+for($i=1;$i -le 609;$i++){
+ $leaf=('asset-{0:D4}.dat' -f $i)
+ [IO.File]::WriteAllBytes((Join-Path $scaleRoot $leaf),$fixtureBytes)
+}
 function Assert-V049([bool]$ok,[string]$why){if(-not$ok){throw ('V049_TEST_'+$why)}}
 $fixtureArgs=@{HostedFixtureRoot=$root;HostedFixtureCliPath=$cli}
 $admission=Get-CustomAppCutoverReadOnlyAdmissionV046 @fixtureArgs
@@ -21,7 +30,7 @@ try{
  $r=Invoke-CustomAppHostedPreimageRehearsalV049 -CutoverLease $lease -ExpectedProfileSha256 $pin -OutputDirectory $out @fixtureArgs
  Assert-V049 ($r.status -ceq 'hosted-rehearsal-preimages-verified' -and
    [int]$r.approved_apps -eq 3 -and
-   [int]$r.xpui_files -ge 1 -and
+   [int]$r.xpui_files -eq 610 -and
    [string]$r.receipt_sha256 -cmatch '^[a-f0-9]{64}$' -and
    -not[bool]$r.production_mutation_authorized -and
    -not[bool]$r.production_backup_durable -and
