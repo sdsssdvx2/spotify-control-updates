@@ -63,11 +63,24 @@ function Get-CustomAppInstalledManifestAuditV048 {
    $cli=Assert-XpuiReadOnlyCanonicalV036 -Path $cli -Label 'V048_CLI'
    $lock=Assert-XpuiReadOnlyCanonicalV036 -Path (Join-Path $local 'SpotifyControl\.engine-cutover-turnstile.lock') -Label 'V048_TURNSTILE'
    $handle=$CutoverLease.lock_handle
-   if($null-eq$handle -or $handle -isnot [IO.FileStream] -or
-      $handle.SafeFileHandle.IsClosed -or $handle.SafeFileHandle.IsInvalid -or
-      -not$handle.CanWrite -or [int64]$handle.Length -ne 0 -or
-      -not([string]::Equals([IO.Path]::GetFullPath([string]$handle.Name),
-        [IO.Path]::GetFullPath($lock),[StringComparison]::OrdinalIgnoreCase))){
+   $lockValid=$false
+   try{
+      if($null-ne$handle -and $handle -is [IO.FileStream]){
+         # Disposed FileStream.Length/Name may throw ObjectDisposedException.
+         # Treat this as a NORMAL fail-closed lease violation, not an
+         # ambiguous filesystem read error that loses the precise reason.
+         $lockValid=(-not$handle.SafeFileHandle.IsClosed -and
+             -not$handle.SafeFileHandle.IsInvalid -and $handle.CanWrite -and
+             [int64]$handle.Length -eq 0 -and
+             [string]::Equals([IO.Path]::GetFullPath([string]$handle.Name),
+               [IO.Path]::GetFullPath($lock),[StringComparison]::OrdinalIgnoreCase))
+      }
+   }catch [System.ObjectDisposedException]{
+      $lockValid=$false
+   }catch [System.IO.IOException]{
+      $lockValid=$false
+   }
+   if(-not$lockValid){
       throw 'V048_OS_TURNSTILE_HANDLE_NOT_LIVE_OR_WRONG_PROFILE'
    }
    $pre=Test-CustomAppCutoverReadOnlyAdmissionV046 -ExpectedProfileSha256 $ExpectedProfileSha256 -HostedFixtureRoot $HostedFixtureRoot -HostedFixtureCliPath $HostedFixtureCliPath
