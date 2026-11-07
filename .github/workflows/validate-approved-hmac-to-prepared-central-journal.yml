@@ -1,0 +1,89 @@
+name: Approved HMAC consumed source to exact backup and durable central prepared journal (HOLD)
+on:
+  push:
+    branches: [validate/approved-hmac-to-prepared-central-journal]
+    paths:
+      - 'validation/approved-hmac-to-prepared-central-journal/**'
+      - 'validation/custom-app-production-crash-recovery-journal-v0.1.0/**'
+      - '.github/workflows/validate-approved-hmac-to-prepared-central-journal.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  hosted-prepared-cas:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, ref: "${{ github.sha }}"}
+      - name: Freeze operating main and inherited qualified source SHA, validate Windows PowerShell 5.1 syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='c2cacee1bb7a0e17528d71c733036e3b852b340c'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.sha }}' -or
+             (git merge-base $base HEAD).Trim() -cne $base){
+             throw 'V030_QUALIFIED_V029_PARENT_OR_HEAD_DRIFT'
+          }
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+             throw 'V030_OPERATING_MAIN_MOVED'
+          }
+          $d='validation/approved-hmac-to-prepared-central-journal'
+          $j='validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1'
+          $pins=@{
+             "$d/approved-prepared-journal.ps1"='63f07752eb513df1cbcb44b7473b0ea6b3714a97'
+             "$d/read-prepared-journal-fresh-process.ps1"='4eea9c57138e0f8a5acb7756d3bd343381dda067'
+             "$d/test-approved-prepared-journal.ps1"='8ca4237ca0dae334b933eb04c52f302e6a4198ca'
+             "$j"='a3df7e5d89c594083c10e240e13029ca5640b8ae'
+             'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1'='47b4d4bb08fe7b14ad43de4300556430eb638869'
+             'validation/custom-app-production-atomic-live-swap-v0.1.0/custom-app-production-atomic-live-swap.ps1'='e91fa6a125f77352907c1119f6d9f47be9682550'
+             'validation/approved-live-hmac-consumed-stage/approved-live-hmac-stage.ps1'='952023357202fe67230dc7fd491a6dfa8eebba72'
+             'validation/approved-live-source-acquisition/approved-live-source-acquisition.ps1'='b11532ffe67b160a77403cbbddbd64946df482a7'
+             'validation/approved-custom-app-native-scope/approved-scoped-native.ps1'='b5266bebd6b8ea87067d1587a5556de85d7a148a'
+             'validation/custom-app-production-permit-v0.1.0/custom-app-production-permit.ps1'='2aff85ca092848ea254423bf5441b1a077dea5b7'
+          }
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allow=@("$d/approved-prepared-journal.ps1","$d/read-prepared-journal-fresh-process.ps1","$d/test-approved-prepared-journal.ps1",$j,'.github/workflows/validate-approved-hmac-to-prepared-central-journal.yml')
+          if($changed.Count -ne 5 -or @($changed|Where-Object{$_ -notin $allow}).Count){
+             throw ('V030_UNEXPECTED_PRODUCTION_OR_UNQUALIFIED_SOURCE_CHANGE '+($changed -join ','))
+          }
+          foreach($p in $pins.Keys){
+             if((git hash-object $p).Trim() -cne $pins[$p]){throw ('V030_QUALIFIED_MODULE_SHA_MISMATCH '+$p)}
+          }
+          foreach($p in @("$d/approved-prepared-journal.ps1","$d/read-prepared-journal-fresh-process.ps1","$d/test-approved-prepared-journal.ps1")){
+             $tokens=$null;$errors=$null
+             [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$tokens,[ref]$errors)
+             if($errors.Count){
+                $errors|Select-Object -First 8|ForEach-Object{Write-Host ($_.Extent.StartLineNumber.ToString()+': '+$_.Message)}
+                throw ('V030_PS51_PARSE_DENIED '+$p)
+             }
+          }
+          Write-Host 'V030_APPROVED_HMAC_EXISTING_JOURNAL_EXACT_PIN_AND_PS51_PASS'
+      - name: One actual approved source HMAC to exact rollback backup and append-only V010 prepared CAS; independent process and tampering
+        shell: powershell
+        timeout-minutes: 17
+        run: |
+          $ErrorActionPreference='Stop'
+          $file='validation/approved-hmac-to-prepared-central-journal/test-approved-prepared-journal.ps1'
+          $log=Join-Path $env:RUNNER_TEMP 'v030-prepared-cas-targeted.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $file *>&1 | Tee-Object -FilePath $log | Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 0){
+            Get-Content -LiteralPath $log -Tail 105|ForEach-Object{Write-Host $_}
+            throw ('V030_TARGETED_CONSUMED_SOURCE_TO_JOURNAL_FAILED '+$rc)
+          }
+          $body=Get-Content -LiteralPath $log -Raw
+          foreach($marker in @(
+            'V030_REAL_APPROVED_HMAC_CONSUMED_EXACT_APP_AND_FIXTURE_PERSISTENCE_PREPARED_CAS_PASS',
+            'V030_FRESH_PROCESS_KEYLESS_SOURCE_CONSUMPTION_AND_BOTH_BACKUPS_VERIFIED_PASS',
+            'V030_ORIGINAL_BACKUP_FIXTURE_PERSISTENCE_DPAPI_TAMPER_AND_REPLAY_DENIED_PASS',
+            'V030_GENUINE_SOURCE_HMAC_ONCE_TO_PREPARED_CENTRAL_JOURNAL_FRESH_PROCESS_PASS',
+            'V030_HOSTED_FIXTURE_ONLY_REAL_SPOTIFY_PERSISTENCE_NOT_COVERED_NO_MUTATION_AUTHORITY_PASS'
+          )){if(-not$body.Contains($marker)){throw ('V030_REQUIRED_INTEGRATION_EVIDENCE_MISSING '+$marker)}}
+          Write-Host 'V030_EXISTING_CENTRAL_JOURNAL_PREPARED_FROM_REAL_V029_HMAC_PASS'
+      - name: No production or new Spotify installation / no regression rerun
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V030_PRODUCTION_SOURCE_MOVED'}
+          Write-Host 'V030_HOLD_NO_REAL_SPOTIFY_PERSISTENCE_PROOF_NO_PRODUCTION_COMMIT_NO_OLD_VENDOR_RERUN_PASS'
