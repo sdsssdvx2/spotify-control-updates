@@ -1,0 +1,41 @@
+name: Inspect byte-pinned original Addon Manager persistence functions (HOLD)
+on:
+  push:
+    branches: [validate/approved-real-persistence-adapter]
+    paths: ['.github/workflows/inspect-approved-real-persistence-source.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  inspect-generated-original:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, ref: "${{ github.sha }}"}
+      - name: Verify frozen original and rebuild established original without execution
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'OPERATING_MAIN_CHANGED'}
+          python validation/custom-app-normal-entrypoint-transaction-integration/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'QUALIFIED_REAL_ADDON_REGENERATION_FAILED'}
+          $f='validation/custom-app-normal-entrypoint-transaction-integration/out/bin/addon-manager.ps1'
+          if((Get-Item $f).Length -ne 1453028 -or (Get-FileHash $f -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0cb2362dd14772f19ba2970e5f4c2bc07bf0512c0de31494af7b01cb2a98fdd6'){throw 'PERSISTENCE_INSPECTION_UNEXPECTED_GENERATED_APP'}
+          $tok=$null;$err=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tok,[ref]$err)
+          if($err.Count){throw 'GENUINE_ADDON_PARSE_FAILED'}
+          $funcs=@($ast.FindAll({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst]},$true))
+          Write-Host 'REAL_PERSISTENCE_FUNCTION_NAMES_BEGIN'
+          $funcs|Where-Object{$_.Name -match 'Persist|Backup|ContentFingerprint|TreeSafe|PathSafe'}|ForEach-Object{
+            Write-Host ("NAME "+$_.Name+" bytes="+$_.Extent.Text.Length)
+          }
+          Write-Host 'REAL_PERSISTENCE_FUNCTION_NAMES_END'
+          foreach($name in @('Get-SpotifyPersistenceSnapshot','New-RequiredSpotifyPersistenceBackup','Get-PathContentFingerprint','Get-SpotifyPersistencePaths','Get-RequiredSpotifyPersistenceSurfaces','Test-PathSafe','Copy-TreeSafe','Get-SpotifyPersistenceSurfaceSpec','Get-SpotifyPersistenceInventory','Restore-RequiredSpotifyPersistenceBackup')){
+            $m=@($funcs|Where-Object{$_.Name -ceq $name})
+            if($m.Count -ne 1){Write-Host ("NO_UNIQUE_FUNCTION "+$name+" count="+$m.Count);continue}
+            $body=[string]$m[0].Extent.Text
+            Write-Host ("FUNCTION_BEGIN "+$name+" LENGTH="+$body.Length)
+            Write-Host $body.Substring(0,[Math]::Min(16000,$body.Length))
+            Write-Host ("FUNCTION_END "+$name)
+          }
+          Write-Host 'REAL_PERSISTENCE_READONLY_CODE_INSPECTION_FINISHED'
