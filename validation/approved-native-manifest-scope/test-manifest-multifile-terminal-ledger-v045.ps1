@@ -32,11 +32,13 @@ $manifest=Get-ApprovedNativeManifestOwnedScopeV044 -Name ([string]$item.name) -S
 Write-Host ('V045_PUBLISHED_IVLYRICS_MANIFEST_COUNTS=owned:'+
   [string]@($manifest.owned_files).Count+';extensions:'+
   [string]$manifest.declared_extensions+';assets:'+
-  [string]$manifest.declared_asset_files+';stage_pin_match:'+
-  [string]([string]$manifest.source_tree_sha256 -ceq [string]$acquired.runtime_tree_sha256))
+  [string]$manifest.declared_asset_files+';full_tree_pin_match:'+
+  [string]([string]$manifest.source_tree_sha256 -ceq
+    [string](Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$acquired.stage_path)).tree_sha256))
 Assert-MultiV045 (@($manifest.owned_files).Count -gt 4 -and
   [int]$manifest.declared_extensions -gt 1 -and
-  [string]$manifest.source_tree_sha256 -ceq [string]$acquired.runtime_tree_sha256) 'AUTHENTIC_MULTIFILE_MANIFEST_NOT_PINNED'
+  [string]$manifest.source_tree_sha256 -ceq
+    [string](Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$acquired.stage_path)).tree_sha256) 'AUTHENTIC_MULTIFILE_MANIFEST_NOT_PINNED'
 Write-Host 'V045_REAL_IVLYRICS_PUBLISHED_MANIFEST_HAS_MULTIPLE_OWNED_OUTPUTS_PASS'
 $fixture=Create-V032PreparedCase 'v045-manifest-heavy-native'
 $vendor=Join-Path $env:RUNNER_TEMP ('v032-official-'+[Guid]::NewGuid().ToString('N').Substring(0,8))
@@ -65,7 +67,8 @@ Assert-MultiV045 ([bool]$receipt.ok -and
  [int]$receipt.exact_official_owned_files -eq @($manifest.owned_files).Count -and
  [int]$receipt.exact_official_owned_files -gt 4 -and
  [int]$receipt.declared_extension_files -eq [int]$manifest.declared_extensions -and
- [string]$receipt.source_tree_sha256 -ceq [string]$acquired.runtime_tree_sha256 -and
+ [string]$receipt.source_runtime_sha256 -ceq [string]$acquired.runtime_tree_sha256 -and
+ [string]$receipt.source_tree_sha256 -ceq [string]$manifest.source_tree_sha256 -and
  [string]$receipt.manifest_owned_set_sha256 -cmatch '^[a-f0-9]{64}$') 'MULTIFILE_NATIVE_DPAPI_SEAL_WRONG'
 Write-Host 'V045_REAL_OFFICIAL_IVLYRICS_MULTIFILE_MANIFEST_DPAPI_SEAL_PASS'
 $paths=Get-ApprovedNativeRecoveryPathsV032 -WorkRoot $fixture.work -Name ([string]$item.name) -TokenId $token

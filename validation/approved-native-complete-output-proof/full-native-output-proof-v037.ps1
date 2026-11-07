@@ -63,7 +63,17 @@ function Get-ApprovedNativeFullOutputEvidenceV037 {
       throw 'V037_ORIGINAL_XPUI_ESCROW_IMAGE_TAMPERED'
    }
    $after=Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui
-   $sourcePin=[string]$e.proof.stage_tree_sha256
+   # The authenticated release's runtime SHA hashes all FILES; V010
+   # additionally hashes directory rows. Both must be preserved, not
+   # compared as if they were the same algorithm.
+   $runtimePin=[string]$e.proof.stage_tree_sha256
+   $completeStage=Get-CustomAppUpdateTreeSnapshotV010 -Root ([string]$e.stage_path)
+   $sourcePin=[string]$completeStage.tree_sha256
+   if($runtimePin -cnotmatch '^[a-f0-9]{64}$' -or
+      $sourcePin -cnotmatch '^[a-f0-9]{64}$' -or
+      [int]$completeStage.file_count -lt 2){
+      throw 'V045_SOURCE_RUNTIME_OR_FULL_TREE_PIN_INVALID'
+   }
    $scope=Test-ApprovedNativeManifestOnlyOwnedTargetChangedV044 -Before $before -After $after -Name $Name -SourceAppPath ([string]$e.stage_path) -ExpectedSourceTreeSha256 $sourcePin
    if(-not[bool]$scope.ok -or -not[bool]$scope.foreign_xpui_preserved){
       throw 'V045_OFFICIAL_MANIFEST_SCOPE_DENIED'
@@ -89,7 +99,7 @@ function Get-ApprovedNativeFullOutputEvidenceV037 {
      $files+=([pscustomobject]@{relative=[string]$rel;sha256=[string]$found[0].sha256;bytes=[int64]$found[0].size})
    }
    $scopeDigest=Get-CustomAppProductionCrashJournalSha256V010 (
-     (@('manifest-native-owned-v045',$TransactionId,$Name,$sourcePin,
+     (@('manifest-native-owned-v045',$TransactionId,$Name,$runtimePin,$sourcePin,
        [string]$manifest.manifest_sha256,[string]$before.tree_sha256,
        [string]$after.tree_sha256)+@($files|ForEach-Object{
          [string]$_.relative+'|'+[string]$_.sha256+'|'+[string]$_.bytes
@@ -113,6 +123,7 @@ function Get-ApprovedNativeFullOutputEvidenceV037 {
      approved_files=$files
      approved_file_count=$files.Count
      source_tree_sha256=$sourcePin
+     source_runtime_sha256=$runtimePin
      manifest_sha256=[string]$manifest.manifest_sha256
      manifest_owned_set_sha256=$scopeDigest
      declared_extension_files=[int]$scope.scoped_extension_files
@@ -166,7 +177,7 @@ function Read-ApprovedNativeFullOutputReceiptV037 {
    foreach($field in @('apply_verified_entry_sha256','apply_result_fingerprint',
      'native_apply_start_entry_sha256','native_root','xpui_path',
      'original_xpui_sha256','after_xpui_sha256','after_file_count','after_total_bytes',
-     'official_binary_sha256','source_tree_sha256','manifest_sha256',
+     'official_binary_sha256','source_tree_sha256','source_runtime_sha256','manifest_sha256',
      'manifest_owned_set_sha256','declared_extension_files','declared_asset_files',
      'approved_file_count')){
        if([string]$record.$field -cne [string]$live.$field){
@@ -194,6 +205,7 @@ function Read-ApprovedNativeFullOutputReceiptV037 {
      exact_official_owned_files=$count;entire_official_output_verified=$true
      manifest_scoped_output_verified=$true
      source_tree_sha256=[string]$live.source_tree_sha256
+     source_runtime_sha256=[string]$live.source_runtime_sha256
      manifest_sha256=[string]$live.manifest_sha256
      manifest_owned_set_sha256=[string]$live.manifest_owned_set_sha256
      declared_extension_files=[int]$live.declared_extension_files
@@ -231,6 +243,7 @@ function Save-ApprovedNativeFullOutputReceiptV037 {
   approved_files=$data.approved_files
   approved_file_count=$data.approved_file_count
   source_tree_sha256=$data.source_tree_sha256
+  source_runtime_sha256=$data.source_runtime_sha256
   manifest_sha256=$data.manifest_sha256
   manifest_owned_set_sha256=$data.manifest_owned_set_sha256
   declared_extension_files=$data.declared_extension_files
