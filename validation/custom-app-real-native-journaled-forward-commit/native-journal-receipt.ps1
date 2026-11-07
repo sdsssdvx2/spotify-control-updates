@@ -93,7 +93,7 @@ function Read-CustomAppRealNativeReceiptV024 {
            (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$r.private_target_sha256){
             throw 'native-receipt-official-output-bytes-changed'
         }
-        return [pscustomobject]@{ok=$true;receipt=$r;fingerprint=[string]$check.fingerprint;journal=$j
+        return [pscustomobject]@{ok=$true;reason='genuine-official-native-result-current-and-journal-anchored';receipt=$r;fingerprint=[string]$check.fingerprint;journal=$j
             production_mutation_authorized=$false;production_execution_authorized=$false}
     }catch{return & $deny ('native-receipt-read-failed:'+[string]$_.Exception.Message)}
 }
