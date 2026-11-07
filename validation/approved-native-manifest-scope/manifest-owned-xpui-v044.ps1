@@ -49,10 +49,19 @@ function Get-ApprovedNativeManifestOwnedScopeV044 {
  try{$m=$raw|ConvertFrom-Json -ErrorAction Stop}catch{throw 'V044_MANIFEST_JSON_INVALID'}
  if($null-eq$m -or $m -isnot [pscustomobject]){throw 'V044_MANIFEST_NOT_OBJECT'}
  $fields=@('subfiles','subfiles_extension','assets')
+ $declared=@{}
  foreach($f in $fields){
-    if($null-ne$m.$f -and $m.$f -isnot [array]){
+    # Optional AppManifest members may be ABSENT altogether. StrictMode
+    # throws on $m.subfiles when absent, so inspect PSObject metadata.
+    $property=$m.PSObject.Properties[$f]
+    if($null-eq$property -or $null-eq$property.Value){
+       $declared[$f]=@()
+       continue
+    }
+    if($property.Value -isnot [array]){
        throw 'V044_MANIFEST_DECLARATION_NOT_ARRAY'
     }
+    $declared[$f]=@($property.Value)
  }
  $paths=@{}
  $ownedFiles=@{}
@@ -74,7 +83,7 @@ function Get-ApprovedNativeManifestOwnedScopeV044 {
  foreach($end in @('.js','.css','.json')){
    Add-ApprovedOwnedFileV044 ('spicetify-routes-'+$Name+$end)
  }
- if($null-ne$m.subfiles){foreach($item in @($m.subfiles)){
+ foreach($item in @($declared['subfiles'])){
    if($item -isnot [string]){throw 'V044_SUBFILE_NOT_STRING'}
    $rel=Assert-ApprovedNativeManifestRelativeV044 -Value ([string]$item)
    if($paths.ContainsKey('subfile|'+$rel)){throw 'V044_DUPLICATE_MANIFEST_SUBFILE'}
@@ -83,8 +92,7 @@ function Get-ApprovedNativeManifestOwnedScopeV044 {
       throw 'V044_MANIFEST_SUBFILE_MISSING'
    }
  }
- }
- if($null-ne$m.subfiles_extension){foreach($item in @($m.subfiles_extension)){
+ foreach($item in @($declared['subfiles_extension'])){
    if($item -isnot [string]){throw 'V044_EXTENSION_NOT_STRING'}
    $rel=Assert-ApprovedNativeManifestRelativeV044 -Value ([string]$item)
    if($paths.ContainsKey('ext|'+$rel)){throw 'V044_DUPLICATE_EXTENSION'}
@@ -102,8 +110,7 @@ function Get-ApprovedNativeManifestOwnedScopeV044 {
    $copiedHash[$output]=[string]$map[$rel].sha256
    $extensionCount++
  }
- }
- if($null-ne$m.assets){foreach($item in @($m.assets)){
+ foreach($item in @($declared['assets'])){
    if($item -isnot [string]){throw 'V044_ASSET_SELECTOR_NOT_STRING'}
    $expr=[string]$item
    $glob=$expr.EndsWith('/*',[StringComparison]::Ordinal)
@@ -143,7 +150,6 @@ function Get-ApprovedNativeManifestOwnedScopeV044 {
           $assetsCount++
       }
    }
- }
  }
  if($paths.Count -gt 96 -or $ownedFiles.Count -gt 5000 -or
     @($tree.entries).Count -gt 10000){throw 'V044_OUTPUT_SCOPE_CAP_EXCEEDED'}
