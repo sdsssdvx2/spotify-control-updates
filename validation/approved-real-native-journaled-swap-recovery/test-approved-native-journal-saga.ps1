@@ -151,7 +151,7 @@ foreach($variant in @(
        [string]$interrupted.phase -ceq [string]$variant.phase -and
        [bool]$interrupted.independent_recovery_required -and
        -not[bool]$interrupted.production_mutation_authorized) ('intentional stop not fail-closed '+$variant.id+': '+[string]$interrupted.reason)
-   $paths=Get-ApprovedRealPersistJournalPathsV031 -WorkRoot $fixture.work -Name ([string]$item.name) -TokenId $fixture.token_id
+   $paths=Get-ApprovedNativeRecoveryPathsV032 -WorkRoot $fixture.work -Name ([string]$item.name) -TokenId $fixture.token_id
    $during=Read-CustomAppProductionCrashJournalV010 -AllowedRoot $env:RUNNER_TEMP -StoreDirectory ([string]$paths.journal)
    Assert-V032 ([string]$during.entry.phase -ceq [string]$variant.phase -and
        [int]$during.revision -eq [int]$variant.expectedRevision) ('crash location mismatch '+$variant.id)

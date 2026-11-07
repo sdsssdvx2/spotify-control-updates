@@ -30,7 +30,7 @@ jobs:
           $pins=@{
             "$d/approved-native-journal-saga.ps1"='f667683582ef77ec33e6e13782e42cd999efed63'
             "$d/read-rollback-fresh-process.ps1"='10d1f86a7ea5b1382e8b5db016aa14cccb06d50c'
-            "$d/test-approved-native-journal-saga.ps1"='26516c6d6835aa4e33a91423242a98a6cdaf0bff'
+            "$d/test-approved-native-journal-saga.ps1"='e68920bbdab15d0333fcf19db7eb352f33ce54a6'
             'validation/approved-real-persistence-adapter/real-addon-persistence-core.ps1'='94f03befd68583c3124365d31dc6e920522aa705'
             'validation/approved-real-persistence-adapter/approved-real-persistence-journal.ps1'='ab449e494625e1b4873c00dbb5ea334be822eb47'
             'validation/approved-live-hmac-consumed-stage/approved-live-hmac-stage.ps1'='952023357202fe67230dc7fd491a6dfa8eebba72'
