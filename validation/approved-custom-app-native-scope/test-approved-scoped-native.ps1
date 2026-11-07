@@ -10,8 +10,8 @@ if([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
    $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or
    [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)){throw 'V026_TARGETED_HOSTED_WINDOWS_ONLY'}
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-. (Join-Path $root 'validation/v0.6.21/addon_policy_registry.ps1.inc')
-. (Join-Path $root 'validation/v0.6.22/addon_source_adapter_engine.ps1.inc')
+. ([ScriptBlock]::Create([IO.File]::ReadAllText((Join-Path $root 'validation/v0.6.21/addon_policy_registry.ps1.inc'),[Text.Encoding]::UTF8)))
+. ([ScriptBlock]::Create([IO.File]::ReadAllText((Join-Path $root 'validation/v0.6.22/addon_source_adapter_engine.ps1.inc'),[Text.Encoding]::UTF8)))
 . (Join-Path $root 'validation/marketplace-source-topology-v0.1.0/marketplace-source-topology.ps1')
 . (Join-Path $root 'validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1')
 . (Join-Path $root 'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1')
