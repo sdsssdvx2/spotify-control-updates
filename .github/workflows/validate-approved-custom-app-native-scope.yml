@@ -22,7 +22,7 @@ jobs:
           $d='validation/approved-custom-app-native-scope'
           $pins=@{
             "$d/approved-scoped-native.ps1"='b5266bebd6b8ea87067d1587a5556de85d7a148a'
-            "$d/test-approved-scoped-native.ps1"='75ca0ddb67b3eb2cec5b7db788aa4c4c39086b2'
+            "$d/test-approved-scoped-native.ps1"='75ca0ddb67b3eb2cec5b7db788aa4c4c39086b2a'
             'validation/v0.6.21/addon_policy_registry.ps1.inc'='4cfdaaee5e8401e6e47f266585a0f0201ce9fc30'
             'validation/v0.6.22/addon_source_adapter_engine.ps1.inc'='1ea670ddf5c2747bcddc15a3c02b357a0dd1733c'
             'validation/marketplace-source-topology-v0.1.0/marketplace-source-topology.ps1'='fff349f3fc765e2fc187b9ccdc249b48e09df6c8'
