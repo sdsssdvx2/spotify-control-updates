@@ -64,13 +64,13 @@ $ini=('[Setting]'+[Environment]::NewLine+'spotify_path = '+$spotify+
  [Environment]::NewLine+'[AdditionalOptions]'+[Environment]::NewLine+
  'custom_apps = '+($names -join '|')+[Environment]::NewLine)
 [IO.File]::WriteAllText($config,$ini,[Text.UTF8Encoding]::new($false))
-$args=@{HostedFixtureRoot=$root;HostedFixtureCliPath=$cli}
+$fixtureArgs=@{HostedFixtureRoot=$root;HostedFixtureCliPath=$cli}
 $legacyStart=(Get-FileHash $state -Algorithm SHA256).Hash
 $unknown=Join-Path $cliApps 'unmanaged-app\index.js'
 $unknownStart=(Get-FileHash $unknown -Algorithm SHA256).Hash
 $foreign=Join-Path $xpui 'foreign-original.dat'
 $foreignStart=(Get-FileHash $foreign -Algorithm SHA256).Hash
-$profile=Get-CustomAppCutoverReadOnlyAdmissionV046 @args
+$profile=Get-CustomAppCutoverReadOnlyAdmissionV046 @fixtureArgs
 Assert-V046Test ($profile.status -ceq 'observed-readonly' -and
  $profile.reason -ceq 'V046_CANDIDATE_ELIGIBLE_FOR_FUTURE_ISOLATED_PREPARATION_ONLY' -and
  $profile.profile_sha256 -cmatch '^[a-f0-9]{64}$' -and
@@ -86,7 +86,7 @@ Assert-V046Test ($profile.status -ceq 'observed-readonly' -and
  -not$profile.full_quiescence_proven -and
  -not$profile.process_lease_held) 'VALID_4_APP_CUTOVER_NOT_NONAUTHORIZING'
 $pin=[string]$profile.profile_sha256
-$again=Test-CustomAppCutoverReadOnlyAdmissionV046 -ExpectedProfileSha256 $pin @args
+$again=Test-CustomAppCutoverReadOnlyAdmissionV046 -ExpectedProfileSha256 $pin @fixtureArgs
 Assert-V046Test ([bool]$again.ok -and -not$again.production_mutation_authorized) 'SAME_READONLY_ADMISSION_NOT_STABLE'
 $json=$profile|ConvertTo-Json -Compress
 foreach($leak in @($root,'unmanaged-app','better-local-files','ivlyrics','V046_USER_PREFS','V046_UNMANAGED')){
@@ -94,39 +94,39 @@ foreach($leak in @($root,'unmanaged-app','better-local-files','ivlyrics','V046_U
 }
 Write-Host 'V046_FOUR_APP_READONLY_LEGACY_TO_NEW_ADMISSION_IDENTITY_PASS'
 [IO.File]::WriteAllText($pending,'{"status":"awaiting-apply"}')
-Must-BlockV046 {Get-CustomAppCutoverReadOnlyAdmissionV046 @args} 'V046_LEGACY_TRANSACTION_STILL_PRESENT_DO_NOT_MIGRATE'
+Must-BlockV046 {Get-CustomAppCutoverReadOnlyAdmissionV046 @fixtureArgs} 'V046_LEGACY_TRANSACTION_STILL_PRESENT_DO_NOT_MIGRATE'
 Assert-V046Test ([IO.File]::Exists($pending)) 'PENDING_OLD_JOURNAL_DELETED_BY_CHECK'
 [IO.File]::Delete($pending) # Hosted synthetic fixture only
 [IO.Directory]::CreateDirectory($enrollment)|Out-Null
-Must-BlockV046 {Get-CustomAppCutoverReadOnlyAdmissionV046 @args} 'V046_NEW_ENGINE_ALREADY_ENROLLED_REQUIRE_EXISTING_JOURNAL_RECOVERY'
+Must-BlockV046 {Get-CustomAppCutoverReadOnlyAdmissionV046 @fixtureArgs} 'V046_NEW_ENGINE_ALREADY_ENROLLED_REQUIRE_EXISTING_JOURNAL_RECOVERY'
 Assert-V046Test ([IO.Directory]::Exists($enrollment)) 'NEW_DPAPI_STORE_DELETED'
 [IO.Directory]::Delete($enrollment) # empty hosted fixture marker
 [IO.File]::WriteAllText($enrollment,'malformed-new-ledger')
-Must-BlockV046 {Get-CustomAppCutoverReadOnlyAdmissionV046 @args} 'V046_NEW_ENGINE_ALREADY_ENROLLED_REQUIRE_EXISTING_JOURNAL_RECOVERY'
+Must-BlockV046 {Get-CustomAppCutoverReadOnlyAdmissionV046 @fixtureArgs} 'V046_NEW_ENGINE_ALREADY_ENROLLED_REQUIRE_EXISTING_JOURNAL_RECOVERY'
 Assert-V046Test ([IO.File]::Exists($enrollment)) 'MALFORMED_NEW_LEDGER_REMOVED'
 [IO.File]::Delete($enrollment)
 Write-Host 'V046_ACTIVE_LEGACY_JOURNAL_AND_ANY_NEW_ENROLLMENT_BLOCKED_PASS'
-$simulated=Get-CustomAppCutoverReadOnlyAdmissionV046 -SimulatedSpotifyRunning @args
+$simulated=Get-CustomAppCutoverReadOnlyAdmissionV046 -SimulatedSpotifyRunning @fixtureArgs
 Assert-V046Test ($simulated.status -ceq 'deferred' -and
  $simulated.reason -ceq 'V046_SPOTIFY_RUNNING_OPERATION_DEFERRED' -and
  $simulated.profile_sha256 -ceq $pin -and
  -not$simulated.production_mutation_authorized) 'RUNNING_SPOTIFY_SHOULD_DEFER_NOT_CREATE_LEDGER'
-Assert-V046Test (-not[bool](Test-CustomAppCutoverReadOnlyAdmissionV046 -ExpectedProfileSha256 $pin @args).production_mutation_authorized) 'CANDIDATE_READBACK_GRANTED_MUTATION'
+Assert-V046Test (-not[bool](Test-CustomAppCutoverReadOnlyAdmissionV046 -ExpectedProfileSha256 $pin @fixtureArgs).production_mutation_authorized) 'CANDIDATE_READBACK_GRANTED_MUTATION'
 Write-Host 'V046_RUNNING_SPOTIFY_DEFERRED_NO_PROCESS_TERMINATION_PASS'
 # Real installed source and XPUI drift are both rejected on next admission.
 $original=[IO.File]::ReadAllBytes((Join-Path $cliApps 'ivlyrics\index.js'))
 [IO.File]::AppendAllText((Join-Path $cliApps 'ivlyrics\index.js'),'CHANGED')
-Assert-V046Test (-not[bool](Test-CustomAppCutoverReadOnlyAdmissionV046 -ExpectedProfileSha256 $pin @args).ok) 'APP_TREE_DRIFT_NOT_DETECTED'
+Assert-V046Test (-not[bool](Test-CustomAppCutoverReadOnlyAdmissionV046 -ExpectedProfileSha256 $pin @fixtureArgs).ok) 'APP_TREE_DRIFT_NOT_DETECTED'
 [IO.File]::WriteAllBytes((Join-Path $cliApps 'ivlyrics\index.js'),$original)
 $foreignOriginal=[IO.File]::ReadAllBytes($foreign)
 [IO.File]::AppendAllText($foreign,'CHANGED')
-Assert-V046Test (-not[bool](Test-CustomAppCutoverReadOnlyAdmissionV046 -ExpectedProfileSha256 $pin @args).ok) 'FOREIGN_XPUI_DRIFT_NOT_DETECTED'
+Assert-V046Test (-not[bool](Test-CustomAppCutoverReadOnlyAdmissionV046 -ExpectedProfileSha256 $pin @fixtureArgs).ok) 'FOREIGN_XPUI_DRIFT_NOT_DETECTED'
 [IO.File]::WriteAllBytes($foreign,$foreignOriginal)
 $oldState=[IO.File]::ReadAllBytes($state)
 [IO.File]::AppendAllText($state,' ')
-Assert-V046Test (-not[bool](Test-CustomAppCutoverReadOnlyAdmissionV046 -ExpectedProfileSha256 $pin @args).ok) 'LEGACY_STATE_DRIFT_NOT_DETECTED'
+Assert-V046Test (-not[bool](Test-CustomAppCutoverReadOnlyAdmissionV046 -ExpectedProfileSha256 $pin @fixtureArgs).ok) 'LEGACY_STATE_DRIFT_NOT_DETECTED'
 [IO.File]::WriteAllBytes($state,$oldState)
-Assert-V046Test ([bool](Test-CustomAppCutoverReadOnlyAdmissionV046 -ExpectedProfileSha256 $pin @args).ok) 'READONLY_STABLE_REPLAY_AFTER_FIXTURE_RESTORE'
+Assert-V046Test ([bool](Test-CustomAppCutoverReadOnlyAdmissionV046 -ExpectedProfileSha256 $pin @fixtureArgs).ok) 'READONLY_STABLE_REPLAY_AFTER_FIXTURE_RESTORE'
 Write-Host 'V046_APPROVED_SOURCE_FOREIGN_XPUI_LEGACY_STATE_CHANGES_DENIED_PASS'
 # No binary execution, no credentials/prefs body opened, no enrollment or
 # old transaction writes in the subject code. The fixture itself is disposable.
