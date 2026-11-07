@@ -17,6 +17,7 @@ if([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 foreach($file in @(
  'validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1',
+ 'validation/custom-app-production-pre-apply-preparation-v0.1.0/custom-app-production-pre-apply-preparation.ps1',
  'validation/custom-app-production-recovery-evidence-envelope-v0.1.0/custom-app-production-recovery-evidence.ps1',
  'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1',
  'validation/custom-app-whole-tree-real-scoped-native/whole-tree-real-scoped-native.ps1',
