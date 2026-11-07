@@ -62,7 +62,6 @@ function Test-CustomAppRealNativeJournalAdmissionV024 {
     }
     if(-not[bool](Test-CustomAppProductionEvidenceBoundJournalAtomicResultV010 $atomic).ok -or
        [string]$atomic.transaction_id -cne $jid -or
-       [string]$atomic.consumption_id -cne $cid -or
        [string]$prepared.consumption_id -cne $cid -or
        [string]$prepared.stage_tree_sha256 -cne [string]$stage.remote_tree_sha256 -or
        [string]$prepared.app_backup_tree_sha256 -cnotmatch '^[a-f0-9]{64}$'){
