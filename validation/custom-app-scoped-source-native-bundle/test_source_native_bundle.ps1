@@ -126,6 +126,47 @@ if($Mode -ceq 'bundle-mutate'){
         if(-not[bool]$bundle.ok -or [bool]$bundle.signed_source_provenance_verified){
             throw 'BUNDLE_SYNTHETIC_UNSIGNED_STAGE_NOT_RECORDED'
         }
+        # The previous hosted CI failure exposed a Win32 working-directory
+        # length violation only AFTER the CAS/source swap. Reject the known
+        # unstartable path class while the journal is still prepared.
+        $overlong=Join-Path $runner ('x'*245)
+        $pathDenied=$false
+        try{[void](Assert-CustomAppScopedBundleNativePathBudgetV020 -WorkingDirectory $overlong)}
+        catch{$pathDenied=([string]$_.Exception.Message -match 'pre-cas-working-directory-too-long')}
+        if(-not$pathDenied){throw 'BUNDLE_PRE_CAS_LONG_CURRENT_DIRECTORY_NOT_DENIED'}
+        $shortWorking=Assert-CustomAppScopedBundleNativePathBudgetV020 -WorkingDirectory ([string]$saved.context.scope_root)
+        if($shortWorking.Length -ge 248){throw 'BUNDLE_NORMAL_CLONE_UNSTARTABLE_PATH'}
+        Write-Host 'NATIVE_BUNDLE_V020_WINDOWS_PATH_BUDGET_PRE_CAS_NEGATIVE_AND_POSITIVE_PASS'
+        # Corrupt ONLY the disposable CLI config. Native preflight must deny
+        # before the append-only journal, intent, source, or XPUI changes;
+        # restore the disposable clone and then run the genuine positive case.
+        $cloneConfig=Join-Path ([string]$saved.context.scope_root) 'config-xpui.ini'
+        $cloneSource=Join-Path ([string]$saved.context.scope_root) 'CustomApps\alpha\index.js'
+        $oldCloneConfig=[IO.File]::ReadAllBytes($cloneConfig)
+        try{
+            $badConfig=[IO.File]::ReadAllText($cloneConfig).Replace(
+                'check_spicetify_update = false','check_spicetify_update = true')
+            if($badConfig -ceq [IO.File]::ReadAllText($cloneConfig)){
+                throw 'BUNDLE_NEGATIVE_PRIVATE_CONFIG_MUTATION_NOT_INJECTED'
+            }
+            [IO.File]::WriteAllText($cloneConfig,$badConfig)
+            $preflightDenied=$false
+            try{[void](Invoke-CustomAppScopedBundleNativeV020 -Session $session -HeldCrossEngineSession $global @pinArgs)}
+            catch{$preflightDenied=([string]$_.Exception.Message -match 'pre-cas-private-config-drift')}
+            $unchanged=Get-CustomAppScopedLabJournalV018 -Session $session -HeldCrossEngineSession $global -Context $saved.context
+            if(-not$preflightDenied -or [long]$unchanged.revision -ne 0 -or
+               [string]$unchanged.phase -cne 'prepared' -or
+               [IO.File]::Exists([string]$saved.context.intent_path) -or
+               [IO.File]::Exists([string]$bundle.bundle.paths.intent) -or
+               [IO.File]::ReadAllText($source) -cne 'console.log("ORIGINAL_BUNDLE_ALPHA_V0");' -or
+               [IO.File]::ReadAllText($target) -cne $baseTarget){
+                throw 'BUNDLE_PRE_CAS_DENIAL_MUTATED_LIVE_OR_JOURNAL'
+            }
+            Write-Host 'NATIVE_BUNDLE_V020_PRIVATE_CONFIG_DRIFT_DENIED_BEFORE_CAS_PASS'
+        }finally{
+            [IO.File]::WriteAllBytes($cloneConfig,$oldCloneConfig)
+            [IO.File]::WriteAllBytes($cloneSource,[IO.File]::ReadAllBytes($source))
+        }
         $beforePhase=Get-CustomAppScopedLabJournalV018 -Session $session -HeldCrossEngineSession $global -Context $saved.context
         if([string]$beforePhase.phase -cne 'prepared' -or [long]$beforePhase.revision -ne 0){
             throw 'SCOPED_LAB_SNAPSHOT_DID_NOT_RETAIN_PREPARED_PHASE'
