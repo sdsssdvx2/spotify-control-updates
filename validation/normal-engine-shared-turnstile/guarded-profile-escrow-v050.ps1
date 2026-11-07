@@ -56,7 +56,8 @@ function Assert-CustomAppV050PrivateVault {
    }
    $parent=Assert-CustomAppV050Path -Path (Split-Path -Parent $p)
    if(-not[IO.Directory]::Exists($parent)){throw 'V050_VAULT_PARENT_MISSING'}
-   [IO.Directory]::CreateDirectory($p)|Out-Null
+   # Build the private DACL BEFORE creation; avoid even a transient
+   # inherited-ACL window around sensitive Spotify prefs.
    $acl=New-Object Security.AccessControl.DirectorySecurity
    $acl.SetAccessRuleProtection($true,$false)
    $inherit=[Security.AccessControl.InheritanceFlags] 'ContainerInherit, ObjectInherit'
@@ -69,7 +70,7 @@ function Assert-CustomAppV050PrivateVault {
      $sid=New-Object Security.Principal.SecurityIdentifier($sidText)
      $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid,$right,$inherit,$propagate,$allow)))
    }
-   (Get-Item -LiteralPath $p -Force).SetAccessControl($acl)
+   [IO.Directory]::CreateDirectory($p,$acl)|Out-Null
  }
  if(-not[IO.Directory]::Exists($p)){throw 'V050_PRIVATE_VAULT_MISSING'}
  $acl=(Get-Item -LiteralPath $p -Force).GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
