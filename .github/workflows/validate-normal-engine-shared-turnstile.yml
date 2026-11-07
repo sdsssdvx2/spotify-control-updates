@@ -1,0 +1,101 @@
+name: Actual Addon Manager shared legacy/new update turnstile (HOLD)
+on:
+  push:
+    branches: [validate/normal-engine-shared-turnstile]
+    paths:
+      - 'validation/normal-engine-shared-turnstile/**'
+      - '.github/workflows/validate-normal-engine-shared-turnstile.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  actual-generated-addon-three-handler-lease:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Exact V046 parent, protected main, only new source and PowerShell 5.1 parser
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='25b2be890412701cbfba6e15e85f8eb0f3e89c99'
+          if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+             (git merge-base $parent HEAD).Trim() -cne $parent){throw 'V047_PARENT_MISMATCH'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+             throw 'V047_OPERATING_MAIN_CHANGED'
+          }
+          $allowed=@(
+           'validation/normal-engine-shared-turnstile/engine-turnstile-v047.ps1',
+           'validation/normal-engine-shared-turnstile/build-locked-addon-v047.ps1',
+           'validation/normal-engine-shared-turnstile/test-shared-turnstile-v047.ps1',
+           '.github/workflows/validate-normal-engine-shared-turnstile.yml')
+          $changed=@(git diff --name-only "$parent...HEAD")
+          if($changed.Count -ne 4 -or @($changed|Where-Object{$_ -notin $allowed}).Count){
+            throw ('V047_SCOPE_CHANGED '+($changed -join ','))
+          }
+          foreach($file in @($allowed|Where-Object{$_ -like '*.ps1'})){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){
+               throw ('V047_WINDOWS_PS51_SYNTAX_'+$file+':'+$errors[0].Message)
+            }
+          }
+          $code=Get-Content $allowed[0] -Raw
+          foreach($bad in @('Remove-Item','Set-Content','Invoke-WebRequest','Invoke-RestMethod',
+            '[IO.File]::Write','[IO.File]::Delete','[IO.Directory]::Delete','Start-Process',
+            'Invoke-AtomicDirectorySwap','Invoke-ApprovedNativeJournalApplyV032')){
+            if($code.Contains($bad)){throw ('V047_EXCLUSIVE_LOCK_HAS_UNEXPECTED_SIDE_EFFECT '+$bad)}
+          }
+          Write-Host 'V047_FROZEN_MAIN_PARENT_MINIMAL_DIFF_AND_PS51_SYNTAX_PASS'
+      - name: Rebuild exact official predecessor generated Addon Manager
+        shell: powershell
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/custom-app-normal-entrypoint-transaction-integration/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'V047_ORIGINAL_ADDON_BUILDER_FAILED'}
+          $parent='validation/custom-app-normal-entrypoint-transaction-integration/out/bin/addon-manager.ps1'
+          if((Get-Item $parent).Length -ne 1453028 -or
+            (Get-FileHash $parent -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0cb2362dd14772f19ba2970e5f4c2bc07bf0512c0de31494af7b01cb2a98fdd6'){
+             throw 'V047_GENERATED_PARENT_ADDON_SHA_CHANGED'
+          }
+          "V047_PARENT=$((Resolve-Path $parent).Path)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host 'V047_EXACT_SOURCE_GENERATED_ADDON_RECONSTRUCTED_PASS'
+      - name: Reuse qualified guarded manual terminal handlers, then wrap three handlers
+        shell: powershell
+        timeout-minutes: 7
+        run: |
+          $ErrorActionPreference='Stop'
+          $manual=Join-Path $env:RUNNER_TEMP 'v047-existing-manual-guard'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/custom-app-normal-manual-entrypoint-exclusivity/integrate-legacy-terminal-fence.ps1' -ParentCandidate $env:V047_PARENT -OutputDirectory $manual
+          if($LASTEXITCODE -ne 0){throw 'V047_INHERITED_MANUAL_GUARD_GENERATION_FAILED'}
+          $dest=Join-Path $env:RUNNER_TEMP 'v047-exact-locked-generated'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/normal-engine-shared-turnstile/build-locked-addon-v047.ps1' -ParentCandidate (Join-Path $manual 'addon-manager.ps1') -OutputDirectory $dest
+          if($LASTEXITCODE -ne 0){throw 'V047_ACTUAL_ADDON_TURNSTILE_GENERATION_FAILED'}
+          "V047_ADDON=$((Resolve-Path (Join-Path $dest 'addon-manager.ps1')).Path)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host 'V047_REAL_GENERATED_ADDON_THREE_HANDLERS_TRANSFORMED_PASS'
+      - name: Cooperative cross-process locking, malformed lock and real Action Update fail-closed
+        shell: powershell
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v047-turnstile-proof.log'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/normal-engine-shared-turnstile/test-shared-turnstile-v047.ps1' -CandidatePath $env:V047_ADDON *>&1 | Tee-Object -FilePath $log
+          if($LASTEXITCODE -ne 0){throw ('V047_TURNSTILE_TEST_FAILED '+$LASTEXITCODE)}
+          $s=Get-Content $log -Raw
+          foreach($marker in @(
+            'V047_REAL_GENERATED_ADDON_AUTO_AND_BOTH_MANUAL_HANDLERS_WRAPPED_PASS',
+            'V047_CROSS_PROCESS_FILESHARE_EXCLUSIVITY_RELEASE_AND_REOPEN_PASS',
+            'V047_MALFORMED_LOCK_FAIL_CLOSED_AND_NO_FORCED_DELETE_PASS',
+            'V047_ACTUAL_ADDON_ACTION_UPDATE_IN_LEASE_THEN_OLD_NEW_FENCE_DENIED_PASS',
+            'V047_EXISTING_LEGACY_NO_NEW_ENGINE_START_OR_INSTALLED_SPOTIFY_TOUCH_PASS')){
+              if(-not$s.Contains($marker)){throw ('V047_MISSING_PROOF '+$marker)}
+          }
+          Write-Host 'V047_ACTUAL_PROGRAM_SHARED_TURNSTILE_TARGETED_WINDOWS_PASS'
+      - name: Original main, installed user Spotify and release unchanged
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+             throw 'V047_REAL_MAIN_CHANGED'
+          }
+          Write-Host 'V047_NO_PRODUCTION_UPDATE_NO_AUTO_ENGINE_ENABLE_NO_USER_DELETE_PASS'
