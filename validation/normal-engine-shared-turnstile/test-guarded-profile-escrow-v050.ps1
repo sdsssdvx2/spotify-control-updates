@@ -113,7 +113,31 @@ Write-Host 'V050_APP_TREE_PREFS_CIPHERTEXT_AND_RECEIPT_TAMPER_DENIAL_PASS'
 # An unsettled older transaction blocks a second snapshot even while lock
 # is held. No second backup vault is created before preflight.
 $next=Join-Path $env:RUNNER_TEMP ('v050-should-not-exist-'+[Guid]::NewGuid().ToString('N'))
-[IO.File]::WriteAllText($pending,'{"state":"unsettled"}')
 $lease2=Open-CustomAppCutoverReadOnlyLeaseV047 -ExpectedProfileSha256 $pin @fixtureArgs
-# Open must fail on pending journal, and may not reserve any new vault.
-throw 'V050_PENDING_TRANSACTION_WAS_WRONGLY_ADMITTED'
+try{
+ [IO.File]::WriteAllText($pending,'{"state":"unsettled"}')
+ $stopped=$false
+ try{
+   [void](New-CustomAppProfilePreimageEscrowV050 -CutoverLease $lease2 -ExpectedProfileSha256 $pin -ExplicitBackupAuthorization -HostedEscrowRoot $next @fixtureArgs)
+ }catch{
+   if([string]$_.Exception.Message -ceq 'V050_INSTALLED_MANIFEST_OR_SHARED_LOCK_NOT_QUALIFIED'){$stopped=$true}else{throw}
+ }
+ Assert-V050 ($stopped -and -not(Test-Path $next) -and [IO.File]::Exists($pending)) 'PENDING_OLD_TRANSACTION_NOT_BLOCKED_BEFORE_WRITE'
+}finally{
+ if($null-ne$lease2.lock_handle){$lease2.lock_handle.Dispose()}
+ if([IO.File]::Exists($pending)){[IO.File]::Delete($pending)}
+}
+Write-Host 'V050_PENDING_LEGACY_TRANSACTION_BLOCKED_BEFORE_BACKUP_CREATED_PASS'
+Assert-V050 (
+ (Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui).tree_sha256 -ceq $before.xpui -and
+ (Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path $cliApps 'ivlyrics')).tree_sha256 -ceq $before.ivlyrics -and
+ (Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path $cliApps 'better-local-files')).tree_sha256 -ceq $before.better -and
+ (Get-CustomAppUpdateTreeSnapshotV010 -Root (Join-Path $cliApps 'eternal-jukebox')).tree_sha256 -ceq $before.eternal -and
+ (Get-FileHash $state -Algorithm SHA256).Hash -ceq $before.state -and
+ (Get-FileHash $prefs -Algorithm SHA256).Hash -ceq $before.prefs -and
+ (Get-FileHash $config -Algorithm SHA256).Hash -ceq $before.config -and
+ (Get-FileHash $unknown -Algorithm SHA256).Hash -ceq $before.unmanaged -and
+ (Get-FileHash $foreign -Algorithm SHA256).Hash -ceq $before.foreign -and
+ -not(Test-Path $enrollment)) 'LIVE_FIXTURE_PROFILE_CHANGED'
+Write-Host 'V050_ORIGINAL_XPUI_ALL_APPROVED_APPS_UNMANAGED_APP_PREFS_LEGACY_UNCHANGED_PASS'
+Write-Host 'V050_BACKUP_ONLY_REAL_EXECUTOR_DISABLED_NO_USER_INSTALL_PASS'
