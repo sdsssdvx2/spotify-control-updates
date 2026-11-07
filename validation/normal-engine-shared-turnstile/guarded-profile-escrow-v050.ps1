@@ -390,6 +390,14 @@ function New-CustomAppProfilePreimageEscrowV050 {
       throw 'V050_PREWRITE_SOURCE_AND_BACKUP_DIFFER'
    }
  }
+ # V042/V048 don't read prefs; retain the exact protected-file preimages
+ # through the actual durable receipt publication boundary.
+ foreach($key in @('config','prefs','state')){
+   $src=switch($key){'config'{$config};'prefs'{$prefs};'state'{$state}}
+   if((Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$shaGuard[$key]){
+      throw 'V050_PROTECTED_INPUT_CHANGED_BEFORE_PUBLICATION'
+   }
+ }
  $after=Get-CustomAppInstalledManifestAuditV048 -CutoverLease $CutoverLease -ExpectedProfileSha256 $ExpectedProfileSha256 @args
  if([string]$after.status -cne 'observed-readonly' -or
     [string]$after.manifest_footprint_sha256 -cne [string]$qualified.manifest_footprint_sha256){
@@ -426,7 +434,8 @@ function New-CustomAppProfilePreimageEscrowV050 {
     status='durable-private-backup-only';escrow_id=$id;receipt_sha256=$pin
     approved_count=$names.Count;xpui_file_count=[int]$pre['xpui'].file_count
     backup_private_acl_verified=$true;guard_files_dpapi_sealed=$true
-    user_originals_unchanged=$true;backup_ready_for_manual_recovery=$true
+    user_originals_unchanged=$true;future_recovery_source_verified=$true
+    production_restore_verified=$false;offline_other_account_recovery_proven=$false
     new_engine_enrollment_created=$false;rollback_authorized=$false
     live_update_authorized=$false;production_mutation_authorized=$false
  }
