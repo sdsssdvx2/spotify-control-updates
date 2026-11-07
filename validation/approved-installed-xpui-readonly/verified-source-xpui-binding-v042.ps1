@@ -175,8 +175,27 @@ function Read-ActualSourceXpuiBindingSafeV042 {
  try{
    return Get-ActualSourceXpuiBindingV042 -HostedFixtureRoot $HostedFixtureRoot -HostedFixtureCliPath $HostedFixtureCliPath
  }catch{
+   # Diagnostics only for disposable GitHub-hosted fixtures; never output
+   # raw paths or user content from an actual Windows installation.
+   if($env:GITHUB_ACTIONS -ceq 'true' -and
+      -not[string]::IsNullOrWhiteSpace($HostedFixtureRoot) -and
+      $env:RUNNER_ENVIRONMENT -ceq 'github-hosted'){
+      $safe=([string]$_.Exception.Message).Replace([string]$HostedFixtureRoot,'<fixture>').Replace([string]$env:RUNNER_TEMP,'<runner>')
+      Write-Host ('V042_HOSTED_FIXTURE_EXCEPTION='+$_.Exception.GetType().Name+
+        ';id='+[string]$_.FullyQualifiedErrorId+
+        ';line='+[string]$_.InvocationInfo.ScriptLineNumber+
+        ';message='+$safe)
+   }
    $why=[string]$_.Exception.Message
-   if($why -cnotmatch '^V042_[A-Z0-9_]+$'){$why='V042_SOURCE_XPUI_NOT_QUALIFIED'}
+   if($why -cnotmatch '^V042_[A-Z0-9_]+
+   return [pscustomobject]@{
+     schema=1;status='blocked';reason=$why
+     source_location_binding_includes_canonical_paths_but_never_discloses_them=$false
+     no_writes=$true;production_mutation_authorized=$false
+   }
+ }
+}
+){$why='V042_SOURCE_XPUI_NOT_QUALIFIED'}
    return [pscustomobject]@{
      schema=1;status='blocked';reason=$why
      source_location_binding_includes_canonical_paths_but_never_discloses_them=$false
