@@ -96,6 +96,24 @@ function Resolve-CustomAppScopedSignedStageCandidateV021 {
        $indexSha -cnotmatch '^[a-f0-9]{64}$'){
         return (& $deny 'signed-stage-scoped-index-manifest-digest-drift')
     }
+    # A two-file stage can still declare unshipped runtime dependencies
+    # through manifest subfiles/subfiles_extension. Only dependency-free
+    # index+manifest is safe for the V020 single-index subset.
+    try{
+        $manifestObject=([IO.File]::ReadAllText($manifestPath,[Text.Encoding]::UTF8) | ConvertFrom-Json -ErrorAction Stop)
+    }catch{return (& $deny 'signed-stage-scoped-manifest-parse-failed')}
+    foreach($field in @('subfiles','subfiles_extension')){
+        $property=$manifestObject.PSObject.Properties[$field]
+        if($null-ne$property){
+            if($null-eq$property.Value -or -not($property.Value -is [Array]) -or
+               @($property.Value).Count -ne 0){
+                return (& $deny ('signed-stage-scoped-manifest-dependencies-not-supported-'+$field))
+            }
+        }
+    }
+    if((Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $manifestSha){
+        return (& $deny 'signed-stage-scoped-manifest-changed-during-dependency-check')
+    }
     $receipt=$IssuerResult.receipt
     if(([string]$receipt.name).Trim().ToLowerInvariant() -cne $key -or
        ([string]$receipt.current_remote_tree_sha256).Trim().ToLowerInvariant() -cne
