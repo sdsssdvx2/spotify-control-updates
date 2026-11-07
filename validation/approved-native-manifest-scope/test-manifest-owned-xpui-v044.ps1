@@ -81,6 +81,14 @@ Assert-V044 ((Get-FileHash $unknownSource -Algorithm SHA256).Hash -ceq $unknownS
  (Get-FileHash $config -Algorithm SHA256).Hash -ceq $parentConfigHash -and
  (Get-FileHash $prefs -Algorithm SHA256).Hash -ceq $prefsHash) 'UNMANAGED_SOURCE_OR_ORIGINAL_CONFIG_PREFS_CHANGED'
 Assert-V044 (Denied-V044 {Test-ApprovedNativeXpuiOnlyOwnedTargetChangedV035 -Before $nativeBefore -After $nativeAfter -Name $targetName}) 'OLD_FIXED_FOUR_FILE_GUARD_MISCLAIMED_ASSET_OUTPUT'
+# Exact allowed real-world app casing: upstream configured ivLyrics is not
+# lowercase. The source scope must still accept its manifest safely.
+$ivScope=Get-ApprovedNativeManifestOwnedScopeV044 -Name 'ivLyrics' -SourceAppPath (Join-Path $cliApps 'ivlyrics')
+Assert-V044 (@($ivScope.owned_files).Count -eq 3 -and
+ @($ivScope.owned_files) -ccontains 'spicetify-routes-ivLyrics.js' -and
+ [int]$ivScope.declared_extensions -eq 0 -and
+ [int]$ivScope.declared_asset_files -eq 0) 'MIXED_CASE_IVLYRICS_MINIMAL_MANIFEST_DENIED'
+Write-Host 'V044_MIXED_CASE_IVLYRICS_OFFICIAL_MANIFEST_SUPPORTED_PASS'
 Write-Host 'V044_PINNED_OFFICIAL_CLI_MANIFEST_SUBFILES_EXTENSION_AND_ASSETS_PASS'
 Write-Host 'V044_NESTED_GLOB_ASSET_AND_EXTENSION_BYTES_EXACTLY_COPIED_PASS'
 Write-Host 'V044_UNMANAGED_APP_AND_OTHER_APPROVED_XPUI_UNCHANGED_PASS'

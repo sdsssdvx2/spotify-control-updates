@@ -25,7 +25,7 @@ function Get-ApprovedNativeManifestOwnedScopeV044 {
  param([Parameter(Mandatory=$true)][string]$Name,
        [Parameter(Mandatory=$true)][string]$SourceAppPath)
  Assert-ApprovedNativeManifestHostedV044
- if($Name -cnotmatch '^[a-z][a-z0-9-]{1,63}$' -or
+ if($Name.ToLowerInvariant() -cnotmatch '^[a-z][a-z0-9-]{1,63}$' -or
     $Name -notin @('ivlyrics','better-local-files','eternal-jukebox','playlist-maker')){
     throw 'V044_NAME_NOT_APPROVED'
  }
