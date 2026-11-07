@@ -1,0 +1,129 @@
+name: Approved real original backups + journaled genuine official scoped native and fresh-process rollback (HOLD)
+on:
+  push:
+    branches: [validate/approved-real-native-journaled-swap-recovery]
+    paths:
+      - 'validation/approved-real-native-journaled-swap-recovery/**'
+      - '.github/workflows/validate-approved-real-native-journaled-swap-recovery.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  integrated-hosted-native-and-recovery:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, ref: "${{ github.sha }}"}
+      - name: Exact production / V031 source pins and Windows PowerShell 5.1 syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='719d1aa64eb55d1f97d07ed2582bf8abec9de0a6'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.sha }}' -or
+             (git merge-base $base HEAD).Trim() -cne $base){
+             throw 'V032_HISTORIC_QUALIFIED_V031_OR_NEW_HEAD_CHANGED'
+          }
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+             throw 'V032_MAIN_MOVED'
+          }
+          $d='validation/approved-real-native-journaled-swap-recovery'
+          $pins=@{
+            "$d/approved-native-journal-saga.ps1"='c3ad614a1a915d314c94bdd1dee0c58ec67d9a90'
+            "$d/read-rollback-fresh-process.ps1"='10d1f86a7ea5b1382e8b5db016aa14cccb06d50c'
+            "$d/test-approved-native-journal-saga.ps1"='26516c6d6835aa4e33a91423242a98a6cdaf0bff'
+            'validation/approved-real-persistence-adapter/real-addon-persistence-core.ps1'='94f03befd68583c3124365d31dc6e920522aa705'
+            'validation/approved-real-persistence-adapter/approved-real-persistence-journal.ps1'='ab449e494625e1b4873c00dbb5ea334be822eb47'
+            'validation/approved-live-hmac-consumed-stage/approved-live-hmac-stage.ps1'='952023357202fe67230dc7fd491a6dfa8eebba72'
+            'validation/approved-hmac-to-prepared-central-journal/approved-prepared-journal.ps1'='cfc3a52c2c59d793e207718e3f71599ddccda72f'
+            'validation/approved-custom-app-native-scope/approved-scoped-native.ps1'='b5266bebd6b8ea87067d1587a5556de85d7a148a'
+            'validation/custom-app-production-crash-recovery-journal-v0.1.0/custom-app-production-crash-recovery-journal.ps1'='a3df7e5d89c594083c10e240e13029ca5640b8ae'
+          }
+          $files=@("$d/approved-native-journal-saga.ps1",
+                    "$d/read-rollback-fresh-process.ps1",
+                    "$d/test-approved-native-journal-saga.ps1")
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allowed=@($files)+@('.github/workflows/validate-approved-real-native-journaled-swap-recovery.yml')
+          if($changed.Count -ne 4 -or @($changed|Where-Object{$_ -notin $allowed}).Count){
+             throw ('V032_UNEXPECTED_PRODUCTION_CHANGE '+($changed -join ','))
+          }
+          foreach($file in $pins.Keys){
+             if((git hash-object $file).Trim() -cne [string]$pins[$file]){
+                throw ('V032_QUALIFIED_SOURCE_BLOB_CHANGED '+$file)
+             }
+          }
+          foreach($file in $files){
+             $tok=$null;$errors=$null
+             [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$tok,[ref]$errors)
+             if($errors.Count){
+                $errors|Select-Object -First 10|ForEach-Object{Write-Host ('V032_PARSE_ERROR line='+$_.Extent.StartLineNumber+' '+$_.Message)}
+                throw ('V032_WINPS51_CODE_PARSE_FAILED '+$file)
+             }
+          }
+          Write-Host 'V032_EXACT_PINS_AND_WINPS51_SOURCE_SCOPE_PASS'
+      - name: Rebuild exact qualified existing Addon Manager persistence core WITHOUT running app
+        shell: powershell
+        timeout-minutes: 18
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/custom-app-normal-entrypoint-transaction-integration/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'V032_PINNED_ADDON_MANAGER_REBUILD_FAILED'}
+          $original='validation/custom-app-normal-entrypoint-transaction-integration/out/bin/addon-manager.ps1'
+          if((Get-Item $original).Length -ne 1453028 -or
+             (Get-FileHash $original -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0cb2362dd14772f19ba2970e5f4c2bc07bf0512c0de31494af7b01cb2a98fdd6'){
+             throw 'V032_ORIGINAL_ADDON_MANAGER_SOURCE_CHANGED'
+          }
+          "V032_ORIGINAL_ADDON=$((Resolve-Path $original).Path)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host 'V032_GENUINE_ORIGINAL_ADDON_BYTE_PIN_PASS'
+      - name: Download and hash-pin exact upstream free official Spicetify 2.46.4 Windows x64
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'v032-spicetify-official'
+          [IO.Directory]::CreateDirectory($dir)|Out-Null
+          $zip=Join-Path $dir 'upstream.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip' -OutFile $zip
+          if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f' -or
+             (Get-Item $zip).Length -ne 7795758){
+             throw 'V032_REAL_OFFICIAL_ZIP_CONTENT_CHANGED'
+          }
+          $out=Join-Path $dir 'expanded'
+          Expand-Archive -LiteralPath $zip -DestinationPath $out
+          $exes=@(Get-ChildItem -LiteralPath $out -Recurse -File -Filter spicetify.exe)
+          if($exes.Count -ne 1 -or
+             (Get-FileHash $exes[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+             throw 'V032_REAL_OFFICIAL_SPICETIFY_EXE_CHANGED'
+          }
+          "V032_OFFICIAL_EXE=$($exes[0].FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host 'V032_OFFICIAL_PINNED_FREE_SPICETIFY_EXE_PASS'
+      - name: New integration only - official native CAS + two independent rollback windows
+        shell: powershell
+        timeout-minutes: 19
+        run: |
+          $ErrorActionPreference='Stop'
+          $file='validation/approved-real-native-journaled-swap-recovery/test-approved-native-journal-saga.ps1'
+          $log=Join-Path $env:RUNNER_TEMP 'v032-native-with-cas-and-keyless-recovery.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $file -OriginalAddonPath $env:V032_ORIGINAL_ADDON -OfficialExecutable $env:V032_OFFICIAL_EXE *>&1 |
+             Tee-Object -FilePath $log | Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 0){
+             Get-Content -LiteralPath $log -Tail 115 | ForEach-Object{Write-Host $_}
+             throw ('V032_OFFICIAL_NATIVE_AND_KEYLESS_RECOVERY_FAILED '+$rc)
+          }
+          $text=Get-Content -LiteralPath $log -Raw
+          foreach($marker in @(
+             'V032_ACTUAL_UPSTREAM_HMAC_ORIGINAL_SPOTIFY_GUARD_AND_REAL_OFFICIAL_SCOPED_JOURNAL_APPLY_VERIFIED_PASS',
+             'V032_FRESH_PROCESS_EXACT_OLD_APP_AND_REAL_ADDON_SPOTIFY_BACKUP_ROLLBACK_PASS case=crash-during-rename',
+             'V032_FRESH_PROCESS_EXACT_OLD_APP_AND_REAL_ADDON_SPOTIFY_BACKUP_ROLLBACK_PASS case=crash-before-vendor',
+             'V032_FRESH_PROCESS_NO_ISSUER_KEY_REAL_ADDON_BACKUP_ROLLBACK_COMPLETE_PASS',
+             'V032_GENUINE_OFFICIAL_SCOPED_IN_SINGLE_CAS_AND_TWO_RESTART_RECOVERIES_PASS',
+             'V032_NO_USER_SPOTIFY_NO_COMMITTED_CLEAN_NO_ORIGINAL_BACKUP_REMOVAL_NO_PRODUCTION_AUTHORITY_PASS'
+          )){if(-not$text.Contains($marker)){throw ('V032_REQUIRED_GENUINE_INTEGRATION_PROOF_MISSING '+$marker)}}
+          Write-Host 'V032_REAL_NATIVE_PREPARED_CAS_AND_TWO_CRASH_WINDOWS_ACCEPTED_PASS'
+      - name: Frozen production and no user installation or cleanup
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V032_FROZEN_MAIN_CHANGED'}
+          Write-Host 'V032_HOLD_NO_OPERATING_SPOTIFY_NO_REAL_PROFILE_NO_COMMITTED_CLEAN_PASS'
