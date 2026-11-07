@@ -1,0 +1,73 @@
+name: V049 hosted locked real-layout preimage and detached restore rehearsal (HOLD)
+on:
+  push:
+    branches: [validate/locked-profile-preimage-rehearsal]
+    paths:
+      - 'validation/normal-engine-shared-turnstile/locked-preimage-rehearsal-v049.ps1'
+      - 'validation/normal-engine-shared-turnstile/test-locked-preimage-rehearsal-v049.ps1'
+      - '.github/workflows/validate-locked-profile-preimage-rehearsal-v049.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  hosted-preimage-detached-restore:
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Verify exact V048 parent, immutable production main and Windows PowerShell 5.1 syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='6c32d0ed9cdd12f0c1085d2e40d922a746e7b68f'
+          $main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          if((git rev-parse origin/main).Trim() -cne $main){throw 'V049_OPERATING_MAIN_CHANGED'}
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'V049_WRONG_PARENT'}
+          $changes=@(git diff --name-only "$base...HEAD")
+          $allowed=@(
+            'validation/normal-engine-shared-turnstile/locked-preimage-rehearsal-v049.ps1',
+            'validation/normal-engine-shared-turnstile/test-locked-preimage-rehearsal-v049.ps1',
+            '.github/workflows/validate-locked-profile-preimage-rehearsal-v049.yml')
+          if($changes.Count -ne 3 -or @($changes|Where-Object{$_ -notin $allowed}).Count){
+             throw ('V049_UNRELATED_FILES_CHANGED '+($changes -join '|'))
+          }
+          foreach($f in @($allowed|Where-Object{$_ -like '*.ps1'})){
+             $tokens=$null;$errors=$null
+             [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tokens,[ref]$errors)
+             if($errors.Count){throw ('V049_POWERSHELL_PARSE_FAILED '+$errors[0].Message)}
+          }
+          $module=Get-Content 'validation/normal-engine-shared-turnstile/locked-preimage-rehearsal-v049.ps1' -Raw
+          foreach($forbidden in @('Start-Process','Invoke-Expression','Invoke-WebRequest','Invoke-RestMethod',
+            'Commit-LastTransaction','Rollback-LastTransaction','Update-AutoApps','Remove-Item',
+            'Spotify\Apps\xpui\spicetify-routes','Open-CustomAppUserTxnStoreV010')){
+             if($module.Contains($forbidden)){throw ('V049_PRODUCTION_ACTION_FORBIDDEN '+$forbidden)}
+          }
+          if(-not $module.Contains("RUNNER_ENVIRONMENT -cne 'github-hosted'")){throw 'V049_HOSTED_ONLY_FENCE_MISSING'}
+          Write-Host 'V049_EXACT_PARENT_MAIN_UNCHANGED_SCOPE_AND_PS51_PARSE_PASS'
+      - name: Hosted installed layout full beforeimage, detached restore, corruption, old-transaction denial
+        shell: powershell
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v049-targeted.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/normal-engine-shared-turnstile/test-locked-preimage-rehearsal-v049.ps1' *>&1 | Tee-Object -FilePath $log
+          $code=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($code -ne 0){Get-Content $log -Tail 90|ForEach-Object{Write-Host $_};throw ('V049_HOSTED_REHEARSAL_FAILED '+$code)}
+          $txt=Get-Content $log -Raw
+          foreach($m in @(
+            'V048_REAL_PROFILE_MANIFEST_READONLY_ONLY_NO_CLI_NO_USER_SPOTIFY_PASS',
+            'V049_LOCKED_HOSTED_THREE_APP_XPUI_PROTECTED_STATE_PREIMAGE_COPIES_PASS',
+            'V049_INDEPENDENT_XPUI_AND_THREE_APPROVED_APP_COLD_RESTORE_PASS',
+            'V049_BACKUP_TAMPER_AND_OUTPUT_COLLISION_FAIL_CLOSED_PASS',
+            'V049_OLD_UNSETTLED_TRANSACTION_PREVENTS_PREIMAGE_STAGING_PASS',
+            'V049_ORIGINAL_XPUI_UNMANAGED_APP_LEGACY_STATE_UNTOUCHED_PASS',
+            'V049_HOSTED_ONLY_ROLLBACK_REHEARSAL_NO_PRODUCTION_MUTATION_PASS')){
+            if(-not$txt.Contains($m)){throw ('V049_MISSING_PROOF '+$m)}
+          }
+          Write-Host 'V049_TARGETED_HOSTED_BACKUP_AND_DETACHED_RESTORE_PASS'
+      - name: Confirm no release or production change
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V049_OPERATING_MAIN_CHANGED_LATE'}
+          Write-Host 'V049_NO_USER_WINDOWS_NO_SPOTIFY_NO_LIVE_CUTOVER_PASS'
