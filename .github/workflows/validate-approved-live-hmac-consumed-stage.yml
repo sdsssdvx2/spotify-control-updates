@@ -1,0 +1,89 @@
+name: HMAC-authenticated actual approved Custom App source single-use DPAPI receipt (HOLD)
+on:
+  push:
+    branches: [validate/approved-live-hmac-consumed-stage]
+    paths:
+      - 'validation/approved-live-hmac-consumed-stage/**'
+      - '.github/workflows/validate-approved-live-hmac-consumed-stage.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  real-github-two-provider-hmac-consumption:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, ref: "${{ github.sha }}"}
+      - name: Pin real upstream-qualified source, frozen operating main, PS 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='4ba0ebb12112cfd8be77cb0b522f356ef8c4bd3a'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.sha }}' -or
+             (git merge-base $base HEAD).Trim() -cne $base){throw 'V029_INHERITED_QUALIFIED_PARENT_MOVED'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V029_PRODUCTION_MAIN_MOVED'}
+          $dir='validation/approved-live-hmac-consumed-stage'
+          $pins=@{
+            "$dir/approved-live-hmac-stage.ps1"='952023357202fe67230dc7fd491a6dfa8eebba72'
+            "$dir/read-sealed-receipt-fresh-process.ps1"='3aefe0df579c0f83f51719d1736959c4abc1d3ba'
+            "$dir/test-approved-live-hmac-stage.ps1"='4191d080313cf7c9049ff8383a318abc5359d76f'
+            'validation/approved-live-source-acquisition/approved-live-source-acquisition.ps1'='b11532ffe67b160a77403cbbddbd64946df482a7'
+            'validation/custom-app-production-permit-v0.1.0/custom-app-production-permit.ps1'='2aff85ca092848ea254423bf5441b1a077dea5b7'
+            'validation/approved-custom-app-native-scope/approved-scoped-native.ps1'='b5266bebd6b8ea87067d1587a5556de85d7a148a'
+            'validation/v0.6.21/addon_policy_registry.ps1.inc'='4cfdaaee5e8401e6e47f266585a0f0201ce9fc30'
+            'validation/v0.6.22/addon_source_adapter_engine.ps1.inc'='1ea670ddf5c2747bcddc15a3c02b357a0dd1733c'
+            'validation/marketplace-source-topology-v0.1.0/marketplace-source-topology.ps1'='fff349f3fc765e2fc187b9ccdc249b48e09df6c8'
+            'validation/custom-app-remote-source-contract-v0.1.0/custom-app-remote-source-contract.ps1'='f8c91f5a566b24c82257742942bdc6fecfe68eb2'
+            'validation/custom-app-remote-observation-collector-v0.1.0/custom-app-remote-observer.ps1'='3a49ceebd13fa993b086eb2643130fb02c746bd1'
+            'validation/custom-app-stage-acquisition-contract-v0.1.0/custom-app-stage-acquisition.ps1'='e2f2fc656235883d2a82b106289973f6ded409a5'
+            'validation/custom-app-local-runtime-baseline-v0.1.0/custom-app-local-runtime-baseline.ps1'='83156d9c14e40061a0728d28b582c1e65684a4a2'
+          }
+          foreach($p in $pins.Keys){
+             if((git hash-object $p).Trim() -cne [string]$pins[$p]){throw ('V029_PUBLISHED_SOURCE_SHA_DRIFT '+$p)}
+          }
+          $new=@("$dir/approved-live-hmac-stage.ps1","$dir/read-sealed-receipt-fresh-process.ps1","$dir/test-approved-live-hmac-stage.ps1")
+          $changed=@(git diff --name-only "$base...HEAD")
+          $allow=@($new)+@('.github/workflows/validate-approved-live-hmac-consumed-stage.yml')
+          if($changed.Count -ne 4 -or @($changed|Where-Object{$_ -notin $allow}).Count){
+            throw ('V029_CHANGED_NON_VALIDATION_SOURCE '+($changed -join ','))
+          }
+          foreach($p in $new){
+            $t=$null;$e=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$t,[ref]$e)
+            if($e.Count){
+              $e|Select-Object -First 8|ForEach-Object{Write-Host ('WINPS51_PARSE line='+$_.Extent.StartLineNumber+' '+$_.Message)}
+              throw ('V029_POWERSHELL_PARSE_FAILED '+$p)
+            }
+          }
+          Write-Host 'V029_QUALIFIED_HMAC_PRIMITIVES_SOURCE_PIN_AND_WINPS51_PASS'
+      - name: Verify real Pithaya and ivLyrics provider source HMAC, tampering, expiry, DPAPI and one-time replay
+        shell: powershell
+        timeout-minutes: 22
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/approved-live-hmac-consumed-stage/test-approved-live-hmac-stage.ps1'
+          $log=Join-Path $env:RUNNER_TEMP 'v029-stage-consumption.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $p *>&1 | Tee-Object -FilePath $log | Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 0){
+             Get-Content -LiteralPath $log -Tail 120|ForEach-Object{Write-Host $_}
+             throw ('V029_CURRENT_REAL_SOURCE_HMAC_CONSUMPTION_FAILED '+$rc)
+          }
+          $body=Get-Content -LiteralPath $log -Raw
+          foreach($marker in @(
+             'V029_LIVE_APPROVED_UPSTREAM_WHOLE_ZIP_TREE_HMAC_AND_TAMPERS_PASS app=better-local-files',
+             'V029_LIVE_APPROVED_UPSTREAM_WHOLE_ZIP_TREE_HMAC_AND_TAMPERS_PASS app=ivLyrics',
+             'V029_APPROVED_LIVE_SOURCE_HMAC_ONCE_DPAPI_FRESH_PROCESS_PASS app=better-local-files',
+             'V029_APPROVED_LIVE_SOURCE_HMAC_ONCE_DPAPI_FRESH_PROCESS_PASS app=ivLyrics',
+             'V029_FRESH_PROCESS_CURRENTUSER_DPAPI_CONSUMED_NO_HMAC_KEY_PASS',
+             'V029_TWO_REAL_UPSTREAM_SOURCE_TYPES_HMAC_SINGLE_USE_AND_FRESH_PROCESS_PASS',
+             'V029_TRUE_REAL_ZIP_NO_TAGIFY_AUTHORITY_NO_INSTALLED_SPOTIFY_OR_MUTATION_PASS'
+          )){if(-not$body.Contains($marker)){throw ('V029_PROOF_MARKER_MISSING '+$marker)}}
+          Write-Host 'V029_REAL_GITHUB_HMAC_SINGLE_USE_DPAPI_CONSUMPTION_VERIFIED_PASS'
+      - name: Fail-closed no production execution or version bump
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V029_OPERATING_RELEASE_CHANGED'}
+          Write-Host 'V029_HOLD_NO_USER_SPOTIFY_NO_NATIVE_RUN_NO_REPACKAGE_NO_CENTRAL_JOURNAL_PROMOTION_PASS'
