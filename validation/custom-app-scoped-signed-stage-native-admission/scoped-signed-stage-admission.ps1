@@ -87,10 +87,20 @@ function Resolve-CustomAppScopedSignedStageCandidateV021 {
     $indexPath=Join-Path $stage 'index.js'
     $manifestPath=Join-Path $stage 'manifest.json'
     try{
-        $indexSha=(Get-FileHash -LiteralPath $indexPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
-        $manifestSha=(Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+        # Freeze exact bytes in-memory. Downstream must never trust a mutable
+        # stage path after this read-only attestation, only this digest-bound
+        # byte snapshot (and must rerun the fresh permit gate before apply).
+        $indexBytes=[IO.File]::ReadAllBytes($indexPath)
+        $manifestBytes=[IO.File]::ReadAllBytes($manifestPath)
+        $sha=[Security.Cryptography.SHA256]::Create()
+        try{
+            $indexSha=([BitConverter]::ToString($sha.ComputeHash($indexBytes))).Replace('-','').ToLowerInvariant()
+            $manifestSha=([BitConverter]::ToString($sha.ComputeHash($manifestBytes))).Replace('-','').ToLowerInvariant()
+        }finally{$sha.Dispose()}
     }catch{return (& $deny 'signed-stage-scoped-subset-read-drift')}
-    if($indexSha -cne [string]$idx[0].sha256 -or
+    if($indexBytes.Length -ne [int64]$idx[0].size -or
+       $manifestBytes.Length -ne [int64]$man[0].size -or
+       $indexSha -cne [string]$idx[0].sha256 -or
        $manifestSha -cne [string]$man[0].sha256 -or
        [int64]$idx[0].size -lt 1 -or [int64]$idx[0].size -gt 2097152 -or
        $indexSha -cnotmatch '^[a-f0-9]{64}$'){
@@ -100,7 +110,7 @@ function Resolve-CustomAppScopedSignedStageCandidateV021 {
     # through manifest subfiles/subfiles_extension. Only dependency-free
     # index+manifest is safe for the V020 single-index subset.
     try{
-        $manifestObject=([IO.File]::ReadAllText($manifestPath,[Text.Encoding]::UTF8) | ConvertFrom-Json -ErrorAction Stop)
+        $manifestObject=([Text.Encoding]::UTF8.GetString($manifestBytes) | ConvertFrom-Json -ErrorAction Stop)
     }catch{return (& $deny 'signed-stage-scoped-manifest-parse-failed')}
     foreach($field in @('subfiles','subfiles_extension')){
         $property=$manifestObject.PSObject.Properties[$field]
@@ -111,9 +121,8 @@ function Resolve-CustomAppScopedSignedStageCandidateV021 {
             }
         }
     }
-    if((Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $manifestSha){
-        return (& $deny 'signed-stage-scoped-manifest-changed-during-dependency-check')
-    }
+    # Manifest parse and index selection derive from the exact byte snapshots
+    # already pinned to the authenticated stage tree; no second path reopening.
     $receipt=$IssuerResult.receipt
     if(([string]$receipt.name).Trim().ToLowerInvariant() -cne $key -or
        ([string]$receipt.current_remote_tree_sha256).Trim().ToLowerInvariant() -cne
@@ -125,6 +134,8 @@ function Resolve-CustomAppScopedSignedStageCandidateV021 {
     return [pscustomobject]@{
         ok=$true;reason='hmac-bound-real-prepared-stage-single-index-subset-readonly'
         candidate_index_path=$indexPath;candidate_index_sha256=$indexSha
+        candidate_index_bytes_base64=[Convert]::ToBase64String($indexBytes)
+        candidate_is_immutable_snapshot=$true
         manifest_sha256=$manifestSha;manifest_name=[string]$baseline.manifest_name
         stage_tree_sha256=[string]$baseline.tree_sha256
         source_identity=[string]$BindingRow.source_identity

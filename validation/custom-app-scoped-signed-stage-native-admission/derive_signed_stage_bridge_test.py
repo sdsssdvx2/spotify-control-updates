@@ -14,7 +14,7 @@ HERE=Path(__file__).resolve().parent
 OLD=ROOT/"validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/test_custom_app_production_byte_real_prepared_stage_handoff.ps1"
 OLD_BLOB="8534c47d13ba07a2933ce6e1cc4cd16e70dae538"
 MODULE=HERE/"scoped-signed-stage-admission.ps1"
-MODULE_BLOB="05ad94f9fa74b6a8bd27a4a6481021bb14a502f7"
+MODULE_BLOB="bb0c03f32eac496ad37e512f069ab0644de90712"
 OUTPUT=OLD.parent/"ci_scoped_signed_stage_bridge_generated.ps1"
 
 def one(s, old, new, title):
@@ -68,6 +68,19 @@ Assert-BRH ([string]$nativeCandidate.candidate_index_path -ceq $actualIndex -and
       (Get-FileHash -LiteralPath $actualIndex -Algorithm SHA256).Hash.ToLowerInvariant() -and
     [string]$nativeCandidate.stage_tree_sha256 -ceq
       [string]$script:BRHExtract.tree_sha256) 'native candidate exact staged index/tree not bound'
+$originalCandidateBytes=[IO.File]::ReadAllBytes($actualIndex)
+Assert-BRH ([bool]$nativeCandidate.candidate_is_immutable_snapshot -and
+    ([Convert]::FromBase64String([string]$nativeCandidate.candidate_index_bytes_base64) -ceq $null) -eq $false 'native snapshot payload missing'
+Assert-BRH ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$nativeCandidate.candidate_index_bytes_base64)) -ceq
+    [Text.Encoding]::UTF8.GetString($originalCandidateBytes)) 'native captured bytes did not match HMAC-bound source'
+$nativeSnapshot=[string]$nativeCandidate.candidate_index_bytes_base64
+try{
+    [IO.File]::AppendAllText($actualIndex,'NATIVE_STAGE_POST_SNAPSHOT_TAMPER')
+    $badNative=Resolve-CustomAppScopedSignedStageCandidateV021 @stageArgs
+    Assert-BRH (-not[bool]$badNative.ok -and -not[bool]$badNative.production_mutation_authorized) 'candidate stage changed after initial read was admitted'
+    Assert-BRH ([string]$nativeCandidate.candidate_index_bytes_base64 -ceq $nativeSnapshot) 'immutable captured source changed after stage mutation'
+}finally{[IO.File]::WriteAllBytes($actualIndex,$originalCandidateBytes)}
+Write-Host 'SIGNED_STAGE_NATIVE_V021_PREPARED_SOURCE_BYTES_SNAPSHOT_TAMPER_DENIED_PASS'
 Write-Host 'SIGNED_STAGE_NATIVE_V021_REAL_ZIP_HMAC_CONSUMPTION_INDEX_BIND_PASS'
 $stageArgs.SessionKey=[byte[]](33..64)
 $badNative=Resolve-CustomAppScopedSignedStageCandidateV021 @stageArgs
