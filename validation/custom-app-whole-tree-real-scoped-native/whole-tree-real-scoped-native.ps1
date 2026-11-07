@@ -88,7 +88,7 @@ function Invoke-CustomAppQualifiedWholeTreeScopedNativeV023 {
         if(-not[bool]$journalAdmission.ok -or
            [string]$journalAdmission.consumption_id -cne [string]$StageExecutorResult.consumption_id -or
            [string]$journalAdmission.source_tree_sha256 -cne [string]$StageExecutorResult.remote_tree_sha256 -or
-           -not $live.Equals(([IO.Path]::GetFullPath([string]$JournalProof.LiveAppPath).TrimEnd('\\','/')),[StringComparison]::OrdinalIgnoreCase)){
+           -not $live.Equals(([IO.Path]::GetFullPath([string]$JournalProof.LiveAppPath).TrimEnd('\','/')),[StringComparison]::OrdinalIgnoreCase)){
             return (& $deny ('whole-tree-native-qualified-current-journal-denied:'+[string]$journalAdmission.reason))
         }
     }else{
@@ -127,7 +127,7 @@ function Invoke-CustomAppQualifiedWholeTreeScopedNativeV023 {
         if(-not $live.Equals(([IO.Path]::GetFullPath([string]$PostSwapCommon.FinalizationResult.live_path).TrimEnd('\','/')),
               [StringComparison]::OrdinalIgnoreCase)){
             return (& $deny 'whole-tree-native-not-the-admitted-live-app')
-        
+        }
     }
     try{$baseline=Get-CustomAppLocalRuntimeBaseline -Name $Name -AppPath $live}
     catch{return (& $deny 'whole-tree-native-live-runtime-read-denied')}
