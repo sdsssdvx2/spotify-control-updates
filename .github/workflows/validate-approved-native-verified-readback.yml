@@ -1,0 +1,85 @@
+name: Approved genuine native independent precommit readback (HOLD)
+on:
+  push:
+    branches: [validate/approved-native-verified-readback]
+    paths:
+      - 'validation/approved-real-native-verified-readback/**'
+      - '.github/workflows/validate-approved-native-verified-readback.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  targeted-native-readback:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, ref: "${{ github.sha }}"}
+      - name: Frozen source and Windows 5.1 syntax checks
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='9ed5d3507adb78494c08acf020f2b6e54ddc9168'
+          if((git rev-parse HEAD).Trim() -cne '${{ github.sha }}' -or (git merge-base $base HEAD).Trim() -cne $base){throw 'V033_PARENT_DRIFT'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V033_MAIN_DRIFT'}
+          $dir='validation/approved-real-native-verified-readback'
+          $allowed=@("$dir/verified-official-readback-v033.ps1","$dir/read-applied-fresh-process-v033.ps1","$dir/test-verified-readback-v033.ps1",'.github/workflows/validate-approved-native-verified-readback.yml')
+          $changed=@(git diff --name-only "$base...HEAD")
+          if($changed.Count -ne 4 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw ('V033_UNEXPECTED_CHANGE '+($changed -join ','))}
+          $pins=@{
+            'validation/approved-real-native-journaled-swap-recovery/approved-native-journal-saga.ps1'='f667683582ef77ec33e6e13782e42cd999efed63'
+            'validation/approved-real-native-journaled-swap-recovery/test-approved-native-journal-saga.ps1'='e68920bbdab15d0333fcf19db7eb352f33ce54a6'
+            'validation/approved-real-native-journaled-swap-recovery/read-rollback-fresh-process.ps1'='10d1f86a7ea5b1382e8b5db016aa14cccb06d50c'
+            'validation/approved-real-persistence-adapter/real-addon-persistence-core.ps1'='94f03befd68583c3124365d31dc6e920522aa705'
+          }
+          foreach($f in $pins.Keys){if((git hash-object $f).Trim() -cne $pins[$f]){throw ('V033_PREVIOUS_SOURCE_CHANGED '+$f)}}
+          foreach($f in @($allowed|Where-Object{$_ -like '*.ps1'})){
+            $tok=$null;$err=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path,[ref]$tok,[ref]$err)
+            if($err.Count){$err|Select-Object -First 5|ForEach-Object{Write-Host $_.Message};throw ('V033_PS51_PARSE_ERROR '+$f)}
+          }
+          Write-Host 'V033_ONLY_READ_ONLY_GUARD_AND_FROZEN_PARENTS_PASS'
+      - name: Rebuild pinned original Addon Manager, no installation
+        shell: powershell
+        timeout-minutes: 18
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/custom-app-normal-entrypoint-transaction-integration/build_candidate.py
+          if($LASTEXITCODE -ne 0){throw 'V033_BUILDER_FAILED'}
+          $p='validation/custom-app-normal-entrypoint-transaction-integration/out/bin/addon-manager.ps1'
+          if((Get-Item $p).Length -ne 1453028 -or (Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0cb2362dd14772f19ba2970e5f4c2bc07bf0512c0de31494af7b01cb2a98fdd6'){throw 'V033_ADDON_CHANGED'}
+          "V033_ADDON=$((Resolve-Path $p).Path)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+      - name: One pinned official free Spicetify CLI
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $d=Join-Path $env:RUNNER_TEMP 'v033-official'
+          [IO.Directory]::CreateDirectory($d)|Out-Null
+          $z=Join-Path $d 'official.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip' -OutFile $z
+          if((Get-Item $z).Length -ne 7795758 -or (Get-FileHash $z -Algorithm SHA256).Hash.ToLowerInvariant() -cne '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f'){throw 'V033_ZIP_DRIFT'}
+          Expand-Archive -LiteralPath $z -DestinationPath (Join-Path $d 'expanded')
+          $exe=@(Get-ChildItem (Join-Path $d 'expanded') -Recurse -File -Filter spicetify.exe)
+          if($exe.Count -ne 1 -or (Get-FileHash $exe[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){throw 'V033_CLI_DRIFT'}
+          "V033_EXE=$($exe[0].FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+      - name: Run frozen V032 once then independent V033 actual output audit
+        shell: powershell
+        timeout-minutes: 19
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v033-integration.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/approved-real-native-verified-readback/test-verified-readback-v033.ps1' -OriginalAddonPath $env:V033_ADDON -OfficialExecutable $env:V033_EXE *>&1 | Tee-Object -FilePath $log | Out-Null
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 0){Get-Content $log -Tail 100 | ForEach-Object{Write-Host $_};throw ('V033_INTEGRATION_FAILED '+$rc)}
+          $s=Get-Content $log -Raw
+          foreach($mark in @('V032_GENUINE_OFFICIAL_SCOPED_IN_SINGLE_CAS_AND_TWO_RESTART_RECOVERIES_PASS','V033_INDEPENDENT_KEYLESS_OFFICIAL_APPLY_READBACK_PASS','V033_INDEPENDENT_APPLY_AND_BOTH_TAMPER_REJECTIONS_PASS','V033_NO_COMMIT_NO_CLEANUP_NO_REAL_SPOTIFY_NO_PRODUCTION_MUTATION_PASS')){
+            if(-not$s.Contains($mark)){throw ('V033_EVIDENCE_MISSING '+$mark)}
+          }
+          Write-Host 'V033_REAL_NATIVE_JOURNAL_KEYLESS_READBACK_PASS'
+      - name: No production changes
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'V033_MAIN_DRIFT'}
+          Write-Host 'V033_HOLD_NO_USER_SPOTIFY_NO_COMMIT_NO_CLEANUP_PASS'
