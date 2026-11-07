@@ -222,7 +222,12 @@ function Restore-CustomAppV052Tree {
  param([string]$Live,[string]$Quarantine,[string]$Stage,[string]$Source,
        [string]$PreimageSha,[string]$CandidateSha,[string]$CrashAfter='none')
  $state=Get-CustomAppV052TreeStatus -Live $Live -Quarantine $Quarantine -PreimageSha $PreimageSha -CandidateSha $CandidateSha
- if($state.live -ceq $PreimageSha){return}
+ if($state.live -ceq $PreimageSha){
+    if([IO.Directory]::Exists($Stage) -or [IO.File]::Exists($Stage)){
+       throw 'V052_ORIGINAL_LIVE_WITH_UNEXPECTED_RESTAGE'
+    }
+    return
+ }
  if([IO.File]::Exists($Stage) -or (Test-Path -LiteralPath $Stage -PathType Leaf)){
     throw 'V052_RESTORE_STAGE_NOT_DIRECTORY'
  }
@@ -301,14 +306,36 @@ function Invoke-CustomAppHostedRollbackV052 {
          throw 'V052_TERMINAL_MARKER_WITH_DRIFTED_LIVE_PROFILE'
        }
      }
+     if([IO.Directory]::Exists($appStage) -or [IO.Directory]::Exists($xpuiStage)){
+       throw 'V052_COMPLETED_WITH_ORPHAN_STAGED_TREE'
+     }
      $tinfo=Get-Item -LiteralPath $terminal -Force
-     if(($tinfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $tinfo.Length -gt 65536){throw 'V052_TERMINAL_MARKER_UNTRUSTED'}
+     if(($tinfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        $tinfo.PSIsContainer -or $tinfo.Length -lt 96 -or $tinfo.Length -gt 65536){
+        throw 'V052_TERMINAL_MARKER_UNTRUSTED'
+     }
      $tbytes=[IO.File]::ReadAllBytes($terminal)
-     $tplain=ConvertFrom-CustomAppV050Sealed -Cipher $tbytes -Purpose ('v052-rollback-terminal|'+$EscrowId)
-     try{$t=([Text.UTF8Encoding]::new($false,$true).GetString($tplain))|ConvertFrom-Json -ErrorAction Stop}
-     finally{[Array]::Clear($tbytes,0,$tbytes.Length);[Array]::Clear($tplain,0,$tplain.Length)}
-     if([string]$t.intent_sha256 -cne $IntentSha256 -or
+     $cipher=$null
+     try{
+       $cipher=New-Object byte[] ($tbytes.Length-32)
+       [Array]::Copy($tbytes,32,$cipher,0,$cipher.Length)
+       $digest=Get-CustomAppV050BytesHash -Data $cipher
+       $header=([BitConverter]::ToString($tbytes,0,32)).Replace('-','').ToLowerInvariant()
+       if($digest -cne $header){throw 'V052_TERMINAL_CIPHERTEXT_NOT_EXACT'}
+       $tplain=ConvertFrom-CustomAppV050Sealed -Cipher $cipher -Purpose ('v052-rollback-terminal|'+$EscrowId)
+       try{$t=([Text.UTF8Encoding]::new($false,$true).GetString($tplain))|ConvertFrom-Json -ErrorAction Stop}
+       finally{[Array]::Clear($tplain,0,$tplain.Length)}
+     }finally{
+       if($null-ne$cipher){[Array]::Clear($cipher,0,$cipher.Length)}
+       [Array]::Clear($tbytes,0,$tbytes.Length)
+     }
+     if([int]$t.schema -ne 1 -or
+        [string]$t.escrow_id -cne $EscrowId -or
+        [string]$t.intent_sha256 -cne $IntentSha256 -or
+        [string]$t.original_app_sha256 -cne [string]$intent.preimage_app_sha256 -or
+        [string]$t.original_xpui_sha256 -cne [string]$intent.preimage_xpui_sha256 -or
         [string]$t.owner -cne 'v052-hosted-rollback-complete' -or
+        -not[bool]$t.quarantine_retained -or
         [bool]$t.production_mutation_authorized){
        throw 'V052_TERMINAL_SEAL_NOT_BOUND_TO_INTENT'
      }
@@ -338,8 +365,16 @@ function Invoke-CustomAppHostedRollbackV052 {
    $raw=[Text.UTF8Encoding]::new($false).GetBytes(($t|ConvertTo-Json -Compress))
    try{
      $sealed=ConvertTo-CustomAppV050Sealed -Plain $raw -Purpose ('v052-rollback-terminal|'+$EscrowId)
-     try{Write-CustomAppV050NewBytes -Path $terminal -Bytes $sealed}
-     finally{[Array]::Clear($sealed,0,$sealed.Length)}
+     try{
+       $sha=[Security.Cryptography.SHA256]::Create()
+       try{$header=$sha.ComputeHash($sealed)}finally{$sha.Dispose()}
+       $frame=New-Object byte[] ($sealed.Length+32)
+       try{
+         [Array]::Copy($header,0,$frame,0,32)
+         [Array]::Copy($sealed,0,$frame,32,$sealed.Length)
+         Write-CustomAppV050NewBytes -Path $terminal -Bytes $frame
+       }finally{[Array]::Clear($frame,0,$frame.Length)}
+     }finally{[Array]::Clear($sealed,0,$sealed.Length)}
    }finally{[Array]::Clear($raw,0,$raw.Length)}
    return [pscustomobject]@{ok=$true;status='hosted-scoped-rollback-complete'
       rollback_complete=$true;source_backup_retained=$true;quarantine_retained=$true

@@ -115,6 +115,19 @@ $again=Invoke-CustomAppHostedRollbackV052 @act
 Assert-V052 ([bool]$again.ok -and [string]$again.status -ceq 'hosted-rollback-already-complete' -and
  -not[bool]$again.production_mutation_authorized -and
  -not[bool]$again.live_update_authorized) 'RESTART_NOT_IDEMPOTENT'
+# Protect against Windows DPAPI accepting appended bytes on an otherwise
+# decryptable ciphertext; the completed record has a full-body SHA frame.
+$terminalBytes=[IO.File]::ReadAllBytes($terminal)
+try{
+ [IO.File]::AppendAllText($terminal,'V052_TRAILER')
+ $badTerminal=$false
+ try{[void](Invoke-CustomAppHostedRollbackV052 @act)}
+ catch{if([string]$_.Exception.Message -ceq 'V052_TERMINAL_CIPHERTEXT_NOT_EXACT'){$badTerminal=$true}else{throw}}
+ Assert-V052 $badTerminal 'TERMINAL_DPAPI_APPEND_WAS_ACCEPTED'
+}finally{[IO.File]::WriteAllBytes($terminal,$terminalBytes)}
+$again=Invoke-CustomAppHostedRollbackV052 @act
+Assert-V052 ([bool]$again.ok -and [string]$again.status -ceq 'hosted-rollback-already-complete') 'TERMINAL_NOT_VERIFIABLE_AFTER_SYNTHETIC_REPAIR'
+Write-Host 'V052_TERMINAL_FULL_CIPHERTEXT_TAMPER_REJECTED_PASS'
 # Neither DPAPI guard files nor other approved apps or unknown inputs change.
 Assert-V052 ((Get-FileHash $prefs -Algorithm SHA256).Hash -ceq $before.prefs -and
  (Get-FileHash $config -Algorithm SHA256).Hash -ceq $before.config -and
