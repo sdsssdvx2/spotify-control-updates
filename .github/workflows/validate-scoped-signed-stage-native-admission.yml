@@ -1,0 +1,99 @@
+name: Real HMAC ZIP to scoped native source (read-only)
+on:
+  push:
+    branches: [validate/scoped-signed-stage-native-admission]
+    paths:
+      - 'validation/custom-app-scoped-signed-stage-native-admission/**'
+      - '.github/workflows/validate-scoped-signed-stage-native-admission.yml'
+  pull_request:
+    branches: [validate/scoped-native-pre-cas-preflight]
+    paths:
+      - 'validation/custom-app-scoped-signed-stage-native-admission/**'
+      - '.github/workflows/validate-scoped-signed-stage-native-admission.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  authentic-stage:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: validate/scoped-signed-stage-native-admission
+      - name: Bound source and PS 5.1 preflight
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='6b401d0ca4e3a22bb47b92aac95c134885d6a7d5'
+          if((git merge-base $base HEAD).Trim() -cne $base){throw 'V020 qualified parent not ancestor'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main moved'}
+          $d='validation/custom-app-scoped-signed-stage-native-admission'
+          $wf='.github/workflows/validate-scoped-signed-stage-native-admission.yml'
+          $allowed=@("$d/scoped-signed-stage-admission.ps1","$d/derive_signed_stage_bridge_test.py",$wf)
+          $changed=@(git diff --name-only "$base...HEAD")
+          if($changed.Count -ne 3 -or @($changed|Where-Object{$_ -notin $allowed}).Count){throw 'unexpected validated file scope'}
+          foreach($pin in @(
+            @("$d/scoped-signed-stage-admission.ps1",'3043fa97bdbc3095987c04c3f02bce70cfe95e77'),
+            @("$d/derive_signed_stage_bridge_test.py",'64bfb273920e9d664cb3d260ec32758154a280fb'),
+            @('validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/test_custom_app_production_byte_real_prepared_stage_handoff.ps1','8534c47d13ba07a2933ce6e1cc4cd16e70dae538')
+          )){if((git hash-object $pin[0]).Trim() -cne $pin[1]){throw ('source pin drift: '+$pin[0])}}
+          $core=(Resolve-Path "$d/scoped-signed-stage-admission.ps1").Path
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($core,[ref]$tokens,[ref]$errors)
+          if($errors.Count){$errors|ForEach-Object{Write-Host ("parse line="+$_.Extent.StartLineNumber+" "+$_.Message)};throw 'PowerShell syntax failure'}
+          $text=[IO.File]::ReadAllText($core)
+          foreach($bad in @('Start-Process','Invoke-WebRequest','Move-Item','Remove-Item','WriteAllBytes','File.Replace','spicetify apply')){
+            if($text.IndexOf($bad,[StringComparison]::OrdinalIgnoreCase) -ge 0){throw ('unexpected source mutation '+$bad)}
+          }
+          if($text -match '(?i)(ready_to_apply|source_swap_authorized|spicetify_refresh_authorized|production_mutation_authorized)\s*=\s*\$true'){throw 'mutation authority leaked'}
+          Write-Host 'SIGNED_STAGE_NATIVE_V021_SCOPE_PS51_READONLY_PASS'
+      - name: Restore historical HMAC permit dependencies once
+        shell: powershell
+        timeout-minutes: 45
+        run: |
+          $ErrorActionPreference='Stop'
+          $prep='validation/custom-app-production-dual-id-new-permit-readiness-v0.1.0/prepare_custom_app_production_dual_id_new_permit_readiness.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $prep -RepoRoot $PWD.Path -RunnerTemp $env:RUNNER_TEMP
+          if($LASTEXITCODE -ne 0){throw 'historical real HMAC fixture preparation failed'}
+          foreach($pin in @(
+            @('validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1','3350cd974bb9f9ae7345e490449c4875d571bf95'),
+            @('validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1','224b9df9d020b74bd4d99c85ca6d06e28999101b')
+          )){if((git hash-object $pin[0]).Trim() -cne $pin[1]){throw ('historical dependency drift '+$pin[0])}}
+          Write-Host 'SIGNED_STAGE_NATIVE_V021_HISTORICAL_HMAC_DEPENDENCIES_PASS'
+      - name: Verify real ZIP and bound source through signed one-time permit
+        shell: powershell
+        timeout-minutes: 100
+        run: |
+          $ErrorActionPreference='Stop'
+          $d='validation/custom-app-production-dual-id-new-permit-reservation-persistence-v0.1.0'
+          $core="$d/custom-app-production-dual-id-new-permit-reservation-persistence.ps1"
+          $parts=@($core,"$d/custom-app-production-dual-id-new-permit-reservation-persistence-deny-binding-fix-v011.ps1","$d/custom-app-production-dual-id-new-permit-reservation-persistence-invoke-deny-binding-fix-v012.ps1")
+          $combined=($parts|ForEach-Object{[IO.File]::ReadAllText((Resolve-Path $_).Path)}) -join [Environment]::NewLine
+          [IO.File]::WriteAllText((Resolve-Path $core).Path,$combined,[Text.UTF8Encoding]::new($false))
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $core).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw 'historical composed PS5.1 syntax failure'}
+          & python 'validation/custom-app-scoped-signed-stage-native-admission/derive_signed_stage_bridge_test.py'
+          if($LASTEXITCODE -ne 0){throw 'authentic source fixture derivation failed'}
+          $file='validation/custom-app-production-byte-real-prepared-stage-handoff-v0.1.0/ci_scoped_signed_stage_bridge_generated.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw 'derived PS5.1 syntax failure'}
+          $oldRun=$env:RUNNER_TEMP;$oldTemp=$env:TEMP;$oldTmp=$env:TMP
+          $run=Join-Path $oldRun ('native-hmac-'+[Guid]::NewGuid().ToString('N'))
+          [void][IO.Directory]::CreateDirectory($run)
+          try{
+            $env:RUNNER_TEMP=$run;$env:TEMP=$run;$env:TMP=$run
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $file
+            if($LASTEXITCODE -ne 0){throw ('real HMAC native source test failed '+$LASTEXITCODE)}
+          }finally{
+            $env:RUNNER_TEMP=$oldRun;$env:TEMP=$oldTemp;$env:TMP=$oldTmp
+            if([IO.File]::Exists($file)){[IO.File]::Delete($file)}
+          }
+          Write-Host 'SIGNED_STAGE_NATIVE_V021_REAL_HMAC_ZIP_SOURCE_PASS'
+      - name: Verify no installed Spotify or production main changes
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'production main changed'}
+          Write-Host 'SIGNED_STAGE_NATIVE_V021_HOSTED_ONLY_NO_INSTALL_PASS'
