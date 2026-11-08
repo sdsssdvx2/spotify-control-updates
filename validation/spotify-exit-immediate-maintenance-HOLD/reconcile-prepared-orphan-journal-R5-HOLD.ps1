@@ -158,6 +158,7 @@ $messages.Add('DIAGNOSTIC=SPOTIFY_BOOTSTRAP_PREPARED_ORPHAN_TERMINALIZER_HOLD_R5
 $messages.Add('APP_BIN_WRITE=NO;SPOTIFY_EXEC=NO;NETWORK=NO;SETTINGS_WRITE=NO;SCHEDULE_WRITE=NO')
 $hosted= -not[string]::IsNullOrWhiteSpace($HostedFixtureRoot)
 $staging=$null
+$stage='INITIAL_PREFLIGHT'
 try{
   if([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT){Fail 'WINDOWS_ONLY'}
   if($hosted){
@@ -186,6 +187,7 @@ try{
   }
   $messages.Add('POSSIBLE_CONCURRENT_WRITERS='+$(if($busy -gt 0){'DETECTED'}elseif($unknown -gt 0){'UNKNOWN'}else{'NONE_OBSERVED'}))
   if($Commit -and ($busy -gt 0 -or $unknown -gt 0)){Fail 'ACTIVE_OR_OPAQUE_POWERSHELL_PROCESS'}
+  $stage='FIRST_SOURCE_PROOF'
   $pre=Probe $root
   $messages.Add('SOURCE_AND_FULL_TREES=EXACT_PREPARED_BEFORE')
   $messages.Add('BACKUP_AND_STAGING=NO_CONFLICT')
@@ -195,14 +197,18 @@ try{
   }else{
     # Reread the full source tree immediately before write; never rely on an
     # earlier R4 user report or a pre-flight pass from another process.
+    $stage='SECOND_SOURCE_PROOF'
     $second=Probe $root $pre.id
     if($second.digest -cne $pre.digest){Fail 'TRANSACTION_RACE_BETWEEN_PREFLIGHTS'}
     $escrow=Join-Path $pre.base 'original-prepared-transaction-before-reconcile.json'
     if(Test-Path -LiteralPath $escrow){Fail 'EXISTING_ESCROW_NO_OVERWRITE'}
     if(-not(ReparseFreePath $root $escrow)){Fail 'ESCROW_PATH_UNSAFE'}
     # Atomically publish immutable original journal before any replacement.
+    $stage='ORIGINAL_ESCROW_CREATE'
     UniqueFile $escrow $pre.original
+    $stage='ORIGINAL_ESCROW_VERIFY'
     if((HashFile $escrow) -cne $pre.digest){Fail 'ESCROW_HASH_MISMATCH'}
+    $stage='PREPARE_TERMINAL_JSON'
     $doc=$pre.doc
     $doc.status='rolled-back'
     $now=[datetime]::UtcNow.ToString('o')
@@ -213,14 +219,18 @@ try{
     [byte[]]$newBytes=[Text.Encoding]::UTF8.GetBytes(($doc|ConvertTo-Json -Depth 12))
     $staging=Join-Path $root ('self-update-transaction-reconcile-'+$pre.id+'.staging')
     if(-not(ReparseFreePath $root $staging)){Fail 'STAGING_PATH_UNSAFE'}
+    $stage='STAGING_JOURNAL_CREATE'
     UniqueFile $staging $newBytes
+    $stage='THIRD_SOURCE_PROOF'
     $third=Probe $root $pre.id
     if($third.digest -cne $pre.digest -or (HashFile $escrow) -cne $pre.digest){
       Fail 'RACE_OR_ESCROW_CHANGED_BEFORE_REPLACE'
     }
     # Source is same-volume, no partial journal write. File.Replace is a
     # single NTFS operation; untrusted real Bootstrap cannot be invoked here.
+    $stage='NTFS_ATOMIC_REPLACE'
     [IO.File]::Replace($staging,$pre.txn,$null,$true)
+    $stage='POST_COMMIT_VERIFY'
     $staging=$null
     $after=([IO.File]::ReadAllText($pre.txn,[Text.Encoding]::UTF8)|ConvertFrom-Json)
     if([string]$after.status -cne 'rolled-back' -or
@@ -234,6 +244,10 @@ try{
     $messages.Add('RESULT=JOURNAL_ONLY_RECONCILED_REQUIRES_FRESH_UPDATE_ACCEPTANCE')
   }
 }catch{
+  if($hosted){
+    $messages.Add('HOSTED_TEST_FAILURE_STAGE='+$stage)
+    $messages.Add('HOSTED_TEST_FAILURE_EXCEPTION_TYPE='+$_.Exception.GetType().Name)
+  }
   $kind=[string]$_.Exception.Message
   $allowed=@('WINDOWS_ONLY','HOSTED_OVERRIDE_DENIED','HOSTED_OVERRIDE_OUTSIDE_RUNNER','LOCAL_ROOT_MISSING',
     'EXPLICIT_APPROVAL_MISSING','PROCESS_INVENTORY_TOO_LARGE','ACTIVE_OR_OPAQUE_POWERSHELL_PROCESS',
