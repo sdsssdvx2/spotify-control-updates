@@ -121,7 +121,14 @@ function Probe([string]$Root,[string]$ExpectedId='') {
   if($null -eq (FileInfo $transaction 1048576)){Fail 'TRANSACTION_UNREADABLE'}
   [byte[]]$original=[IO.File]::ReadAllBytes($transaction)
   $doc=([Text.Encoding]::UTF8.GetString($original)|ConvertFrom-Json -ErrorAction Stop)
-  if([string](Field $doc 'status') -cne 'prepared'){Fail 'TRANSACTION_NOT_PREPARED'}
+  # R11 replay-admission recognizes our OWN previously reconciled journal
+  # only when the exact original PREPARED bytes are still in immutable escrow.
+  # This lets a user explicitly resume a failed *pre-update* Check, without
+  # re-terminalizing or overwriting an already preserved original.
+  $status=[string](Field $doc 'status')
+  $reconciled=($status -ceq 'rolled-back' -and
+      (Field $doc 'prepared_orphan_reconciled_without_bin_swap') -eq $true)
+  if($status -cne 'prepared' -and -not $reconciled){Fail 'TRANSACTION_NOT_PREPARED_OR_OWN_RECONCILED'}
   $id=Field $doc 'id'
   if($id -isnot [string] -or $id -cnotmatch '^\d{8}-\d{6}-[0-9a-f]{8}$'){Fail 'TRANSACTION_ID_INVALID'}
   if($ExpectedId.Length -gt 0 -and $id -cne $ExpectedId){Fail 'TRANSACTION_CHANGED_DURING_APPROVAL'}
@@ -149,10 +156,41 @@ function Probe([string]$Root,[string]$ExpectedId='') {
   $liveSha=ExactTree $bin
   $backupSha=ExactTree $backup
   if($liveSha -cne $before -or $backupSha -cne $before){Fail 'TREE_MISMATCH_REFUSE_JOURNAL_CHANGE'}
+  if($reconciled){
+    $escrow=Join-Path $base 'original-prepared-transaction-before-reconcile.json'
+    if(-not(ReparseFreePath $Root $escrow)){Fail 'PREVIOUS_ESCROW_PATH_UNSAFE'}
+    if($null -eq (FileInfo $escrow 1048576)){Fail 'PREVIOUS_ESCROW_NOT_FOUND'}
+    [byte[]]$prevBytes=[IO.File]::ReadAllBytes($escrow)
+    try{$prev=([Text.Encoding]::UTF8.GetString($prevBytes)|ConvertFrom-Json -ErrorAction Stop)}
+    catch{Fail 'PREVIOUS_ESCROW_UNREADABLE'}
+    if([string](Field $prev 'status') -cne 'prepared' -or
+       [string](Field $prev 'id') -cne $id -or
+       [string](Field $prev 'before_tree_sha256') -cne $before -or
+       [string](Field $prev 'after_tree_sha256') -cne $after -or
+       [string](Field $prev 'source_commit') -cne [string](Field $doc 'source_commit') -or
+       [string](Field $prev 'payload_set_sha256') -cne [string](Field $doc 'payload_set_sha256') -or
+       (Field $prev 'prepared_orphan_reconciled_without_bin_swap') -eq $true){
+      Fail 'PREVIOUS_ESCROW_PROVENANCE_INVALID'
+    }
+    # Rebuild the EXACT JSON bytes the current tool would have published
+    # from the archived original, including its recorded timestamp, rather
+    # than accepting a manually edited rolled-back marker as provenance.
+    $stamp=Field $doc 'rolled_back_at'
+    if($stamp -isnot [string] -or $stamp -cnotmatch '^20[0-9]{2}-[0-9]{2}-[0-9]{2}T'){
+      Fail 'RECONCILIATION_TIMESTAMP_INVALID'
+    }
+    $prev.status='rolled-back'
+    if($null -eq $prev.PSObject.Properties['rolled_back_at']){
+      $prev|Add-Member -MemberType NoteProperty -Name 'rolled_back_at' -Value $stamp
+    }else{$prev.rolled_back_at=$stamp}
+    $prev|Add-Member -MemberType NoteProperty -Name 'prepared_orphan_reconciled_without_bin_swap' -Value $true -Force
+    [byte[]]$expected=[Text.Encoding]::UTF8.GetBytes(($prev|ConvertTo-Json -Depth 12))
+    if((HashBytes $expected) -cne (HashBytes $original)){Fail 'RECONCILED_JOURNAL_NOT_OWN_EXACT_BYTES'}
+  }
   return [pscustomobject]@{
     id=$id;doc=$doc;original=$original;digest=(HashBytes $original);
     txn=$transaction;base=$base;live=$bin;backup=$backup;
-    before=$before
+    before=$before;reconciled=$reconciled
   }
 }
 function WriterAdmission([string]$Root,[bool]$LegacyMutexesHeld=$false) {
@@ -442,8 +480,32 @@ try{
   $messages.Add('BACKUP_AND_STAGING=NO_CONFLICT')
   $messages.Add('TRANSACTION_ORIGINAL_SHA_PIN=YES')
   if(-not $Commit){
-     $messages.Add('RESULT=READY_FOR_EXPLICIT_AUTHORIZED_JOURNAL_ONLY_RECONCILIATION')
+     $messages.Add('RESULT='+$(if($pre.reconciled){
+        'EXACT_PRIOR_RECONCILIATION_VERIFIED_EXPLICIT_UPDATE_APPROVAL_REQUIRED'
+     }else{'READY_FOR_EXPLICIT_AUTHORIZED_JOURNAL_ONLY_RECONCILIATION'}))
   }else{
+    if($pre.reconciled){
+      # Only a second *explicitly approved* stable update can resume a
+      # terminalized journal. No new escrow and no second transaction CAS.
+      if(-not $ContinueOfficialStableUpdate){
+        $messages.Add('RESULT=ALREADY_RECONCILED_JOURNAL_UNCHANGED')
+      }else{
+        $stage='RESUME_OWN_EXACT_RECONCILED_JOURNAL'
+        $check=Probe $root $pre.id
+        if(-not $check.reconciled -or $check.digest -cne $pre.digest){
+          Fail 'RESUME_JOURNAL_OR_BASELINE_CHANGED'
+        }
+        if(-not (WriterAdmission $root $true).safe){
+          Fail 'ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE'
+        }
+        $exclusiveBootstrap=HoldExactBootstrapFile $root
+        $messages.Add('PREVIOUS_ORIGINAL_ESCROW=EXACT_UNCHANGED')
+        $messages.Add('RESUME_RECONCILIATION_CAS=SKIPPED_ALREADY_TERMINAL')
+        $stage='RESUME_OFFICIAL_V0628_STABLE_UPDATE'
+        InvokeControlledOfficialStableUpdate -Root $root -BootstrapFileHandle $exclusiveBootstrap -Hosted $hosted -Messages $messages
+        $messages.Add('RESULT=RESUMED_OFFICIAL_STABLE_V0628_R17_COMMITTED_VERIFIED')
+      }
+    }else{
     # Reread the full source tree immediately before write; never rely on an
     # earlier R4 user report or a pre-flight pass from another process.
     $stage='SECOND_SOURCE_PROOF'
@@ -511,6 +573,7 @@ try{
     }else{
       $messages.Add('RESULT=JOURNAL_ONLY_RECONCILED_REQUIRES_FRESH_UPDATE_ACCEPTANCE')
     }
+    }
   }
 }catch{
   if($hosted){
@@ -537,6 +600,10 @@ try{
     'OFFICIAL_BOOTSTRAP_JSON_RECEIPT_MISSING','OFFICIAL_BOOTSTRAP_JSON_RECEIPT_INVALID',
     'OFFICIAL_BOOTSTRAP_ACTION_NOT_SUCCESS','UNSUPPORTED_BOOTSTRAP_ACTION',
     'TRANSACTION_RACE_BETWEEN_PREFLIGHTS','EXISTING_ESCROW_NO_OVERWRITE','ESCROW_PATH_UNSAFE',
+    'TRANSACTION_NOT_PREPARED_OR_OWN_RECONCILED','PREVIOUS_ESCROW_PATH_UNSAFE',
+    'PREVIOUS_ESCROW_NOT_FOUND','PREVIOUS_ESCROW_UNREADABLE',
+    'PREVIOUS_ESCROW_PROVENANCE_INVALID','RECONCILIATION_TIMESTAMP_INVALID',
+    'RECONCILED_JOURNAL_NOT_OWN_EXACT_BYTES','RESUME_JOURNAL_OR_BASELINE_CHANGED',
     'ESCROW_HASH_MISMATCH','STAGING_PATH_UNSAFE','RACE_OR_ESCROW_CHANGED_BEFORE_REPLACE',
     'POST_RECONCILIATION_INDETERMINATE_DO_NOT_RETRY','POST_RECONCILIATION_TREE_CHANGED_DO_NOT_RETRY')
   if($kind -cnotin $allowed){$kind='UNVERIFIED_FAIL_CLOSED'}
