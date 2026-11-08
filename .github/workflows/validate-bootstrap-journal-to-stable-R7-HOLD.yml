@@ -75,6 +75,24 @@ jobs:
              source=pack.read('bootstrap/spotify-control-self-updater.ps1')
           assert (len(source),hashlib.sha256(source).hexdigest())==(42963,'d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6')
           (boot/'spotify-control-self-updater.ps1').write_bytes(source)
+          # Reuse the *same* exact installation acceptance fixture invariants
+          # as the previously PASSed 8-hop Bootstrap test: long-lived helpers
+          # and structurally valid local Marketplace tree are not updated by
+          # the manifest, but are required by v0.6.28 SelfTest.
+          (scratch/'LocalAppData'/'Spotify').mkdir(parents=True)
+          for name in ('collect-spotify-diagnostics.ps1','performance-profiler.ps1',
+                       'health-report.ps1','performance-ab-profiler.ps1',
+                       'marketplace-isolation-profiler.ps1'):
+            (bin/name).write_text('# Spotify Control bootstrap-contract CI installed-helper fixture\n',
+                                  encoding='utf-8',newline='\n')
+          marketplace=scratch/'LocalAppData'/'spicetify'/'CustomApps'/'marketplace'
+          marketplace.mkdir(parents=True)
+          for name,content in (
+             ('index.js','// CI Marketplace fixture\n'),
+             ('extension.js','// CI Marketplace fixture\n'),
+             ('style.css','/* CI Marketplace fixture */\n'),
+             ('manifest.json','{"name":"Spotify Marketplace CI Fixture"}\n')):
+            (marketplace/name).write_text(content,encoding='utf-8',newline='\n')
           for f in bin.iterdir():shutil.copy2(f,backing/f.name)
           def tree(d):
              rows=[]
