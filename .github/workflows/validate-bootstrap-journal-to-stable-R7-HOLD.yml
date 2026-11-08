@@ -1,5 +1,5 @@
 name: HOLD R7 journal-to-official-stable one-pass integrated Windows acceptance
-# Verify exact IsPlainDirectory function resolution (avoid PowerShell built-in dir alias).
+# Original v0.6.28 SelfTest requires installed Bootstrap read-sharing; maintain no-write fence and both named legacy mutexes.
 on:
   push:
     branches: [validate/spotify-exit-immediate-maintenance-HOLD]
