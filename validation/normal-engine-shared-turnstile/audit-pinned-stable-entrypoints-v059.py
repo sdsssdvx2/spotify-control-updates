@@ -114,6 +114,47 @@ def classify(text: str, label: str) -> dict:
         found[key] = {"count": min(len(matches), 99999), "owners": funcs[:32]}
     return found
 
+def emit_limited_public_source_context(text: str, label: str):
+    """Only show narrow checked-in program-source lines, never runtime data.
+
+    This is safe only because read_exact() has proved the bytes are those
+    reconstructed from the public official release. Do not use for real PCs.
+    """
+    if label == "stable_main":
+        funcs = list(PS_FUNCTION.finditer(text))
+        matching = [(i, m) for i, m in enumerate(funcs)
+                    if m.group(1) == "Install-TasksAndShortcuts"]
+        if len(matching) != 1:
+            raise RuntimeError("V059_MAIN_TASK_INSTALLER_FUNCTION_MISSING_OR_AMBIGUOUS")
+        i, m = matching[0]
+        end = funcs[i + 1].start() if i + 1 < len(funcs) else len(text)
+        excerpt = text[m.start():end]
+        key = re.compile(r"(?i)(?:schtasks|start.?menu|startup|createshortcut|taskname|\.lnk|agent\.vbs|wscript|cscript|onlogon|onstart|powershell|register|/create|/query|/change)")
+    elif label == "resident_agent":
+        excerpt = text
+        key = re.compile(r"(?i)(?:WScript|powershell|\.vbs|GetObject|Win32_Process|\.Run|\.Exec|GetProcesses|\.Sleep|Agent|Addon|spotify-control|Updater)")
+    else:
+        # No need to emit large mutation routine implementation.
+        return
+    emitted = 0
+    for line_number, raw in enumerate(excerpt.splitlines(), 1):
+        if not key.search(raw):
+            continue
+        line = " ".join(raw.strip().split())
+        if not line or line.startswith(("#", "'", "Rem ")):
+            continue
+        # Avoid any source string containing potential literal credentials.
+        if re.search(r"(?i)password|client_secret|api[_-]?key|bearer|authorization", line):
+            continue
+        print("V059_PUBLIC_CODE_" + label.upper()
+              + "_LINE_" + str(line_number) + "=" + line[:220])
+        emitted += 1
+        if emitted >= 46:
+            break
+    if emitted < 1:
+        raise RuntimeError("V059_SOURCE_LAUNCH_DETAILS_MISSING")
+
+
 def static_selftest():
     fake = """function Update-AutoApps { Register-ScheduledTask; Start-Process }
 function Other { $x=New-Object -ComObject Schedule.Service }
@@ -174,6 +215,8 @@ def main():
         raise RuntimeError("V059_STABLE_ADDON_SOURCE_UNEXPECTEDLY_NO_ENTRYPOINTS")
     # Static source evidence can NEVER imply exact installed task identity,
     # activated Run keys, present processes or complete manual-launch fencing.
+    for label in ("stable_main", "resident_agent"):
+        emit_limited_public_source_context(read_exact(label), label)
     if meta["bootstrap"] != {
         "version": "1.0.6",
         "size": 42963,
