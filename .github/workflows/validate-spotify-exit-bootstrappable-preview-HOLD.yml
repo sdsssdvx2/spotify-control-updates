@@ -1,0 +1,121 @@
+name: HOLD Bootstrap 1.0.6 single-file SpotifyExit candidate
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths: ['.github/workflows/validate-spotify-exit-bootstrappable-preview-HOLD.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+jobs:
+  real-bootstrap-private-fixture-only:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: validate/spotify-exit-immediate-maintenance-HOLD
+      - name: Exact stable base and target syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'OPERATING_MAIN_DRIFTED'}
+          if((git branch --show-current).Trim() -cne 'validate/spotify-exit-immediate-maintenance-HOLD'){throw 'WRONG_BRANCH'}
+          if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA){throw 'EVENT_SHA_CHANGED'}
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/test-bootstrappable-preview.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw ('TARGET_PS51_SYNTAX_FAILED '+[string]$errors[0].Message)}
+          python -m py_compile validation/spotify-exit-immediate-maintenance-HOLD/build-bootstrappable-preview.py
+          if($LASTEXITCODE -ne 0){throw 'TARGET_PYTHON_SYNTAX_FAILED'}
+          Write-Host 'STABLE_BASE_AND_TARGET_SOURCE_PARSE_PASS'
+      - name: Obtain exact previously accepted Bootstrap 1.0.6 (no user download)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' > validated-v0614-repair-artifact.zip
+          python - <<'PY'
+          import hashlib,zipfile
+          from io import BytesIO
+          from pathlib import Path
+          with zipfile.ZipFile(BytesIO(Path('validated-v0614-repair-artifact.zip').read_bytes())) as z:
+              assert z.testzip() is None
+              inner=z.read('SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip')
+          assert len(inner)==30856
+          assert hashlib.sha256(inner).hexdigest()=='6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdfd267bd95f6c6ddcf06'
+          with zipfile.ZipFile(BytesIO(inner)) as z:
+              boot=z.read('bootstrap/spotify-control-self-updater.ps1')
+          assert len(boot)==42963
+          assert hashlib.sha256(boot).hexdigest()=='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
+          print('ORIGINAL_BOOTSTRAP_V106_CARRIER_SHA_VERIFIED')
+          PY
+      - name: Build exact one-main-file 0.6.29 preview
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-bootstrappable-preview.py --build
+          if($LASTEXITCODE -ne 0){throw 'PREVIEW_BUILD_FAILED'}
+          $meta=Get-Content validation/spotify-exit-immediate-maintenance-HOLD/out/bootstrappable-preview-metadata.json -Raw|ConvertFrom-Json
+          if($meta.new_version -cne '0.6.29' -or $meta.production_mutation_authorized -or
+            $meta.addon_sha256 -cne '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285'){throw 'RELEASE_SCOPE_DRIFT'}
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'validation/spotify-exit-immediate-maintenance-HOLD/out/bin/spotify-control.ps1'),[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw ('ACTUAL_MAIN_PS51_PARSE_FAILED '+[string]$errors[0].Message)}
+          Write-Host 'ONE_FILE_BOOTSTRAP_TRANSPORT_STAGED_R17_UNCHANGED'
+      - name: Freeze only immutable package chunks in development branch
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- packages/v0.6.29/main-v0628-to-v0629
+          $staged=@(git diff --cached --name-only)
+          if($staged.Count -lt 1 -or @($staged|Where-Object{$_ -notlike 'packages/v0.6.29/main-v0628-to-v0629/chunk-*.txt'}).Count){throw 'PACKAGE_SCOPE_DRIFT'}
+          git commit -m 'HOLD: pin bootstrap 0.6.29 single-main transport'
+          if($LASTEXITCODE -ne 0){throw 'DEV_PACKAGE_COMMIT_FAILED'}
+          $source=(git rev-parse HEAD).Trim()
+          git push origin HEAD:refs/heads/validate/spotify-exit-immediate-maintenance-HOLD
+          if($LASTEXITCODE -ne 0){throw 'DEV_PACKAGE_PUSH_FAILED'}
+          "SOURCE_COMMIT=$source" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host 'IMMUTABLE_DEV_SOURCE_COMMIT_PINNED'
+      - name: Create separate preview manifest bound to immutable package source
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-bootstrappable-preview.py --source-commit $env:SOURCE_COMMIT
+          if($LASTEXITCODE -ne 0){throw 'PREVIEW_SOURCE_BINDING_FAILED'}
+          $stable=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($stable.latest_version -cne '0.6.28' -or $stable.source_commit -cne 'bb6d90146f20b73d36fbf8cb813f1b190f403c48'){throw 'STABLE_MANIFEST_CHANGED'}
+          git diff --exit-code -- manifest.json packages/v0.6.29
+          if($LASTEXITCODE -ne 0){throw 'IMMUTABLE_PACKAGES_CHANGED'}
+          Write-Host 'PREVIEW_MANIFEST_ISOLATED_FROM_MAIN'
+      - name: Original Bootstrap Check RollbackTest Update post-Check in isolated Windows
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/spotify-exit-immediate-maintenance-HOLD/test-bootstrappable-preview.ps1 -SourceCommit $env:SOURCE_COMMIT
+          if($LASTEXITCODE -ne 0){throw 'REAL_BOOTSTRAP_ACCEPTANCE_NOT_COMPLETE'}
+          Write-Host 'HOSTED_E2E_ACTUAL_BOOTSTRAP_V106_COMPLETED'
+      - name: Preserve accepted preview manifest on dev branch only
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $dest='validation/spotify-exit-immediate-maintenance-HOLD/manifest.preview.json'
+          [IO.File]::Copy((Resolve-Path 'validation/spotify-exit-immediate-maintenance-HOLD/out/preview/manifest.json').Path,(Join-Path (Get-Location) $dest),$true)
+          git add -- $dest
+          $staged=@(git diff --cached --name-only)
+          if($staged.Count -ne 1 -or $staged[0] -cne $dest){throw 'PREVIEW_SCOPE_DRIFT'}
+          git commit -m 'HOLD: accepted exact Bootstrap preview manifest, not stable release'
+          if($LASTEXITCODE -ne 0){throw 'PREVIEW_COMMIT_FAILED'}
+          git push origin HEAD:refs/heads/validate/spotify-exit-immediate-maintenance-HOLD
+          if($LASTEXITCODE -ne 0){throw 'PREVIEW_PUSH_FAILED'}
+          Write-Host 'BOOTSTRAPPABLE_DEV_CANDIDATE_ACCEPTED_STABLE_MAIN_UNTOUCHED'
+      - name: Remove disposable test data
+        if: always()
+        shell: powershell
+        run: |
+          Remove-Item -LiteralPath ci-bootstrap-fixture -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath validated-v0614-repair-artifact.zip -Force -ErrorAction SilentlyContinue
