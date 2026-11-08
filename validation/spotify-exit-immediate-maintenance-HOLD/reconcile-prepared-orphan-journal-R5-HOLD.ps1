@@ -562,6 +562,7 @@ $messages.Add('DIAGNOSTIC=SPOTIFY_BOOTSTRAP_PREPARED_ORPHAN_TERMINALIZER_HOLD_R5
 $messages.Add($(if($ContinueOfficialStableUpdate){'CORE_UPDATE=OPT_IN_ONLY;NETWORK=BOOTSTRAP_PINNED_OFFICIAL;SETTINGS_WRITE=NO;SCHEDULE_WRITE=NO'}else{'APP_BIN_WRITE=NO;SPOTIFY_EXEC=NO;NETWORK=NO;SETTINGS_WRITE=NO;SCHEDULE_WRITE=NO'}))
 $hosted= -not[string]::IsNullOrWhiteSpace($HostedFixtureRoot)
 $staging=$null
+$stagingOwned=$false
 $legacyMutexes=$null
 $exclusiveBootstrap=$null
 $stage='INITIAL_PREFLIGHT'
@@ -686,6 +687,9 @@ try{
     if(-not(ReparseFreePath $root $staging)){Fail 'STAGING_PATH_UNSAFE'}
     $stage='STAGING_JOURNAL_CREATE'
     UniqueFile $staging $newBytes
+    # Only this invocation's successfully created staging file may be cleaned.
+    # A pre-existing file that made CreateNew fail must never be deleted.
+    $stagingOwned=$true
     $stage='THIRD_SOURCE_PROOF'
     $third=Probe $root $pre.id
     if($third.digest -cne $pre.digest -or (Test-Path -LiteralPath $escrow)){
@@ -776,7 +780,7 @@ try{
   $messages.Add('RESULT=HOLD_NO_AUTOMATIC_RETRY')
 }finally{
   if($null -ne $exclusiveBootstrap){try{$exclusiveBootstrap.Dispose()}catch{}}
-  if($null -ne $staging -and [IO.File]::Exists($staging)){
+  if($stagingOwned -and $null -ne $staging -and [IO.File]::Exists($staging)){
     try{[IO.File]::Delete($staging)}catch{}
   }
   if($null -ne $legacyMutexes){ExitLegacyMutexPair $legacyMutexes}
