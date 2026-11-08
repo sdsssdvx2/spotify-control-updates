@@ -1,5 +1,5 @@
 # V061 hosted-only real r17 FUNCTION execution, not whole-program execution.
-# Extract precisely 3 V060 wrapped mutators and 4 known lease helpers from
+# Extract precisely 3 V061 guarded mutators and 5 known lease/gate helpers from
 # a freshly built and byte-proven stable r17 candidate via PowerShell AST.
 # All dependencies prior to a sentinel Backup are replaced with inert mocks.
 # No real addon, Spotify, user profile, scheduler, installed agent, API,
@@ -29,7 +29,7 @@ function Expect-V061Failure([scriptblock]$run,[string]$expected){
 $root=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\','/')
 $source=[IO.Path]::GetFullPath($CandidatePath)
 Assert-V061 ($source.StartsWith(($root+'\'),[StringComparison]::OrdinalIgnoreCase) -and
- [IO.Path]::GetFileName($source) -ceq 'addon-manager-reentrant-V060-NONDEPLOY.ps1' -and
+ [IO.Path]::GetFileName($source) -ceq 'addon-manager-reentrant-enrollment-V061-NONDEPLOY.ps1' -and
  [IO.File]::Exists($source)) 'CANDIDATE_OUTSIDE_ISOLATED_RUNNER_OR_NOT_BUILT'
 $tokens=$null;$parseErrors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile($source,[ref]$tokens,[ref]$parseErrors)
@@ -42,6 +42,7 @@ $wanted=@(
  'Enter-CustomAppReentrantTurnstileV060',
  'Exit-CustomAppReentrantTurnstileV060',
  'Assert-CustomAppReentrantLeaseInvariantV060',
+ 'Assert-CustomAppNormalUpdateEngineExclusivityV010',
  'Update-AutoApps','Rollback-LastTransaction','Commit-LastTransaction'
 )
 $fragments=New-Object 'System.Collections.Generic.List[string]'
@@ -56,12 +57,14 @@ foreach($name in $wanted){
 foreach($name in @('Update-AutoApps','Rollback-LastTransaction','Commit-LastTransaction')){
  $part=[string](@($definitions|Where-Object{$_.Name -ceq $name})[0].Body.Extent.Text)
  $enter=$part.IndexOf('Enter-CustomAppReentrantTurnstileV060',[StringComparison]::Ordinal)
- $guard=$part.IndexOf('try {',[StringComparison]::Ordinal)
+ $tryIndex=$part.IndexOf('try {',[StringComparison]::Ordinal)
+ $gate=$part.IndexOf('Assert-CustomAppNormalUpdateEngineExclusivityV010',[StringComparison]::Ordinal)
  $exit=$part.LastIndexOf('Exit-CustomAppReentrantTurnstileV060',[StringComparison]::Ordinal)
- Assert-V061 ($enter -ge 0 -and $guard -gt $enter -and $exit -gt $guard) ('MUTATOR_NOT_WRAPPED_'+$name)
+ Assert-V061 ($enter -ge 0 -and $tryIndex -gt $enter -and $gate -gt $tryIndex -and
+  $exit -gt $gate) ('MUTATOR_NOT_WRAPPED_AND_ENROLLMENT_GATED_'+$name)
 }
 # We deliberately DO NOT dot-source the candidate program. This text
-# contains ONLY the exact seven AST function extents; its top-level actions,
+# contains ONLY the exact eight AST function extents; its top-level actions,
 # selftests, logging setup and all other executable source are excluded.
 $sourceFunctions=$fragments -join [Environment]::NewLine
 . ([scriptblock]::Create($sourceFunctions))
@@ -75,6 +78,7 @@ $script:Phase='initial'
 $script:PathsChecked=0
 $script:ProcessProbed=0
 $script:BackupCalled=0
+$script:EnrollmentChecks=0
 $script:NestedObserved=0
 $script:MockedLogCount=0
 $script:NoOutsideOperations=0
@@ -94,6 +98,19 @@ function Enter-CustomAppEngineTurnstileV047 {
 }
 # This is the original 323385-byte legacy r17 function's OWN pre-I/O
 # dependency surface. No effects are permitted beyond mock counters.
+$script:ActualV010=(Get-Command Assert-CustomAppNormalUpdateEngineExclusivityV010).ScriptBlock
+function Assert-CustomAppNormalUpdateEngineExclusivityV010 {
+ param([string]$HostedCiRoot=$null)
+ if(-not[string]::IsNullOrWhiteSpace($HostedCiRoot) -and
+    -not[IO.Path]::GetFullPath($HostedCiRoot).Equals(
+      [IO.Path]::GetFullPath($script:SafeLocal),
+      [StringComparison]::OrdinalIgnoreCase)){
+    throw 'V061_REJECTED_ANOTHER_ENROLLMENT_GATE_ROOT'
+ }
+ $script:EnrollmentChecks++
+ & $script:ActualV010 -HostedCiRoot $script:SafeLocal
+}
+# Exact V010 executes ONLY with hosted scratch LocalAppData.
 function Get-Process {
  [CmdletBinding()]
  param([Parameter(Position=0)][string[]]$Name)
@@ -169,28 +186,61 @@ try{
    Expect-V061Failure {& $name} 'V047_ENGINE_TURNSTILE_BUSY_OR_IO_UNSAFE'
  }
  Assert-V061 ($script:PathsChecked -eq 0 -and $script:ProcessProbed -eq 0 -and
-  $script:BackupCalled -eq 0 -and $script:MockedLogCount -eq 0) 'OLD_MUTATORS_EXECUTED_SIDE_EFFECT_PREREQUISITE_WHILE_LOCKED'
+  $script:BackupCalled -eq 0 -and $script:EnrollmentChecks -eq 0 -and $script:MockedLogCount -eq 0) 'OLD_MUTATORS_EXECUTED_SIDE_EFFECT_PREREQUISITE_WHILE_LOCKED'
 }finally{$held.Dispose()}
 $h=Assert-CustomAppReentrantLeaseInvariantV060
 Assert-V061 (-not[bool]$h.active) 'DENIED_MUTATORS_LEAKED_LEASE'
 Write-Host 'V061_ACTUAL_WRAPPED_STABLE_R17_THREE_MUTATORS_DENY_BEFORE_SIDE_EFFECT_WHEN_OS_LOCK_HELD_PASS'
-# Test #2: real r17 RollbackLast/CommitLast with a known missing ledger
+# Test #2: V010 previously-reviewed new-engine enrollment must deny
+# all three actual r17 mutators after OS lease, before old side effects.
+$enrollment=Join-Path $script:SafeLocal 'SpotifyControlUpdates-CustomApp-State'
+$script:Phase='enrolled'
+[void][IO.Directory]::CreateDirectory($enrollment)
+try{
+ foreach($name in @('Update-AutoApps','Rollback-LastTransaction','Commit-LastTransaction')){
+   Expect-V061Failure {& $name} 'normal-update-engine-gate-dpapi-enrollment-present-requires-journal-recovery-or-migration'
+ }
+ Assert-V061 ($script:EnrollmentChecks -eq 3 -and
+   $script:ProcessProbed -eq 0 -and $script:PathsChecked -eq 0 -and
+   $script:BackupCalled -eq 0 -and $script:MockedLogCount -eq 0 -and
+   [IO.Directory]::Exists($enrollment)) 'ENROLLED_ENGINE_ALLOWED_OLD_R17_TO_MUTATE'
+ $h=Assert-CustomAppReentrantLeaseInvariantV060
+ Assert-V061 (-not[bool]$h.active) 'ENROLLMENT_DENIAL_LEAKED_OS_LOCK'
+ $probe=& $script:ActualV047 -HostedCiRoot $script:SafeLocal
+ Assert-V061 ($probe -is [IO.FileStream]) 'ENROLLMENT_DENIAL_LEFT_LOCK_BUSY'
+ $probe.Dispose()
+}finally{
+ if([IO.Directory]::Exists($enrollment)){
+   Assert-V061 (@(Get-ChildItem -LiteralPath $enrollment -Force).Count -eq 0) 'UNEXPECTED_PRIVATE_ENROLLMENT_CONTENTS'
+   [IO.Directory]::Delete($enrollment)
+ }
+}
+[IO.File]::WriteAllText($enrollment,'isolated-invalid-new-engine-enrollment')
+try{
+ Expect-V061Failure {Update-AutoApps} 'normal-update-engine-gate-dpapi-enrollment-present-requires-journal-recovery-or-migration'
+ Assert-V061 ([IO.File]::ReadAllText($enrollment) -ceq 'isolated-invalid-new-engine-enrollment' -and
+   $script:EnrollmentChecks -eq 4 -and $script:ProcessProbed -eq 0 -and
+   $script:PathsChecked -eq 0 -and $script:BackupCalled -eq 0) 'MALFORMED_ENROLLMENT_MARKER_IGNORED_OR_MODIFIED'
+}finally{[IO.File]::Delete($enrollment)}
+Write-Host 'V061_ACTUAL_R17_ALL_3_MUTATORS_REJECT_ENROLLED_ENGINE_BEFORE_LEGACY_SIDE_EFFECT_PASS'
+Write-Host 'V061_MALFORMED_ENROLLMENT_FILE_FAIL_CLOSED_WITHOUT_REPAIR_OR_DELETION_PASS'
+# Test #3: real r17 RollbackLast/CommitLast with a known missing ledger
 # can safely no-op and release even without any original disk operations.
 $script:Phase='noop'
 Rollback-LastTransaction
 Commit-LastTransaction
-Assert-V061 ($script:PathsChecked -eq 2 -and
+Assert-V061 ($script:PathsChecked -eq 2 -and $script:EnrollmentChecks -eq 6 -and
  $script:BackupCalled -eq 0 -and $script:MockedLogCount -eq 2) 'REAL_DIRECT_NOOP_INCOMPLETE'
 $h=Assert-CustomAppReentrantLeaseInvariantV060
 Assert-V061 (-not[bool]$h.active) 'REAL_DIRECT_NOOP_LEFT_LEASE'
 Write-Host 'V061_ACTUAL_R17_ROLLBACK_AND_COMMIT_EARLY_NOOP_RELEASE_ONE_LEASE_PASS'
-# Test #3: actual Update-AutoApps invokes actual Rollback-LastTransaction
+# Test #4: actual Update-AutoApps invokes actual Rollback-LastTransaction
 # within SAME thread/runspace and holds ONE OS FileShare.None for both.
 $script:Phase='nested'
 $script:PathsChecked=0
 Expect-V061Failure {Update-AutoApps} 'V061_STOP_BEFORE_ALL_ORIGINAL_BACKUP_IO'
 Assert-V061 ($script:NestedObserved -eq 1 -and $script:PathsChecked -eq 3 -and
- $script:ProcessProbed -eq 1 -and $script:BackupCalled -eq 1) 'REAL_NESTED_R17_FUNCTION_CONTROL_FLOW_CHANGED'
+ $script:ProcessProbed -eq 1 -and $script:EnrollmentChecks -eq 8 -and $script:BackupCalled -eq 1) 'REAL_NESTED_R17_FUNCTION_CONTROL_FLOW_CHANGED'
 $h=Assert-CustomAppReentrantLeaseInvariantV060
 Assert-V061 (-not[bool]$h.active) 'ACTUAL_R17_NESTED_ROLLBACK_LEAKED_OS_LEASE'
 # The cross-process OS handle was freed after the outermost finally.
