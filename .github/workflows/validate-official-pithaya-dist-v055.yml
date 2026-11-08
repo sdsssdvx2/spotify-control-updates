@@ -1,0 +1,121 @@
+name: V055 pinned official Pithaya app artifacts to native Spicetify outputs (HOLD)
+on:
+  push:
+    branches: [validate/official-pithaya-dist-v055-HOLD]
+    paths:
+      - 'validation/normal-engine-shared-turnstile/test-official-pithaya-dist-v055.ps1'
+      - '.github/workflows/validate-official-pithaya-dist-v055.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  actual-official-distributions-pinned-source-to-output:
+    runs-on: windows-2025
+    timeout-minutes: 13
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Pin V054 lineage and immutable production main; parse targeted WinPS51
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='fa484bb328c26584510a41d7fb803ea48c35400f'
+          $main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+             (git merge-base $base HEAD).Trim() -cne $base -or
+             (git rev-parse origin/main).Trim() -cne $main){
+             throw 'V055_PARENT_OR_MAIN_NOT_PINNED'
+          }
+          $source='validation/normal-engine-shared-turnstile/test-official-pithaya-dist-v055.ps1'
+          $workflow='.github/workflows/validate-official-pithaya-dist-v055.yml'
+          $changed=@(git diff --name-only "$base...HEAD")
+          if($changed.Count -ne 2 -or $source -notin $changed -or $workflow -notin $changed){
+             throw 'V055_UNEXPECTED_SOURCE_SCOPE'
+          }
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $source).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw ('V055_PS51_PARSE_FAILED_'+$errors[0].Message)}
+          $test=Get-Content $source -Raw
+          foreach($needle in @(
+            'bf467fab93e6c1f8b8d4189dc1054bd1cafb3f3a',
+            '78764378798505884cc5c6e40fe7f7ac504d6c8a',
+            'Test-ApprovedNativeManifestOnlyOwnedTargetChangedV044',
+            'Test-CustomAppV054OfficialSourceBoundRoutes',
+            'V055_HOSTED_WINDOWS_ONLY',
+            'V054_VENDOR_ROUTE_JS_NOT_SOURCE_DERIVED',
+            'V044_MANIFEST_SOURCE_COPIED_BYTES_DID_NOT_MATCH')){
+              if(-not $test.Contains($needle)){throw ('V055_PROOF_COMPONENT_MISSING_'+$needle)}
+          }
+          if(@(Get-Process Spotify -ErrorAction SilentlyContinue).Count -gt 0){
+             throw 'V055_UNEXPECTED_SPOTIFY_PROCESS'
+          }
+          Write-Host 'V055_V054_EXACT_PARENT_OPERATING_MAIN_TWO_NEW_FILES_PS51_PASS'
+      - name: Fetch exact upstream Spicetify release v2.46.4 on isolated hosted runner
+        shell: powershell
+        timeout-minutes: 7
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'v055-official-cli'
+          [IO.Directory]::CreateDirectory($dir)|Out-Null
+          $zip=Join-Path $dir 'vendor.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip' -OutFile $zip
+          if((Get-Item -LiteralPath $zip).Length -ne 7795758 -or
+             (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f'){
+             throw 'V055_OFFICIAL_SPICETIFY_ARCHIVE_SIZE_OR_SHA_MISMATCH'
+          }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $bundle=[IO.Compression.ZipFile]::OpenRead($zip)
+          try{
+             $total=[long]0
+             foreach($entry in $bundle.Entries){
+               $name=([string]$entry.FullName).Replace('/','\')
+               if([IO.Path]::IsPathRooted($name) -or $name.StartsWith('\') -or
+                  $name.Contains('..\') -or $name.Contains(':')){
+                  throw 'V055_OFFICIAL_ZIP_PATH_NOT_BOUNDED'
+               }
+               $total+=[long]$entry.Length
+               if($total -gt 104857600){throw 'V055_OFFICIAL_ZIP_SIZE_CAP'}
+             }
+          }finally{$bundle.Dispose()}
+          $out=Join-Path $dir 'extracted'
+          Expand-Archive -LiteralPath $zip -DestinationPath $out
+          $exe=@(Get-ChildItem $out -Recurse -File -Filter 'spicetify.exe')
+          if($exe.Count -ne 1 -or
+             (Get-FileHash $exe[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+               '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+             throw 'V055_OFFICIAL_VENDOR_EXECUTABLE_SHA_MISMATCH'
+          }
+          "V055_OFFICIAL_EXE=$($exe[0].FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host 'V055_ACTUAL_PINNED_OFFICIAL_SPICETIFY_CLI_READY_PASS'
+      - name: Verify 12 pinned publisher blobs then two native CLI real-source renderings
+        shell: powershell
+        timeout-minutes: 6
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v055-source-provenance.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/normal-engine-shared-turnstile/test-official-pithaya-dist-v055.ps1' -OfficialExecutable $env:V055_OFFICIAL_EXE *>&1 |
+             Tee-Object -FilePath $log | Out-Null
+          $rc=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($rc -ne 0){
+            Get-Content $log -Tail 70|ForEach-Object{Write-Host $_}
+            throw ('V055_PINNED_DISTRIBUTION_TEST_FAILED_'+$rc)
+          }
+          $evidence=Get-Content $log -Raw
+          foreach($marker in @(
+             'V055_PINNED_OFFICIAL_PITHAYA_BETTER_LOCAL_FILES_COMMIT_BLOBS_AND_NATIVE_ROUTES_PASS',
+             'V055_BETTER_LOCAL_FILES_FORGED_JS_CSS_JSON_AND_EXTENSION_DENIED_PASS',
+             'V055_PINNED_OFFICIAL_PITHAYA_ETERNAL_JUKEBOX_COMMIT_BLOBS_AND_NATIVE_ROUTES_PASS',
+             'V055_ETERNAL_JUKEBOX_FORGED_JS_CSS_JSON_AND_EXTENSION_DENIED_PASS',
+             'V055_TWO_REAL_OFFICIAL_PITHAYA_DISTRIBUTIONS_RENDERED_WITH_PINNED_SPICETIFY_2464_PASS',
+             'V055_HOSTED_READ_ONLY_USER_PROFILE_SOURCE_NOT_VENDORED_NO_INSTALL_NO_PRODUCTION_AUTHORITY_PASS')){
+             if(-not $evidence.Contains($marker)){throw ('V055_EVIDENCE_MISSING_'+$marker)}
+          }
+          Write-Host 'V055_TWO_REAL_PITHAYA_RELEASES_OFFICIAL_VENDOR_RENDER_AND_FORGED_OUTPUT_DENIAL_PASS'
+      - name: Operating main remains exact; no local user installation
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+             throw 'V055_OPERATING_MAIN_CHANGED'
+          }
+          Write-Host 'V055_OPERATING_MAIN_PRESERVED_NO_SPOTIFY_INSTALL_NO_ADDON_REPLACEMENT_PASS'
