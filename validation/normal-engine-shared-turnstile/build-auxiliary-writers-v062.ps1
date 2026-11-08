@@ -29,7 +29,7 @@ if($bytes.Length -lt 323385 -or $bytes.Length -gt 390000){
 }
 $bom=if($bytes.Length -ge 3 -and $bytes[0] -eq 239 -and
  $bytes[1] -eq 187 -and $bytes[2] -eq 191){3}else{0}
-$utf8=New-Object Text.UTF8Encoding($false,$true)
+$utf8=[Text.UTF8Encoding]::new($false,$true)
 $original=$utf8.GetString($bytes,$bom,$bytes.Length-$bom)
 $crlf=[string][char]13+[string][char]10
 $lf=[string][char]10
