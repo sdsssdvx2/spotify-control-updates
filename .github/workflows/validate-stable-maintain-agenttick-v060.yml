@@ -5,6 +5,8 @@ on:
     paths:
       - 'validation/normal-engine-shared-turnstile/audit-stable-maintain-agenttick-v060.py'
       - 'validation/normal-engine-shared-turnstile/test-stable-mutex-interop-v060.ps1'
+      - 'validation/normal-engine-shared-turnstile/reentrant-addon-turnstile-v060.ps1'
+      - 'validation/normal-engine-shared-turnstile/test-reentrant-addon-turnstile-v060.ps1'
       - '.github/workflows/validate-stable-maintain-agenttick-v060.yml'
   workflow_dispatch:
 permissions: {contents: read}
@@ -15,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
-      - name: Exact V059 parent, stable main and only 3 development files
+      - name: Exact V059 parent, stable main and only 5 development files
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -23,6 +25,8 @@ jobs:
           $main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
           $script='validation/normal-engine-shared-turnstile/audit-stable-maintain-agenttick-v060.py'
           $test='validation/normal-engine-shared-turnstile/test-stable-mutex-interop-v060.ps1'
+          $module='validation/normal-engine-shared-turnstile/reentrant-addon-turnstile-v060.ps1'
+          $reentrant='validation/normal-engine-shared-turnstile/test-reentrant-addon-turnstile-v060.ps1'
           $workflow='.github/workflows/validate-stable-maintain-agenttick-v060.yml'
           if((git merge-base $base HEAD).Trim() -cne $base -or
              (git rev-parse origin/main).Trim() -cne $main -or
@@ -30,12 +34,15 @@ jobs:
             throw 'V060_PARENT_OR_PRODUCTION_MAIN_DRIFT'
           }
           $changed=@(git diff --name-only "$base...HEAD")
-          if($changed.Count -ne 3 -or @($changed|Where-Object{$_ -notin @($script,$test,$workflow)}).Count -ne 0){
-            throw 'V060_SCOPE_EXCEEDS_THREE_AUDIT_FILES'
+          if($changed.Count -ne 5 -or @($changed|Where-Object{$_ -notin @($script,$test,$module,$reentrant,$workflow)}).Count -ne 0){
+            throw 'V060_SCOPE_EXCEEDS_FIVE_AUDIT_FILES'
           }
           $psTokens=$null;$psErrors=$null
-          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $test).Path,[ref]$psTokens,[ref]$psErrors)
-          if($psErrors.Count){throw ('V060_INTEROP_PS51_PARSE_ERROR_'+$psErrors[0].Message)}
+          foreach($p in @($test,$module,$reentrant)){
+            $psTokens=$null;$psErrors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$psTokens,[ref]$psErrors)
+            if($psErrors.Count){throw ('V060_INTEROP_PS51_PARSE_ERROR_'+$p+'_'+$psErrors[0].Message)}
+          }
           & python -m py_compile $script
           if($LASTEXITCODE -ne 0){throw 'V060_PYTHON_SYNTAX_ERROR'}
           $s=Get-Content $script -Raw
@@ -106,6 +113,31 @@ jobs:
           }
           Get-Content $log|ForEach-Object{Write-Host $_}
           Write-Host 'V060_STABLE_REAL_MUTEX_NONCOOPERATIVE_PARENT_BLOCK_WITHOUT_SIDE_EFFECTS_PASS'
+      - name: V060 nested Update rollback LIFO reentrant FileShare.None lease, hosted-only
+        shell: powershell
+        timeout-minutes: 4
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v060-reentrant-regression.txt'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/normal-engine-shared-turnstile/test-reentrant-addon-turnstile-v060.ps1' *>&1 |
+            Tee-Object -FilePath $log | Out-Null
+          $rc=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($rc -ne 0){
+             Get-Content $log -Tail 85 | ForEach-Object{Write-Host $_}
+             throw ('V060_NESTED_REENTRANT_TEST_FAILED_'+$rc)
+          }
+          $proof=Get-Content $log -Raw
+          foreach($marker in @(
+            'V060_REAL_R17_UPDATE_CALLS_ROLLBACK_WHILE_V047_WRAPPED_BOTH_MUTATORS_PASS',
+            'V060_SAME_RUNSPACE_NESTED_ROLLBACK_ONE_LOCK_OTHER_PROCESS_DENIED_PASS',
+            'V060_NESTED_RETURN_KEEP_OUTER_FILESHARE_EXCLUSIVE_PASS',
+            'V060_OUTER_EXIT_RELEASES_OS_LOCK_AND_DOUBLE_EXIT_FAIL_CLOSED_PASS',
+            'V060_SYNTHETIC_UPDATE_ROLLBACK_NESTING_EXCEPTION_EXACT_RELEASE_PASS',
+            'V060_NO_OLD_ADDON_EXECUTION_NO_REAL_SPOTIFY_NO_PRODUCTION_AUTHORITY_PASS')){
+             if(-not$proof.Contains($marker)){throw ('V060_NESTED_LOCK_PROOF_MISSING_'+$marker)}
+          }
+          Write-Host 'V060_REENTRANT_NESTED_UPDATE_ROLLBACK_AND_CROSS_PROCESS_EXCLUSION_PASS'
       - name: Reconfirm operating main unchanged
         shell: powershell
         run: |
