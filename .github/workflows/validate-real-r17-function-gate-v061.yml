@@ -4,6 +4,7 @@ on:
     branches: [validate/real-r17-function-gated-scratch-v061-HOLD]
     paths:
       - 'validation/normal-engine-shared-turnstile/test-real-r17-reentrant-functions-v061.ps1'
+      - 'validation/normal-engine-shared-turnstile/build-r17-enrollment-guard-v061.ps1'
       - '.github/workflows/validate-real-r17-function-gate-v061.yml'
   workflow_dispatch:
 permissions: {contents: read}
@@ -14,13 +15,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
-      - name: Verify exact V060 parent, immutable production main, only two new HOLD files
+      - name: Verify exact V060 parent, immutable production main, only three new HOLD files
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           $parent='11d3cb8ec6cd18fa24237a467504cfc2fd13b2a9'
           $main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
           $script='validation/normal-engine-shared-turnstile/test-real-r17-reentrant-functions-v061.ps1'
+          $builder='validation/normal-engine-shared-turnstile/build-r17-enrollment-guard-v061.ps1'
           $flow='.github/workflows/validate-real-r17-function-gate-v061.yml'
           if((git merge-base $parent HEAD).Trim() -cne $parent -or
              (git rev-parse origin/main).Trim() -cne $main -or
@@ -28,15 +30,18 @@ jobs:
              throw 'V061_PARENT_OR_STABLE_MAIN_DRIFT'
           }
           $changed=@(git diff --name-only "$parent...HEAD")
-          if($changed.Count -ne 2 -or
-             @($changed|Where-Object{$_ -notin @($script,$flow)}).Count -ne 0){
-             throw 'V061_OUTSIDE_TWO_FILE_HOLD_SCOPE'
+          if($changed.Count -ne 3 -or
+             @($changed|Where-Object{$_ -notin @($script,$builder,$flow)}).Count -ne 0){
+             throw 'V061_OUTSIDE_THREE_FILE_HOLD_SCOPE'
           }
           $tokens=$null;$parseErrors=$null
-          [void][Management.Automation.Language.Parser]::ParseFile(
-             (Resolve-Path $script).Path,[ref]$tokens,[ref]$parseErrors)
-          if($parseErrors.Count){
-             throw ('V061_WINPS51_PARSE_FAILED_'+$parseErrors[0].Message)
+          foreach($p in @($script,$builder)){
+            $tokens=$null;$parseErrors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile(
+               (Resolve-Path $p).Path,[ref]$tokens,[ref]$parseErrors)
+            if($parseErrors.Count){
+               throw ('V061_WINPS51_PARSE_FAILED_'+$p+'_'+$parseErrors[0].Message)
+            }
           }
           $source=Get-Content $script -Raw
           foreach($needle in @(
@@ -44,12 +49,13 @@ jobs:
             'V061_ACTUAL_WRAPPED_STABLE_R17_THREE_MUTATORS_DENY_BEFORE_SIDE_EFFECT_WHEN_OS_LOCK_HELD_PASS',
             'V061_REAL_R17_UPDATE_NESTED_REAL_ROLLBACK_KEEP_EXCLUSIVE_LOCK_AND_RELEASE_AFTER_FAILURE_PASS',
             'V061_STOP_BEFORE_ALL_ORIGINAL_BACKUP_IO',
+            'V061_ACTUAL_R17_ALL_3_MUTATORS_REJECT_ENROLLED_ENGINE_BEFORE_LEGACY_SIDE_EFFECT_PASS',
             'V061_NO_STABLE_WHOLE_PROGRAM_RUN_NO_REAL_BACKUP_NO_USER_PROFILE_NO_LIVE_CUTOVER_PASS')){
              if(-not$source.Contains($needle)){
                 throw ('V061_MISSING_HARNESS_CONTRACT_'+$needle)
              }
           }
-          Write-Host 'V061_EXACT_V060_PARENT_MAIN_TWO_FILES_WINPS51_AND_HARNESS_SCOPE_PASS'
+          Write-Host 'V061_EXACT_V060_PARENT_MAIN_THREE_FILES_WINPS51_AND_HARNESS_SCOPE_PASS'
       - name: Rebuild exact SHA-pinned operating r17 source without executing it
         shell: powershell
         timeout-minutes: 7
@@ -89,6 +95,27 @@ jobs:
                'V060_REAL_R17_UPDATE_COMMIT_ROLLBACK_ALL_REENTRANT_WRAPPED_PS51_PASS')){
              throw 'V061_PINNED_V060_CANDIDATE_NOT_QUALIFIED'
           }
+          $guardedDir=Join-Path $env:RUNNER_TEMP ('v061-enrollment-'+[guid]::NewGuid().ToString('N'))
+          $guardBuilder='validation/normal-engine-shared-turnstile/build-r17-enrollment-guard-v061.ps1'
+          $guardLog=Join-Path $env:RUNNER_TEMP 'v061-private-enrollment-builder.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $guardBuilder -ParentCandidate $source -OutputDirectory $guardedDir *>&1 |
+             Tee-Object -FilePath $guardLog | Out-Null
+          $guardRc=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($guardRc -ne 0){
+             Get-Content $guardLog -Tail 65 | ForEach-Object{Write-Host $_}
+             throw ('V061_GUARDED_ENROLLMENT_CANDIDATE_FAILED_'+$guardRc)
+          }
+          $source=Join-Path $guardedDir 'addon-manager-reentrant-enrollment-V061-NONDEPLOY.ps1'
+          $guardProof=Get-Content $guardLog -Raw
+          foreach($marker in @(
+            'V061_EXACT_V060_PARENT_CANDIDATE_INVERSE_3_GUARDS_BYTE_PRESERVED_PASS',
+            'V061_EXISTING_V010_ENROLLMENT_GATE_EXACT_REUSED_IN_ALL_3_MUTATORS_PASS',
+            'V061_V047_OS_LEASE_THEN_V010_FAIL_CLOSED_BEFORE_ANY_OLD_SIDE_EFFECT_PASS',
+            'V061_NONDEPLOY_GUARDED_CANDIDATE_ONLY_IN_HOSTED_RUNNER_TEMP_PASS')){
+             if(-not$guardProof.Contains($marker)){throw ('V061_GUARD_BUILDER_MARKER_MISSING_'+$marker)}
+          }
+          if(-not[IO.File]::Exists($source)){throw 'V061_GUARDED_CANDIDATE_MISSING'}
           $ErrorActionPreference='Continue'
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $tester -CandidatePath $source *>&1 |
              Tee-Object -FilePath $testLog | Out-Null
@@ -101,6 +128,8 @@ jobs:
           $proof=Get-Content $testLog -Raw
           foreach($marker in @(
             'V061_ACTUAL_WRAPPED_STABLE_R17_THREE_MUTATORS_DENY_BEFORE_SIDE_EFFECT_WHEN_OS_LOCK_HELD_PASS',
+            'V061_ACTUAL_R17_ALL_3_MUTATORS_REJECT_ENROLLED_ENGINE_BEFORE_LEGACY_SIDE_EFFECT_PASS',
+            'V061_MALFORMED_ENROLLMENT_FILE_FAIL_CLOSED_WITHOUT_REPAIR_OR_DELETION_PASS',
             'V061_ACTUAL_R17_ROLLBACK_AND_COMMIT_EARLY_NOOP_RELEASE_ONE_LEASE_PASS',
             'V061_REAL_R17_UPDATE_NESTED_REAL_ROLLBACK_KEEP_EXCLUSIVE_LOCK_AND_RELEASE_AFTER_FAILURE_PASS',
             'V061_NO_STABLE_WHOLE_PROGRAM_RUN_NO_REAL_BACKUP_NO_USER_PROFILE_NO_LIVE_CUTOVER_PASS')){
@@ -108,7 +137,7 @@ jobs:
                throw ('V061_ACTUAL_MUTATOR_REQUIRED_MARKER_MISSING_'+$marker)
              }
           }
-          Write-Host 'V061_ACTUAL_STABLE_R17_WRAPPED_MUTATOR_GATED_NESTED_SAFE_AND_NO_USER_IO_PASS'
+          Write-Host 'V061_ACTUAL_STABLE_R17_NESTED_SAFE_ENROLLMENT_GATED_NO_USER_IO_PASS'
       - name: Reconfirm operating main not modified
         shell: powershell
         run: |
