@@ -1,6 +1,7 @@
 # Windows hosted ONLY. Real candidate bytes, real Win32 File.Replace and
 # fresh-process intent-bound rollback. Never touches installed Spotify.
 param([switch]$Recover,
+ [switch]$Discover,
  [switch]$RecoverCombined,
  [string]$FixtureRoot,
  [string]$Journal,
@@ -13,7 +14,13 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
 . (Join-Path $PSScriptRoot 'hosted-atomic-source-pair-cutover-HOLD.ps1')
 if($Recover){
- $status=Restore-V064HostedSourcePair -FixtureRoot $FixtureRoot -Journal $Journal -JournalSha256 $JournalSha256
+ if($Discover){
+  Assert-V064 ([string]::IsNullOrWhiteSpace($Journal) -and
+   [string]::IsNullOrWhiteSpace($JournalSha256)) 'DISCOVERY_MUST_HAVE_NO_RECEIPT'
+  $status=Restore-V064HostedSourcePair -FixtureRoot $FixtureRoot
+ }else{
+  $status=Restore-V064HostedSourcePair -FixtureRoot $FixtureRoot -Journal $Journal -JournalSha256 $JournalSha256
+ }
  if([string]$status.status -cne 'HOSTED_OLD_SOURCES_RESTORED_FROM_JOURNAL' -or
   -not[bool]$status.source_bytes_exact -or
   [bool]$status.production_mutation_authorized){
@@ -64,14 +71,23 @@ function New-V064PrivateFixture {
   stateHash=(Get-V064Sha $state);extraHash=(Get-V064Sha $extra)}
 }
 function Invoke-V064Child {
- param($Result,[switch]$ExpectedFailure)
+ param($Result,[switch]$ExpectedFailure,[switch]$Discover)
  $before=$ErrorActionPreference
  if($ExpectedFailure){$ErrorActionPreference='Continue'}
  try{
-  if($ExpectedFailure){
-   & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $PSCommandPath -Recover -FixtureRoot $Result.root -Journal $Result.journal -JournalSha256 $Result.journal_sha256 *> $null
+  $childArgs=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass',
+   '-File',$PSCommandPath,'-Recover','-FixtureRoot',[string]$Result.root)
+  if($Discover){
+   # Intentionally pass NO path, transaction ID or external SHA receipt.
+   $childArgs+=@('-Discover')
   }else{
-   & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $PSCommandPath -Recover -FixtureRoot $Result.root -Journal $Result.journal -JournalSha256 $Result.journal_sha256
+   $childArgs+=@('-Journal',[string]$Result.journal,
+    '-JournalSha256',[string]$Result.journal_sha256)
+  }
+  if($ExpectedFailure){
+   & powershell.exe @childArgs *> $null
+  }else{
+   & powershell.exe @childArgs
   }
   $exit=$LASTEXITCODE
  }finally{$ErrorActionPreference=$before}
@@ -94,11 +110,12 @@ $r1=Start-V064HostedSourcePairPublish -FixtureRoot $f1.root -BundleRoot $bundleP
 Assert-V064 ([string]$r1.status -ceq 'HOSTED_INJECTED_STOP_AFTER_FIRST_REPLACE' -and
  (Get-V064Sha $f1.main) -ceq [string]$expectedManifest.candidate_main_sha256 -and
  (Get-V064Sha $f1.addon) -ceq [string]$expectedManifest.original_addon_sha256) 'FIRST_REPLACE_INTERRUPTION_NOT_REAL'
-Invoke-V064Child -Result ([pscustomobject]@{root=$f1.root;journal=$r1.journal;journal_sha256=$r1.journal_sha256})
+Invoke-V064Child -Result ([pscustomobject]@{root=$f1.root;journal=$r1.journal;journal_sha256=$r1.journal_sha256}) -Discover
 Assert-V064 ((Get-V064Sha $f1.main) -ceq [string]$expectedManifest.original_main_sha256 -and
  (Get-V064Sha $f1.addon) -ceq [string]$expectedManifest.original_addon_sha256) 'FIRST_REPLACE_ROLLBACK_NOT_BYTE_EXACT'
 Check-V064Preservation $f1
 Write-Host 'V064_REAL_MAIN_FIRST_REPLACE_INTERRUPTED_AND_CHILD_ROLLBACK_PASS'
+Write-Host 'V064_NO_RETURNED_RECEIPT_DPAPI_DISCOVERY_RECOVERED_FIRST_INTERRUPTION_PASS'
 # Case 2: two replacements complete and crash before final authority.
 $f2=New-V064PrivateFixture
 $r2=Start-V064HostedSourcePairPublish -FixtureRoot $f2.root -BundleRoot $bundlePath -InjectStop 'after-addon' -ExplicitHostedSimulationApproval
@@ -110,27 +127,38 @@ $journalOriginal=[IO.File]::ReadAllBytes([string]$r2.journal)
 try{
  $utf8=[Text.UTF8Encoding]::new($false,$true)
  [IO.File]::AppendAllText([string]$r2.journal,'UNTRUSTED_TRAILING_BYTES',$utf8)
- Invoke-V064Child -Result ([pscustomobject]@{root=$f2.root;journal=$r2.journal;journal_sha256=$r2.journal_sha256}) -ExpectedFailure
+ Invoke-V064Child -Result ([pscustomobject]@{root=$f2.root;journal=$r2.journal;journal_sha256=$r2.journal_sha256}) -ExpectedFailure -Discover
  Assert-V064 ((Get-V064Sha $f2.main) -ceq [string]$expectedManifest.candidate_main_sha256 -and
   (Get-V064Sha $f2.addon) -ceq [string]$expectedManifest.candidate_addon_sha256) 'TAMPERED_JOURNAL_CHANGED_SOURCES'
 }finally{[IO.File]::WriteAllBytes([string]$r2.journal,$journalOriginal)}
-Invoke-V064Child -Result ([pscustomobject]@{root=$f2.root;journal=$r2.journal;journal_sha256=$r2.journal_sha256})
+Invoke-V064Child -Result ([pscustomobject]@{root=$f2.root;journal=$r2.journal;journal_sha256=$r2.journal_sha256}) -Discover
 Assert-V064 ((Get-V064Sha $f2.main) -ceq [string]$expectedManifest.original_main_sha256 -and
  (Get-V064Sha $f2.addon) -ceq [string]$expectedManifest.original_addon_sha256) 'TWO_REPLACEMENT_ROLLBACK_FAILED'
 # Repeated recovery is idempotent and cannot overwrite old source.
-Invoke-V064Child -Result ([pscustomobject]@{root=$f2.root;journal=$r2.journal;journal_sha256=$r2.journal_sha256})
+Invoke-V064Child -Result ([pscustomobject]@{root=$f2.root;journal=$r2.journal;journal_sha256=$r2.journal_sha256}) -Discover
 Check-V064Preservation $f2
 Write-Host 'V064_REAL_TWO_REPLACES_JOURNAL_TAMPER_DENIED_AND_IDEMPOTENT_ROLLBACK_PASS'
+Write-Host 'V064_NO_RETURNED_RECEIPT_DPAPI_TAMPER_DENIED_AND_RESTORED_PASS'
 # Case 3: arbitrary external drift on one file means *all* recovery
 # activity stops before the other target can be changed.
 $f3=New-V064PrivateFixture
 $r3=Start-V064HostedSourcePairPublish -FixtureRoot $f3.root -BundleRoot $bundlePath -InjectStop 'after-main' -ExplicitHostedSimulationApproval
+# If there are two intent-like entries, refuse guesswork even when both
+# ciphertexts were issued by this user. The caller has no lost receipt.
+$duplicate=Join-Path (Join-Path $f3.root 'Recovery') (
+ 'source-pair-intent-'+[guid]::NewGuid().ToString('N')+'.dpapi')
+[IO.File]::Copy([string]$r3.journal,$duplicate,$false)
+try{
+ Invoke-V064Child -Result ([pscustomobject]@{root=$f3.root}) -ExpectedFailure -Discover
+ Assert-V064 ((Get-V064Sha $f3.main) -ceq [string]$expectedManifest.candidate_main_sha256) 'AMBIGUOUS_INTENTS_MODIFIED_SOURCE'
+}finally{[IO.File]::Delete($duplicate)}
+Write-Host 'V064_MULTIPLE_SOURCE_INTENTS_REJECTED_WITHOUT_EXTERNAL_RECEIPT_PASS'
 [IO.File]::AppendAllText($f3.addon,'EXTERNAL_DRIFT',([Text.UTF8Encoding]::new($false,$true)))
-Invoke-V064Child -Result ([pscustomobject]@{root=$f3.root;journal=$r3.journal;journal_sha256=$r3.journal_sha256}) -ExpectedFailure
+Invoke-V064Child -Result ([pscustomobject]@{root=$f3.root;journal=$r3.journal;journal_sha256=$r3.journal_sha256}) -ExpectedFailure -Discover
 Assert-V064 ((Get-V064Sha $f3.main) -ceq [string]$expectedManifest.candidate_main_sha256) 'RECOVERED_MAIN_BEFORE_DETECTING_ADDON_DRIFT'
 # Only CI tests may restore the local synthetic test input directly.
 [IO.File]::WriteAllBytes($f3.addon,[IO.File]::ReadAllBytes($stableAddon))
-Invoke-V064Child -Result ([pscustomobject]@{root=$f3.root;journal=$r3.journal;journal_sha256=$r3.journal_sha256})
+Invoke-V064Child -Result ([pscustomobject]@{root=$f3.root;journal=$r3.journal;journal_sha256=$r3.journal_sha256}) -Discover
 Check-V064Preservation $f3
 Write-Host 'V064_CROSS_FILE_EXTERNAL_DRIFT_BLOCKED_BEFORE_ANY_ROLLBACK_PASS'
 # Case 4: clean original pair is replaceable only inside disposable CI,
@@ -164,7 +192,7 @@ try{
   $prev=$ErrorActionPreference
   $ErrorActionPreference='Continue'
   try{
-   & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $PSCommandPath -Recover -RecoverCombined -FixtureRoot $f5.root -Journal $r5.journal -JournalSha256 $r5.journal_sha256 -ScratchTaskJournal $taskProof.journal_path *> $null
+   & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $PSCommandPath -Recover -Discover -RecoverCombined -FixtureRoot $f5.root -ScratchTaskJournal $taskProof.journal_path *> $null
    $bad=$LASTEXITCODE
   }finally{$ErrorActionPreference=$prev}
   Assert-V064 ($bad -ne 0) 'CORRUPT_SOURCE_RECOVERY_ALLOWED_TASK_REENABLE'
@@ -175,13 +203,14 @@ try{
   Assert-V064 (-not[bool]$task.Enabled -and
     (Get-V064Sha $f5.main) -ceq [string]$expectedManifest.candidate_main_sha256) 'CORRUPT_SOURCE_RECOVERY_ENABLED_TASK_OR_OVERWROTE_SOURCE'
  }finally{[IO.File]::WriteAllBytes([string]$r5.journal,$journalOriginal)}
- & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $PSCommandPath -Recover -RecoverCombined -FixtureRoot $f5.root -Journal $r5.journal -JournalSha256 $r5.journal_sha256 -ScratchTaskJournal $taskProof.journal_path
+ & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $PSCommandPath -Recover -Discover -RecoverCombined -FixtureRoot $f5.root -ScratchTaskJournal $taskProof.journal_path
  if($LASTEXITCODE -ne 0){throw 'V064_COMBINED_SOURCE_THEN_SCHEDULER_RECOVERY_FAILED'}
  $taskDone=$true
  Assert-V064 ((Get-V064Sha $f5.main) -ceq [string]$expectedManifest.original_main_sha256 -and
   (Get-V064Sha $f5.addon) -ceq [string]$expectedManifest.original_addon_sha256) 'COMBINED_RECOVERY_NOT_BOTH_OLD_SOURCES'
  Check-V064Preservation $f5
  Write-Host 'V064_ONE_HOSTED_REAL_TASK_DISABLED_UNTIL_BOTH_SOURCE_FILES_RESTORED_PASS'
+Write-Host 'V064_TASK_RESTORE_DEPENDS_ON_AUTODISCOVERED_AUTHENTICATED_SOURCE_RECOVERY_PASS'
 }finally{
  if($null-ne$taskProof -and -not$taskDone){
   try{[void](Restore-V058OwnedScratchFromJournal -JournalPath ([string]$taskProof.journal_path))}
