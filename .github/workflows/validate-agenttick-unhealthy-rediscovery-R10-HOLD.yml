@@ -4,7 +4,7 @@ on:
     branches: [validate/spotify-exit-immediate-maintenance-HOLD]
     paths: ['.github/workflows/validate-agenttick-unhealthy-rediscovery-R10-HOLD.yml']
   workflow_dispatch:
-permissions: {contents: read}
+permissions: {contents: write}
 jobs:
   exact-v0628-source-minimal-v0629-recovery:
     runs-on: windows-2025
@@ -60,3 +60,69 @@ jobs:
             if($line -match '(?i)manifest\.json$' -and $line -notmatch 'preview'){throw 'R10_PRODUCTION_MANIFEST_CHANGED'}
           }
           Write-Host 'R10_OFFICIAL_MANIFEST_STABLE_UNCHANGED_AND_HOSTED_PREVIEW_BUILT'
+      - name: Commit only newly generated R10 preview chunks locally, then real Bootstrap rollback/update E2E
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          import json,pathlib,hashlib,os
+          root=pathlib.Path.cwd()
+          p=root/'validation/spotify-exit-immediate-maintenance-HOLD/out/bootstrappable-preview-metadata.json'
+          meta=json.loads(p.read_text(encoding='utf-8'))
+          assert meta['hold'] is True and meta['deployable'] is False
+          assert meta['new_version']=='0.6.29' and meta['old_version']=='0.6.28'
+          expected={e['path'] for e in meta['patch']['chunks']}
+          assert 1<=len(expected)<=64
+          location=root/'packages/v0.6.29/main-v0628-to-v0629'
+          assert all(x.startswith('packages/v0.6.29/main-v0628-to-v0629/chunk-') for x in expected)
+          for chunk in location.glob('chunk-*.txt'):
+            rel=chunk.relative_to(root).as_posix()
+            if rel not in expected:chunk.unlink()
+          assert {x.relative_to(root).as_posix() for x in location.glob('chunk-*.txt')}==expected
+          for item in meta['patch']['chunks']:
+            b=(root/item['path']).read_bytes()
+            assert len(b)==item['size'] and hashlib.sha256(b).hexdigest()==item['sha256']
+          print('R10_CANONICAL_NEW_PREVIEW_CHUNKS_COUNT='+str(len(expected)))
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'R10_CANONICAL_PREVIEW_CHUNK_VERIFY_FAILED'}
+          $prod=(Get-FileHash -LiteralPath 'manifest.json' -Algorithm SHA256).Hash.ToLowerInvariant()
+          git add -A -- packages/v0.6.29/main-v0628-to-v0629
+          if($LASTEXITCODE -ne 0){throw 'R10_CHUNK_STAGE_FAILED'}
+          $staged=@(git diff --cached --name-only)
+          if($staged.Count -lt 1 -or @($staged|Where-Object{$_ -notlike 'packages/v0.6.29/main-v0628-to-v0629/chunk-*.txt'}).Count -gt 0){
+            throw 'R10_GENERATED_STAGE_OUT_OF_APPROVED_PREVIEW_SCOPE'
+          }
+          git -c user.name='SpotifyControl-Hosted-HOLD-Bot' -c user.email='ci-bot@users.noreply.github.com' commit -m 'HOLD R10 commit regenerated v0.6.29 exact resident health rediscovery transport chunks'
+          if($LASTEXITCODE -ne 0){throw 'R10_PREVIEW_TRANSPORT_COMMIT_FAILED'}
+          $source=(git rev-parse HEAD).Trim()
+          if($source -notmatch '^[a-f0-9]{40}
+){throw 'R10_SOURCE_COMMIT_INVALID'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-bootstrappable-preview.py --source-commit $source
+          if($LASTEXITCODE -ne 0){throw 'R10_SOURCE_COMMIT_PINNED_PREVIEW_FAILED'}
+          if((Get-FileHash -LiteralPath 'manifest.json' -Algorithm SHA256).Hash.ToLowerInvariant() -cne $prod){
+            throw 'R10_STABLE_PRODUCTION_MANIFEST_CHANGED'
+          }
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/spotify-exit-immediate-maintenance-HOLD/test-bootstrappable-preview.ps1' -SourceCommit $source
+          if($LASTEXITCODE -ne 0){throw 'R10_REAL_BOOTSTRAP_PREVIEW_E2E_FAILED_NO_PUBLISH'}
+          $preview='validation/spotify-exit-immediate-maintenance-HOLD/out/preview/manifest.json'
+          $target='validation/spotify-exit-immediate-maintenance-HOLD/manifest.preview.json'
+          Copy-Item -LiteralPath $preview -Destination $target -Force
+          $copy=Get-Content -LiteralPath $target -Raw|ConvertFrom-Json
+          if([string]$copy.source_commit -cne $source -or [string]$copy.latest_version -cne '0.6.29'){
+            throw 'R10_PREVIEW_MANIFEST_SOURCE_PIN_DRIFT'
+          }
+          git add -- $target
+          if($LASTEXITCODE -ne 0){throw 'R10_PREVIEW_MANIFEST_STAGE_FAILED'}
+          git -c user.name='SpotifyControl-Hosted-HOLD-Bot' -c user.email='ci-bot@users.noreply.github.com' commit -m 'HOLD R10 bind developer-only v0.6.29 preview manifest to exact immutable transport commit'
+          if($LASTEXITCODE -ne 0){throw 'R10_PREVIEW_MANIFEST_COMMIT_FAILED'}
+          if((Get-FileHash -LiteralPath 'manifest.json' -Algorithm SHA256).Hash.ToLowerInvariant() -cne $prod){
+            throw 'R10_PRODUCTION_STABLE_MANIFEST_CHANGED'
+          }
+          $remaining=@(git status --porcelain)
+          if($remaining.Count -gt 0){throw 'R10_UNEXPECTED_UNCOMMITTED_WORKTREE_CHANGES'}
+          Write-Host 'R10_FULL_ONE_EDGE_BOOTSTRAP_CHECK_ROLLBACKTEST_UPDATE_POSTCHECK_PASSED'
+          Write-Host 'R10_DEVELOPMENT_PREVIEW_PUBLISH_REQUESTED_ONLY_AFTER_WINDOWS_E2E'
+          git push origin HEAD:refs/heads/validate/spotify-exit-immediate-maintenance-HOLD
+          if($LASTEXITCODE -ne 0){throw 'R10_DEVELOPMENT_BRANCH_PUSH_FAILED_NOT_RELEASED'}
+          Write-Host 'R10_HOLD_DEVELOPMENT_PREVIEW_PACKAGE_SOURCE_PINNED_AND_PUBLISHED_TO_BRANCH_PASS'
+
