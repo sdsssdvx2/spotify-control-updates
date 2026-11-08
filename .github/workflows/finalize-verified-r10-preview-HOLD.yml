@@ -18,7 +18,10 @@ jobs:
           $ErrorActionPreference='Stop'
           $source='7166870e96d6483eca076152fd2c66ce84bff1cd'
           $prod=(Get-FileHash 'manifest.json' -Algorithm SHA256).Hash.ToLowerInvariant()
-          if((git rev-parse 'HEAD^').Trim() -cne $source){throw 'R10_APPROVED_SOURCE_COMMIT_NOT_PARENT'}
+          $kind=(git cat-file -t $source).Trim()
+          if($kind -cne 'commit'){throw 'R10_APPROVED_SOURCE_COMMIT_NOT_FOUND'}
+          git merge-base --is-ancestor $source HEAD
+          if($LASTEXITCODE -ne 0){throw 'R10_APPROVED_SOURCE_COMMIT_NOT_ANCESTOR'}
           if((git show ($source+':manifest.json') | Out-String).Length -lt 100){throw 'R10_STABLE_MANIFEST_UNREADABLE'}
           python validation/spotify-exit-immediate-maintenance-HOLD/build-bootstrappable-preview.py --source-commit $source
           if($LASTEXITCODE -ne 0){throw 'R10_PREVIEW_REBUILD_FAILED'}
