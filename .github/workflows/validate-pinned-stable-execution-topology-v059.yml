@@ -61,10 +61,15 @@ jobs:
           $ErrorActionPreference='Stop'
           $script='validation/normal-engine-shared-turnstile/audit-pinned-stable-entrypoints-v059.py'
           $log=Join-Path $env:RUNNER_TEMP 'v059-source-scan.txt'
+          # Windows PowerShell 5.1 can promote native stderr into a
+          # terminating error when ErrorActionPreference is Stop.
+          $ErrorActionPreference='Continue'
           & python $script --audit 2>&1 | Tee-Object -FilePath $log | Out-Null
-          if($LASTEXITCODE -ne 0){
+          $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($rc -ne 0){
              Get-Content $log -Tail 50|ForEach-Object{Write-Host $_}
-             throw 'V059_STABLE_SOURCE_TOPOLOGY_SCAN_FAILED'
+             throw ('V059_STABLE_SOURCE_TOPOLOGY_SCAN_FAILED_'+$rc)
           }
           $body=Get-Content $log -Raw
           foreach($marker in @(
