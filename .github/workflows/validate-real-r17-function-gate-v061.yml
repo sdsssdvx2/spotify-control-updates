@@ -1,0 +1,118 @@
+name: V061 real stable r17 wrapped-function guarded execution (HOLD)
+on:
+  push:
+    branches: [validate/real-r17-function-gated-scratch-v061-HOLD]
+    paths:
+      - 'validation/normal-engine-shared-turnstile/test-real-r17-reentrant-functions-v061.ps1'
+      - '.github/workflows/validate-real-r17-function-gate-v061.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  real-r17-source-functions-only-no-live-profile:
+    runs-on: windows-2025
+    timeout-minutes: 11
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Verify exact V060 parent, immutable production main, only two new HOLD files
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='11d3cb8ec6cd18fa24237a467504cfc2fd13b2a9'
+          $main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          $script='validation/normal-engine-shared-turnstile/test-real-r17-reentrant-functions-v061.ps1'
+          $flow='.github/workflows/validate-real-r17-function-gate-v061.yml'
+          if((git merge-base $parent HEAD).Trim() -cne $parent -or
+             (git rev-parse origin/main).Trim() -cne $main -or
+             (git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA){
+             throw 'V061_PARENT_OR_STABLE_MAIN_DRIFT'
+          }
+          $changed=@(git diff --name-only "$parent...HEAD")
+          if($changed.Count -ne 2 -or
+             @($changed|Where-Object{$_ -notin @($script,$flow)}).Count -ne 0){
+             throw 'V061_OUTSIDE_TWO_FILE_HOLD_SCOPE'
+          }
+          $tokens=$null;$parseErrors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile(
+             (Resolve-Path $script).Path,[ref]$tokens,[ref]$parseErrors)
+          if($parseErrors.Count){
+             throw ('V061_WINPS51_PARSE_FAILED_'+$parseErrors[0].Message)
+          }
+          $source=Get-Content $script -Raw
+          foreach($needle in @(
+            'V061_ONLY_HOSTED_WINDOWS',
+            'V061_ACTUAL_WRAPPED_STABLE_R17_THREE_MUTATORS_DENY_BEFORE_SIDE_EFFECT_WHEN_OS_LOCK_HELD_PASS',
+            'V061_REAL_R17_UPDATE_NESTED_REAL_ROLLBACK_KEEP_EXCLUSIVE_LOCK_AND_RELEASE_AFTER_FAILURE_PASS',
+            'V061_STOP_BEFORE_ALL_ORIGINAL_BACKUP_IO',
+            'V061_NO_STABLE_WHOLE_PROGRAM_RUN_NO_REAL_BACKUP_NO_USER_PROFILE_NO_LIVE_CUTOVER_PASS')){
+             if(-not$source.Contains($needle)){
+                throw ('V061_MISSING_HARNESS_CONTRACT_'+$needle)
+             }
+          }
+          Write-Host 'V061_EXACT_V060_PARENT_MAIN_TWO_FILES_WINPS51_AND_HARNESS_SCOPE_PASS'
+      - name: Rebuild exact SHA-pinned operating r17 source without executing it
+        shell: powershell
+        timeout-minutes: 7
+        run: |
+          $ErrorActionPreference='Stop'
+          & python validation/v0.6.28/build_v0628.py --build
+          if($LASTEXITCODE -ne 0){throw 'V061_PINNED_R17_REBUILD_FAILED'}
+          $path='validation/v0.6.28/out/bin/addon-manager.ps1'
+          if((Get-Item $path).Length -ne 323385 -or
+             (Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+             '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285'){
+            throw 'V061_STABLE_R17_EXACT_SOURCE_PIN_CHANGED'
+          }
+          Write-Host 'V061_IMMUTABLE_PRODUCTION_R17_RECONSTRUCTED_WITHOUT_PROGRAM_EXECUTION_PASS'
+      - name: Generate V060 candidate and execute ONLY seven AST functions with inert dependencies
+        shell: powershell
+        timeout-minutes: 4
+        run: |
+          $ErrorActionPreference='Stop'
+          $output=Join-Path $env:RUNNER_TEMP ('v061-candidate-'+[guid]::NewGuid().ToString('N'))
+          $builder='validation/normal-engine-shared-turnstile/build-pinned-r17-reentrant-v060.ps1'
+          $tester='validation/normal-engine-shared-turnstile/test-real-r17-reentrant-functions-v061.ps1'
+          $builderLog=Join-Path $env:RUNNER_TEMP 'v061-private-builder.log'
+          $testLog=Join-Path $env:RUNNER_TEMP 'v061-private-functions.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $builder -ParentCandidate 'validation/v0.6.28/out/bin/addon-manager.ps1' -OutputDirectory $output *>&1 |
+             Tee-Object -FilePath $builderLog | Out-Null
+          $builderRc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($builderRc -ne 0){
+             Get-Content $builderLog -Tail 55 | ForEach-Object {Write-Host $_}
+             throw ('V061_SOURCE_CANDIDATE_BUILD_FAILED_'+$builderRc)
+          }
+          $source=Join-Path $output 'addon-manager-reentrant-V060-NONDEPLOY.ps1'
+          if(-not[IO.File]::Exists($source) -or
+             -not(Get-Content $builderLog -Raw).Contains(
+               'V060_REAL_R17_UPDATE_COMMIT_ROLLBACK_ALL_REENTRANT_WRAPPED_PS51_PASS')){
+             throw 'V061_PINNED_V060_CANDIDATE_NOT_QUALIFIED'
+          }
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $tester -CandidatePath $source *>&1 |
+             Tee-Object -FilePath $testLog | Out-Null
+          $testRc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($testRc -ne 0){
+             Get-Content $testLog -Tail 85 | ForEach-Object {Write-Host $_}
+             throw ('V061_ACTUAL_R17_FUNCTION_TEST_FAILED_'+$testRc)
+          }
+          $proof=Get-Content $testLog -Raw
+          foreach($marker in @(
+            'V061_ACTUAL_WRAPPED_STABLE_R17_THREE_MUTATORS_DENY_BEFORE_SIDE_EFFECT_WHEN_OS_LOCK_HELD_PASS',
+            'V061_ACTUAL_R17_ROLLBACK_AND_COMMIT_EARLY_NOOP_RELEASE_ONE_LEASE_PASS',
+            'V061_REAL_R17_UPDATE_NESTED_REAL_ROLLBACK_KEEP_EXCLUSIVE_LOCK_AND_RELEASE_AFTER_FAILURE_PASS',
+            'V061_NO_STABLE_WHOLE_PROGRAM_RUN_NO_REAL_BACKUP_NO_USER_PROFILE_NO_LIVE_CUTOVER_PASS')){
+             if(-not$proof.Contains($marker)){
+               throw ('V061_ACTUAL_MUTATOR_REQUIRED_MARKER_MISSING_'+$marker)
+             }
+          }
+          Write-Host 'V061_ACTUAL_STABLE_R17_WRAPPED_MUTATOR_GATED_NESTED_SAFE_AND_NO_USER_IO_PASS'
+      - name: Reconfirm operating main not modified
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+             throw 'V061_OPERATING_MAIN_DRIFT'
+          }
+          Write-Host 'V061_OPERATING_SPOTIFY_ADDON_SCHEDULER_AND_STARTUP_UNTOUCHED_PASS'
