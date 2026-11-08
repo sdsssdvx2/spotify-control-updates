@@ -1,0 +1,87 @@
+name: HOLD exact Bootstrap self-update incident read-only R3 acceptance
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - '.github/workflows/validate-bootstrap-incident-readonly-R3-HOLD.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  winps51-readonly-incident-classification:
+    runs-on: windows-2025
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse existing exact Bootstrap incident source and classify three synthetic states
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $file='validation/spotify-exit-immediate-maintenance-HOLD/read-bootstrap-incident-R3.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw ('BOOTSTRAP_R3_WINPS51_PARSE_ERROR '+[string]$errors[0].Message)}
+          $root=Join-Path $env:RUNNER_TEMP ('spotify-bootstrap-r3-'+[guid]::NewGuid().ToString('N'))
+          $local=Join-Path $root 'LocalAppData/SpotifyControl'
+          $reports=Join-Path $local 'reports'
+          [void][IO.Directory]::CreateDirectory($reports)
+          function WriteSynthetic($Leaf,$Obj){
+            [IO.File]::WriteAllText((Join-Path $local $Leaf),($Obj|ConvertTo-Json -Depth 7 -Compress),(New-Object Text.UTF8Encoding($false)))
+          }
+          try{
+            $backup=Join-Path $local 'backups/self-update-transactions/example/bin'
+            [void][IO.Directory]::CreateDirectory($backup)
+            WriteSynthetic 'self-update-last-transaction.json' ([ordered]@{
+              schema=1;status='rolled-back';before_version='0.6.20';after_version='0.6.28'
+              backup_bin=$backup;error='The file cannot be accessed because it is being used by another process'
+            })
+            WriteSynthetic 'reports/self-update-latest.json' ([ordered]@{
+              schema=1;action='Update';success=$false;transaction_status='rolled-back'
+              error='Candidate Addon Manager SelfTest failed: user path and private token should never leak'
+              result=$null
+            })
+            WriteSynthetic 'state.json' ([ordered]@{
+              schema=20;self_update_last_transaction_status='failed'
+              pending_self_update=$true;maintenance_check_healthy=$false
+            })
+            $receipt=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $file -HostedFixtureRoot $root 2>&1)
+            if($LASTEXITCODE -ne 0){throw 'READONLY_INCIDENT_PROC_FAILURE'}
+            foreach($line in @(
+              'DIAGNOSTIC=SPOTIFY_CONTROL_BOOTSTRAP_INCIDENT_R3',
+              'TRANSACTION_STATUS=ROLLED_BACK',
+              'TRANSACTION_ERROR_CLASS=FILE_LOCK_OR_ACCESS',
+              'BACKUP_DIRECTORY=EXPECTED_BACKUP_DIRECTORY_PRESENT',
+              'LAST_BOOTSTRAP_ACTION=UPDATE',
+              'LAST_BOOTSTRAP_SUCCESS=FALSE',
+              'REPORT_TRANSACTION_STATUS=ROLLED_BACK',
+              'LAST_BOOTSTRAP_ERROR_CLASS=CANDIDATE_SELFTEST',
+              'STATE_SELF_UPDATE=FAILED',
+              'STATE_PENDING_SELF_UPDATE=TRUE',
+              'STATE_MAINTENANCE_HEALTH=FALSE',
+              'POSSIBLE_UNFINISHED_BOOTSTRAP_TRANSACTION=NO_TERMINAL_RECORDED',
+              'CHECK_ACTION_NOT_EXECUTED=YES;USER_SOURCE_UNMODIFIED=YES;ORIGINALS_DELETE=NO'
+            )){
+              if($receipt -cnotcontains $line){throw ('EXPECTED_INCIDENT_CLASSIFICATION_MISSING_'+$line)}
+            }
+            if(($receipt -join ' ') -match '(?i)(user path|private token|example\\bin|:\\Users\\)'){
+              throw 'ERROR_OR_PRIVATE_PATH_LEAKED'
+            }
+            Write-Host 'BOOTSTRAP_V106_FAILED_UPDATE_ROLLBACK_RECORD_CLASSIFIED_NO_PRIVATE_ERROR_PASS'
+            WriteSynthetic 'self-update-last-transaction.json' ([ordered]@{
+              schema=1;status='swapped';backup_bin=(Join-Path $local 'backups/self-update-transactions/missing/bin')
+            })
+            $pending=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $file -HostedFixtureRoot $root 2>&1)
+            if($LASTEXITCODE -ne 0 -or $pending -cnotcontains 'POSSIBLE_UNFINISHED_BOOTSTRAP_TRANSACTION=YES_DO_NOT_AUTOREPAIR' -or
+               $pending -cnotcontains 'BACKUP_DIRECTORY=MISSING_OR_NOT_PLAIN_DIRECTORY'){
+              throw 'BOOTSTRAP_PENDING_TRANSACTION_NOT_FAIL_CLOSED'
+            }
+            Write-Host 'INCOMPLETE_SWAPPED_TRANSACTION_NO_AUTOREPAIR_PRESERVED_PASS'
+            $bad=Join-Path $env:SystemDrive 'Users'
+            $blocked=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $file -HostedFixtureRoot $bad 2>&1)
+            if($LASTEXITCODE -ne 0 -or $blocked -cnotcontains 'RESULT=HOLD_READONLY_INPUTS_UNVERIFIED'){
+              throw 'NONHOSTED_PATH_OVERRIDE_WAS_NOT_REJECTED'
+            }
+            Write-Host 'HOSTED_OVERRIDE_OUTSIDE_RUNNER_DENIED_PASS'
+          }finally{
+            if([IO.Directory]::Exists($root)){Remove-Item -LiteralPath $root -Recurse -Force}
+          }
+          Write-Host 'EXACT_BOOTSTRAP_V106_READ_ONLY_INCIDENT_R3_WINDOWS_ACCEPTED'
