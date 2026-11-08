@@ -1,4 +1,4 @@
-name: HOLD R7 journal-to-official-stable one-pass integrated Windows acceptance
+name: HOLD R8 protected CustomApps and dual consent journal-to-stable Windows acceptance
 # Original v0.6.28 SelfTest requires installed Bootstrap read-sharing; maintain no-write fence and both named legacy mutexes.
 on:
   push:
@@ -124,6 +124,43 @@ jobs:
           roaming=scratch/'Roaming'/'spicetify'
           roaming.mkdir(parents=True)
           (roaming/'config-xpui.ini').write_text('[Setting]\ncurrent_theme = UserOriginal\n',encoding='utf-8')
+          # Preserve the real owner's four auto-managed CustomApp *classes*
+          # and the separate protected data/extension classes. All bytes
+          # here are synthetic: no user profile is loaded by this workflow.
+          appbase=roaming/'CustomApps'
+          appnames=('better-local-files','eternal-jukebox','ivLyrics','playlist-maker',
+                    'star-ratings','tagify','splitify','sc-cover-ambience')
+          for name in appnames:
+             app=(appbase/name)
+             app.mkdir(parents=True)
+             (app/'index.js').write_bytes(('// Owner protected '+name+' original\n').encode('utf-8'))
+             (app/'preferences.json').write_bytes(json.dumps(
+                 dict(owner='user',app=name,settings=dict(enabled=True,custom=True)),
+                 sort_keys=True).encode())
+          ratings=roaming/'Backups'/'star-ratings'
+          ratings.mkdir(parents=True)
+          (ratings/'ratings-user.json').write_bytes(b'{"playlist-ratings":[5,1,4],"note":"preserve"}')
+          notes=roaming/'Backups'/'tagify'
+          notes.mkdir(parents=True)
+          (notes/'tags-user.json').write_bytes(b'{"tags":["favorite","personal"],"note":"keep"}')
+          owners=(scratch/'Roaming'/'spicetify',scratch/'LocalAppData'/'spicetify',
+                  scratch/'LocalAppData'/'SpotifyControl'/'user-unrelated-preserve.txt')
+          def snapshot():
+             result={}
+             for obj in owners:
+                if obj.is_file():
+                   result[str(obj.relative_to(scratch)).replace('\\','/')]=hashlib.sha256(obj.read_bytes()).hexdigest()
+                else:
+                   for entry in obj.rglob('*'):
+                      rel=str(entry.relative_to(scratch)).replace('\\','/')
+                      if entry.is_dir():result[rel]='DIR'
+                      else:result[rel]=hashlib.sha256(entry.read_bytes()).hexdigest()
+             return result
+          preserve=snapshot()
+          assert len(preserve)>24 and all(any(n in k for k in preserve) for n in appnames)
+          (scratch/'preservation-fixture-manifest.json').write_text(json.dumps(
+             dict(schema=1,files=preserve),sort_keys=True,separators=(',',':')),encoding='utf-8')
+          print('R8_FOUR_MANAGED_AND_PROTECTED_CUSTOMAPP_AND_OWNER_DATA_BYTES_SEEDED')
           print('EXACT_USER_V0620_R9_AND_REAL_VBS_ORIGINAL_BOOTSTRAP_SYNTHETIC_PREPARED_READY')
           '@ | python -
           if($LASTEXITCODE -ne 0){throw 'HOSTED_EXACT_USER_PREPARED_FIXTURE_FAILED'}
@@ -150,6 +187,19 @@ jobs:
             $resident=Start-Process -FilePath $wscript -ArgumentList ('//B //NoLogo "'+$agent+'"') -PassThru
             Start-Sleep -Milliseconds 800
             if($resident.HasExited){throw 'ORIGINAL_RESIDENT_VBS_EXITED_EARLY'}
+            # A full installed-source mutation must never be authorized by a
+            # journal-only approval. The separate exact second phrase is
+            # mandatory. Test the REAL script under active original VBS.
+            $originalRecord=Join-Path $root 'self-update-last-transaction.json'
+            $beforeUnapproved=(Get-FileHash $originalRecord -Algorithm SHA256).Hash.ToLowerInvariant()
+            $no=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture -Commit -ApprovalPhrase EXACT_PREPARED_NO_BIN_SWAP -ContinueOfficialStableUpdate 2>&1)
+            if($LASTEXITCODE -ne 0 -or
+               $no -cnotcontains 'HOLD_REASON=OFFICIAL_STABLE_UPDATE_EXPLICIT_APPROVAL_MISSING' -or
+               $no -cnotcontains 'RESULT=HOLD_NO_AUTOMATIC_RETRY' -or
+               (Get-FileHash $originalRecord -Algorithm SHA256).Hash.ToLowerInvariant() -cne $beforeUnapproved){
+               throw 'R8_MISSING_SECOND_APPROVAL_MUTATED_OR_CLAIMED_SUCCESS'
+            }
+            Write-Host 'R8_REAL_HOSTED_SECOND_INDEPENDENT_SOURCE_UPGRADE_APPROVAL_REQUIRED_PASS'
             $output=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture -Commit -ApprovalPhrase EXACT_PREPARED_NO_BIN_SWAP -ContinueOfficialStableUpdate -OfficialUpdateApprovalPhrase APPROVE_OFFICIAL_V0628_CORE_UPGRADE 2>&1)
             if($LASTEXITCODE -ne 0){throw 'GUARDED_R7_WRAPPER_PROCESS_FAILED'}
             if($output -ccontains 'RESULT=HOLD_NO_AUTOMATIC_RETRY'){
@@ -206,6 +256,34 @@ jobs:
             if(-not (Test-Path $escrow)){throw 'R7_PREPARED_ORIGINAL_ESCROW_MISSING'}
             $old=Get-Content $escrow -Raw | ConvertFrom-Json
             if($old.status -cne 'prepared'){throw 'R7_PREVIOUS_FAILED_JOURNAL_NOT_PRESERVED'}
+            # Independently verify all synthetic four managed and
+            # protected app directories and rating/note data, including
+            # Marketplace and user settings, are byte-for-byte preserved.
+            $checkPy=@'
+          import pathlib,hashlib,json,sys
+          scratch=pathlib.Path(sys.argv[1])
+          expected=json.loads((scratch/'preservation-fixture-manifest.json').read_text(encoding='utf-8'))
+          assert expected['schema']==1
+          owners=(scratch/'Roaming'/'spicetify',scratch/'LocalAppData'/'spicetify',
+                  scratch/'LocalAppData'/'SpotifyControl'/'user-unrelated-preserve.txt')
+          result={}
+          for obj in owners:
+             if obj.is_file():
+                result[str(obj.relative_to(scratch)).replace('\\','/')]=hashlib.sha256(obj.read_bytes()).hexdigest()
+             else:
+                for entry in obj.rglob('*'):
+                   rel=str(entry.relative_to(scratch)).replace('\\','/')
+                   result[rel]='DIR' if entry.is_dir() else hashlib.sha256(entry.read_bytes()).hexdigest()
+          if result!=expected['files']:
+             miss=set(expected['files'])-set(result)
+             extra=set(result)-set(expected['files'])
+             changed=[k for k in result if k in expected['files'] and result[k]!=expected['files'][k]]
+             print('R8_OWNER_DATA_MISMATCH_FILES='+str(len(miss))+'_'+str(len(extra))+'_'+str(len(changed)))
+             sys.exit(3)
+          print('R8_4_MANAGED_CUSTOMAPPS_PLUS_PROTECTED_RATINGS_TAGS_MARKETPLACE_PRESERVED_PASS')
+          '@
+            $checkPy | python - $fixture
+            if($LASTEXITCODE -ne 0){throw 'R8_USER_CUSTOMAPP_RATINGS_AND_MARKETPLACE_PRESERVATION_FAILED'}
             Write-Host 'R7_HOSTED_REAL_ORIGINAL_BOOTSTRAP_STABLE_UPDATE_AND_PREPARED_RECOVERY_FULL_CHAIN_PASS'
             Write-Host 'R7_REAL_VBS_ALIVE_AND_USER_PROFILE_CONFIG_ORIGINAL_DATA_UNCHANGED_PASS'
           }finally{
