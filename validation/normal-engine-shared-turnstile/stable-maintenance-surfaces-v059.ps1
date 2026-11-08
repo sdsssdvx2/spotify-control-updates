@@ -10,9 +10,16 @@ Set-StrictMode -Version 2.0
 function Resolve-V059MaintenanceLaunchTopology {
  param([Parameter(Mandatory=$true)][string]$TaskState,
        [Parameter(Mandatory=$true)][string]$ShortcutState,
-       [Parameter(Mandatory=$true)][bool]$ProcessScanComplete,
-       [Parameter(Mandatory=$true)][int]$SuspectedLegacyProcesses,
-       [Parameter(Mandatory=$true)][int]$OpaqueProcesses)
+       [Parameter(Mandatory=$true)]$ProcessScanComplete,
+       [Parameter(Mandatory=$true)]$SuspectedLegacyProcesses,
+       [Parameter(Mandatory=$true)]$OpaqueProcesses)
+ # WinPS5.1 would coerce nonempty string "False" to $true. Do not allow
+ # text/JSON conversion to claim a complete observer scan.
+ if($ProcessScanComplete -isnot [bool] -or
+    $SuspectedLegacyProcesses -isnot [int] -or
+    $OpaqueProcesses -isnot [int]){
+    throw 'V059_UNTYPED_OBSERVER_EVIDENCE'
+ }
  $tasks=@('ABSENT','EXACT_ENABLED','EXACT_DISABLED','FOREIGN','UNKNOWN')
  $links=@('ABSENT','EXACT','FOREIGN','UNKNOWN')
  if($TaskState -cnotin $tasks -or $ShortcutState -cnotin $links -or
@@ -96,10 +103,18 @@ function Get-V059StartupFallbackReadOnly {
  param([Parameter(Mandatory=$true)][string]$Link,
        [Parameter(Mandatory=$true)][string]$ExpectedMain,
        [Parameter(Mandatory=$true)][string]$ExpectedRoot)
- if(-not[IO.File]::Exists($Link)){return 'ABSENT'}
  try{
-    $attrs=[IO.File]::GetAttributes($Link)
-    if(($attrs -band [IO.FileAttributes]::ReparsePoint) -ne 0){return 'FOREIGN'}
+    $folder=Split-Path -Parent $Link
+    $leaf=Split-Path -Leaf $Link
+    $matches=@(Get-ChildItem -LiteralPath $folder -Force -ErrorAction Stop |
+      Where-Object{$_.Name.Equals($leaf,[StringComparison]::OrdinalIgnoreCase)})
+    if($matches.Count -eq 0){return 'ABSENT'}
+    if($matches.Count -ne 1){return 'UNKNOWN'}
+    $entry=$matches[0]
+    if($entry.PSIsContainer -or
+       ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){
+       return 'FOREIGN'
+    }
     if([IO.Path]::GetExtension($Link) -cne '.lnk'){return 'FOREIGN'}
     $obj=New-Object -ComObject WScript.Shell
     # Read shortcut properties ONLY. Never call Save() / CreateLink.
@@ -107,12 +122,14 @@ function Get-V059StartupFallbackReadOnly {
     $exe=[string]$lnk.TargetPath
     $args=[string]$lnk.Arguments
     $wd=[string]$lnk.WorkingDirectory
+    $description=[string]$lnk.Description
     $p=[IO.Path]::GetFullPath((Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'))
     $file=[regex]::Escape([IO.Path]::GetFullPath($ExpectedMain))
     $pattern='(?i)^\s*-NoProfile\s+-WindowStyle\s+Hidden\s+-ExecutionPolicy\s+Bypass\s+-File\s+"'+
       $file+'"\s+-Action\s+Maintain\s*$'
     if(-not([IO.Path]::GetFullPath($exe)).Equals($p,[StringComparison]::OrdinalIgnoreCase) -or
         $args -cnotmatch $pattern -or
+        $description -cne 'Spotify Control automatic maintenance' -or
         -not ([IO.Path]::GetFullPath($wd)).Equals([IO.Path]::GetFullPath($ExpectedRoot),
              [StringComparison]::OrdinalIgnoreCase)){
         return 'FOREIGN'
@@ -156,7 +173,13 @@ function Get-V059ScheduledMaintenanceReadOnly {
     $p=[regex]::Escape([IO.Path]::GetFullPath($ExpectedMain))
     $pattern='(?i)^\s*-NoProfile\s+-WindowStyle\s+Hidden\s+-ExecutionPolicy\s+Bypass\s+-File\s+"'+
         $p+'"\s+-Action\s+Maintain\s*$'
-    if($args -cnotmatch $pattern){return 'FOREIGN'}
+    if($args -cnotmatch $pattern -or
+       -not[string]::IsNullOrWhiteSpace([string]$actions[0].WorkingDirectory)){
+       return 'FOREIGN'
+    }
+    # Running instance may outlive an Enabled=false transition. Never
+    # confuse "disabled" with "drained".
+    if(@($task.GetInstances(0)).Count -ne 0){return 'UNKNOWN'}
     if([bool]$task.Enabled){return 'EXACT_ENABLED'}
     return 'EXACT_DISABLED'
  }catch{
