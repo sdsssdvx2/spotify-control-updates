@@ -7,6 +7,7 @@ on:
       - 'validation/normal-engine-shared-turnstile/test-stable-mutex-interop-v060.ps1'
       - 'validation/normal-engine-shared-turnstile/reentrant-addon-turnstile-v060.ps1'
       - 'validation/normal-engine-shared-turnstile/test-reentrant-addon-turnstile-v060.ps1'
+      - 'validation/normal-engine-shared-turnstile/build-pinned-r17-reentrant-v060.ps1'
       - '.github/workflows/validate-stable-maintain-agenttick-v060.yml'
   workflow_dispatch:
 permissions: {contents: read}
@@ -17,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
-      - name: Exact V059 parent, stable main and only 5 development files
+      - name: Exact V059 parent, stable main and only 6 development files
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -27,6 +28,7 @@ jobs:
           $test='validation/normal-engine-shared-turnstile/test-stable-mutex-interop-v060.ps1'
           $module='validation/normal-engine-shared-turnstile/reentrant-addon-turnstile-v060.ps1'
           $reentrant='validation/normal-engine-shared-turnstile/test-reentrant-addon-turnstile-v060.ps1'
+          $builder='validation/normal-engine-shared-turnstile/build-pinned-r17-reentrant-v060.ps1'
           $workflow='.github/workflows/validate-stable-maintain-agenttick-v060.yml'
           if((git merge-base $base HEAD).Trim() -cne $base -or
              (git rev-parse origin/main).Trim() -cne $main -or
@@ -34,11 +36,11 @@ jobs:
             throw 'V060_PARENT_OR_PRODUCTION_MAIN_DRIFT'
           }
           $changed=@(git diff --name-only "$base...HEAD")
-          if($changed.Count -ne 5 -or @($changed|Where-Object{$_ -notin @($script,$test,$module,$reentrant,$workflow)}).Count -ne 0){
-            throw 'V060_SCOPE_EXCEEDS_FIVE_AUDIT_FILES'
+          if($changed.Count -ne 6 -or @($changed|Where-Object{$_ -notin @($script,$test,$module,$reentrant,$builder,$workflow)}).Count -ne 0){
+            throw 'V060_SCOPE_EXCEEDS_SIX_DEVELOPMENT_FILES'
           }
           $psTokens=$null;$psErrors=$null
-          foreach($p in @($test,$module,$reentrant)){
+          foreach($p in @($test,$module,$reentrant,$builder)){
             $psTokens=$null;$psErrors=$null
             [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$psTokens,[ref]$psErrors)
             if($psErrors.Count){throw ('V060_INTEROP_PS51_PARSE_ERROR_'+$p+'_'+$psErrors[0].Message)}
@@ -138,6 +140,30 @@ jobs:
              if(-not$proof.Contains($marker)){throw ('V060_NESTED_LOCK_PROOF_MISSING_'+$marker)}
           }
           Write-Host 'V060_REENTRANT_NESTED_UPDATE_ROLLBACK_AND_CROSS_PROCESS_EXCLUSION_PASS'
+      - name: Build nondeploy exact stable r17 candidate with nested-safe lease, validate inverse bytes
+        shell: powershell
+        timeout-minutes: 4
+        run: |
+          $ErrorActionPreference='Stop'
+          $result=Join-Path $env:RUNNER_TEMP ('v060-r17-candidate-'+[guid]::NewGuid().ToString('N'))
+          $log=Join-Path $env:RUNNER_TEMP 'v060-r17-candidate-source-audit.txt'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/normal-engine-shared-turnstile/build-pinned-r17-reentrant-v060.ps1' -ParentCandidate 'validation/v0.6.28/out/bin/addon-manager.ps1' -OutputDirectory $result *>&1 |
+            Tee-Object -FilePath $log | Out-Null
+          $rc=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($rc -ne 0){
+            Get-Content $log -Tail 65|ForEach-Object{Write-Host $_}
+            throw ('V060_EXACT_R17_CANDIDATE_BUILD_FAILED_'+$rc)
+          }
+          $proof=Get-Content $log -Raw
+          foreach($marker in @(
+            'V060_STABLE_R17_SOURCE_EXACT_SHA_PIN_AND_INVERSE_3_MUTATORS_PASS',
+            'V060_STABLE_R17_OTHER_FUNCTIONS_BYTE_IDENTICAL_AND_FOUR_HELPERS_ONLY_PASS',
+            'V060_REAL_R17_UPDATE_COMMIT_ROLLBACK_ALL_REENTRANT_WRAPPED_PS51_PASS',
+            'V060_NONDEPLOY_CANDIDATE_ONLY_UNDER_GITHUB_RUNNER_TEMP_NO_INSTALL_PASS')){
+            if(-not$proof.Contains($marker)){throw ('V060_MISSING_CANDIDATE_SOURCE_PROOF_'+$marker)}
+          }
+          Write-Host 'V060_REENTRANT_STABLE_R17_SOURCE_ONLY_NONDEPLOY_CANDIDATE_PASS'
       - name: Reconfirm operating main unchanged
         shell: powershell
         run: |
