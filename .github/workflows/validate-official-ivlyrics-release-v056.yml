@@ -1,0 +1,130 @@
+name: V056 actual official ivLyrics 7.1.6 signed-digest release output and tamper (HOLD)
+on:
+  push:
+    branches: [validate/official-ivlyrics-release-v056-HOLD]
+    paths:
+      - 'validation/normal-engine-shared-turnstile/test-official-ivlyrics-release-v056.ps1'
+      - '.github/workflows/validate-official-ivlyrics-release-v056.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  pinned-real-ivlyrics-release-with-official-cli:
+    runs-on: windows-2025
+    timeout-minutes: 19
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Verify exact cumulative V055 parent and production main, two new files, PS51
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='21df5717d3f30e6dbeb5257513c8c6f7549db8f6'
+          $main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+             (git merge-base $base HEAD).Trim() -cne $base -or
+             (git rev-parse origin/main).Trim() -cne $main){
+             throw 'V056_V055_PARENT_OR_PRODUCTION_MAIN_NOT_PINNED'
+          }
+          $source='validation/normal-engine-shared-turnstile/test-official-ivlyrics-release-v056.ps1'
+          $workflow='.github/workflows/validate-official-ivlyrics-release-v056.yml'
+          $changed=@(git diff --name-only "$base...HEAD")
+          if($changed.Count -ne 2 -or $source -notin $changed -or $workflow -notin $changed){
+             throw 'V056_UNEXPECTED_PRODUCTION_OR_PARENT_SOURCE_CHANGE'
+          }
+          $pins=@{
+            'validation/normal-engine-shared-turnstile/official-route-byte-binding-v054.ps1'='812c3978748b4084a59e8e26c6278eeba589c6ca'
+            'validation/approved-native-manifest-scope/manifest-owned-xpui-v044.ps1'='275cc6f420cdc3b41e8a007d7e848d5d9e4019fd'
+            'validation/custom-app-update-transaction-protocol-v0.1.0/custom-app-update-transaction.ps1'='47b4d4bb08fe7b14ad43de4300556430eb638869'
+          }
+          foreach($p in $pins.Keys){
+            if((git hash-object $p).Trim() -cne [string]$pins[$p]){throw ('V056_ANCESTOR_SOURCE_BLOB_DRIFT_'+$p)}
+          }
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $source).Path,[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw ('V056_PS51_PARSE_FAILED_'+$errors[0].Message)}
+          $text=Get-Content $source -Raw
+          foreach($token in @(
+            'V056_HOSTED_WINDOWS_ONLY','bdd7c047b303c519997d3f5c5f0ca416e607aad0a6de6592bb15fddb6e6269ac',
+            'V056_INDEPENDENT_PUBLISHER_CHECKSUM_CONTENT_MISMATCH',
+            'Get-ApprovedNativeManifestOwnedScopeV044','Test-ApprovedNativeManifestOnlyOwnedTargetChangedV044',
+            'Test-CustomAppV054OfficialSourceBoundRoutes',
+            'V054_VENDOR_ROUTE_JS_NOT_SOURCE_DERIVED',
+            'V054_VENDOR_ROUTE_CSS_NOT_SOURCE_DERIVED',
+            'V054_VENDOR_ROUTE_MANIFEST_NOT_SOURCE_DERIVED',
+            'V044_MANIFEST_SOURCE_COPIED_BYTES_DID_NOT_MATCH')){
+              if(-not$text.Contains($token)){throw ('V056_REQUIRED_SAFETY_PROOF_MISSING_'+$token)}
+          }
+          if(@(Get-Process -Name Spotify -ErrorAction SilentlyContinue).Count -gt 0){
+              throw 'V056_UNEXPECTED_SPOTIFY_ON_GITHUB_HOSTED_RUNNER'
+          }
+          Write-Host 'V056_PINNED_PARENT_MAIN_TWO_NEW_FILES_PS51_AND_UPSTREAM_PROOF_PASS'
+      - name: Obtain exact official Spicetify 2.46.4 executable without install
+        shell: powershell
+        timeout-minutes: 7
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP 'v056-official-spicetify'
+          [IO.Directory]::CreateDirectory($root)|Out-Null
+          $zip=Join-Path $root 'vendor.zip'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip' -OutFile $zip
+          if((Get-Item $zip).Length -ne 7795758 -or
+             (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                 '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f'){
+             throw 'V056_OFFICIAL_SPICETIFY_ZIP_SIZE_OR_SHA_DRIFT'
+          }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z=[IO.Compression.ZipFile]::OpenRead($zip)
+          try{
+            $total=[int64]0
+            foreach($entry in $z.Entries){
+              $name=([string]$entry.FullName).Replace('/','\')
+              if([IO.Path]::IsPathRooted($name) -or $name.StartsWith('\') -or
+                 $name.Contains('..\') -or $name.Contains(':')){
+                 throw 'V056_UNSAFE_OFFICIAL_SPICETIFY_ARCHIVE_PATH'
+              }
+              $total+=[int64]$entry.Length
+              if($total -gt 104857600){throw 'V056_OFFICIAL_SPICETIFY_ZIP_INFLATION_CAP'}
+            }
+          }finally{$z.Dispose()}
+          $output=Join-Path $root 'extracted'
+          Expand-Archive -LiteralPath $zip -DestinationPath $output -ErrorAction Stop
+          $exes=@(Get-ChildItem -LiteralPath $output -Filter 'spicetify.exe' -File -Recurse)
+          if($exes.Count -ne 1 -or
+             (Get-FileHash $exes[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+               '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+             throw 'V056_OFFICIAL_SPICETIFY_EXECUTABLE_SHA_MISMATCH'
+          }
+          "V056_VENDOR_EXE=$($exes[0].FullName)"|Out-File $env:GITHUB_ENV -Append -Encoding UTF8
+          Write-Host 'V056_OFFICIAL_SPICETIFY_2464_ARCHIVE_AND_EXECUTABLE_PIN_PASS'
+      - name: Fetch actual ivLyrics 7.1.6 ZIP & SHA sidecar, produce and verify all route output
+        shell: powershell
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v056-real-ivlyrics-readonly-acceptance.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/normal-engine-shared-turnstile/test-official-ivlyrics-release-v056.ps1' -OfficialExecutable $env:V056_VENDOR_EXE *>&1 |
+             Tee-Object -FilePath $log | Out-Null
+          $rc=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($rc -ne 0){
+            Get-Content $log -Tail 70 | ForEach-Object {Write-Host $_}
+            throw ('V056_ACTUAL_PUBLISHER_RELEASE_TEST_FAILED_'+$rc)
+          }
+          $evidence=Get-Content $log -Raw
+          foreach($marker in @(
+            'V056_OFFICIAL_IVLYRICS_V716_RELEASE_METADATA_ARCHIVE_AND_CHECKSUM_SHA_PINS_PASS',
+            'V056_OFFICIAL_RUNTIME_SOURCE_51_SUBFILES_36_EXTENSIONS_PINNED_PASS',
+            'V056_REAL_OFFICIAL_RELEASE_ZIP_RENDERED_39_MANIFEST_OWNED_XPUI_FILES_EXACT_PASS',
+            'V056_ORIGINAL_CONFIG_PREFS_VENDOR_AND_TWO_FOREIGN_XPUI_FILES_UNCHANGED_PASS',
+            'V056_FORGED_OFFICIAL_JS_CSS_JSON_EXTENSION_AND_POST_RELEASE_SOURCE_REJECTED_PASS',
+            'V056_REAL_PUBLISHER_ARTIFACT_HOSTED_ONLY_USER_SPOTIFY_AND_MAIN_UNCHANGED_NO_AUTHORITY_PASS')){
+             if(-not $evidence.Contains($marker)){throw ('V056_REQUIRED_HOSTED_EVIDENCE_ABSENT_'+$marker)}
+          }
+          Write-Host 'V056_ACTUAL_IVLYRICS_RELEASE_AUTHENTICATED_AND_NATIVE_OUTPUT_FULL_PASS'
+      - name: Reconfirm immutable production main
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+              throw 'V056_MAIN_CHANGED'
+          }
+          Write-Host 'V056_PRODUCTION_MAIN_NO_INSTALL_NO_LIVE_CUTOVER_NO_RELEASE_NO_PERSONAL_FILES_PASS'
