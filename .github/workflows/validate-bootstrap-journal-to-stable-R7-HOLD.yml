@@ -1,4 +1,4 @@
-name: HOLD R12 official rolled-back transaction lineage and stable Windows E2E
+name: HOLD R13 complete-recovery idempotence and stable Windows E2E
 # Reconstructed source from R11 baseline with byte-literal insertion and function uniqueness verified.
 # Original v0.6.28 SelfTest requires installed Bootstrap read-sharing; maintain no-write fence and both named legacy mutexes.
 on:
@@ -355,6 +355,25 @@ jobs:
             if(-not (Test-Path $escrow)){throw 'R7_PREPARED_ORIGINAL_ESCROW_MISSING'}
             $old=Get-Content $escrow -Raw | ConvertFrom-Json
             if($old.status -cne 'prepared'){throw 'R7_PREVIOUS_FAILED_JOURNAL_NOT_PRESERVED'}
+            # R13: Test the common late-failure ambiguity: the genuine
+            # Bootstrap committed and source is exact but a later wrapper
+            # postcheck/network/receipt can throw. Never re-run Update.
+            $doneHash=(Get-FileHash $originalRecord -Algorithm SHA256).Hash.ToLowerInvariant()
+            $complete=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture 2>&1)
+            if($LASTEXITCODE -ne 0 -or
+               $complete -cnotcontains 'RESULT=ALREADY_COMMITTED_STABLE_V0628_VERIFIED_NO_ACTION' -or
+               $complete -cnotcontains 'OFFICIAL_STABLE_V0628_R17=EXACT_BIN_AND_COMMITTED_JOURNAL' -or
+               (Get-FileHash $originalRecord -Algorithm SHA256).Hash.ToLowerInvariant() -cne $doneHash){
+              throw ('R13_GENUINE_COMMITTED_JOURNAL_NOT_CLASSIFIED '+($complete -join ','))
+            }
+            $double=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture -Commit -ApprovalPhrase EXACT_PREPARED_NO_BIN_SWAP -ContinueOfficialStableUpdate -OfficialUpdateApprovalPhrase APPROVE_OFFICIAL_V0628_CORE_UPGRADE 2>&1)
+            if($LASTEXITCODE -ne 0 -or
+               $double -cnotcontains 'RESULT=ALREADY_COMMITTED_STABLE_V0628_VERIFIED_NO_ACTION' -or
+               $double -cnotcontains 'BOOTSTRAP_CHECK_ATTEMPTED=NO;BOOTSTRAP_UPDATE_ATTEMPTED=NO;CORE_UPDATE_APPROVAL=OPT_IN_REQUESTED;USER_DATA_DELETE=NO' -or
+               (Get-FileHash $originalRecord -Algorithm SHA256).Hash.ToLowerInvariant() -cne $doneHash){
+              throw ('R13_DUPLICATE_APPROVED_CORE_UPDATE_NOT_REFUSED '+($double -join ','))
+            }
+            Write-Host 'R13_VERIFIED_COMMITTED_STABLE_AND_ORIGINAL_ESCROW_NO_SECOND_UPDATE_PASS'
             # Independently verify all synthetic four managed and
             # protected app directories and rating/note data, including
             # Marketplace and user settings, are byte-for-byte preserved.
