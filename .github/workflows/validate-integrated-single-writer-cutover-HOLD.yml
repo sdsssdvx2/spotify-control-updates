@@ -1,0 +1,61 @@
+name: Integrated single-writer scratch cutover and crash recovery (HOLD)
+on:
+  push:
+    branches: [validate/integrated-single-writer-rehearsal-HOLD]
+    paths:
+      - 'validation/normal-engine-shared-turnstile/test-integrated-single-writer-cutover-HOLD.ps1'
+      - 'validation/normal-engine-shared-turnstile/recover-hosted-cutover-rehearsal-HOLD.ps1'
+      - '.github/workflows/validate-integrated-single-writer-cutover-HOLD.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  verified-windows-synthetic-task-source-lease-and-fresh-recovery:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Exact V062 and main enrollment parent with only three scratch files
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='d02a2b6c7a70966bb69dfe5131fe1ea0e36ec5e4'
+          $operating='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          $allowed=@(
+            'validation/normal-engine-shared-turnstile/test-integrated-single-writer-cutover-HOLD.ps1',
+            'validation/normal-engine-shared-turnstile/recover-hosted-cutover-rehearsal-HOLD.ps1',
+            '.github/workflows/validate-integrated-single-writer-cutover-HOLD.yml'
+          )
+          if((git merge-base $parent HEAD).Trim() -cne $parent -or
+             (git rev-parse origin/main).Trim() -cne $operating -or
+             (git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA){
+             throw 'CUTOVER_INTEGRATION_PARENT_OR_OPERATING_SOURCE_CHANGED'
+          }
+          $changed=@(git diff --name-only "$parent...HEAD")
+          if($changed.Count -ne 3 -or
+            @($changed|Where-Object{$_ -cnotin $allowed}).Count -ne 0){
+             throw 'CUTOVER_INTEGRATION_UNEXPECTED_SCOPE'
+          }
+          foreach($file in $allowed[0..1]){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path -LiteralPath $file).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw ('CUTOVER_INTEGRATION_PS51_PARSE_'+$file)}
+          }
+          Write-Host 'CUTOVER_INTEGRATION_PREVIOUS_PARENT_AND_NEW_SOURCE_SCOPE_PRESERVED_PASS'
+      - name: Run one integrated real hosted Windows Task Scheduler and lease acceptance
+        shell: powershell
+        timeout-minutes: 7
+        run: |
+          $ErrorActionPreference='Stop'
+          $file='validation/normal-engine-shared-turnstile/test-integrated-single-writer-cutover-HOLD.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $file
+          if($LASTEXITCODE -ne 0){throw 'CUTOVER_INTEGRATION_HOSTED_TEST_FAILED'}
+          Write-Host 'CUTOVER_INTEGRATION_HOSTED_REAL_SCHEDULER_SCRATCH_REHEARSAL_ACCEPTED'
+      - name: No main, installed Spotify, task or version mutation
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'CUTOVER_INTEGRATION_STABLE_MAIN_CHANGED'
+          }
+          Write-Host 'CUTOVER_INTEGRATION_ONLY_PRIVATE_RUNNER_TASK_AND_FIXTURE_NO_USER_INSTALL_PASS'
