@@ -95,8 +95,7 @@ jobs:
           git -c user.name='SpotifyControl-Hosted-HOLD-Bot' -c user.email='ci-bot@users.noreply.github.com' commit -m 'HOLD R10 commit regenerated v0.6.29 exact resident health rediscovery transport chunks'
           if($LASTEXITCODE -ne 0){throw 'R10_PREVIEW_TRANSPORT_COMMIT_FAILED'}
           $source=(git rev-parse HEAD).Trim()
-          if($source -notmatch '^[a-f0-9]{40}
-){throw 'R10_SOURCE_COMMIT_INVALID'}
+          if($source -notmatch '^[a-f0-9]{40}\\z'){throw 'R10_SOURCE_COMMIT_INVALID'}
           python validation/spotify-exit-immediate-maintenance-HOLD/build-bootstrappable-preview.py --source-commit $source
           if($LASTEXITCODE -ne 0){throw 'R10_SOURCE_COMMIT_PINNED_PREVIEW_FAILED'}
           if((Get-FileHash -LiteralPath 'manifest.json' -Algorithm SHA256).Hash.ToLowerInvariant() -cne $prod){
