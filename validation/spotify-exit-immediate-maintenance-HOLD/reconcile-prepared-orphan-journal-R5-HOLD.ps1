@@ -281,6 +281,7 @@ function InvokeControlledOfficialStableUpdate {
   $oldStateHash=''
   if($null -ne (FileInfo $oldStatePath 4194304)){$oldStateHash=HashFile $oldStatePath}
   $created=$false;$script=''
+  $readSharingFence=$null
   try{
     if(-not(ReparseFreePath $Root $dir) -or (Test-Path -LiteralPath $dir)){
       Fail 'CONTROLLED_COPY_DESTINATION_NOT_NEW'
@@ -304,6 +305,25 @@ function InvokeControlledOfficialStableUpdate {
     if((HashFile $script) -cne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'){
       Fail 'CONTROLLED_BOOTSTRAP_COPY_HASH_MISMATCH'
     }
+    # The actual v0.6.28 SelfTest reads the installed Bootstrap trust
+    # root. FileShare.None would block this legitimate read and cause a
+    # candidate SelfTest failure, as proven by the R7 hosted integration.
+    # Keep FileShare.None strictly for the preceding journal CAS. During
+    # the genuine Bootstrap update, downgrade to FileShare.Read (no writes
+    # or deletion) under BOTH still-held named legacy writer mutexes.
+    $BootstrapFileHandle.Dispose()
+    $readSharingFence=[IO.File]::Open(
+       (Join-Path $Root 'bootstrap\spotify-control-self-updater.ps1'),
+       [IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+    if([int64]$readSharingFence.Length -ne 42963){Fail 'SHARED_BOOTSTRAP_TRUST_ROOT_SIZE_CHANGED'}
+    $h=[Security.Cryptography.SHA256]::Create()
+    try{$check=[BitConverter]::ToString($h.ComputeHash($readSharingFence)).Replace('-','').ToLowerInvariant()}
+    finally{$h.Dispose()}
+    if($check -cne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'){
+      Fail 'SHARED_BOOTSTRAP_TRUST_ROOT_SHA_CHANGED'
+    }
+    $Messages.Add('BOOTSTRAP_ORIGINAL_READ_SHARE_NO_WRITE=HELD')
+    if(-not (WriterAdmission $Root $true).safe){Fail 'ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE'}
     if($Hosted){
       $fixture=[IO.Path]::GetFullPath($HostedFixtureRoot)
       $env:LOCALAPPDATA=Join-Path $fixture 'LocalAppData'
@@ -319,6 +339,7 @@ function InvokeControlledOfficialStableUpdate {
        [string]$check.result.latest_version -cne '0.6.28' -or
        [int]$check.result.edge_count -ne 8){Fail 'OFFICIAL_EIGHT_EDGE_PREFLIGHT_NOT_EXACT'}
     $Messages.Add('OFFICIAL_BOOTSTRAP_EIGHT_EDGE_PLAN=EXACT')
+    if(-not (WriterAdmission $Root $true).safe){Fail 'ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE'}
     $changed=InvokeControlledBootstrapAction -Script $script -Action 'Update'
     if([string]$changed.transaction_status -cne 'committed' -or
        [string]$changed.result.Status -cne 'committed'){
@@ -343,6 +364,7 @@ function InvokeControlledOfficialStableUpdate {
     $Messages.Add('STABLE_POSTCHECK_ALREADY_CURRENT=TRUE')
     $Messages.Add('USER_STATE_JSON=UNCHANGED')
   }finally{
+    if($null -ne $readSharingFence){try{$readSharingFence.Dispose()}catch{}}
     if($Hosted){$env:LOCALAPPDATA=$originalLocal;$env:APPDATA=$originalRoaming}
     if($created -and $script.Length -gt 0 -and
        (FileInfo $script 2097152) -and
@@ -503,7 +525,8 @@ try{
     'TRANSACTION_CHANGED_BEFORE_ATOMIC_REPLACE','ORIGINAL_BOOTSTRAP_EXCLUSIVE_HANDLE_MISSING',
     'CONTROLLED_COPY_DESTINATION_NOT_NEW','CONTROLLED_COPY_DIRECTORY_UNSAFE',
     'ORIGINAL_BOOTSTRAP_READ_INCOMPLETE','COPIED_BOOTSTRAP_SOURCE_NOT_TRUSTED',
-    'CONTROLLED_BOOTSTRAP_COPY_HASH_MISMATCH','OFFICIAL_EIGHT_EDGE_PREFLIGHT_NOT_EXACT',
+    'CONTROLLED_BOOTSTRAP_COPY_HASH_MISMATCH','SHARED_BOOTSTRAP_TRUST_ROOT_SIZE_CHANGED',
+    'SHARED_BOOTSTRAP_TRUST_ROOT_SHA_CHANGED','OFFICIAL_EIGHT_EDGE_PREFLIGHT_NOT_EXACT',
     'OFFICIAL_UPDATE_NOT_COMMITTED','OFFICIAL_UPDATED_BIN_IDENTITY_NOT_EXACT',
     'OFFICIAL_POSTCHECK_NOT_CURRENT','CONTROLLED_UPDATE_CHANGED_OWNER_STATE',
     'OFFICIAL_BOOTSTRAP_CHECK_FAILED_NO_AUTORETRY','OFFICIAL_BOOTSTRAP_UPDATE_FAILED_NO_AUTORETRY',
