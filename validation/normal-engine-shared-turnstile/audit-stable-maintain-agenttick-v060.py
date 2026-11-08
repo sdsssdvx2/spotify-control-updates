@@ -115,11 +115,11 @@ def source_summary() -> dict:
     return {"codes": source, "hit_count": counts}
 
 def selftest() -> None:
-    example = "function A {\n -Action Maintain\n}\nfunction B {\n -Action AgentTick\n}"
+    example = "function Alpha {\n -Action Maintain\n}\nfunction Bravo {\n -Action AgentTick\n}"
     a = mini_context(example, re.compile("Maintain"), "stable_main")
     b = mini_context(example, re.compile("AgentTick"), "stable_main")
     assert len(a) == len(b) == 1
-    assert ":A:" in a[0] and ":B:" in b[0]
+    assert ":Alpha:" in a[0] and ":Bravo:" in b[0]
     assert len(mini_context("# Maintain\nAgentTick", re.compile("Maintain"), "stable_main")) == 0
 
 if __name__ == "__main__":
