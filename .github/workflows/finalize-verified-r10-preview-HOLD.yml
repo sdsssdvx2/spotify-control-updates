@@ -46,8 +46,13 @@ jobs:
           }
           git -c user.name='SpotifyControl-Hosted-HOLD-Bot' -c user.email='ci-bot@users.noreply.github.com' commit -m 'HOLD bind R10 developer preview to immutable Windows-accepted transport commit'
           if($LASTEXITCODE -ne 0){throw 'R10_PREVIEW_COMMIT_FAILED'}
-          $unexpected=@(git status --porcelain)
-          if($unexpected.Count -gt 0){throw 'R10_REMAINING_WORKTREE_CHANGES'}
+          # The official builders generate untracked throwaway output
+          # under validation/out/. git push only publishes tracked commits;
+          # fail if ANY tracked source/manifest remains modified instead.
+          git diff --quiet HEAD --
+          if($LASTEXITCODE -ne 0){throw 'R10_TRACKED_SOURCE_NOT_CLEAN_AFTER_PREVIEW_COMMIT'}
+          git diff --cached --quiet --
+          if($LASTEXITCODE -ne 0){throw 'R10_UNEXPECTED_STAGED_FILES'}
           git push origin HEAD:refs/heads/validate/spotify-exit-immediate-maintenance-HOLD
           if($LASTEXITCODE -ne 0){throw 'R10_PREVIEW_MANIFEST_DEV_PUSH_FAILED'}
           Write-Host 'R10_NATIVE_BOOTSTRAP_E2E_PRIOR_RUN=42461632004'
