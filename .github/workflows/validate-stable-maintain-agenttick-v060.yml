@@ -4,6 +4,7 @@ on:
     branches: [validate/stable-maintain-agenttick-callgraph-v060-HOLD]
     paths:
       - 'validation/normal-engine-shared-turnstile/audit-stable-maintain-agenttick-v060.py'
+      - 'validation/normal-engine-shared-turnstile/test-stable-mutex-interop-v060.ps1'
       - '.github/workflows/validate-stable-maintain-agenttick-v060.yml'
   workflow_dispatch:
 permissions: {contents: read}
@@ -14,13 +15,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
-      - name: Exact V059 parent, stable main and only 2 development files
+      - name: Exact V059 parent, stable main and only 3 development files
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           $base='72ba786d67ef8d7db33d1d3988001b2b51018273'
           $main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
           $script='validation/normal-engine-shared-turnstile/audit-stable-maintain-agenttick-v060.py'
+          $test='validation/normal-engine-shared-turnstile/test-stable-mutex-interop-v060.ps1'
           $workflow='.github/workflows/validate-stable-maintain-agenttick-v060.yml'
           if((git merge-base $base HEAD).Trim() -cne $base -or
              (git rev-parse origin/main).Trim() -cne $main -or
@@ -28,9 +30,12 @@ jobs:
             throw 'V060_PARENT_OR_PRODUCTION_MAIN_DRIFT'
           }
           $changed=@(git diff --name-only "$base...HEAD")
-          if($changed.Count -ne 2 -or @($changed|Where-Object{$_ -notin @($script,$workflow)}).Count -ne 0){
-            throw 'V060_SCOPE_EXCEEDS_TWO_AUDIT_FILES'
+          if($changed.Count -ne 3 -or @($changed|Where-Object{$_ -notin @($script,$test,$workflow)}).Count -ne 0){
+            throw 'V060_SCOPE_EXCEEDS_THREE_AUDIT_FILES'
           }
+          $psTokens=$null;$psErrors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $test).Path,[ref]$psTokens,[ref]$psErrors)
+          if($psErrors.Count){throw ('V060_INTEROP_PS51_PARSE_ERROR_'+$psErrors[0].Message)}
           & python -m py_compile $script
           if($LASTEXITCODE -ne 0){throw 'V060_PYTHON_SYNTAX_ERROR'}
           $s=Get-Content $script -Raw
@@ -73,6 +78,34 @@ jobs:
           }
           Get-Content $log|ForEach-Object{Write-Host $_}
           Write-Host 'V060_PUBLIC_CODE_SOURCE_ONLY_NEVER_EXECUTED_OR_LIVE_MUTATED_PASS'
+      - name: Real stable maintenance OS mutex cross-process interoperability, no Spotify execution
+        shell: powershell
+        timeout-minutes: 3
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v060-stable-mutex.txt'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/normal-engine-shared-turnstile/test-stable-mutex-interop-v060.ps1' *>&1 |
+            Tee-Object -FilePath $log | Out-Null
+          $rc=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($rc -ne 0){
+            Get-Content $log -Tail 70|ForEach-Object{Write-Host $_}
+            throw ('V060_STABLE_MUTEX_REAL_SOURCE_TEST_FAILED_'+$rc)
+          }
+          $proof=Get-Content $log -Raw
+          foreach($marker in @(
+             'V060_REAL_STABLE_MAINTENANCE_MUTEX_HELD_BLOCKS_OTHER_PROCESS_PASS',
+             'V060_LEGACY_AGENTTICK_MUTEX_DISTINCT_AND_MAINTENANCE_REMAINS_BLOCKED_PASS',
+             'V060_REAL_STABLE_MAINTENANCE_OS_MUTEX_RELEASES_FOR_CHILD_PROCESS_PASS',
+             'V060_PINNED_R17_UPDATE_AUTOAPPS_SHARED_TURNSTILE=',
+             'V060_PINNED_R17_ROLLBACK_LASTTRANSACTION_SHARED_TURNSTILE=',
+             'V060_PINNED_R17_COMMIT_LASTTRANSACTION_SHARED_TURNSTILE=',
+             'V060_PINNED_STABLE_MAIN_R17_FUNCTIONS_ONLY_NO_LIVE_PROGRAM_EXECUTION_PASS',
+             'V060_NO_USER_TASK_PROFILE_STARTUP_OR_SPOTIFY_MUTATION_NO_PRODUCTION_AUTHORITY_PASS')){
+            if(-not$proof.Contains($marker)){throw ('V060_MISSING_CROSS_PROCESS_OR_OLD_R17_EVIDENCE_'+$marker)}
+          }
+          Get-Content $log|ForEach-Object{Write-Host $_}
+          Write-Host 'V060_STABLE_REAL_MUTEX_NONCOOPERATIVE_PARENT_BLOCK_WITHOUT_SIDE_EFFECTS_PASS'
       - name: Reconfirm operating main unchanged
         shell: powershell
         run: |
