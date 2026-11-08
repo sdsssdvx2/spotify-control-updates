@@ -113,7 +113,8 @@ foreach($required in @(
   throw ('V061_REVIEWED_V010_GATE_NO_LONGER_HAS_REQUIRED_DENIAL_'+$required)
  }
 }
-$gatePayload=$gateFn.Replace($crlf,$lf).Replace($lf,$nl)+$nl+$nl
+$gateNormalized=$gateFn.Replace($crlf,$lf).Replace($lf,$nl)
+$gatePayload=$gateNormalized+$nl+$nl
 $anchor='function Test-Due {'
 if(($wrapped.Split([string[]]@($anchor),[StringSplitOptions]::None)).Count -ne 2){
  throw 'V061_EXACT_GATE_HELPER_ANCHOR_MISSING'
@@ -131,7 +132,7 @@ $newFns=@($newAst.FindAll({param($node)
 if($newFns.Count -ne $all.Count+1){throw 'V061_ORIGINAL_V060_FUNCTION_COUNT_NOT_PRESERVED'}
 $extra=@($newFns|Where-Object{$_.Name -ceq 'Assert-CustomAppNormalUpdateEngineExclusivityV010'})
 if($extra.Count -ne 1 -or
-  [string]$extra[0].Extent.Text -cne $gateFn){
+  [string]$extra[0].Extent.Text -cne $gateNormalized){
  throw 'V061_V010_GATE_FUNCTION_NOT_EXACTLY_INJECTED'
 }
 foreach($old in $all){
