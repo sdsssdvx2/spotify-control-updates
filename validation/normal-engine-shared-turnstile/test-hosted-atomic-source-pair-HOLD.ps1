@@ -1,9 +1,11 @@
 # Windows hosted ONLY. Real candidate bytes, real Win32 File.Replace and
 # fresh-process intent-bound rollback. Never touches installed Spotify.
 param([switch]$Recover,
+ [switch]$RecoverCombined,
  [string]$FixtureRoot,
  [string]$Journal,
  [string]$JournalSha256,
+ [string]$ScratchTaskJournal,
  [string]$BundleRoot,
  [string]$OriginalMain,
  [string]$OriginalAddon)
@@ -18,6 +20,19 @@ if($Recover){
   throw 'V064_CHILD_RECOVERY_STATUS_INVALID'
  }
  Write-Host 'V064_FRESH_CHILD_WIN32_ATOMIC_FILE_REPLACE_RECOVERY_PASS'
+ if($RecoverCombined){
+  # Restore the exact verified old scripts FIRST, then (and only then)
+  # re-enable/remove our freshly owned far-future synthetic task.
+  Assert-V064 (-not[string]::IsNullOrWhiteSpace($ScratchTaskJournal)) 'COMBINED_RECOVERY_NEEDS_TASK_JOURNAL'
+  . (Join-Path $PSScriptRoot 'scheduler-scratch-quiescence-v058.ps1')
+  $result=Restore-V058OwnedScratchFromJournal -JournalPath $ScratchTaskJournal
+  Assert-V064 ([bool]$result.recovered_in_fresh_process -and
+    [bool]$result.enabled_state_restored -and
+    [bool]$result.scratch_task_deleted -and
+    -not[bool]$result.user_task_mutation -and
+    -not[bool]$result.production_mutation_authorized) 'COMBINED_RECOVERY_TASK_NOT_RESTORED_AFTER_SOURCE'
+  Write-Host 'V064_FRESH_CHILD_OLD_SOURCE_FIRST_THEN_OWNED_SCRATCH_TASK_RESTORED_PASS'
+ }
  return
 }
 Assert-V064 (-not[string]::IsNullOrWhiteSpace($BundleRoot) -and
@@ -130,4 +145,46 @@ Assert-V064 ([string]$r4.status -ceq 'HOSTED_SOURCE_PAIR_ONLY_COMMITTED' -and
 Invoke-V064Child -Result ([pscustomobject]@{root=$f4.root;journal=$r4.journal;journal_sha256=$r4.journal_sha256})
 Check-V064Preservation $f4
 Write-Host 'V064_REAL_COHERENT_MAIN_ADDON_PAIR_PUBLISHED_AND_INDEPENDENTLY_REVERTED_PASS'
+# Case 5: one real TaskScheduler scratch disable + exact two-file source
+# replacement + independent rollback. The old task must NEVER be re-enabled
+# while the candidate scripts remain installed after a failed recovery.
+. (Join-Path $PSScriptRoot 'scheduler-scratch-quiescence-v058.ps1')
+$f5=New-V064PrivateFixture
+$taskProof=$null;$taskDone=$false;$r5=$null
+try{
+ $taskProof=Invoke-V058OwnedScratchQuiescence -LeaveDisabledForChild
+ Assert-V064 ([bool]$taskProof.disabled_verified -and
+  -not[bool]$taskProof.production_mutation_authorized) 'COMBINED_TASK_NOT_DISABLED'
+ $r5=Start-V064HostedSourcePairPublish -FixtureRoot $f5.root -BundleRoot $bundlePath -InjectStop 'after-addon' -ExplicitHostedSimulationApproval
+ Assert-V064 ((Get-V064Sha $f5.main) -ceq [string]$expectedManifest.candidate_main_sha256 -and
+  (Get-V064Sha $f5.addon) -ceq [string]$expectedManifest.candidate_addon_sha256) 'COMBINED_ACTUAL_SOURCE_PAIR_NOT_REPLACED'
+ $journalOriginal=[IO.File]::ReadAllBytes([string]$r5.journal)
+ try{
+  [IO.File]::AppendAllText([string]$r5.journal,'UNTRUSTED_APPEND',([Text.UTF8Encoding]::new($false,$true)))
+  $prev=$ErrorActionPreference
+  $ErrorActionPreference='Continue'
+  try{
+   & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $PSCommandPath -Recover -RecoverCombined -FixtureRoot $f5.root -Journal $r5.journal -JournalSha256 $r5.journal_sha256 -ScratchTaskJournal $taskProof.journal_path *> $null
+   $bad=$LASTEXITCODE
+  }finally{$ErrorActionPreference=$prev}
+  Assert-V064 ($bad -ne 0) 'CORRUPT_SOURCE_RECOVERY_ALLOWED_TASK_REENABLE'
+  $svc=New-Object -ComObject Schedule.Service
+  $svc.Connect()
+  $task=$svc.GetFolder('\').GetTask([string]$taskProof.scratch_task_name)
+  Assert-V064 (-not[bool]$task.Enabled -and
+    (Get-V064Sha $f5.main) -ceq [string]$expectedManifest.candidate_main_sha256) 'CORRUPT_SOURCE_RECOVERY_ENABLED_TASK_OR_OVERWROTE_SOURCE'
+ }finally{[IO.File]::WriteAllBytes([string]$r5.journal,$journalOriginal)}
+ & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $PSCommandPath -Recover -RecoverCombined -FixtureRoot $f5.root -Journal $r5.journal -JournalSha256 $r5.journal_sha256 -ScratchTaskJournal $taskProof.journal_path
+ if($LASTEXITCODE -ne 0){throw 'V064_COMBINED_SOURCE_THEN_SCHEDULER_RECOVERY_FAILED'}
+ $taskDone=$true
+ Assert-V064 ((Get-V064Sha $f5.main) -ceq [string]$expectedManifest.original_main_sha256 -and
+  (Get-V064Sha $f5.addon) -ceq [string]$expectedManifest.original_addon_sha256) 'COMBINED_RECOVERY_NOT_BOTH_OLD_SOURCES'
+ Check-V064Preservation $f5
+ Write-Host 'V064_ONE_HOSTED_REAL_TASK_DISABLED_UNTIL_BOTH_SOURCE_FILES_RESTORED_PASS'
+}finally{
+ if($null-ne$taskProof -and -not$taskDone){
+  try{[void](Restore-V058OwnedScratchFromJournal -JournalPath ([string]$taskProof.journal_path)}
+  catch{Write-Host 'V064_FAILURE_OWNED_GITHUB_RUNNER_TASK_NEEDS_DISPOSABLE_RUNNER_TEARDOWN'}
+ }
+}
 Write-Host 'V064_ALL_TESTS_HOSTED_ONLY_NO_INSTALLED_MAIN_VBS_SPOTIFY_SCHEDULER_DATA_TOUCHED_PASS'
