@@ -1,4 +1,4 @@
-name: HOLD R8 protected CustomApps and dual consent journal-to-stable Windows acceptance
+name: HOLD R11 exact journal-escrow resume and stable Windows E2E
 # Original v0.6.28 SelfTest requires installed Bootstrap read-sharing; maintain no-write fence and both named legacy mutexes.
 on:
   push:
@@ -200,6 +200,52 @@ jobs:
                throw 'R8_MISSING_SECOND_APPROVAL_MUTATED_OR_CLAIMED_SUCCESS'
             }
             Write-Host 'R8_REAL_HOSTED_SECOND_INDEPENDENT_SOURCE_UPGRADE_APPROVAL_REQUIRED_PASS'
+            # R11: exactly terminate the *old* PREPARED orphan in one
+            # process, then exit. Later an independent approved process must
+            # recognize our original escrow without a second CAS.
+            $orig=(Get-FileHash $originalRecord -Algorithm SHA256).Hash.ToLowerInvariant()
+            $one=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture -Commit -ApprovalPhrase EXACT_PREPARED_NO_BIN_SWAP 2>&1)
+            if($LASTEXITCODE -ne 0 -or
+               $one -cnotcontains 'RESULT=JOURNAL_ONLY_RECONCILED_REQUIRES_FRESH_UPDATE_ACCEPTANCE' -or
+               $one -cnotcontains 'TRANSACTION_TERMINAL=ROLLED_BACK_NO_BIN_SWAP'){
+               throw ('R11_FIRST_JOURNAL_ONLY_CAS_NOT_ACCEPTED '+($one -join ','))
+            }
+            $escrow=Join-Path $root 'backups/self-update-transactions/20261108-131500-cafefeed/original-prepared-transaction-before-reconcile.json'
+            if((Get-FileHash $escrow -Algorithm SHA256).Hash.ToLowerInvariant() -cne $orig){throw 'R11_ORIGINAL_ESCROW_MISMATCH'}
+            $terminalHash=(Get-FileHash $originalRecord -Algorithm SHA256).Hash.ToLowerInvariant()
+            $dry=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture 2>&1)
+            if($LASTEXITCODE -ne 0 -or $dry -cnotcontains 'RESULT=EXACT_PRIOR_RECONCILIATION_VERIFIED_EXPLICIT_UPDATE_APPROVAL_REQUIRED'){
+              throw ('R11_RECONCILED_DRYRUN_NOT_ATTESTED '+($dry -join ','))
+            }
+            $again=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture -Commit -ApprovalPhrase EXACT_PREPARED_NO_BIN_SWAP 2>&1)
+            if($LASTEXITCODE -ne 0 -or $again -cnotcontains 'RESULT=ALREADY_RECONCILED_JOURNAL_UNCHANGED' -or
+               (Get-FileHash $originalRecord -Algorithm SHA256).Hash.ToLowerInvariant() -cne $terminalHash){
+               throw ('R11_JOURNAL_ONLY_REPEAT_NOT_IDEMPOTENT '+($again -join ','))
+            }
+            # Synthetic fixture only: an attacker/torn backup changing
+            # the escrow ID must fail closed without any second mutation.
+            [byte[]]$held=[IO.File]::ReadAllBytes($escrow)
+            try{
+              $oldJson=[Text.Encoding]::UTF8.GetString($held)
+              $newJson=$oldJson.Replace('20261108-131500-cafefeed','20261108-131500-bafefeed')
+              if($newJson -ceq $oldJson){throw 'R11_ESCROW_MUTATION_FIXTURE_NOT_MATCHED'}
+              [IO.File]::WriteAllBytes($escrow,[Text.Encoding]::UTF8.GetBytes($newJson))
+              $tampered=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture 2>&1)
+              if($LASTEXITCODE -ne 0 -or
+                 $tampered -cnotcontains 'HOLD_REASON=PREVIOUS_ESCROW_PROVENANCE_INVALID' -or
+                 $tampered -cnotcontains 'RESULT=HOLD_NO_AUTOMATIC_RETRY' -or
+                 (Get-FileHash $originalRecord -Algorithm SHA256).Hash.ToLowerInvariant() -cne $terminalHash){
+                throw ('R11_TAMPERED_PREPARED_ESCROW_NOT_DENIED '+($tampered -join ','))
+              }
+            }finally{
+              [IO.File]::WriteAllBytes($escrow,$held)
+            }
+            if((Get-FileHash $escrow -Algorithm SHA256).Hash.ToLowerInvariant() -cne $orig){
+              throw 'R11_SYNTHETIC_ESCROW_NOT_EXACTLY_RESTORED'
+            }
+            Write-Host 'R11_SEPARATE_JOURNAL_ONLY_EXIT_DRYRUN_REPLAY_AND_ESCROW_TAMPER_DENIAL_PASS'
+            # Now and only now a separate explicit official-update approval
+            # resumes under the original two mutexes with the resident alive.
             $output=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture -Commit -ApprovalPhrase EXACT_PREPARED_NO_BIN_SWAP -ContinueOfficialStableUpdate -OfficialUpdateApprovalPhrase APPROVE_OFFICIAL_V0628_CORE_UPGRADE 2>&1)
             if($LASTEXITCODE -ne 0){throw 'GUARDED_R7_WRAPPER_PROCESS_FAILED'}
             if($output -ccontains 'RESULT=HOLD_NO_AUTOMATIC_RETRY'){
@@ -230,12 +276,12 @@ jobs:
             foreach($exact in @(
               'LEGACY_MAINTENANCE_AND_AGENTTICK_MUTEX=HELD',
               'RESIDENT_AGENT=RUNNING_TICKS_MUTEX_FENCED',
-              'EXACT_BOOTSTRAP_FILESHARE_NONE=HELD',
-              'JOURNAL_ORPHAN_TERMINALIZED_WITHOUT_BIN_SWAP=YES',
+              'PREVIOUS_ORIGINAL_ESCROW=EXACT_UNCHANGED',
+              'RESUME_RECONCILIATION_CAS=SKIPPED_ALREADY_TERMINAL',
               'OFFICIAL_BOOTSTRAP_EIGHT_EDGE_PLAN=EXACT',
               'OFFICIAL_BOOTSTRAP_EXACT_V0628_R17=COMMITTED',
               'STABLE_POSTCHECK_ALREADY_CURRENT=TRUE',
-              'RESULT=OFFICIAL_STABLE_V0628_R17_COMMITTED_VERIFIED'
+              'RESULT=RESUMED_OFFICIAL_STABLE_V0628_R17_COMMITTED_VERIFIED'
             )){
               if($output -cnotcontains $exact){throw ('GUARDED_R7_FULL_CHAIN_EVIDENCE_MISSING_'+$exact+' OUTPUT='+($output -join ','))}
             }
