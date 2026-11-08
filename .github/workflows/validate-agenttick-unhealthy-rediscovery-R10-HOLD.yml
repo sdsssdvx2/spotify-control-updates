@@ -60,6 +60,13 @@ jobs:
             if($line -match '(?i)manifest\.json$' -and $line -notmatch 'preview'){throw 'R10_PRODUCTION_MANIFEST_CHANGED'}
           }
           Write-Host 'R10_OFFICIAL_MANIFEST_STABLE_UNCHANGED_AND_HOSTED_PREVIEW_BUILT'
+      - name: Retrieve exact original Bootstrap 1.0.6 release evidence for hosted E2E
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' > validated-v0614-repair-artifact.zip
       - name: Commit only newly generated R10 preview chunks locally, then real Bootstrap rollback/update E2E
         shell: powershell
         run: |
@@ -124,4 +131,9 @@ jobs:
           git push origin HEAD:refs/heads/validate/spotify-exit-immediate-maintenance-HOLD
           if($LASTEXITCODE -ne 0){throw 'R10_DEVELOPMENT_BRANCH_PUSH_FAILED_NOT_RELEASED'}
           Write-Host 'R10_HOLD_DEVELOPMENT_PREVIEW_PACKAGE_SOURCE_PINNED_AND_PUBLISHED_TO_BRANCH_PASS'
+      - name: Remove only hosted scratch release carrier
+        if: always()
+        shell: powershell
+        run: |
+          Remove-Item -LiteralPath 'validated-v0614-repair-artifact.zip' -Force -ErrorAction SilentlyContinue
 
