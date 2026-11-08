@@ -81,6 +81,19 @@ try{[void](Resolve-CustomAppV057CutoverObservation -Snapshot $negative)}
 catch{if([string]$_.Exception.Message -ceq 'V057_SNAPSHOT_INVALID_NONNEGATIVE_COUNT'){$denied=$true}else{throw}}
 Assert-V057 $denied 'NEGATIVE_COUNT_NOT_REJECTED'
 Write-Host 'V057_INVALID_SCHEMA_AND_NEGATIVE_COUNT_REJECTED_PASS'
+$badBool=Snapshot-V057;$badBool.task_scan_complete='False'
+$denied=$false
+try{[void](Resolve-CustomAppV057CutoverObservation -Snapshot $badBool)}
+catch{if([string]$_.Exception.Message -ceq 'V057_SNAPSHOT_INVALID_BOOLEAN'){$denied=$true}else{throw}}
+Assert-V057 $denied 'STRING_FALSE_MUST_NOT_COUNT_AS_BOOLEAN_TRUE'
+$badCounts=Snapshot-V057
+$badCounts.task_count=2;$badCounts.suspect_task_count=3
+$denied=$false
+try{[void](Resolve-CustomAppV057CutoverObservation -Snapshot $badCounts)}
+catch{if([string]$_.Exception.Message -ceq 'V057_SNAPSHOT_INCONSISTENT_COUNTS'){$denied=$true}else{throw}}
+Assert-V057 $denied 'IMPOSSIBLE_SUSPECT_TASK_COUNT_NOT_REJECTED'
+Write-Host 'V057_TYPED_BOOLEAN_FALSE_AND_IMPOSSIBLE_COUNTS_REJECTED_PASS'
+
 $real=Get-CustomAppV057ReadOnlyWindowsInventory
 Assert-V057NoAuthority $real
 Assert-V057 ($real.schema -eq 1 -and
