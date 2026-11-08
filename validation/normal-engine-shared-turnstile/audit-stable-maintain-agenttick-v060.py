@@ -148,6 +148,74 @@ def emit_targeted_control_flow(code: dict[str, str]) -> None:
             raise RuntimeError(f"V060_NOT_ENOUGH_SOURCE_FLOW_EVIDENCE_{label}")
 
 
+def emit_mutation_chain_summary(code: dict[str, str]) -> None:
+    # Exact public source functions reconstructed and SHA-pinned above.
+    selected = {
+        "stable_main": [
+            "Get-MaintenanceMode", "Enter-SpotifyControlMutex",
+            "Invoke-MaintenanceCheckPhase", "Invoke-MaintenanceMutationPhase",
+            "Invoke-ResidentAgentTick", "Maintain",
+        ],
+        "stable_addon_r17": [
+            "Update-AutoApps", "Rollback-LastTransaction",
+            "Commit-LastTransaction",
+        ],
+    }
+    interesting = re.compile(
+        r"(?i)(?:function |AddonManager|Update-AutoApps|Rollback|Commit|"
+        r"Invoke-|Start-Process|Process|powershell|Mutex|Lock|AgentTick|"
+        r"sourcePlan|Transaction|pending|check-only|SpotifyRunning|"
+        r"^[\s]*\$(?:r|m|status|mode|exitCode)\s*=)"
+    )
+    for label, names in selected.items():
+        text = code[label]
+        defs = list(SOURCE_FUNCTION.finditer(text))
+        for name in names:
+            matches = [(i, m) for i, m in enumerate(defs)
+                       if m.group(1).casefold() == name.casefold()]
+            if len(matches) != 1:
+                print(f"V060_CHAIN_{label.upper()}_{name}=NOT_ONE_FUNCTION")
+                continue
+            i, m = matches[0]
+            end = defs[i + 1].start() if i + 1 < len(defs) else len(text)
+            begin_line = text.count("\n", 0, m.start()) + 1
+            lines = text[m.start():end].splitlines()
+            print(f"V060_CHAIN_{label.upper()}_{name}=lines:{len(lines)}"
+                  f":first:{begin_line}")
+            n = 0
+            for delta, raw in enumerate(lines):
+                line = raw.strip()
+                if not line or line.startswith(("#", "'")) or not interesting.search(line):
+                    continue
+                if re.search(r"(?i)password|api[_-]?key|bearer|authorization|client_secret", line):
+                    continue
+                print(f"V060_CHAIN_CODE_{label.upper()}_L{begin_line+delta}=" +
+                      " ".join(line.split())[:220])
+                n += 1
+                if n == 48:
+                    break
+    # Full main action dispatch is the top-level switch after all defined
+    # functions; show only mutation-related dispatch terms, not user data.
+    lines = code["stable_main"].splitlines()
+    for number in range(4780, min(len(lines), 4978) + 1):
+        line = lines[number - 1].strip()
+        if re.search(
+            r"(?i)(?:\"(?:Update|Rollback|Install|AgentTick|Maintain|Launch|Check)"
+            r"|Invoke-Maintenance|Invoke-SelfUpdate|Update-AutoApps|"
+            r"Invoke-Addon|SelfUpdate|AgentTick|addon-manager|"
+            r"Enter-SpotifyControlMutex|\"Spicetify)",
+            line,
+        ):
+            print(f"V060_MAIN_ACTION_DISPATCH_L{number}=" +
+                  " ".join(line.split())[:180])
+    lines = code["stable_addon_r17"].splitlines()
+    for number in range(3780, min(len(lines), 3845) + 1):
+        line = lines[number - 1].strip()
+        if line and not line.startswith("#"):
+            print(f"V060_ADDON_ACTION_DISPATCH_L{number}=" +
+                  " ".join(line.split())[:180])
+
+
 def selftest() -> None:
     example = "function Alpha {\n -Action Maintain\n}\nfunction Bravo {\n -Action AgentTick\n}"
     a = mini_context(example, re.compile("Maintain"), "stable_main")
@@ -160,5 +228,6 @@ if __name__ == "__main__":
     selftest()
     info = source_summary()
     emit_targeted_control_flow(info["codes"])
+    emit_mutation_chain_summary(info["codes"])
     print("V060_ACTUAL_STABLE_MAIN_ADDON_VBS_TRIPLE_PINNED_DISPATCH_SOURCE_AUDIT_PASS")
     print("V060_SOURCE_CALLSITE_ONLY_NOT_RUNTIME_CUTOVER_OR_LIVE_AUTHORITY_PASS")
