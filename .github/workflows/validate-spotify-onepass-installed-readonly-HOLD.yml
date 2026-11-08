@@ -1,0 +1,90 @@
+name: HOLD one-pass actual Windows install acceptance preflight (read-only)
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - '.github/workflows/validate-spotify-onepass-installed-readonly-HOLD.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  exact-source-onepass-readonly-windows:
+    runs-on: windows-2025
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify production main pin and new PowerShell 5.1 source syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'LIVE_MAIN_CHANGED_REFUSE_TO_RUN'
+          }
+          foreach($p in @(
+            'validation/spotify-exit-immediate-maintenance-HOLD/onepass-installed-readonly-preflight.ps1',
+            'validation/spotify-exit-immediate-maintenance-HOLD/test-onepass-installed-readonly-preflight.ps1'
+          )){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw ('REAL_READONLY_SOURCE_PS51_PARSE_FAILED: '+[string]$errors[0].Message)}
+          }
+          Write-Host 'READONLY_REAL_PC_SOURCE_PS51_PARSE_PASS'
+      - name: Obtain existing original Bootstrap carrier (one-time exact SHA)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' > validated-v0614-repair-artifact.zip
+          python - <<'PY'
+          from pathlib import Path
+          from io import BytesIO
+          import hashlib,zipfile,os
+          outer=Path('validated-v0614-repair-artifact.zip').read_bytes()
+          with zipfile.ZipFile(BytesIO(outer)) as oz:
+              assert oz.testzip() is None
+              inner=oz.read('SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip')
+          assert len(inner)==30856
+          assert hashlib.sha256(inner).hexdigest()=='6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdfd267bd95f6c6ddcf06'
+          with zipfile.ZipFile(BytesIO(inner)) as z:
+              boot=z.read('bootstrap/spotify-control-self-updater.ps1')
+          assert len(boot)==42963
+          assert hashlib.sha256(boot).hexdigest()=='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
+          Path(os.environ['RUNNER_TEMP'],'bootstrap-v106-ci.ps1').write_bytes(boot)
+          print('REUSED_ORIGINAL_BOOTSTRAP_V106_SHA_PASS')
+          PY
+      - name: Rebuild only exact stable scripts and canonical VBS for this new probe
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/v0.6.28/build_v0628.py --build
+          if($LASTEXITCODE -ne 0){throw 'CANONICAL_STABLE_BUILD_FAILED'}
+          @'
+          from pathlib import Path
+          import os,runpy,hashlib
+          ns=runpy.run_path('validation/normal-engine-shared-turnstile/audit-pinned-stable-entrypoints-v059.py')
+          data=ns['extract_verified_agent']()
+          assert len(data)==4855
+          assert hashlib.sha256(data).hexdigest()=='2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278'
+          Path(os.environ['RUNNER_TEMP'],'agent-v011-ci.vbs').write_bytes(data)
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'CANONICAL_AGENT_VBS_NOT_REBUILT'}
+          Write-Host 'UNCHANGED_STABLE_MAIN_ADDON_AGENT_RECONSTRUCTED'
+      - name: One pass hosted fixture of real installed-source state
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $boot=Join-Path $env:RUNNER_TEMP 'bootstrap-v106-ci.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/spotify-exit-immediate-maintenance-HOLD/test-onepass-installed-readonly-preflight.ps1 -OriginalBootstrap $boot
+          if($LASTEXITCODE -ne 0){throw 'ONEPASS_REAL_PC_PREFLIGHT_NOT_ACCEPTED'}
+          Write-Host 'ONEPASS_INSTALLED_SOURCE_AUDIT_ACCEPTED_NO_INSTALLED_USER_APP_TOUCHED'
+      - name: Cleanup fixture bootstrap bytes
+        if: always()
+        shell: powershell
+        run: |
+          Remove-Item -LiteralPath validated-v0614-repair-artifact.zip -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'bootstrap-v106-ci.ps1') -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'agent-v011-ci.vbs') -Force -ErrorAction SilentlyContinue
