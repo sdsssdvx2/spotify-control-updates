@@ -1,0 +1,110 @@
+name: Coherent guarded Spotify Control and Addon Manager source bundle (HOLD)
+on:
+  push:
+    branches: [validate/integrated-guarded-source-bundle-HOLD]
+    paths:
+      - 'validation/normal-engine-shared-turnstile/stage-coherent-guarded-sources-HOLD.ps1'
+      - '.github/workflows/validate-integrated-guarded-source-bundle-HOLD.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  build-and-attest-two-source-pair-nondeploy:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Verify exact parent, operating main and PS51
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='6d1394fb50073763a6c802054c78fbb1965c6230'
+          $operating='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          $allowed=@(
+           'validation/normal-engine-shared-turnstile/stage-coherent-guarded-sources-HOLD.ps1',
+           '.github/workflows/validate-integrated-guarded-source-bundle-HOLD.yml'
+          )
+          if((git merge-base $parent HEAD).Trim() -cne $parent -or
+             (git rev-parse origin/main).Trim() -cne $operating -or
+             (git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA){
+            throw 'BUNDLE_IMMUTABLE_PARENT_OR_MAIN_CHANGED'
+          }
+          $changed=@(git diff --name-only "$parent...HEAD")
+          if($changed.Count -ne 2 -or @($changed|Where-Object{$_ -cnotin $allowed}).Count -ne 0){
+             throw 'BUNDLE_NOT_EXACT_TWO_DEVELOPMENT_FILES'
+          }
+          $tokens=$null;$err=$null
+          [void][Management.Automation.Language.Parser]::ParseFile(
+             (Resolve-Path $allowed[0]).Path,[ref]$tokens,[ref]$err)
+          if($err.Count){throw ('BUNDLE_SCRIPT_PS51_INVALID_'+$err[0].Message)}
+          Write-Host 'BUNDLE_EXACT_V063_PARENT_AND_POWERSHELL51_PASS'
+      - name: Rebuild BOTH immutable stable sources exactly ONCE without running
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & python validation/v0.6.28/build_v0628.py --build
+          if($LASTEXITCODE -ne 0){throw 'BUNDLE_RECONSTRUCT_FAILED'}
+          $root='validation/v0.6.28/out/bin'
+          $expected=@(
+            @{name='spotify-control.ps1';sha='af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0';size=284321},
+            @{name='addon-manager.ps1';sha='5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285';size=323385}
+          )
+          foreach($item in $expected){
+            $p=Join-Path $root $item.name
+            if((Get-Item $p).Length -ne $item.size -or
+              (Get-FileHash $p -Algorithm SHA256).Hash.ToLowerInvariant() -cne $item.sha){
+              throw ('BUNDLE_SOURCE_DRIFT_'+$item.name)
+            }
+          }
+          Write-Host 'BUNDLE_BOTH_CANONICAL_SOURCES_BYTE_PINNED_PASS'
+      - name: Compose four existing qualified transforms and cross-file bind
+        shell: powershell
+        timeout-minutes: 8
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='validation/normal-engine-shared-turnstile'
+          $src='validation/v0.6.28/out/bin'
+          $temp=$env:RUNNER_TEMP
+          $v060=Join-Path $temp 'pair-V060'
+          $v061=Join-Path $temp 'pair-V061'
+          $v062=Join-Path $temp 'pair-V062'
+          $main=Join-Path $temp 'pair-main'
+          $out=Join-Path $temp 'guarded-source-HOLD'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $base 'build-pinned-r17-reentrant-v060.ps1') -ParentCandidate (Join-Path $src 'addon-manager.ps1') -OutputDirectory $v060
+          if($LASTEXITCODE -ne 0){throw 'BUNDLE_V060_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $base 'build-r17-enrollment-guard-v061.ps1') -ParentCandidate (Join-Path $v060 'addon-manager-reentrant-V060-NONDEPLOY.ps1') -OutputDirectory $v061
+          if($LASTEXITCODE -ne 0){throw 'BUNDLE_V061_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $base 'build-auxiliary-writers-v062.ps1') -ParentCandidate (Join-Path $v061 'addon-manager-reentrant-enrollment-V061-NONDEPLOY.ps1') -OutputDirectory $v062
+          if($LASTEXITCODE -ne 0){throw 'BUNDLE_V062_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $base 'build-main-enrollment-preflight-HOLD.ps1') -ParentMain (Join-Path $src 'spotify-control.ps1') -OutputDirectory $main
+          if($LASTEXITCODE -ne 0){throw 'BUNDLE_MAIN_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $base 'stage-coherent-guarded-sources-HOLD.ps1') -OriginalMain (Join-Path $src 'spotify-control.ps1') -OriginalAddon (Join-Path $src 'addon-manager.ps1') -GuardedMain (Join-Path $main 'spotify-control-enrollment-preflight-NONDEPLOY.ps1') -GuardedAddon (Join-Path $v062 'addon-manager-auxiliary-gated-V062-NONDEPLOY.ps1') -OutputDirectory $out
+          if($LASTEXITCODE -ne 0){throw 'BUNDLE_PAIR_BIND_FAILED'}
+          $manifest=Get-Content (Join-Path $out 'MANIFEST-HOLD.json') -Raw|ConvertFrom-Json
+          foreach($record in @(
+           @{name='spotify-control.ps1';sha=$manifest.candidate_main_sha256},
+           @{name='addon-manager.ps1';sha=$manifest.candidate_addon_sha256}
+          )){
+            $f=Join-Path (Join-Path $out 'bin') $record.name
+            if((Get-FileHash $f -Algorithm SHA256).Hash.ToLowerInvariant() -cne $record.sha){
+              throw 'BUNDLE_INDEPENDENT_MANIFEST_HASH_MISMATCH'
+            }
+          }
+          if($manifest.deployable -or $manifest.production_mutation_authorized -or $manifest.real_spotify_executed){
+            throw 'BUNDLE_UNAUTHORIZED_REAL_DEPLOYMENT_FLAG'
+          }
+          Write-Host 'BUNDLE_ONE_COHERENT_HELD_PAIR_NO_INSTALL_NO_USER_DATA_PASS'
+      - name: Retain coherent SHA-proof artifact NOT an installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: spotify-control-guarded-source-HOLD
+          path: ${{ runner.temp }}/guarded-source-HOLD/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Confirm immutable operating main
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'BUNDLE_OPERATING_MAIN_MOVED'
+          }
+          Write-Host 'BUNDLE_MAIN_AND_OPERATING_PC_UNCHANGED'
