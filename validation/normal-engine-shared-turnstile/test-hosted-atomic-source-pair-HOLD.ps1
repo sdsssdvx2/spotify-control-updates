@@ -3,6 +3,7 @@
 param([switch]$Recover,
  [switch]$Discover,
  [switch]$RecoverCombined,
+ [switch]$DiscoverTaskJournal,
  [string]$FixtureRoot,
  [string]$Journal,
  [string]$JournalSha256,
@@ -30,9 +31,24 @@ if($Recover){
  if($RecoverCombined){
   # Restore the exact verified old scripts FIRST, then (and only then)
   # re-enable/remove our freshly owned far-future synthetic task.
-  Assert-V064 (-not[string]::IsNullOrWhiteSpace($ScratchTaskJournal)) 'COMBINED_RECOVERY_NEEDS_TASK_JOURNAL'
+  if($DiscoverTaskJournal){
+   # The original V058 journal was durably flushed before task disable.
+   # After an interrupted parent's lost return, discover ONLY one exact
+   # GUID-named scratch journal at GitHub RUNNER_TEMP's root. V058's own
+   # authenticated task XML/description/command identity checks still apply.
+   Assert-V064 ([string]::IsNullOrWhiteSpace($ScratchTaskJournal)) 'COMBINED_TASK_DISCOVERY_MUST_NOT_HAVE_EXTERNAL_PATH'
+   $candidates=@(Get-ChildItem -LiteralPath $env:RUNNER_TEMP -Force -ErrorAction Stop|
+    Where-Object{$_.Name.StartsWith('V058-Scratch-',
+      [StringComparison]::OrdinalIgnoreCase)})
+   Assert-V064 ($candidates.Count -eq 1 -and
+    [string]$candidates[0].Name -cmatch '^V058-Scratch-[a-f0-9]{32}\.json$') 'COMBINED_TASK_DISCOVERY_AMBIGUOUS_OR_INVALID'
+   $scratchPath=[string]$candidates[0].FullName
+  }else{
+   Assert-V064 (-not[string]::IsNullOrWhiteSpace($ScratchTaskJournal)) 'COMBINED_RECOVERY_NEEDS_TASK_JOURNAL'
+   $scratchPath=$ScratchTaskJournal
+  }
   . (Join-Path $PSScriptRoot 'scheduler-scratch-quiescence-v058.ps1')
-  $result=Restore-V058OwnedScratchFromJournal -JournalPath $ScratchTaskJournal
+  $result=Restore-V058OwnedScratchFromJournal -JournalPath $scratchPath
   Assert-V064 ([bool]$result.recovered_in_fresh_process -and
     [bool]$result.enabled_state_restored -and
     [bool]$result.scratch_task_deleted -and
@@ -192,7 +208,7 @@ try{
   $prev=$ErrorActionPreference
   $ErrorActionPreference='Continue'
   try{
-   & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $PSCommandPath -Recover -Discover -RecoverCombined -FixtureRoot $f5.root -ScratchTaskJournal $taskProof.journal_path *> $null
+   & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $PSCommandPath -Recover -Discover -RecoverCombined -DiscoverTaskJournal -FixtureRoot $f5.root *> $null
    $bad=$LASTEXITCODE
   }finally{$ErrorActionPreference=$prev}
   Assert-V064 ($bad -ne 0) 'CORRUPT_SOURCE_RECOVERY_ALLOWED_TASK_REENABLE'
@@ -203,7 +219,25 @@ try{
   Assert-V064 (-not[bool]$task.Enabled -and
     (Get-V064Sha $f5.main) -ceq [string]$expectedManifest.candidate_main_sha256) 'CORRUPT_SOURCE_RECOVERY_ENABLED_TASK_OR_OVERWROTE_SOURCE'
  }finally{[IO.File]::WriteAllBytes([string]$r5.journal,$journalOriginal)}
- & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $PSCommandPath -Recover -Discover -RecoverCombined -FixtureRoot $f5.root -ScratchTaskJournal $taskProof.journal_path
+ # A second plausible V058 journal must NOT be guessed as the real one.
+ $clone=Join-Path $env:RUNNER_TEMP ('V058-Scratch-'+[guid]::NewGuid().ToString('N')+'.json')
+ [IO.File]::Copy([string]$taskProof.journal_path,$clone,$false)
+ try{
+  $prior=$ErrorActionPreference
+  $ErrorActionPreference='Continue'
+  try{
+   & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $PSCommandPath -Recover -Discover -RecoverCombined -DiscoverTaskJournal -FixtureRoot $f5.root *> $null
+   $bad=$LASTEXITCODE
+  }finally{$ErrorActionPreference=$prior}
+  Assert-V064 ($bad -ne 0) 'AMBIGUOUS_SCRATCH_TASK_DISCOVERY_ACCEPTED'
+  $svc=New-Object -ComObject Schedule.Service
+  $svc.Connect()
+  $scratchFolder=$svc.GetFolder('\')
+  $scratchTask=$scratchFolder.GetTask([string]$taskProof.scratch_task_name)
+  Assert-V064 (-not[bool]$scratchTask.Enabled) 'AMBIGUOUS_TASK_DISCOVERY_CHANGED_TASK'
+ }finally{[IO.File]::Delete($clone)}
+ Write-Host 'V064_BOTH_LOST_JOURNAL_RECEIPTS_AMBIGUOUS_TASK_RECOVERY_FAIL_CLOSED_PASS'
+ & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $PSCommandPath -Recover -Discover -RecoverCombined -DiscoverTaskJournal -FixtureRoot $f5.root
  if($LASTEXITCODE -ne 0){throw 'V064_COMBINED_SOURCE_THEN_SCHEDULER_RECOVERY_FAILED'}
  $taskDone=$true
  Assert-V064 ((Get-V064Sha $f5.main) -ceq [string]$expectedManifest.original_main_sha256 -and
@@ -211,6 +245,7 @@ try{
  Check-V064Preservation $f5
  Write-Host 'V064_ONE_HOSTED_REAL_TASK_DISABLED_UNTIL_BOTH_SOURCE_FILES_RESTORED_PASS'
 Write-Host 'V064_TASK_RESTORE_DEPENDS_ON_AUTODISCOVERED_AUTHENTICATED_SOURCE_RECOVERY_PASS'
+ Write-Host 'V064_BOTH_JOURNALS_RECOVERED_WITHOUT_PARENT_RECEIPTS_PASS'
 }finally{
  if($null-ne$taskProof -and -not$taskDone){
   try{[void](Restore-V058OwnedScratchFromJournal -JournalPath ([string]$taskProof.journal_path))}
