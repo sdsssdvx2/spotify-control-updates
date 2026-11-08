@@ -43,7 +43,7 @@ $originalLocal=$env:LOCALAPPDATA
 $originalRoaming=$env:APPDATA
 $originalProfile=$env:USERPROFILE
 try {
-    if(-not $private.StartsWith(([IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\\')+'\\'),[StringComparison]::OrdinalIgnoreCase)){
+    if(-not $private.StartsWith(([IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\')+'\'),[StringComparison]::OrdinalIgnoreCase)){
         throw 'E2E_PRIVATE_PATH_NOT_BENEATH_RUNNER_TEMP'
     }
     [IO.Directory]::CreateDirectory($private)|Out-Null
@@ -83,10 +83,10 @@ try {
     $check=([Text.Encoding]::UTF8.GetString($injected)).Replace($localUrl,$mainUrl)
     if($check -cne $content){throw 'BOOTSTRAP_COPY_CHANGED_BEYOND_LOCAL_URL'}
     $ciManifest=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'out/preview/manifest.json') -Raw | ConvertFrom-Json
-    $ciManifest.bootstrap.sha256=([Security.Cryptography.SHA256]::Create().ComputeHash($injected)|ForEach-Object ToString x2) -join ''
+    $ciManifest.bootstrap.sha256=[BitConverter]::ToString(([Security.Cryptography.SHA256]::Create()).ComputeHash($injected)).Replace('-','').ToLowerInvariant()
     $ciManifest.bootstrap.size=$injected.Length
     [IO.Directory]::CreateDirectory($manifestDir)|Out-Null
-    $ciManifest|ConvertTo-Json -Depth 100 -Compress|Set-Content -LiteralPath (Join-Path $manifestDir 'manifest.json') -Encoding UTF8
+    [IO.File]::WriteAllText((Join-Path $manifestDir 'manifest.json'),($ciManifest|ConvertTo-Json -Depth 100 -Compress),(New-Object System.Text.UTF8Encoding($false)))
     $env:LOCALAPPDATA=Join-Path $copied 'LocalAppData'
     $env:APPDATA=Join-Path $copied 'Roaming'
     [IO.Directory]::CreateDirectory($env:APPDATA)|Out-Null
