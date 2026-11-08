@@ -2,8 +2,8 @@
 # WHOLE TWO-SCRIPT guarded source pair, using real source bytes and the V047
 # OS lock. Only Windows github-hosted RUNNER_TEMP. Never write installed
 # SpotifyControl, user profiles, scheduled tasks, or real new engine journals.
-# Recovery is an independent callable function and needs the exact SHA of
-# the immutable intent journal. No "GO" state or OS-wide process fence.
+# Recovery is an independent callable function: an external SHA pin is
+# accepted when available; otherwise unique DPAPI-authenticated discovery. No "GO" state or OS-wide process fence.
 Set-StrictMode -Version 2.0
 function Assert-V064([bool]$ok,[string]$reason){
  if(-not$ok){throw ('V064_'+$reason)}
@@ -107,7 +107,7 @@ function New-V064SourceIntent {
  param([Parameter(Mandatory=$true)]$Paths,
        [Parameter(Mandatory=$true)]$Bundle,
        [Parameter(Mandatory=$true)][string]$Nonce)
- $journal=Join-Path $Paths.recovery ('source-pair-intent-'+$Nonce+'.json')
+ $journal=Join-Path $Paths.recovery ('source-pair-intent-'+$Nonce+'.dpapi')
  $record=[ordered]@{
   schema=1;owner='V064_GITHUB_HOSTED_SOURCE_PAIR_ONLY'
   fixture_root=$Paths.root;id=$Nonce
@@ -117,10 +117,24 @@ function New-V064SourceIntent {
   backup_addon='original-addon-'+$Nonce+'.bak'
   production_mutation_authorized=$false;source_pair_cutover_authorized=$false
  }
+ # DPAPI CurrentUser integrity protects recovery when its returned external
+ # SHA receipt is lost in a crash. This is NOT an external/offsite trust pin,
+ # and does not exclude hostile code already running as the same Windows user.
+ Add-Type -AssemblyName System.Security -ErrorAction Stop
  $utf8=[Text.UTF8Encoding]::new($false,$true)
- $bytes=$utf8.GetBytes(($record|ConvertTo-Json -Compress -Depth 3))
- $f=[IO.File]::Open($journal,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
- try{$f.Write($bytes,0,$bytes.Length);$f.Flush($true)}finally{$f.Dispose()}
+ $entropy=$utf8.GetBytes('V064-HOSTED-SOURCE-INTENT|'+$Paths.root+'|'+$Nonce)
+ $plain=$utf8.GetBytes(($record|ConvertTo-Json -Compress -Depth 3))
+ $cipher=$null
+ try{
+  $cipher=[Security.Cryptography.ProtectedData]::Protect(
+    $plain,$entropy,[Security.Cryptography.DataProtectionScope]::CurrentUser)
+  $f=[IO.File]::Open($journal,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+  try{$f.Write($cipher,0,$cipher.Length);$f.Flush($true)}finally{$f.Dispose()}
+ }finally{
+  [Array]::Clear($plain,0,$plain.Length)
+  [Array]::Clear($entropy,0,$entropy.Length)
+  if($null-ne$cipher){[Array]::Clear($cipher,0,$cipher.Length)}
+ }
  return [pscustomobject]@{path=$journal;sha=(Get-V064Sha $journal);record=$record}
 }
 function Start-V064HostedSourcePairPublish {
@@ -181,21 +195,186 @@ function Start-V064HostedSourcePairPublish {
 }
 function Restore-V064HostedSourcePair {
  param([Parameter(Mandatory=$true)][string]$FixtureRoot,
-       [Parameter(Mandatory=$true)][string]$Journal,
-       [Parameter(Mandatory=$true)][string]$JournalSha256)
+       [string]$Journal=$null,
+       [string]$JournalSha256=$null)
  $p=Assert-V064HostedFixture -FixtureRoot $FixtureRoot
- Assert-V064 ($JournalSha256 -cmatch '^[a-f0-9]{64}$') 'INTENT_PIN_MISSING'
- $path=[IO.Path]::GetFullPath($Journal)
+ $providedPath=-not[string]::IsNullOrWhiteSpace($Journal)
+ $providedPin=-not[string]::IsNullOrWhiteSpace($JournalSha256)
+ Assert-V064 ($providedPath -eq $providedPin) 'PARTIAL_EXTERNAL_JOURNAL_PIN'
+ if($providedPath){
+  Assert-V064 ($JournalSha256 -cmatch '^[a-f0-9]{64}
+ $fields=@('schema','owner','fixture_root','id','old_main_sha256','old_addon_sha256',
+  'candidate_main_sha256','candidate_addon_sha256',
+  'backup_main','backup_addon','production_mutation_authorized','source_pair_cutover_authorized')
+ Assert-V064 (
+  @($record.PSObject.Properties).Count -eq $fields.Count -and
+  @($fields|Where-Object{$null-eq$record.PSObject.Properties[$_]}).Count -eq 0 -and
+  [int]$record.schema -eq 1 -and
+  [string]$record.owner -ceq 'V064_GITHUB_HOSTED_SOURCE_PAIR_ONLY' -and
+  [string]$record.fixture_root -ceq $p.root -and
+  [string]$record.id -ceq $nonce -and
+  [string]$record.old_main_sha256 -ceq $p.oldMain -and
+  [string]$record.old_addon_sha256 -ceq $p.oldAddon -and
+  [string]$record.candidate_main_sha256 -cmatch '^[a-f0-9]{64}$' -and
+  [string]$record.candidate_addon_sha256 -cmatch '^[a-f0-9]{64}$' -and
+  [string]$record.backup_main -ceq ('original-main-'+$nonce+'.bak') -and
+  [string]$record.backup_addon -ceq ('original-addon-'+$nonce+'.bak') -and
+  $record.production_mutation_authorized -is [bool] -and
+  -not[bool]$record.production_mutation_authorized -and
+  $record.source_pair_cutover_authorized -is [bool] -and
+  -not[bool]$record.source_pair_cutover_authorized
+ ) 'INTENT_INVALID_SCHEMA_OR_OWNER_OR_SOURCE'
+ . (Join-Path $PSScriptRoot 'engine-turnstile-v047.ps1')
+ $lease=$null
+ try{
+  $lease=Enter-CustomAppEngineTurnstileV047 -HostedCiRoot $p.local
+  # No file is modified until ALL destinations have been classified and
+  # EVERY required preimage backup is verified. Never overwrite a file
+  # changed by another writer.
+  $records=@(
+   [pscustomobject]@{target=$p.addon;old=$p.oldAddon;new=[string]$record.candidate_addon_sha256
+    backup=(Join-Path $p.recovery ([string]$record.backup_addon));label='addon'},
+   [pscustomobject]@{target=$p.main;old=$p.oldMain;new=[string]$record.candidate_main_sha256
+    backup=(Join-Path $p.recovery ([string]$record.backup_main));label='main'}
+  )
+  foreach($part in $records){
+   $target=(Get-V064Sha ([string]$part.target))
+   Assert-V064 ($target -cin @([string]$part.old,[string]$part.new)) (
+    'UNRECOGNIZED_CONCURRENT_SOURCE_DRIFT_'+$part.label)
+   if($target -ceq [string]$part.new){
+    Assert-V064ExistingFile -Path ([string]$part.backup) -Sha256 ([string]$part.old)
+   }
+  }
+  $count=0
+  foreach($part in $records){
+   if((Get-V064Sha ([string]$part.target)) -ceq [string]$part.old){continue}
+   $stage=Join-Path $p.bin ('restore-'+$part.label+'-'+$nonce+'.new')
+   Copy-V064DurableNew -Source ([string]$part.backup) -Target $stage -ExpectedSha ([string]$part.old)
+   $replaced=Join-Path $p.recovery ('discarded-candidate-'+$part.label+'-'+$nonce+'.bak')
+   [IO.File]::Replace($stage,[string]$part.target,$replaced,$false)
+   Assert-V064ExistingFile -Path ([string]$part.target) -Sha256 ([string]$part.old)
+   Assert-V064ExistingFile -Path $replaced -Sha256 ([string]$part.new)
+   $count++
+  }
+  Assert-V064ExistingFile -Path $p.main -Sha256 $p.oldMain
+  Assert-V064ExistingFile -Path $p.addon -Sha256 $p.oldAddon
+  return [pscustomobject]@{
+   status='HOSTED_OLD_SOURCES_RESTORED_FROM_JOURNAL'
+   files_rolled_back=$count
+   preimage_backups_preserved=$true
+   recovery_journal_retained=$true
+   source_bytes_exact=$true
+   production_mutation_authorized=$false;real_profile_written=$false
+  }
+ }finally{if($null-ne$lease){$lease.Dispose()}}
+}
+) 'EXTERNAL_JOURNAL_PIN_INVALID'
+  $path=[IO.Path]::GetFullPath($Journal)
+ }else{
+  # Recovery must work even if the publisher exited before returning a
+  # receipt. Treat ALL source-intent-like entries as candidates; do not
+  # silently ignore malformed/foreign/symlink entries or ambiguity.
+  $all=@(Get-ChildItem -LiteralPath $p.recovery -Force -ErrorAction Stop|
+   Where-Object{$_.Name.StartsWith('source-pair-intent-',
+      [StringComparison]::OrdinalIgnoreCase)})
+  Assert-V064 ($all.Count -eq 1) 'DISCOVERY_REQUIRES_ONE_UNAMBIGUOUS_INTENT'
+  $path=[IO.Path]::GetFullPath([string]$all[0].FullName)
+ }
  Assert-V064 ($path.StartsWith(($p.recovery+'\'),[StringComparison]::OrdinalIgnoreCase) -and
-  [IO.Path]::GetFileName($path) -cmatch '^source-pair-intent-[a-f0-9]{32}\.json$' -and
-  (Get-V064Sha $path) -ceq $JournalSha256) 'INTENT_CIPHERTEXT_SHA_OR_LOCATION_CHANGED'
+  [IO.Path]::GetFileName($path) -cmatch '^source-pair-intent-[a-f0-9]{32}\.dpapi
+ $fields=@('schema','owner','fixture_root','id','old_main_sha256','old_addon_sha256',
+  'candidate_main_sha256','candidate_addon_sha256',
+  'backup_main','backup_addon','production_mutation_authorized','source_pair_cutover_authorized')
+ Assert-V064 (
+  @($record.PSObject.Properties).Count -eq $fields.Count -and
+  @($fields|Where-Object{$null-eq$record.PSObject.Properties[$_]}).Count -eq 0 -and
+  [int]$record.schema -eq 1 -and
+  [string]$record.owner -ceq 'V064_GITHUB_HOSTED_SOURCE_PAIR_ONLY' -and
+  [string]$record.fixture_root -ceq $p.root -and
+  [string]$record.id -ceq $nonce -and
+  [string]$record.old_main_sha256 -ceq $p.oldMain -and
+  [string]$record.old_addon_sha256 -ceq $p.oldAddon -and
+  [string]$record.candidate_main_sha256 -cmatch '^[a-f0-9]{64}$' -and
+  [string]$record.candidate_addon_sha256 -cmatch '^[a-f0-9]{64}$' -and
+  [string]$record.backup_main -ceq ('original-main-'+$nonce+'.bak') -and
+  [string]$record.backup_addon -ceq ('original-addon-'+$nonce+'.bak') -and
+  $record.production_mutation_authorized -is [bool] -and
+  -not[bool]$record.production_mutation_authorized -and
+  $record.source_pair_cutover_authorized -is [bool] -and
+  -not[bool]$record.source_pair_cutover_authorized
+ ) 'INTENT_INVALID_SCHEMA_OR_OWNER_OR_SOURCE'
+ . (Join-Path $PSScriptRoot 'engine-turnstile-v047.ps1')
+ $lease=$null
+ try{
+  $lease=Enter-CustomAppEngineTurnstileV047 -HostedCiRoot $p.local
+  # No file is modified until ALL destinations have been classified and
+  # EVERY required preimage backup is verified. Never overwrite a file
+  # changed by another writer.
+  $records=@(
+   [pscustomobject]@{target=$p.addon;old=$p.oldAddon;new=[string]$record.candidate_addon_sha256
+    backup=(Join-Path $p.recovery ([string]$record.backup_addon));label='addon'},
+   [pscustomobject]@{target=$p.main;old=$p.oldMain;new=[string]$record.candidate_main_sha256
+    backup=(Join-Path $p.recovery ([string]$record.backup_main));label='main'}
+  )
+  foreach($part in $records){
+   $target=(Get-V064Sha ([string]$part.target))
+   Assert-V064 ($target -cin @([string]$part.old,[string]$part.new)) (
+    'UNRECOGNIZED_CONCURRENT_SOURCE_DRIFT_'+$part.label)
+   if($target -ceq [string]$part.new){
+    Assert-V064ExistingFile -Path ([string]$part.backup) -Sha256 ([string]$part.old)
+   }
+  }
+  $count=0
+  foreach($part in $records){
+   if((Get-V064Sha ([string]$part.target)) -ceq [string]$part.old){continue}
+   $stage=Join-Path $p.bin ('restore-'+$part.label+'-'+$nonce+'.new')
+   Copy-V064DurableNew -Source ([string]$part.backup) -Target $stage -ExpectedSha ([string]$part.old)
+   $replaced=Join-Path $p.recovery ('discarded-candidate-'+$part.label+'-'+$nonce+'.bak')
+   [IO.File]::Replace($stage,[string]$part.target,$replaced,$false)
+   Assert-V064ExistingFile -Path ([string]$part.target) -Sha256 ([string]$part.old)
+   Assert-V064ExistingFile -Path $replaced -Sha256 ([string]$part.new)
+   $count++
+  }
+  Assert-V064ExistingFile -Path $p.main -Sha256 $p.oldMain
+  Assert-V064ExistingFile -Path $p.addon -Sha256 $p.oldAddon
+  return [pscustomobject]@{
+   status='HOSTED_OLD_SOURCES_RESTORED_FROM_JOURNAL'
+   files_rolled_back=$count
+   preimage_backups_preserved=$true
+   recovery_journal_retained=$true
+   source_bytes_exact=$true
+   production_mutation_authorized=$false;real_profile_written=$false
+  }
+ }finally{if($null-ne$lease){$lease.Dispose()}}
+}
+) 'INTENT_LOCATION_OR_NAME_UNTRUSTED'
  $item=Get-Item -LiteralPath $path -Force -ErrorAction Stop
  Assert-V064 (-not$item.PSIsContainer -and
   ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0 -and
-  [int64]$item.Length -gt 250 -and [int64]$item.Length -lt 8192) 'INTENT_FILE_NOT_BOUNDED'
- $utf8=[Text.UTF8Encoding]::new($false,$true)
- $record=$utf8.GetString([IO.File]::ReadAllBytes($path))|ConvertFrom-Json -ErrorAction Stop
+  [int64]$item.Length -gt 150 -and [int64]$item.Length -lt 8192) 'INTENT_FILE_NOT_BOUNDED'
+ if($providedPath){
+  Assert-V064 ((Get-V064Sha $path) -ceq $JournalSha256) 'EXTERNAL_JOURNAL_CIPHERTEXT_SHA_CHANGED'
+ }
  $nonce=[IO.Path]::GetFileNameWithoutExtension($path).Substring('source-pair-intent-'.Length)
+ $utf8=[Text.UTF8Encoding]::new($false,$true)
+ Add-Type -AssemblyName System.Security -ErrorAction Stop
+ $cipher=[IO.File]::ReadAllBytes($path)
+ $entropy=$utf8.GetBytes('V064-HOSTED-SOURCE-INTENT|'+$p.root+'|'+$nonce)
+ $plain=$null
+ try{
+  try{
+   $plain=[Security.Cryptography.ProtectedData]::Unprotect(
+      $cipher,$entropy,[Security.Cryptography.DataProtectionScope]::CurrentUser)
+  }catch{
+   throw 'V064_INTENT_DPAPI_INTEGRITY_OR_USER_MISMATCH'
+  }
+  Assert-V064 ($plain.Length -gt 150 -and $plain.Length -lt 8192) 'INTENT_DECRYPTED_LENGTH_INVALID'
+  $record=$utf8.GetString($plain)|ConvertFrom-Json -ErrorAction Stop
+ }finally{
+  [Array]::Clear($cipher,0,$cipher.Length)
+  [Array]::Clear($entropy,0,$entropy.Length)
+  if($null-ne$plain){[Array]::Clear($plain,0,$plain.Length)}
+ }
  $fields=@('schema','owner','fixture_root','id','old_main_sha256','old_addon_sha256',
   'candidate_main_sha256','candidate_addon_sha256',
   'backup_main','backup_addon','production_mutation_authorized','source_pair_cutover_authorized')
