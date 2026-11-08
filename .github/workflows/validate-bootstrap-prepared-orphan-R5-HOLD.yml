@@ -6,7 +6,7 @@ on:
     paths:
       - '.github/workflows/validate-bootstrap-prepared-orphan-R5-HOLD.yml'
   workflow_dispatch:
-# One focused HRESULT diagnostic from a disposable Windows fixture.
+# Actual Windows E_INVALIDARG fix: File.Replace uses an atomic non-null original escrow.
 permissions: {contents: read, actions: read}
 jobs:
   verify-no-bin-swap-and-no-overwrite:
