@@ -128,6 +128,38 @@ jobs:
           if($LASTEXITCODE -ne 0 -or $again -cnotcontains 'RESULT=HOLD_NO_AUTOMATIC_RETRY' -or
              (Get-FileHash $escrow -Algorithm SHA256).Hash.ToLowerInvariant() -cne $before){throw 'R5_SECOND_RUN_NOT_FAIL_CLOSED'}
           Write-Host 'TERMINALIZED_JOURNAL_NOT_MUTATED_AGAIN_PASS'
+          # Simulate an active resident VBS worker in the private fixture only.
+          # The original transaction is restored here solely to exercise the
+          # new commit admission gate, never on a real user machine.
+          [IO.File]::Copy($escrow,$record,$true)
+          [IO.File]::Delete($escrow)
+          $agentPath=Join-Path $bin 'spotify-control-agent.vbs'
+          $stub=Join-Path $fixture 'synthetic-resident-stub.vbs'
+          [IO.File]::WriteAllText($stub,('Do' + [char]10 + 'WScript.Sleep 500' + [char]10 + 'Loop'),(New-Object Text.UTF8Encoding($false)))
+          $wscript=Join-Path $env:SystemRoot 'System32\wscript.exe'
+          $fake=$null
+          try{
+            $arguments='//B //NoLogo "'+$stub+'" "'+$agentPath+'"'
+            $fake=Start-Process -FilePath $wscript -ArgumentList $arguments -PassThru
+            Start-Sleep -Milliseconds 350
+            if($fake.HasExited){throw 'SYNTHETIC_RESIDENT_SCRIPT_NOT_ALIVE'}
+            $wp=Get-CimInstance -ClassName Win32_Process -Filter ('ProcessId='+$fake.Id) -ErrorAction Stop
+            if([string]$wp.CommandLine -notlike ('*'+$agentPath+'*')){throw 'SYNTHETIC_RESIDENT_PROCESS_NOT_OBSERVABLE'}
+            $r=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture -Commit -ApprovalPhrase EXACT_PREPARED_NO_BIN_SWAP 2>&1)
+            if($LASTEXITCODE -ne 0 -or $r -cnotcontains 'RESIDENT_AGENT=ACTIVE_REQUIRES_QUIESCENCE' -or
+               $r -cnotcontains 'HOLD_REASON=ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE' -or
+               $r -cnotcontains 'RESULT=HOLD_NO_AUTOMATIC_RETRY' -or
+               (Test-Path $escrow) -or
+               (Get-FileHash $record -Algorithm SHA256).Hash.ToLowerInvariant() -cne $before){
+              throw 'ACTIVE_RESIDENT_WAS_NOT_A_HARD_COMMIT_BLOCKER'
+            }
+            Write-Host 'ACTIVE_SYNTHETIC_RESIDENT_BLOCKS_JOURNAL_COMMIT_NO_WRITES_PASS'
+          }finally{
+            if($null -ne $fake -and -not $fake.HasExited){
+              Stop-Process -Id $fake.Id -Force -ErrorAction SilentlyContinue
+              try{$fake.WaitForExit(5000)|Out-Null}catch{}
+            }
+          }
           if(($commit -join ' ') -match 'PRIVATE_MUST_BE_RETAINED|deadbeef|\\Users\\'){throw 'PRIVATE_JOURNAL_DATA_LEAKED'}
       - name: Cleanup Windows-only synthetic fixture
         if: always()
