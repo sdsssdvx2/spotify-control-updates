@@ -153,6 +153,29 @@ function Probe([string]$Root,[string]$ExpectedId='') {
     before=$before
   }
 }
+function WriterAdmission([string]$Root) {
+  $powershell=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe' OR Name='powershell_ise.exe'" -ErrorAction Stop)
+  $scriptHosts=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='wscript.exe' OR Name='cscript.exe'" -ErrorAction Stop)
+  if(($powershell.Count+$scriptHosts.Count) -gt 4096){Fail 'PROCESS_INVENTORY_TOO_LARGE'}
+  $active=0;$opaque=0;$resident=0
+  $agentPath=[regex]::Escape([IO.Path]::GetFullPath((Join-Path $Root 'bin\spotify-control-agent.vbs')))
+  foreach($p in $powershell){
+    $cmd=[string]$p.CommandLine
+    if([string]::IsNullOrWhiteSpace($cmd)){$opaque++;continue}
+    if($cmd -match '(?i)spotify-control-self-updater\.ps1|spotify-control\.ps1\s+.*-Action\s+(Maintain|AgentTick)|addon-manager\.ps1\s+.*-Action'){
+      $active++
+    }
+  }
+  foreach($p in $scriptHosts){
+    $cmd=[string]$p.CommandLine
+    if([string]::IsNullOrWhiteSpace($cmd)){$opaque++;continue}
+    if($cmd -match $agentPath){$resident++}
+  }
+  return [pscustomobject]@{
+    active=$active;opaque=$opaque;resident=$resident
+    safe=($active -eq 0 -and $opaque -eq 0 -and $resident -eq 0)
+  }
+}
 $messages=New-Object System.Collections.Generic.List[string]
 $messages.Add('DIAGNOSTIC=SPOTIFY_BOOTSTRAP_PREPARED_ORPHAN_TERMINALIZER_HOLD_R5')
 $messages.Add('APP_BIN_WRITE=NO;SPOTIFY_EXEC=NO;NETWORK=NO;SETTINGS_WRITE=NO;SCHEDULE_WRITE=NO')
@@ -175,18 +198,14 @@ try{
     $root=Join-Path $local 'SpotifyControl'
   }
   if($Commit -and ($ApprovalPhrase -cne 'EXACT_PREPARED_NO_BIN_SWAP')){Fail 'EXPLICIT_APPROVAL_MISSING'}
-  # Deny Windows processes currently executing the Bootstrap or Spotify Control
-  # maintenance script. Resident VBS itself is not a writer; a spawned tick is.
-  $processes=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe' OR Name='powershell_ise.exe'" -ErrorAction Stop)
-  if($processes.Count -gt 4096){Fail 'PROCESS_INVENTORY_TOO_LARGE'}
-  $busy=0;$unknown=0
-  foreach($p in $processes){
-    if([string]::IsNullOrWhiteSpace([string]$p.CommandLine)){$unknown++;continue}
-    $cmd=[string]$p.CommandLine
-    if($cmd -match '(?i)spotify-control-self-updater\.ps1|spotify-control\.ps1\s+.*-Action\s+(Maintain|AgentTick)|addon-manager\.ps1\s+.*-Action'){ $busy++ }
-  }
-  $messages.Add('POSSIBLE_CONCURRENT_WRITERS='+$(if($busy -gt 0){'DETECTED'}elseif($unknown -gt 0){'UNKNOWN'}else{'NONE_OBSERVED'}))
-  if($Commit -and ($busy -gt 0 -or $unknown -gt 0)){Fail 'ACTIVE_OR_OPAQUE_POWERSHELL_PROCESS'}
+  # Legacy Bootstrap does not cooperate with custom app turnstile locks.
+  # Active or opaque PowerShell writers and the resident WScript agent must be
+  # absent before ANY journal change. This is only a snapshot, NOT an OS-global
+  # process-admission barrier; production cutover remains on HOLD.
+  $obs=WriterAdmission $root
+  $messages.Add('POSSIBLE_CONCURRENT_WRITERS='+$(if($obs.active -gt 0){'DETECTED'}elseif($obs.opaque -gt 0){'UNKNOWN'}else{'NONE_OBSERVED'}))
+  $messages.Add('RESIDENT_AGENT='+$(if($obs.resident -gt 0){'ACTIVE_REQUIRES_QUIESCENCE'}elseif($obs.opaque -gt 0){'UNKNOWN'}else{'NOT_OBSERVED'}))
+  if($Commit -and -not $obs.safe){Fail 'ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE'}
   $stage='FIRST_SOURCE_PROOF'
   $pre=Probe $root
   $messages.Add('SOURCE_AND_FULL_TREES=EXACT_PREPARED_BEFORE')
@@ -230,6 +249,8 @@ try{
     # File.Replace atomically archives old journal into a *new* escrow file
     # while replacing the transaction. No original bin files are touched.
     # Do NOT invoke the installed Bootstrap, including -Action Check.
+    $finalAdmission=WriterAdmission $root
+    if(-not $finalAdmission.safe){Fail 'ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE'}
     $stage='NTFS_ATOMIC_REPLACE'
     [IO.File]::Replace($staging,$pre.txn,$escrow,$true)
     $stage='POST_COMMIT_VERIFY'
@@ -256,7 +277,7 @@ try{
   }
   $kind=[string]$_.Exception.Message
   $allowed=@('WINDOWS_ONLY','HOSTED_OVERRIDE_DENIED','HOSTED_OVERRIDE_OUTSIDE_RUNNER','LOCAL_ROOT_MISSING',
-    'EXPLICIT_APPROVAL_MISSING','PROCESS_INVENTORY_TOO_LARGE','ACTIVE_OR_OPAQUE_POWERSHELL_PROCESS',
+    'EXPLICIT_APPROVAL_MISSING','PROCESS_INVENTORY_TOO_LARGE','ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE',
     'TRANSACTION_RACE_BETWEEN_PREFLIGHTS','EXISTING_ESCROW_NO_OVERWRITE','ESCROW_PATH_UNSAFE',
     'ESCROW_HASH_MISMATCH','STAGING_PATH_UNSAFE','RACE_OR_ESCROW_CHANGED_BEFORE_REPLACE',
     'POST_RECONCILIATION_INDETERMINATE_DO_NOT_RETRY','POST_RECONCILIATION_TREE_CHANGED_DO_NOT_RETRY')
