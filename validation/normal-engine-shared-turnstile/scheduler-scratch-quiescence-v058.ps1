@@ -153,6 +153,7 @@ function Invoke-V058OwnedScratchQuiescence {
  $folder=$service.GetFolder('\')
  $created=$false;$disabled=$false;$preserved=$false;$cleaned=$false
  $originalHash=$null;$observedDisabled=$false
+ $phase='BEFORE_SCRATCH_REGISTER'
  try{
    $def=$service.NewTask(0)
    $def.RegistrationInfo.Description='V058_ISOLATED_UNRUNNABLE_SCRATCH_ONLY'
@@ -170,16 +171,20 @@ function Invoke-V058OwnedScratchQuiescence {
    $trigger.StartBoundary='2099-01-01T00:00:00'
    [void]$folder.RegisterTaskDefinition($name,$def,2,$null,$null,3,$null)
    $created=$true
+   $phase='AFTER_SCRATCH_REGISTER'
    $task=$folder.GetTask($name)
    $before=Assert-V058ScratchTaskExact -Task $task -ExpectedName $name
    if(-not[bool]$before.enabled){throw 'V058_SCRATCH_NOT_ORIGINALLY_ENABLED'}
    $originalHash=[string]$before.normalized_sha256
+   $phase='AFTER_SCRATCH_IDENTITY_CHECK'
    $running=@($task.GetInstances(0))
    if($running.Count -ne 0){throw 'V058_NEW_SCRATCH_TASK_UNEXPECTED_RUNNING_INSTANCE'}
    Write-V058ScratchJournal -Path $journal -Name $name -XmlSha $originalHash
+   $phase='AFTER_DURABLE_JOURNAL'
    # No Stop, Run, DeleteTask or RegisterTaskDefinition for an EXISTING task.
    # This field-only change is allowed solely for our fresh scratch task.
    $task.Enabled=$false;$disabled=$true
+   $phase='AFTER_SCRATCH_DISABLE'
    $now=$folder.GetTask($name)
    $after=Assert-V058ScratchTaskExact -Task $now -ExpectedName $name
    if([bool]$after.enabled -or
@@ -187,6 +192,7 @@ function Invoke-V058OwnedScratchQuiescence {
      throw 'V058_SCRATCH_DEFINITION_CHANGED_BEYOND_ENABLED'
    }
    $observedDisabled=$true
+   $phase='AFTER_SCRATCH_DISABLED_PROOF'
    $runningAgain=@($now.GetInstances(0))
    $decision=Resolve-V058QuiescenceDecision -Observation ([pscustomobject]@{
       task_identity_exact=$true;task_disabled=$true
@@ -208,11 +214,19 @@ function Invoke-V058OwnedScratchQuiescence {
       throw 'V058_SCRATCH_CONCURRENT_EDITS_BLOCK_ROLLBACK'
    }
    $restore.Enabled=$true;$disabled=$false
+   $phase='AFTER_SCRATCH_RESTORE'
    $check=Assert-V058ScratchTaskExact -Task ($folder.GetTask($name)) -ExpectedName $name
    if(-not[bool]$check.enabled -or [string]$check.normalized_sha256 -cne $originalHash){
       throw 'V058_SCRATCH_ORIGINAL_ENABLED_STATE_NOT_RESTORED'
    }
    $preserved=$true
+   $phase='COMPLETE'
+ }catch{
+   $err=[string]$_.Exception.Message
+   $kind=if($err -cmatch '^V058_[A-Z0-9_]+$'){$err}
+         else{'NON_POLICY_'+$_.Exception.GetType().Name}
+   Write-Host ('V058_SANITIZED_STAGE_FAILURE='+$phase+';reason='+$kind)
+   throw
  }finally{
    if($created){
       # Never touch tasks outside the unique task we just registered.
@@ -234,6 +248,12 @@ function Invoke-V058OwnedScratchQuiescence {
          $folder.DeleteTask($name,0)
          $cleaned=$true
       }catch{
+         $err=[string]$_.Exception.Message
+         $kind=if($err -cmatch '^V058_[A-Z0-9_]+$'){$err}
+               else{'NON_POLICY_'+$_.Exception.GetType().Name}
+         Write-Host ('V058_SANITIZED_CLEANUP_FAILURE='+$phase+
+             ';reason='+$kind+
+             ';identity_pin_present='+[bool](-not[string]::IsNullOrEmpty($originalHash)))
          throw 'V058_SCRATCH_CLEANUP_NEEDS_ISOLATED_RUNNER_TEARDOWN'
       }
    }
