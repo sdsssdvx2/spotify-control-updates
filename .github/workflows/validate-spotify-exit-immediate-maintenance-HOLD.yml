@@ -1,0 +1,64 @@
+name: Actual stable AgentTick SpotifyExit fast discovery integration (HOLD)
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    # One initial integration run only, not endless CI on future edits.
+    paths:
+      - '.github/workflows/validate-spotify-exit-immediate-maintenance-HOLD.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  stage-and-run-one-focused-source-integration:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Pin operating stable and parse only modified test scripts
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $operating=(git rev-parse origin/main).Trim()
+          if($LASTEXITCODE -ne 0 -or $operating -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'OPERATING_MAIN_BASE_NOT_EXPECTED_DO_NOT_BUILD'
+          }
+          foreach($p in @(
+           'validation/spotify-exit-immediate-maintenance-HOLD/test-real-agenttick.ps1'
+          )){
+            $tokens=$null; $errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+             (Join-Path (Get-Location) $p),[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw ('TARGET_PS51_SYNTAX_FAILED_'+$errors[0].Message)}
+          }
+          python -m py_compile validation/spotify-exit-immediate-maintenance-HOLD/stage-candidate.py
+          if($LASTEXITCODE -ne 0){throw 'TARGET_BUILDER_PYTHON_SYNTAX_INVALID'}
+          Write-Host 'STABLE_MAIN_PIN_AND_NEW_TARGET_SYNTAX_PASS'
+      - name: Rebuild existing stable bytes and stage ONE actual AgentTick function overlay
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/stage-candidate.py
+          if($LASTEXITCODE -ne 0){throw 'CANONICAL_SOURCE_OR_ACTUAL_AGENT_EVENT_NOT_ATTESTED'}
+          $root='validation/spotify-exit-immediate-maintenance-HOLD/out'
+          $manifest=Get-Content (Join-Path $root 'source-attestation.json') -Raw|ConvertFrom-Json
+          $addon=(Get-FileHash (Join-Path $root 'bin/addon-manager.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+          $main=(Get-FileHash (Join-Path $root 'bin/spotify-control.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($addon -cne '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285' -or
+             $main -cne $manifest.candidate_main_sha256 -or
+             [bool]$manifest.production_mutation_authorized){
+              throw 'EXACT_BASE_ADDON_OR_CANDIDATE_MAIN_ATTESTATION_FAILED'
+          }
+          $tokens=$null; $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path (Get-Location) (Join-Path $root 'bin/spotify-control.ps1')),[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw ('ACTUAL_MODIFIED_MAIN_SYNTAX_FAILED_'+$errors[0].Message)}
+          Write-Host 'EXACT_CANONICAL_STABLE_R17_AND_EVENT_BOUND_MAIN_PS51_PASS'
+      - name: Test real AgentTick decision branches in hosted process without Spotify
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=(Resolve-Path 'validation/spotify-exit-immediate-maintenance-HOLD/out/isolated').Path
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/spotify-exit-immediate-maintenance-HOLD/test-real-agenttick.ps1 -StagedDirectory $root
+          if($LASTEXITCODE -ne 0){throw 'ACTUAL_REAL_AGENTTICK_HOSTED_BEHAVIOR_FAILED'}
+          Write-Host 'SPOTIFY_EXIT_CORE_CANDIDATE_REAL_SOURCE_INTEGRATION_COMPLETE_HOLD'
