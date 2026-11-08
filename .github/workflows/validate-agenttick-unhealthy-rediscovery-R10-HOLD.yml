@@ -1,0 +1,62 @@
+name: HOLD R10 real AgentTick unhealthy closed-state recovery
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths: ['.github/workflows/validate-agenttick-unhealthy-rediscovery-R10-HOLD.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  exact-v0628-source-minimal-v0629-recovery:
+    runs-on: windows-2025
+    timeout-minutes: 17
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Pin canonical stable, stage exact original AgentTick and validate unattended retry behavior
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $manifest=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($manifest.latest_version -cne '0.6.28' -or [string]$manifest.bootstrap.version -cne '1.0.6'){
+            throw 'R10_STABLE_RELEASE_DRIFT'
+          }
+          python validation/spotify-exit-immediate-maintenance-HOLD/stage-candidate.py
+          if($LASTEXITCODE -ne 0){throw 'R10_STAGED_REAL_AGENTTICK_FAILED'}
+          $test='validation/spotify-exit-immediate-maintenance-HOLD/test-real-agenttick.ps1'
+          $stage='validation/spotify-exit-immediate-maintenance-HOLD/out/isolated'
+          $token=$null;$err=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $test),[ref]$token,[ref]$err)
+          if($err.Count){throw ('R10_PS51_TEST_PARSE_ERROR '+[string]$err[0].Message)}
+          $src=Join-Path $stage 'actual-agenttick-function.ps1'
+          $token=$null;$err=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $src),[ref]$token,[ref]$err)
+          if($err.Count){throw ('R10_PS51_REAL_FUNCTION_PARSE_ERROR '+[string]$err[0].Message)}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test -StagedDirectory $stage
+          if($LASTEXITCODE -ne 0){throw 'R10_REAL_STABLE_AGENTTICK_BEHAVIOR_FAILED'}
+      - name: Build exact official one-edge bootstrap preview without publishing any artifact
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-bootstrappable-preview.py --build
+          if($LASTEXITCODE -ne 0){throw 'R10_OFFICIAL_PATCH_FORMAT_BUILDER_FAILED'}
+          @'
+          import json,pathlib,hashlib
+          root=pathlib.Path('validation/spotify-exit-immediate-maintenance-HOLD')
+          meta=json.loads((root/'out/source-attestation.json').read_text())
+          patch=json.loads((root/'out/preview-package-metadata.json').read_text()) if (root/'out/preview-package-metadata.json').exists() else None
+          assert meta['changed_existing_function_count']==1
+          assert meta['new_external_dependencies']==0
+          assert meta['production_mutation_authorized'] is False
+          assert len(meta['candidate_main_sha256'])==64
+          raw=(root/'out/staged/bin/spotify-control.ps1')
+          # Default source is hosted-only; checkout tracked production manifest
+          # and stable release remains unchanged.
+          print('R10_SINGLE_REAL_FUNCTION_NO_EXTRA_DEPENDENCY_SOURCE_PIN_PASS')
+          print('R10_CANDIDATE_MAIN_SHA256='+meta['candidate_main_sha256'])
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'R10_SOURCES_META_NOT_SOUND'}
+          $changed=@(git status --porcelain | ForEach-Object {$_})
+          foreach($line in $changed){
+            if($line -match '(?i)manifest\.json$' -and $line -notmatch 'preview'){throw 'R10_PRODUCTION_MANIFEST_CHANGED'}
+          }
+          Write-Host 'R10_OFFICIAL_MANIFEST_STABLE_UNCHANGED_AND_HOSTED_PREVIEW_BUILT'
