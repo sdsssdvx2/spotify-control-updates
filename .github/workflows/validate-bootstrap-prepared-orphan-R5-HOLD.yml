@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/validate-bootstrap-prepared-orphan-R5-HOLD.yml'
   workflow_dispatch:
+# One focused HRESULT diagnostic from a disposable Windows fixture.
 permissions: {contents: read, actions: read}
 jobs:
   verify-no-bin-swap-and-no-overwrite:
