@@ -5,6 +5,8 @@ on:
     paths:
       - 'validation/normal-engine-shared-turnstile/stage-coherent-guarded-sources-HOLD.ps1'
       - '.github/workflows/validate-integrated-guarded-source-bundle-HOLD.yml'
+      - 'validation/normal-engine-shared-turnstile/hosted-atomic-source-pair-cutover-HOLD.ps1'
+      - 'validation/normal-engine-shared-turnstile/test-hosted-atomic-source-pair-HOLD.ps1'
   workflow_dispatch:
 permissions: {contents: read}
 jobs:
@@ -22,7 +24,9 @@ jobs:
           $operating='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
           $allowed=@(
            'validation/normal-engine-shared-turnstile/stage-coherent-guarded-sources-HOLD.ps1',
-           '.github/workflows/validate-integrated-guarded-source-bundle-HOLD.yml'
+           '.github/workflows/validate-integrated-guarded-source-bundle-HOLD.yml',
+           'validation/normal-engine-shared-turnstile/hosted-atomic-source-pair-cutover-HOLD.ps1',
+           'validation/normal-engine-shared-turnstile/test-hosted-atomic-source-pair-HOLD.ps1'
           )
           if((git merge-base $parent HEAD).Trim() -cne $parent -or
              (git rev-parse origin/main).Trim() -cne $operating -or
@@ -30,13 +34,15 @@ jobs:
             throw 'BUNDLE_IMMUTABLE_PARENT_OR_MAIN_CHANGED'
           }
           $changed=@(git diff --name-only "$parent...HEAD")
-          if($changed.Count -ne 2 -or @($changed|Where-Object{$_ -cnotin $allowed}).Count -ne 0){
-             throw 'BUNDLE_NOT_EXACT_TWO_DEVELOPMENT_FILES'
+          if($changed.Count -ne 4 -or @($changed|Where-Object{$_ -cnotin $allowed}).Count -ne 0){
+             throw 'BUNDLE_NOT_EXACT_FOUR_DEVELOPMENT_FILES'
           }
-          $tokens=$null;$err=$null
-          [void][Management.Automation.Language.Parser]::ParseFile(
-             (Resolve-Path $allowed[0]).Path,[ref]$tokens,[ref]$err)
-          if($err.Count){throw ('BUNDLE_SCRIPT_PS51_INVALID_'+$err[0].Message)}
+          foreach($script in @($allowed[0],$allowed[2],$allowed[3])){
+            $tokens=$null;$err=$null
+            [void][Management.Automation.Language.Parser]::ParseFile(
+             (Resolve-Path $script).Path,[ref]$tokens,[ref]$err)
+            if($err.Count){throw ('BUNDLE_SCRIPT_PS51_INVALID_'+$script+'_'+$err[0].Message)}
+          }
           Write-Host 'BUNDLE_EXACT_V063_PARENT_AND_POWERSHELL51_PASS'
       - name: Rebuild BOTH immutable stable sources exactly ONCE without running
         shell: powershell
@@ -94,6 +100,17 @@ jobs:
             throw 'BUNDLE_UNAUTHORIZED_REAL_DEPLOYMENT_FLAG'
           }
           Write-Host 'BUNDLE_ONE_COHERENT_HELD_PAIR_NO_INSTALL_NO_USER_DATA_PASS'
+      - name: Real Windows two-script File.Replace crash and independent restore E2E
+        shell: powershell
+        timeout-minutes: 6
+        run: |
+          $ErrorActionPreference='Stop'
+          $test='validation/normal-engine-shared-turnstile/test-hosted-atomic-source-pair-HOLD.ps1'
+          $src='validation/v0.6.28/out/bin'
+          $bundle=Join-Path $env:RUNNER_TEMP 'guarded-source-HOLD'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test -BundleRoot $bundle -OriginalMain (Join-Path $src 'spotify-control.ps1') -OriginalAddon (Join-Path $src 'addon-manager.ps1')
+          if($LASTEXITCODE -ne 0){throw 'BUNDLE_TWO_FILE_ATOMIC_PUBLICATION_ROLLBACK_FAILED'}
+          Write-Host 'BUNDLE_REAL_COHERENT_CANDIDATE_SRC_AND_NATIVE_WINDOWS_RECOVERY_PASS'
       - name: Retain coherent SHA-proof artifact NOT an installer
         uses: actions/upload-artifact@v4
         with:
