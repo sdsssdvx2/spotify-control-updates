@@ -1,0 +1,100 @@
+name: V057 legacy unpatched task-process observer read-only (HOLD)
+on:
+  push:
+    branches: [validate/legacy-task-process-observation-v057-HOLD]
+    paths:
+      - 'validation/normal-engine-shared-turnstile/legacy-task-process-observer-v057.ps1'
+      - 'validation/normal-engine-shared-turnstile/test-legacy-task-process-observer-v057.ps1'
+      - '.github/workflows/validate-legacy-task-process-observer-v057.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  inspect-and-never-authorize-mutating-cutover:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: V057 immutable V056 parent / main and read-only PowerShell5.1 source
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='7c01d324f511d90b379185a7c91ef30f2cd237d4'
+          $main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          if((git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+             (git merge-base $base HEAD).Trim() -cne $base -or
+             (git rev-parse origin/main).Trim() -cne $main){
+            throw 'V057_BASE_OR_MAIN_DRIFT'
+          }
+          $scripts=@(
+            'validation/normal-engine-shared-turnstile/legacy-task-process-observer-v057.ps1',
+            'validation/normal-engine-shared-turnstile/test-legacy-task-process-observer-v057.ps1')
+          $workflow='.github/workflows/validate-legacy-task-process-observer-v057.yml'
+          $changed=@(git diff --name-only "$base...HEAD")
+          if($changed.Count -ne 3 -or
+             @($changed|Where-Object{$_ -notin ($scripts+@($workflow))}).Count -ne 0){
+             throw 'V057_SCOPE_NOT_OWNED'
+          }
+          foreach($file in $scripts){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw ('V057_POWERSHELL51_PARSE_FAILED_'+$file+'_'+$errors[0].Message)}
+          }
+          $policy=Get-Content $scripts[0] -Raw
+          foreach($forbidden in @(
+            'Disable-ScheduledTask','Enable-ScheduledTask','Stop-ScheduledTask',
+            'Start-ScheduledTask','Register-ScheduledTask','Unregister-ScheduledTask',
+            'Set-ScheduledTask','schtasks /change','schtasks /end',
+            '.Stop(','.Terminate(','.Kill(','task.Enabled =','TaskScheduler.PutEnabled',
+            'Remove-Item','Rename-Item','Set-Content','WriteAllBytes',
+            'WriteAllText','CreateDirectory')){
+             if($policy.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){
+               throw ('V057_UNAUTHORIZED_MUTATION_SOURCE_PRESENT_'+$forbidden)
+             }
+          }
+          foreach($required in @(
+            'GetTasks(1)','GetInstances(0)','Get-CimInstance',
+            'manual_legacy_launch_excluded=$false',
+            'earlier_unpatched_processes_excluded=$false',
+            'production_mutation_authorized=$false','live_cutover_go=$false')){
+             if(-not$policy.Contains($required)){throw ('V057_MISSING_FAIL_CLOSED_GUARD_'+$required)}
+          }
+          Write-Host 'V057_EXACT_PARENT_MAIN_THREE_NEW_FILES_NO_MUTATION_PS51_PASS'
+      - name: Run synthetic failure matrix and real hosted Task Scheduler COM/CIM READ ONLY
+        shell: powershell
+        timeout-minutes: 4
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v057-observer-test.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/normal-engine-shared-turnstile/test-legacy-task-process-observer-v057.ps1' *>&1 |
+            Tee-Object -FilePath $log | Out-Null
+          $rc=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($rc -ne 0){
+             Get-Content $log -Tail 70 | ForEach-Object {Write-Host $_}
+             throw ('V057_OBSERVER_TEST_FAILED_'+$rc)
+          }
+          $body=Get-Content $log -Raw
+          foreach($marker in @(
+            'V057_ZERO_VISIBLE_WRITERS_STILL_NOT_EXCLUSIVE_NO_MUTATION_AUTHORITY_PASS',
+            'V057_ENABLED_RUNNING_LEGACY_TASK_AND_MANUAL_PROCESS_DENIED_PASS',
+            'V057_HIDDEN_TASKS_OPAQUE_COMMANDS_ACCESS_FAILURES_FAIL_CLOSED_PASS',
+            'V057_INVALID_SCHEMA_AND_NEGATIVE_COUNT_REJECTED_PASS',
+            'V057_WINDOWS_COM_HIDDEN_TASK_AND_CIM_PROBE_SANITIZED_PASS',
+            'V057_NO_SCHEDULER_WRITE_NO_STOP_NO_PROCESS_KILL_NO_REAL_SPOTIFY_CHANGE_PASS')){
+             if(-not $body.Contains($marker)){throw ('V057_MISSING_ACCEPTANCE_MARKER_'+$marker)}
+          }
+          # Only boolean/count output is permitted; do not print PowerShell
+          # command lines, PIDs, task names/paths, usernames or task XML.
+          foreach($line in ($body -split '\r?\n')){
+            if($line.StartsWith('V057_WINDOWS_COM_')){Write-Host $line}
+          }
+          Write-Host 'V057_SYNTHETIC_PLUS_REAL_HOSTED_OBSERVER_ONLY_NO_LIVE_AUTHORITY_PASS'
+      - name: Recheck production main
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'V057_OPERATING_MAIN_CHANGED'
+          }
+          Write-Host 'V057_OPERATING_MAIN_PRESERVED_NO_SCHEDULER_OR_SPOTIFY_CHANGES_PASS'
