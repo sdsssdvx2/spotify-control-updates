@@ -46,6 +46,16 @@ try{[void](Resolve-V059MaintenanceLaunchTopology -TaskState 'ABSENT' -ShortcutSt
 catch{if([string]$_.Exception.Message -ceq 'V059_INVALID_LAUNCH_TOPOLOGY_STATE'){$threw=$true}else{throw}}
 Assert-V059 $threw 'INVALID_NEGATIVE_PROCESS_COUNT_ALLOWED'
 Write-Host 'V059_INVALID_ENUM_AND_NEGATIVE_COUNT_REJECTED_PASS'
+$threw=$false
+try{[void](Resolve-V059MaintenanceLaunchTopology -TaskState 'ABSENT' -ShortcutState 'ABSENT' -ProcessScanComplete 'False' -SuspectedLegacyProcesses 0 -OpaqueProcesses 0)}
+catch{if([string]$_.Exception.Message -ceq 'V059_UNTYPED_OBSERVER_EVIDENCE'){$threw=$true}else{throw}}
+Assert-V059 $threw 'STRING_FALSE_MUST_NOT_BE_OBSERVER_TRUE'
+$threw=$false
+try{[void](Resolve-V059MaintenanceLaunchTopology -TaskState 'ABSENT' -ShortcutState 'ABSENT' -ProcessScanComplete $true -SuspectedLegacyProcesses '0' -OpaqueProcesses 0)}
+catch{if([string]$_.Exception.Message -ceq 'V059_UNTYPED_OBSERVER_EVIDENCE'){$threw=$true}else{throw}}
+Assert-V059 $threw 'STRING_PROCESS_COUNT_NOT_ALLOWED'
+Write-Host 'V059_FALSE_STRING_AND_UNTYPED_PROCESS_EVIDENCE_FAIL_CLOSED_PASS'
+
 
 $root=Join-Path $env:RUNNER_TEMP ('v059-entrypoints-'+[guid]::NewGuid().ToString('N'))
 $local=Join-Path $root 'Local'
@@ -80,6 +90,14 @@ Assert-V059 ((Get-V059StartupFallbackReadOnly -Link $paths.startup_link -Expecte
 $lnk.WorkingDirectory=$paths.root
 $lnk.Save()
 Assert-V059 ((Get-V059StartupFallbackReadOnly -Link $paths.startup_link -ExpectedMain $paths.main -ExpectedRoot $paths.root) -ceq 'EXACT') 'RESTORED_SYNTHETIC_LINK_NOT_EXACT'
+$lnk.Description='USER_UNRECOGNIZED_SHORTCUT'
+$lnk.Save()
+Assert-V059 ((Get-V059StartupFallbackReadOnly -Link $paths.startup_link -ExpectedMain $paths.main -ExpectedRoot $paths.root) -ceq 'FOREIGN') 'MISMATCHED_SHORTCUT_DESCRIPTION_NOT_BLOCKED'
+$lnk.Description='Spotify Control automatic maintenance'
+$lnk.Save()
+Assert-V059 ((Get-V059StartupFallbackReadOnly -Link $paths.startup_link -ExpectedMain $paths.main -ExpectedRoot $paths.root) -ceq 'EXACT') 'RESTORED_SHORTCUT_DESCRIPTION_NOT_EXACT'
+Write-Host 'V059_STARTUP_SHORTCUT_DESCRIPTION_OWNER_PIN_FAIL_CLOSED_PASS'
+
 Write-Host 'V059_ACTUAL_WSH_COM_STARTUP_SHORTCUT_READ_ONLY_AND_FIVE_MUTATION_SCOPES_PASS'
 
 # Actual Windows hosted scheduler: read ONLY exact public task name if it
