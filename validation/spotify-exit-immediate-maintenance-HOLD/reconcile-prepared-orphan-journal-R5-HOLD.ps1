@@ -247,6 +247,10 @@ try{
   if($hosted){
     $messages.Add('HOSTED_TEST_FAILURE_STAGE='+$stage)
     $messages.Add('HOSTED_TEST_FAILURE_EXCEPTION_TYPE='+$_.Exception.GetType().Name)
+    if($null -ne $_.Exception.InnerException){
+      $messages.Add('HOSTED_TEST_INNER_TYPE='+$_.Exception.InnerException.GetType().Name)
+      $messages.Add('HOSTED_TEST_INNER_HRESULT='+[string]$_.Exception.InnerException.HResult)
+    }
   }
   $kind=[string]$_.Exception.Message
   $allowed=@('WINDOWS_ONLY','HOSTED_OVERRIDE_DENIED','HOSTED_OVERRIDE_OUTSIDE_RUNNER','LOCAL_ROOT_MISSING',
