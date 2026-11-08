@@ -4,6 +4,8 @@ on:
     branches: [validate/pinned-stable-execution-topology-v059-HOLD]
     paths:
       - 'validation/normal-engine-shared-turnstile/audit-pinned-stable-entrypoints-v059.py'
+      - 'validation/normal-engine-shared-turnstile/stable-maintenance-surfaces-v059.ps1'
+      - 'validation/normal-engine-shared-turnstile/test-stable-maintenance-surfaces-v059.ps1'
       - '.github/workflows/validate-pinned-stable-execution-topology-v059.yml'
   workflow_dispatch:
 permissions: {contents: read}
@@ -14,13 +16,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
-      - name: Exact V058 parent/main and only two new read-only files
+      - name: Exact V058 parent/main and only four new audit/observer files
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           $parent='8baf196accaf4c80ba6f88041097e397a17ccbe5'
           $main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
           $script='validation/normal-engine-shared-turnstile/audit-pinned-stable-entrypoints-v059.py'
+          $observer='validation/normal-engine-shared-turnstile/stable-maintenance-surfaces-v059.ps1'
+          $observerTest='validation/normal-engine-shared-turnstile/test-stable-maintenance-surfaces-v059.ps1'
           $flow='.github/workflows/validate-pinned-stable-execution-topology-v059.yml'
           if((git merge-base $parent HEAD).Trim() -cne $parent -or
              (git rev-parse origin/main).Trim() -cne $main -or
@@ -28,7 +32,7 @@ jobs:
              throw 'V059_PARENT_OR_MAIN_DRIFT'
           }
           $changed=@(git diff --name-only "$parent...HEAD")
-          if($changed.Count -ne 2 -or @($changed|Where-Object{$_ -notin @($script,$flow)}).Count -ne 0){
+          if($changed.Count -ne 4 -or @($changed|Where-Object{$_ -notin @($script,$observer,$observerTest,$flow)}).Count -ne 0){
              throw 'V059_NON_AUDITOR_SCOPE_EDIT'
           }
           $src=Get-Content $script -Raw
@@ -40,9 +44,35 @@ jobs:
              '2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278')){
              if(-not$src.Contains($needle)){throw ('V059_AUDITOR_MISSING_SOURCE_PIN_'+$needle)}
           }
+          foreach($p in @($observer,$observerTest)){
+            $tokens=$null;$parseErrors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$tokens,[ref]$parseErrors)
+            if($parseErrors.Count){throw ('V059_PS51_OBSERVER_PARSE_FAILED_'+$p+'_'+$parseErrors[0].Message)}
+          }
+          $obs=Get-Content $observer -Raw
+          foreach($token in @(
+             'Get-V059StartupFallbackReadOnly',
+             'Get-V059ScheduledMaintenanceReadOnly',
+             'Resolve-V059MaintenanceLaunchTopology',
+             'SpotifyControl Maintenance.lnk',
+             'SpotifyControl Maintenance',
+             'DUAL_AUTO_LAUNCH_COLLISION',
+             'manual_legacy_launch_excluded=$false',
+             'live_cutover_go=$false',
+             'production_mutation_authorized=$false')){
+              if(-not$obs.Contains($token)){throw ('V059_OBSERVER_SOURCE_MISSING_'+$token)}
+          }
+          foreach($forbidden in @(
+            'Stop-ScheduledTask','Disable-ScheduledTask','Register-ScheduledTask',
+            'Start-Process','Remove-Item','Set-ScheduledTask','Start-ScheduledTask','Unregister-ScheduledTask',
+            '.Save(','.Delete(','.Kill(','.Stop(','.RegisterTaskDefinition(')){
+            if($obs.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){
+              throw ('V059_READ_ONLY_OBSERVER_CONTAINS_MUTATION_'+$forbidden)
+            }
+          }
           & python -m py_compile $script
           if($LASTEXITCODE -ne 0){throw 'V059_PYTHON_COMPILE_ERROR'}
-          Write-Host 'V059_EXACT_V058_PARENT_OPERATING_MAIN_TWO_AUDIT_FILES_PASS'
+          Write-Host 'V059_EXACT_V058_PARENT_OPERATING_MAIN_FOUR_AUDIT_FILES_PASS'
       - name: Reconstruct exact hashed stable r17 from existing builders; DO NOT EXECUTE IT
         shell: powershell
         timeout-minutes: 12
@@ -84,6 +114,31 @@ jobs:
           }
           Get-Content $log | ForEach-Object {Write-Host $_}
           Write-Host 'V059_ACTUAL_HASH_PINNED_STABLE_ENTRYPOINT_SOURCE_STATIC_SCAN_PASS'
+      - name: Source-anchored Task Scheduler + Startup fallback exact read-only acceptance
+        shell: powershell
+        timeout-minutes: 4
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v059-maintenance-surfaces.txt'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/normal-engine-shared-turnstile/test-stable-maintenance-surfaces-v059.ps1' *>&1 |
+             Tee-Object -FilePath $log | Out-Null
+          $code=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          if($code -ne 0){
+             Get-Content $log -Tail 65|ForEach-Object{Write-Host $_}
+             throw ('V059_TASK_STARTUP_SURFACES_FAILED_'+$code)
+          }
+          $proof=Get-Content $log -Raw
+          foreach($marker in @(
+            'V059_TASK_STARTUP_DUAL_PROCESS_OPAQUE_AND_NO_TASK_STATES_FAIL_CLOSED_PASS',
+            'V059_INVALID_ENUM_AND_NEGATIVE_COUNT_REJECTED_PASS',
+            'V059_ACTUAL_WSH_COM_STARTUP_SHORTCUT_READ_ONLY_AND_FIVE_MUTATION_SCOPES_PASS',
+            'V059_HOSTED_REAL_SCHEDULER_READ_ONLY_NO_LIVE_APPROVAL_PASS',
+            'V059_NO_USER_TASK_STARTUP_PROFILE_OR_SPOTIFY_CHANGED_PASS')){
+            if(-not$proof.Contains($marker)){throw ('V059_MISSING_SURFACE_PROOF_'+$marker)}
+          }
+          Write-Host 'V059_REAL_SOURCE_TASK_STARTUP_EXCLUSIVE_OR_DUAL_OWNERSHIP_READONLY_PASS'
       - name: Stable operating main unchanged
         shell: powershell
         run: |
