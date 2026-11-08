@@ -1,0 +1,55 @@
+name: HOLD R10 finalize already Bootstrap-verified preview manifest
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths: ['.github/workflows/finalize-verified-r10-preview-HOLD.yml']
+  workflow_dispatch:
+permissions: {contents: write}
+jobs:
+  bind-already-accepted-payload:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Verify source from passed native Bootstrap E2E and commit only preview manifest
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $source='7166870e96d6483eca076152fd2c66ce84bff1cd'
+          $prod=(Get-FileHash 'manifest.json' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if((git rev-parse 'HEAD^').Trim() -cne $source){throw 'R10_APPROVED_SOURCE_COMMIT_NOT_PARENT'}
+          if((git show ($source+':manifest.json') | Out-String).Length -lt 100){throw 'R10_STABLE_MANIFEST_UNREADABLE'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-bootstrappable-preview.py --source-commit $source
+          if($LASTEXITCODE -ne 0){throw 'R10_PREVIEW_REBUILD_FAILED'}
+          $folder='validation/spotify-exit-immediate-maintenance-HOLD'
+          $meta=Get-Content -LiteralPath ($folder+'/out/bootstrappable-preview-metadata.json') -Raw|ConvertFrom-Json
+          $file=$folder+'/out/preview/manifest.json'
+          $doc=Get-Content -LiteralPath $file -Raw|ConvertFrom-Json
+          if([string]$doc.latest_version -cne '0.6.29' -or
+             [string]$doc.source_commit -cne $source -or
+             [string]$meta.new_main_sha256 -cne 'ac30d80209a563fdffe238d75bd76cb10dddc30ac38b932bf8ed893868a1d230' -or
+             [int]@($meta.patch.chunks).Count -ne 19 -or
+             [string]$doc.latest_files[0].sha256 -cne [string]$meta.new_main_sha256){
+             throw 'R10_NATIVE_BOOTSTRAP_VERIFIED_PREVIEW_CONTRACT_DRIFT'
+          }
+          $target=$folder+'/manifest.preview.json'
+          Copy-Item -LiteralPath $file -Destination $target -Force
+          git add -- $target
+          if($LASTEXITCODE -ne 0){throw 'R10_PREVIEW_ONLY_STAGE_FAILED'}
+          $staged=@(git diff --cached --name-only)
+          if($staged.Count -ne 1 -or $staged[0] -cne 'validation/spotify-exit-immediate-maintenance-HOLD/manifest.preview.json'){
+             throw 'R10_PREVIEW_STAGE_NOT_EXACT_ONE_FILE'
+          }
+          if((Get-FileHash 'manifest.json' -Algorithm SHA256).Hash.ToLowerInvariant() -cne $prod){
+             throw 'R10_STABLE_MANIFEST_TOUCHED'
+          }
+          git -c user.name='SpotifyControl-Hosted-HOLD-Bot' -c user.email='ci-bot@users.noreply.github.com' commit -m 'HOLD bind R10 developer preview to immutable Windows-accepted transport commit'
+          if($LASTEXITCODE -ne 0){throw 'R10_PREVIEW_COMMIT_FAILED'}
+          $unexpected=@(git status --porcelain)
+          if($unexpected.Count -gt 0){throw 'R10_REMAINING_WORKTREE_CHANGES'}
+          git push origin HEAD:refs/heads/validate/spotify-exit-immediate-maintenance-HOLD
+          if($LASTEXITCODE -ne 0){throw 'R10_PREVIEW_MANIFEST_DEV_PUSH_FAILED'}
+          Write-Host 'R10_NATIVE_BOOTSTRAP_E2E_PRIOR_RUN=42461632004'
+          Write-Host 'R10_SHA_PINNED_HOLD_PREVIEW_MANIFEST_PUBLISHED_ONE_FILE'
+          Write-Host 'STABLE_MAIN_AND_USER_PC=UNCHANGED'
