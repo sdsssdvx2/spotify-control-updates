@@ -151,7 +151,7 @@ jobs:
                     else{'OTHER_REDACTED'}
                 $safe=$raw.Replace($root,'[ROOT]').Replace($env:RUNNER_TEMP,'[RUNNER_TEMP]').Replace($env:USERPROFILE,'[USER]')
                 $safe=[regex]::Replace($safe,'(?i)[A-Z]:\\[^\s,;]+','[SCRATCH_PATH]')
-                if($safe.Length -gt 240){$safe=$safe.Substring(0,240)}
+                if($safe.Length -gt 850){$safe=$safe.Substring($safe.Length-850)}
                 Write-Host ('R7_HOSTED_BOOTSTRAP_ERROR_CATEGORY='+$category)
                 Write-Host ('R7_HOSTED_BOOTSTRAP_REDACTED_CONTEXT='+$safe)
                 $latest=Get-Content -LiteralPath (Join-Path $root 'self-update-last-transaction.json') -Raw|ConvertFrom-Json
