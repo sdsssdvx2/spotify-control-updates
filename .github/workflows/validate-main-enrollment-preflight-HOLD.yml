@@ -1,0 +1,77 @@
+name: Main stable enrollment preflight and post-check mutation denial (HOLD)
+on:
+  push:
+    branches: [validate/main-enrollment-preflight-cutover-HOLD]
+    paths:
+      - 'validation/normal-engine-shared-turnstile/build-main-enrollment-preflight-HOLD.ps1'
+      - 'validation/normal-engine-shared-turnstile/test-main-enrollment-preflight-HOLD.ps1'
+      - '.github/workflows/validate-main-enrollment-preflight-HOLD.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  exact-immutable-main-no-operating-launch:
+    runs-on: windows-2025
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Check exact V062 and operating main and new three-file scope
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='f8c9ca99c874cfb733d250a169020c3696a72bfa'
+          $main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          $allowed=@(
+             'validation/normal-engine-shared-turnstile/build-main-enrollment-preflight-HOLD.ps1',
+             'validation/normal-engine-shared-turnstile/test-main-enrollment-preflight-HOLD.ps1',
+             '.github/workflows/validate-main-enrollment-preflight-HOLD.yml'
+          )
+          if((git merge-base $parent HEAD).Trim() -cne $parent -or
+             (git rev-parse origin/main).Trim() -cne $main -or
+             (git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA){
+            throw 'MAIN_PREFLIGHT_IMMUTABLE_PARENTS_OR_MAIN_CHANGED'
+          }
+          $changed=@(git diff --name-only "$parent...HEAD")
+          if($changed.Count -ne 3 -or
+              @($changed | Where-Object {$_ -cnotin $allowed}).Count -ne 0){
+             throw 'MAIN_PREFLIGHT_UNEXPECTED_CHANGE_SCOPE'
+          }
+          foreach($p in $allowed[0..1]){
+            $tok=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path -LiteralPath $p).Path,[ref]$tok,[ref]$errors)
+            if($errors.Count){throw ('MAIN_PREFLIGHT_HOSTED_WINPS51_PARSE_FAILED_'+$p+'_'+$errors[0].Message)}
+          }
+          Write-Host 'MAIN_PREFLIGHT_PARENT_V062_MAIN_AND_EXACT_THREE_FILES_PASS'
+      - name: Rebuild exact stable v0.6.28 main but never execute
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & python validation/v0.6.28/build_v0628.py --build
+          if($LASTEXITCODE -ne 0){throw 'MAIN_PREFLIGHT_R17_BUILDER_FAILED'}
+          $main='validation/v0.6.28/out/bin/spotify-control.ps1'
+          if((Get-Item $main).Length -ne 284321 -or
+             (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+             'af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0'){
+            throw 'MAIN_PREFLIGHT_EXACT_STABLE_MAIN_PROVENANCE_MISMATCH'
+          }
+          Write-Host 'MAIN_PREFLIGHT_SOURCE_EXACT_STABLE_MAIN_SHA256_PASS'
+      - name: Compose private nondeploy main and test real gate and phase AST only
+        shell: powershell
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='validation/normal-engine-shared-turnstile'
+          $temp=Join-Path $env:RUNNER_TEMP ('main-guard-'+[guid]::NewGuid().ToString('N'))
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $base 'build-main-enrollment-preflight-HOLD.ps1') -ParentMain 'validation/v0.6.28/out/bin/spotify-control.ps1' -OutputDirectory $temp
+          if($LASTEXITCODE -ne 0){throw 'MAIN_PREFLIGHT_HOSTED_SOURCE_COMPOSITION_FAILED'}
+          $candidate=Join-Path $temp 'spotify-control-enrollment-preflight-NONDEPLOY.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $base 'test-main-enrollment-preflight-HOLD.ps1') -Candidate $candidate
+          if($LASTEXITCODE -ne 0){throw 'MAIN_PREFLIGHT_HOSTED_REAL_AST_TEST_FAILED'}
+          Write-Host 'MAIN_PREFLIGHT_START_AND_POST_CHECK_DENIAL_ACCEPTED_WITHOUT_LIVE_MAIN'
+      - name: Final operating preservation assertion
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'MAIN_PREFLIGHT_OPERATING_MAIN_CHANGED'
+          }
+          Write-Host 'MAIN_PREFLIGHT_NO_OPERATING_SPOTIFY_OR_SCHEDULER_CHANGES_PASS'
