@@ -76,8 +76,12 @@ def extract_verified_agent() -> bytes:
                         continue
                     if (len(raw), sha256(raw)) == (size, wanted):
                         candidates.append((name, raw))
-        except (ValueError, zipfile.BadZipFile, EOFError) as e:
-            raise RuntimeError("V059_REPOSITORY_DELIVERED_AGENT_ARCHIVE_CORRUPT") from e
+        except (ValueError, zipfile.BadZipFile, EOFError):
+            # One historical carrier is known to contain invalid ZIP
+            # members; the original validated builder skips that carrier
+            # and recovers ONLY a member with exact expected SHA+length
+            # from the other. No unpinned fallback is allowed.
+            continue
     distinct = {(name, sha256(raw)): raw for name, raw in candidates}
     if len(distinct) != 1:
         raise RuntimeError("V059_EXPECTED_ONE_EXACT_AGENT_MEMBER")
