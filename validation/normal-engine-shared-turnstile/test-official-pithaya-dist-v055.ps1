@@ -160,17 +160,26 @@ foreach($spec in $specs){
  $scope=Get-ApprovedNativeManifestOwnedScopeV044 -Name $spec.name -SourceAppPath $source
  $proof=Test-ApprovedNativeManifestOnlyOwnedTargetChangedV044 -Before $before -After $after -Name $spec.name -SourceAppPath $source -ExpectedSourceTreeSha256 ([string]$sourceBefore.tree_sha256)
  $exact=Test-CustomAppV054OfficialSourceBoundRoutes -Name $spec.name -SourceAppPath $source -CandidateXpuiRoot $xpui -ExpectedSourceTreeSha256 ([string]$sourceBefore.tree_sha256)
- Assert-V055 ([bool]$proof.ok -and [bool]$proof.foreign_xpui_preserved -and
-  [int]$proof.scoped_file_count -eq 4 -and [int]$proof.scoped_extension_files -eq 1 -and
-  [bool]$exact.ok -and
-  [string]$scope.source_tree_sha256 -ceq [string]$sourceBefore.tree_sha256 -and
-  (Get-FileHash $foreign -Algorithm SHA256).Hash -ceq $foreignSha -and
-  (Get-FileHash $prefs -Algorithm SHA256).Hash -ceq $prefsSha -and
-  (Get-FileHash (Join-Path $config 'config-xpui.ini') -Algorithm SHA256).Hash -ceq $configSha -and
-  (Get-CustomAppUpdateTreeSnapshotV010 -Root $source).tree_sha256 -ceq $sourceBefore.tree_sha256 -and
-  (Get-FileHash $bin -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $exeHash -and
-  -not[bool]$proof.production_mutation_authorized -and
-  -not[bool]$exact.production_mutation_authorized) 'REAL_PITHAYA_UPSTREAM_TO_NATIVE_OUTPUT_NOT_BOUND'
+ $accept=[ordered]@{
+   proof_ok=[bool]$proof.ok
+   foreign_scope_preserved=[bool]$proof.foreign_xpui_preserved
+   declared_file_count_four=([int]$proof.scoped_file_count -eq 4)
+   one_extension=([int]$proof.scoped_extension_files -eq 1)
+   source_derived_route_bytes=[bool]$exact.ok
+   source_scope_pin=([string]$scope.source_tree_sha256 -ceq [string]$sourceBefore.tree_sha256)
+   foreign_file_untouched=((Get-FileHash $foreign -Algorithm SHA256).Hash -ceq $foreignSha)
+   prefs_untouched=((Get-FileHash $prefs -Algorithm SHA256).Hash -ceq $prefsSha)
+   isolated_config_untouched=((Get-FileHash (Join-Path $config 'config-xpui.ini') -Algorithm SHA256).Hash -ceq $configSha)
+   real_upstream_source_untouched=((Get-CustomAppUpdateTreeSnapshotV010 -Root $source).tree_sha256 -ceq $sourceBefore.tree_sha256)
+   pinned_exe_untouched=((Get-FileHash $bin -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $exeHash)
+   no_v044_authority=(-not[bool]$proof.production_mutation_authorized)
+   no_v054_authority=(-not[bool]$exact.production_mutation_authorized)
+ }
+ if(@($accept.Values|Where-Object{-not[bool]$_}).Count -ne 0){
+   $states=@($accept.Keys|ForEach-Object{[string]$_+'='+[string]$accept[$_]}) -join ';'
+   Write-Host ('V055_SAFE_BOOLEAN_ONLY_PROOF_STATUS_'+$spec.name+'='+$states)
+ }
+ Assert-V055 (@($accept.Values|Where-Object{-not[bool]$_}).Count -eq 0) 'REAL_PITHAYA_UPSTREAM_TO_NATIVE_OUTPUT_NOT_BOUND'
  # Valid output path but changed JS, CSS, JSON, or manifest-copied extension
  # must be rejected. Do not run Spicetify again for these negatives.
  foreach($case in @(
