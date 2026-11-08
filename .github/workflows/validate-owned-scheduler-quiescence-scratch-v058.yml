@@ -1,0 +1,98 @@
+name: V058 owned-only scheduler quiescence scratch acceptance (HOLD)
+on:
+  push:
+    branches: [validate/owned-scheduler-quiescence-scratch-v058-HOLD]
+    paths:
+      - 'validation/normal-engine-shared-turnstile/scheduler-scratch-quiescence-v058.ps1'
+      - 'validation/normal-engine-shared-turnstile/test-scheduler-scratch-quiescence-v058.ps1'
+      - '.github/workflows/validate-owned-scheduler-quiescence-scratch-v058.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  no-live-task-registration-or-legacy-mutation:
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Exact V057 parent, stable main and isolated owned task source / PS5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='bf203fb44666e1b6a5e3c9377813f161f16e7b7d'
+          $main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          if((git merge-base $base HEAD).Trim() -cne $base -or
+             (git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA -or
+             (git rev-parse origin/main).Trim() -cne $main){
+             throw 'V058_PARENT_OR_PRODUCTION_MAIN_DRIFT'
+          }
+          $source='validation/normal-engine-shared-turnstile/scheduler-scratch-quiescence-v058.ps1'
+          $test='validation/normal-engine-shared-turnstile/test-scheduler-scratch-quiescence-v058.ps1'
+          $workflow='.github/workflows/validate-owned-scheduler-quiescence-scratch-v058.yml'
+          $changed=@(git diff --name-only "$base...HEAD")
+          if($changed.Count -ne 3 -or @($changed|Where-Object{$_ -notin @($source,$test,$workflow)}).Count -ne 0){
+              throw 'V058_UNEXPECTED_NON_SCRATCH_EDIT'
+          }
+          foreach($p in @($source,$test)){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw ('V058_PS51_PARSE_FAILED_'+$p+'_'+$errors[0].Message)}
+          }
+          $s=Get-Content $source -Raw
+          foreach($required in @(
+            'V058_GITHUB_HOSTED_WINDOWS_ONLY',
+            "'V058-Scratch-'+[guid]",
+            'RegisterTaskDefinition($name,$def,2',
+            'V058_ISOLATED_UNRUNNABLE_SCRATCH_ONLY',
+            "StartBoundary='2099-01-01T00:00:00'",
+            'FileMode]::CreateNew',
+            'Flush($true)',
+            'V058_SCRATCH_CONCURRENT_EDITS_BLOCK_ROLLBACK',
+            'production_mutation_authorized=$false',
+            'live_cutover_go=$false',
+            'earlier_unpatched_processes_excluded=$false',
+            'manual_legacy_launch_excluded=$false')){
+            if(-not$s.Contains($required)){throw ('V058_SAFETY_PROOF_SOURCE_MISSING_'+$required)}
+          }
+          foreach($forbidden in @('Stop-ScheduledTask','Stop-Process','Disable-ScheduledTask',
+            'Set-ScheduledTask','schtasks /Change','Unregister-ScheduledTask','Invoke-Expression',
+            'Start-Process','\.Terminate(','.Kill(','.Stop(')){
+            if($s.IndexOf($forbidden,[StringComparison]::OrdinalIgnoreCase) -ge 0){
+              throw ('V058_DANGEROUS_TASK_OR_PROCESS_SOURCE_'+$forbidden)
+            }
+          }
+          if(@(Get-Process -Name Spotify -ErrorAction SilentlyContinue).Count -gt 0){
+            throw 'V058_SPOTIFY_NOT_ALLOWED_ON_EPHEMERAL_RUNNER'
+          }
+          Write-Host 'V058_EXACT_PARENT_MAIN_3_SCRATCH_FILES_PS51_AND_WRITE_SCOPE_PASS'
+      - name: Real Windows TASK_CREATE scratch only, disable and restore via Enabled; fail-closed policy
+        shell: powershell
+        timeout-minutes: 6
+        run: |
+          $ErrorActionPreference='Stop'
+          $log=Join-Path $env:RUNNER_TEMP 'v058-private-acceptance.log'
+          $ErrorActionPreference='Continue'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File 'validation/normal-engine-shared-turnstile/test-scheduler-scratch-quiescence-v058.ps1' *>&1 |
+            Tee-Object -FilePath $log | Out-Null
+          $code=$LASTEXITCODE;$ErrorActionPreference='Stop'
+          if($code -ne 0){
+            Get-Content $log -Tail 60|ForEach-Object{Write-Host $_}
+            throw ('V058_SCRATCH_TEST_FAILED_'+$code)
+          }
+          $body=Get-Content $log -Raw
+          foreach($marker in @(
+           'V058_SEVEN_MISSING_BOUNDARIES_AND_ALL_TRUE_STILL_NO_PRODUCTION_AUTHORITY_PASS',
+           'V058_TYPED_OBSERVATION_AND_MISSING_FIELDS_FAIL_CLOSED_PASS',
+           'V058_REAL_COM_SCRATCH_ENABLED_FALSE_THEN_ORIGINAL_TRUE_EXACT_XML_CAS_PASS',
+           'V058_INJECTED_FAILURE_AFTER_DURABLE_JOURNAL_NO_TASK_LEFT_DISABLED_PASS',
+           'V058_ONLY_EPHEMERAL_OWNED_SCRATCH_TASKS_TOUCHED_NO_LEGACY_OR_SPOTIFY_MUTATION_PASS')){
+             if(-not$body.Contains($marker)){throw ('V058_MISSING_ACCEPTANCE_MARKER_'+$marker)}
+          }
+          Write-Host 'V058_NEWLY_OWNED_SCRATCH_TASK_REAL_COM_REVERSIBLE_DISABLE_RESTORE_PASS'
+      - name: Immutable operating main and no deployment
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'V058_OPERATING_MAIN_DRIFT'
+          }
+          Write-Host 'V058_NO_REAL_USER_SCHEDULER_SPOTIFY_PROFILE_CONFIG_OR_BOOTSTRAP_MUTATION_PASS'
