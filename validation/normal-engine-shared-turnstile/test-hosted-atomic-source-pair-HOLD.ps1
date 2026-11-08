@@ -170,7 +170,8 @@ try{
   Assert-V064 ($bad -ne 0) 'CORRUPT_SOURCE_RECOVERY_ALLOWED_TASK_REENABLE'
   $svc=New-Object -ComObject Schedule.Service
   $svc.Connect()
-  $task=$svc.GetFolder('\').GetTask([string]$taskProof.scratch_task_name)
+  $taskFolder=$svc.GetFolder('\')
+  $task=$taskFolder.GetTask([string]$taskProof.scratch_task_name)
   Assert-V064 (-not[bool]$task.Enabled -and
     (Get-V064Sha $f5.main) -ceq [string]$expectedManifest.candidate_main_sha256) 'CORRUPT_SOURCE_RECOVERY_ENABLED_TASK_OR_OVERWROTE_SOURCE'
  }finally{[IO.File]::WriteAllBytes([string]$r5.journal,$journalOriginal)}
