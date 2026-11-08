@@ -72,14 +72,34 @@ def construct() -> dict:
         raise RuntimeError("AGENTTICK_RUNNING_BRANCH_NOT_ADJACENT")
     indentation = re.search(r"(?m)^([ \t]*)if \(\$running\) \{", original[p:]).group(1)
     # The real resident VBS emits this exact event ONCE per Spotify exit
-    # transition. Other AgentTick events continue their old interval path.
-    # A current-user opt-in still controls whether detected work mutates.
+    # transition. Ordinary closed ticks may also recheck an unhealthy or
+    # ambiguous pending state only when the original 12-hour discovery
+    # interval is due; they are NOT allowed to bypass the existing mutation
+    # authority/health/ambiguity gate.
     insert_lines = [
         " # Trigger a fresh read-only check when Spotify actually closes.",
         " # Without this, an update immediately after a 12-hour scan could",
         " # leave a missing Spicetify patch unnoticed until the next scan.",
         " $exitRefreshDone = $false",
         f' if (-not $running -and $EventName -ceq "{event}") {{',
+        "     [void](Invoke-MaintenanceCheckPhase -State $State)",
+        "     $State = Ensure-StateShape (Load-State)",
+        "     $checkRan = $true",
+        "     $exitRefreshDone = $true",
+        " }",
+        " # Recover from stale unhealthy/ambiguous discovery while closed.",
+        " # Keep the existing 12-hour cadence; do not make unchecked network",
+        " # requests on every resident tick after a failed or partial check.",
+        " # This ONLY performs discovery/state bookkeeping; the existing",
+        " # armed/healthy/unambiguous gate below still owns all mutations.",
+        " if (-not $running -and -not $exitRefreshDone -and $checkDue -and",
+        "     [bool]$State.pending_maintenance -and",
+        "     ($State.maintenance_check_healthy -eq $false -or",
+        "      [int]$State.pending_addon_auto_ambiguous -gt 0)) {",
+        "     # Persist retry admission BEFORE remote checks. If discovery",
+        "     # throws early, subsequent ticks cannot hammer free endpoints.",
+        '     $State.last_check_only_utc = [DateTimeOffset]::UtcNow.ToString("o")',
+        "     Save-State (Ensure-StateShape $State)",
         "     [void](Invoke-MaintenanceCheckPhase -State $State)",
         "     $State = Ensure-StateShape (Load-State)",
         "     $checkRan = $true",
