@@ -85,4 +85,56 @@ catch{
 }
 Assert-V058 ($failed -and (Get-V058OwnedCount) -eq $before) 'INJECTED_FAILURE_FAILED_SAFE_REENABLE_AND_CLEANUP'
 Write-Host 'V058_INJECTED_FAILURE_AFTER_DURABLE_JOURNAL_NO_TASK_LEFT_DISABLED_PASS'
+$stage=Invoke-V058OwnedScratchQuiescence -LeaveDisabledForChild
+Assert-V058 ([bool]$stage.disabled_verified -and
+   -not[bool]$stage.production_mutation_authorized -and
+   -not[bool]$stage.real_task_touched -and
+   (Get-V058OwnedCount) -eq ($before+1) -and
+   [IO.File]::Exists([string]$stage.journal_path) -and
+   -not[bool]$folder.GetTask([string]$stage.scratch_task_name).Enabled) 'FRESH_PROCESS_STAGE_NOT_DISABLED'
+$originalReceipt=[IO.File]::ReadAllBytes([string]$stage.journal_path)
+try{
+  # Tamper with the only on-disk identity pin; a restorer MUST refuse
+  # before enabling anything. Original is preserved for recovery.
+  $utf8=[Text.UTF8Encoding]::new($false,$true)
+  $text=$utf8.GetString($originalReceipt)
+  $tampered=[regex]::Replace($text,'(?<="action_xml_sha256":")[a-f0-9]{64}','0000000000000000000000000000000000000000000000000000000000000000')
+  Assert-V058 ($tampered -cne $text) 'JOURNAL_TAMPER_TEST_DID_NOT_MODIFY_HASH'
+  [IO.File]::WriteAllBytes([string]$stage.journal_path,[Text.Encoding]::UTF8.GetBytes($tampered))
+  $denied=$false
+  try{[void](Restore-V058OwnedScratchFromJournal -JournalPath ([string]$stage.journal_path))}
+  catch{if([string]$_.Exception.Message -ceq 'V058_RECOVERY_CONCURRENT_TASK_DEFINITION_DRIFT'){$denied=$true}else{throw}}
+  Assert-V058 ($denied -and
+     -not[bool]$folder.GetTask([string]$stage.scratch_task_name).Enabled) 'ALTERED_JOURNAL_ENABLED_TASK'
+  Write-Host 'V058_SEPARATE_RECOVERY_REJECTS_TAMPERED_DISK_JOURNAL_BEFORE_TASK_WRITE_PASS'
+}finally{
+ [IO.File]::WriteAllBytes([string]$stage.journal_path,$originalReceipt)
+}
+$child=Join-Path $PSScriptRoot 'scheduler-scratch-fresh-recover-v058.ps1'
+$ps=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$process=New-Object Diagnostics.Process
+try{
+  $p=New-Object Diagnostics.ProcessStartInfo
+  $p.FileName=$ps
+  $p.Arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$child+'" -JournalPath "'+[string]$stage.journal_path+'"'
+  $p.UseShellExecute=$false;$p.CreateNoWindow=$true
+  $p.RedirectStandardOutput=$true;$p.RedirectStandardError=$true
+  $process.StartInfo=$p
+  if(-not$process.Start()){throw 'V058_CHILD_PROCESS_START_FAILED'}
+  if(-not$process.WaitForExit(45000)){
+    $process.Kill();[void]$process.WaitForExit()
+    throw 'V058_CHILD_PROCESS_RECOVERY_TIMEOUT'
+  }
+  $stdout=$process.StandardOutput.ReadToEnd()
+  $stderr=$process.StandardError.ReadToEnd()
+  if($process.ExitCode -ne 0 -or
+     $stdout.Length+$stderr.Length -gt 4000 -or
+     -not$stdout.Contains('V058_SEPARATE_POWERSHELL_PROCESS_RESTORED_AND_REMOVED_ONLY_OWNED_SCRATCH_TASK_PASS')){
+     $type=if($stderr.Contains('V058_RECOVERY_')){'V058_RECOVERY_DENIED'}
+           else{'V058_CHILD_NON_POLICY_ERROR'}
+     throw $type
+  }
+}finally{$process.Dispose()}
+Assert-V058 ((Get-V058OwnedCount) -eq $before) 'FRESH_CHILD_LEFT_UNOWNED_OR_DISABLED_TASK'
+Write-Host 'V058_FRESH_PROCESS_JOURNAL_RESTORED_AND_REMOVED_DISABLED_SCRATCH_TASK_PASS'
 Write-Host 'V058_ONLY_EPHEMERAL_OWNED_SCRATCH_TASKS_TOUCHED_NO_LEGACY_OR_SPOTIFY_MUTATION_PASS'
