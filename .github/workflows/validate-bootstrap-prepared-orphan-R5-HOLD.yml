@@ -1,4 +1,5 @@
 name: HOLD exact prepared-orphan journal-only terminalizer R5 scratch acceptance
+# Targeted replay following hosted-only stage classification
 on:
   push:
     branches: [validate/spotify-exit-immediate-maintenance-HOLD]
