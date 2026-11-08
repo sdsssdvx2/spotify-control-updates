@@ -170,70 +170,22 @@ foreach($spec in $specs){
  $scope=Get-ApprovedNativeManifestOwnedScopeV044 -Name $spec.name -SourceAppPath $source
  $proof=Test-ApprovedNativeManifestOnlyOwnedTargetChangedV044 -Before $before -After $after -Name $spec.name -SourceAppPath $source -ExpectedSourceTreeSha256 ([string]$sourceBefore.tree_sha256)
  $exact=Test-CustomAppV054OfficialSourceBoundRoutes -Name $spec.name -SourceAppPath $source -CandidateXpuiRoot $xpui -ExpectedSourceTreeSha256 ([string]$sourceBefore.tree_sha256)
- # go-ini can reformat alignment when writing a cloned config. Require
- # exactly the section-key VALUE, not accidental spacing of the raw line.
+ # Parse real go-ini sections and key values. The vendor may re-align
+ # whitespace in the disposable config; canonical original must stay exact.
  $values=New-Object 'System.Collections.Generic.Dictionary[string,string]' ([StringComparer]::OrdinalIgnoreCase)
  $section=''
  foreach($line in [IO.File]::ReadAllLines((Join-Path $config 'config-xpui.ini'))){
    $trimmed=$line.Trim()
    if($trimmed.Length -eq 0 -or $trimmed.StartsWith(';') -or $trimmed.StartsWith('#')){continue}
-   if($trimmed -match '^\[([A-Za-z][A-Za-z0-9]*)\]
- $accept=[ordered]@{
-   proof_ok=[bool]$proof.ok
-   foreign_scope_preserved=[bool]$proof.foreign_xpui_preserved
-   declared_file_count_four=([int]$proof.scoped_file_count -eq 4)
-   one_extension=([int]$proof.scoped_extension_files -eq 1)
-   source_derived_route_bytes=[bool]$exact.ok
-   source_scope_pin=([string]$scope.source_tree_sha256 -ceq [string]$sourceBefore.tree_sha256)
-   foreign_file_untouched=((Get-FileHash $foreign -Algorithm SHA256).Hash -ceq $foreignSha)
-   prefs_untouched=((Get-FileHash $prefs -Algorithm SHA256).Hash -ceq $prefsSha)
-   canonical_original_config_untouched=((Get-FileHash $canonicalIni -Algorithm SHA256).Hash -ceq $canonicalSha)
-   isolated_clone_single_app_only=$exactCloneApps
-   isolated_clone_fake_spotify_only=$exactCloneSpotify
-   isolated_clone_fake_prefs_only=$exactClonePrefs
-   real_upstream_source_untouched=((Get-CustomAppUpdateTreeSnapshotV010 -Root $source).tree_sha256 -ceq $sourceBefore.tree_sha256)
-   pinned_exe_untouched=((Get-FileHash $bin -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $exeHash)
-   no_v044_authority=(-not[bool]$proof.production_mutation_authorized)
-   no_v054_authority=(-not[bool]$exact.production_mutation_authorized)
- }
- if(@($accept.Values|Where-Object{-not[bool]$_}).Count -ne 0){
-   $states=@($accept.Keys|ForEach-Object{[string]$_+'='+[string]$accept[$_]}) -join ';'
-   Write-Host ('V055_SAFE_BOOLEAN_ONLY_PROOF_STATUS_'+$spec.name+'='+$states)
- }
- Assert-V055 (@($accept.Values|Where-Object{-not[bool]$_}).Count -eq 0) 'REAL_PITHAYA_UPSTREAM_TO_NATIVE_OUTPUT_NOT_BOUND'
- # Valid output path but changed JS, CSS, JSON, or manifest-copied extension
- # must be rejected. Do not run Spicetify again for these negatives.
- foreach($case in @(
-    @('spicetify-routes-'+$spec.name+'.js','V054_VENDOR_ROUTE_JS_NOT_SOURCE_DERIVED'),
-    @('spicetify-routes-'+$spec.name+'.css','V054_VENDOR_ROUTE_CSS_NOT_SOURCE_DERIVED'),
-    @('spicetify-routes-'+$spec.name+'.json','V054_VENDOR_ROUTE_MANIFEST_NOT_SOURCE_DERIVED'))){
-    $target=Join-Path $xpui ([string]$case[0])
-    $saved=[IO.File]::ReadAllBytes($target)
-    try{
-      [IO.File]::AppendAllText($target,'V055_INVALID_OFFICIAL_OUTPUT')
-      Must-Deny-V055 {Test-CustomAppV054OfficialSourceBoundRoutes -Name $spec.name -SourceAppPath $source -CandidateXpuiRoot $xpui -ExpectedSourceTreeSha256 ([string]$sourceBefore.tree_sha256)} ([string]$case[1])
-    }finally{[IO.File]::WriteAllBytes($target,$saved)}
- }
- $ext=Join-Path $xpui ('extensions\'+$spec.name+'\extension.js')
- $saved=[IO.File]::ReadAllBytes($ext)
- try{
-    [IO.File]::AppendAllText($ext,'V055_FAKE_EXTERNAL_EXTENSION')
-    $drift=Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui
-    Must-Deny-V055 {Test-ApprovedNativeManifestOnlyOwnedTargetChangedV044 -Before $before -After $drift -Name $spec.name -SourceAppPath $source -ExpectedSourceTreeSha256 ([string]$sourceBefore.tree_sha256)} 'V044_MANIFEST_SOURCE_COPIED_BYTES_DID_NOT_MATCH'
- }finally{[IO.File]::WriteAllBytes($ext,$saved)}
- Assert-V055 ((Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui).tree_sha256 -ceq [string]$after.tree_sha256) 'NEGATIVE_TEST_FAILED_TO_RESTORE_OUTPUT'
- Assert-V055 (Assert-V055PublisherFiles -Spec $spec -Directory $source) 'FINAL_PIN_CHANGED'
- Write-Host ('V055_PINNED_OFFICIAL_PITHAYA_'+$spec.name.ToUpperInvariant().Replace('-','_')+'_COMMIT_BLOBS_AND_NATIVE_ROUTES_PASS')
- Write-Host ('V055_'+$spec.name.ToUpperInvariant().Replace('-','_')+'_FORGED_JS_CSS_JSON_AND_EXTENSION_DENIED_PASS')
-}
-Write-Host 'V055_TWO_REAL_OFFICIAL_PITHAYA_DISTRIBUTIONS_RENDERED_WITH_PINNED_SPICETIFY_2464_PASS'
-Write-Host 'V055_HOSTED_READ_ONLY_USER_PROFILE_SOURCE_NOT_VENDORED_NO_INSTALL_NO_PRODUCTION_AUTHORITY_PASS'
-){$section=[string]$Matches[1];continue}
+   if($trimmed -match '^\[([A-Za-z][A-Za-z0-9]*)\]$'){
+     $section=[string]$Matches[1]
+     continue
+   }
    $separator=$trimmed.IndexOf('=')
    if($separator -le 0 -or [string]::IsNullOrWhiteSpace($section)){throw 'V055_SCOPED_INI_UNPARSEABLE'}
-   $name=($section+'.'+$trimmed.Substring(0,$separator).Trim())
-   if($values.ContainsKey($name)){throw 'V055_SCOPED_INI_DUPLICATE_SECTION_KEY'}
-   $values.Add($name,$trimmed.Substring($separator+1).Trim())
+   $key=$section+'.'+$trimmed.Substring(0,$separator).Trim()
+   if($values.ContainsKey($key)){throw 'V055_SCOPED_INI_DUPLICATE_SECTION_KEY'}
+   $values.Add($key,$trimmed.Substring($separator+1).Trim())
  }
  $exactCloneApps=($values.ContainsKey('AdditionalOptions.custom_apps') -and
    [string]$values['AdditionalOptions.custom_apps'] -ceq [string]$spec.name)
