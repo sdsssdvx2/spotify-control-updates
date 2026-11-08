@@ -50,7 +50,7 @@ jobs:
             'V058_SCRATCH_CONCURRENT_EDITS_BLOCK_ROLLBACK',
             'production_mutation_authorized=$false',
             'live_cutover_go=$false',
-            'earlier_unpatched_processes_excluded=$false',
+            'older_unpatched_processes_excluded=$false',
             'manual_legacy_launch_excluded=$false')){
             if(-not$s.Contains($required)){throw ('V058_SAFETY_PROOF_SOURCE_MISSING_'+$required)}
           }
