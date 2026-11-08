@@ -219,14 +219,14 @@ foreach($spec in $specs){
  # Valid output path but changed JS, CSS, JSON, or manifest-copied extension
  # must be rejected. Do not run Spicetify again for these negatives.
  foreach($case in @(
-    @('spicetify-routes-'+$spec.name+'.js','V054_VENDOR_ROUTE_JS_NOT_SOURCE_DERIVED'),
-    @('spicetify-routes-'+$spec.name+'.css','V054_VENDOR_ROUTE_CSS_NOT_SOURCE_DERIVED'),
-    @('spicetify-routes-'+$spec.name+'.json','V054_VENDOR_ROUTE_MANIFEST_NOT_SOURCE_DERIVED'))){
-    $target=Join-Path $xpui ([string]$case[0])
+    [pscustomobject]@{relative=('spicetify-routes-'+$spec.name+'.js');denial='V054_VENDOR_ROUTE_JS_NOT_SOURCE_DERIVED'},
+    [pscustomobject]@{relative=('spicetify-routes-'+$spec.name+'.css');denial='V054_VENDOR_ROUTE_CSS_NOT_SOURCE_DERIVED'},
+    [pscustomobject]@{relative=('spicetify-routes-'+$spec.name+'.json');denial='V054_VENDOR_ROUTE_MANIFEST_NOT_SOURCE_DERIVED'})){
+    $target=Join-Path $xpui ([string]$case.relative)
     $saved=[IO.File]::ReadAllBytes($target)
     try{
       [IO.File]::AppendAllText($target,'V055_INVALID_OFFICIAL_OUTPUT')
-      Must-Deny-V055 {Test-CustomAppV054OfficialSourceBoundRoutes -Name $spec.name -SourceAppPath $source -CandidateXpuiRoot $xpui -ExpectedSourceTreeSha256 ([string]$sourceBefore.tree_sha256)} ([string]$case[1])
+      Must-Deny-V055 {Test-CustomAppV054OfficialSourceBoundRoutes -Name $spec.name -SourceAppPath $source -CandidateXpuiRoot $xpui -ExpectedSourceTreeSha256 ([string]$sourceBefore.tree_sha256)} ([string]$case.denial)
     }finally{[IO.File]::WriteAllBytes($target,$saved)}
  }
  $ext=Join-Path $xpui ('extensions\'+$spec.name+'\extension.js')
