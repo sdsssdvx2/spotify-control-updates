@@ -114,6 +114,40 @@ def source_summary() -> dict:
         counts[label] = len(hits)
     return {"codes": source, "hit_count": counts}
 
+def emit_targeted_control_flow(code: dict[str, str]) -> None:
+    """Bounded immutable-source excerpts for accurate dispatch classification.
+
+    Exact source line ranges were located in the previous SHA-pinned audit.
+    These are public source file lines, not process/task/user runtime data.
+    """
+    zones = {
+        "stable_main": [(4250, 4410), (4740, 4810), (4905, 4960)],
+        "stable_addon_r17": [(2940, 2990), (3065, 3125), (3825, 3890)],
+        "resident_agent": [(125, 147)],
+    }
+    for label, spans in zones.items():
+        lines = code[label].splitlines()
+        emitted = 0
+        for low, high in spans:
+            if len(lines) < low:
+                raise RuntimeError(f"V060_PINNED_SOURCE_LINES_TRUNCATED_{label}")
+            for line_no in range(low, min(high, len(lines)) + 1):
+                raw = lines[line_no - 1].strip()
+                if not raw or raw.startswith(("#", "//", "Rem ", "'", "<#")):
+                    continue
+                if re.search(r"(?i)password|api[_-]?key|bearer|authorization|client_secret", raw):
+                    continue
+                if raw.lower().startswith(("write-log ", "log-msg ", "log ")):
+                    continue
+                print(f"V060_PUBLIC_FLOW_{label.upper()}_L{line_no}=" +
+                      " ".join(raw.split())[:230])
+                emitted += 1
+                if emitted > 350:
+                    raise RuntimeError("V060_SOURCE_FLOW_OUTPUT_CAP")
+        if emitted < 15:
+            raise RuntimeError(f"V060_NOT_ENOUGH_SOURCE_FLOW_EVIDENCE_{label}")
+
+
 def selftest() -> None:
     example = "function Alpha {\n -Action Maintain\n}\nfunction Bravo {\n -Action AgentTick\n}"
     a = mini_context(example, re.compile("Maintain"), "stable_main")
@@ -125,5 +159,6 @@ def selftest() -> None:
 if __name__ == "__main__":
     selftest()
     info = source_summary()
+    emit_targeted_control_flow(info["codes"])
     print("V060_ACTUAL_STABLE_MAIN_ADDON_VBS_TRIPLE_PINNED_DISPATCH_SOURCE_AUDIT_PASS")
     print("V060_SOURCE_CALLSITE_ONLY_NOT_RUNTIME_CUTOVER_OR_LIVE_AUTHORITY_PASS")
