@@ -153,7 +153,7 @@ function Probe([string]$Root,[string]$ExpectedId='') {
     before=$before
   }
 }
-function WriterAdmission([string]$Root) {
+function WriterAdmission([string]$Root,[bool]$LegacyMutexesHeld=$false) {
   $powershell=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe' OR Name='powershell_ise.exe'" -ErrorAction Stop)
   $scriptHosts=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='wscript.exe' OR Name='cscript.exe'" -ErrorAction Stop)
   if(($powershell.Count+$scriptHosts.Count) -gt 4096){Fail 'PROCESS_INVENTORY_TOO_LARGE'}
@@ -170,17 +170,84 @@ function WriterAdmission([string]$Root) {
     $cmd=[string]$p.CommandLine
     if([string]::IsNullOrWhiteSpace($cmd)){$opaque++;continue}
     if($cmd -match $agentPath){$resident++}
+    elseif($cmd -match '(?i)spotify.?control|spicetify|addon.?manager'){$active++}
   }
+  # The pinned resident VBS does not acquire either mutex itself; its
+  # child AgentTick acquires Local\SpotifyControl-AgentTick-<SID> before
+  # doing any state work. A LIVE resident may be left running ONLY with
+  # both exact named legacy mutexes held by THIS thread.
   return [pscustomobject]@{
     active=$active;opaque=$opaque;resident=$resident
-    safe=($active -eq 0 -and $opaque -eq 0 -and $resident -eq 0)
+    safe=($active -eq 0 -and $opaque -eq 0 -and $resident -le 1 -and
+      ($resident -eq 0 -or $LegacyMutexesHeld))
   }
+}
+function EnterLegacyMutexPair {
+  $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  if([string]::IsNullOrWhiteSpace($sid)){Fail 'CURRENT_USER_SID_UNAVAILABLE'}
+  $safeSid=([string]$sid -replace '[^A-Za-z0-9]','_')
+  $owned=New-Object 'System.Collections.Generic.List[System.Threading.Mutex]'
+  try{
+    foreach($purpose in @('Maintenance','AgentTick')){
+      $name=('Local\SpotifyControl-{0}-{1}' -f $purpose,$safeSid)
+      $mutex=New-Object System.Threading.Mutex($false,$name)
+      $got=$false
+      try {
+        try {$got=$mutex.WaitOne(0,$false)}
+        catch [System.Threading.AbandonedMutexException] {
+          # Abandonment grants ownership, but indicates an uncertain
+          # earlier writer. Release it and ABORT instead of proceeding.
+          try{$mutex.ReleaseMutex()}catch{}
+          Fail 'ABANDONED_LEGACY_MUTEX'
+        }
+        if(-not $got){Fail 'LEGACY_WRITER_MUTEX_BUSY'}
+        $owned.Add($mutex)
+      }catch{
+        if(-not $got){$mutex.Dispose()}
+        throw
+      }
+    }
+    return $owned
+  }catch{
+    for($i=$owned.Count-1;$i -ge 0;$i--){
+      try{$owned[$i].ReleaseMutex()}catch{}
+      try{$owned[$i].Dispose()}catch{}
+    }
+    throw
+  }
+}
+function ExitLegacyMutexPair($Pair) {
+  if($null -eq $Pair){return}
+  for($i=$Pair.Count-1;$i -ge 0;$i--){
+    try{$Pair[$i].ReleaseMutex()}catch{}
+    try{$Pair[$i].Dispose()}catch{}
+  }
+}
+function HoldExactBootstrapFile([string]$Root) {
+  # Exact original Bootstrap 1.0.6 cannot be started via -File while
+  # its original source is opened with FileShare.None. We acquire the
+  # handle AFTER every source proof, immediately before atomic Replace.
+  # This does not prevent a malicious same-user copy launched manually.
+  $path=Join-Path $Root 'bootstrap\spotify-control-self-updater.ps1'
+  $f=New-Object IO.FileStream($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
+  try{
+    if([int64]$f.Length -ne 42963){Fail 'BOOTSTRAP_FENCE_SOURCE_SIZE_CHANGED'}
+    $hasher=[Security.Cryptography.SHA256]::Create()
+    try{$sha=[BitConverter]::ToString($hasher.ComputeHash($f)).Replace('-','').ToLowerInvariant()}
+    finally{$hasher.Dispose()}
+    if($sha -cne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'){
+      Fail 'BOOTSTRAP_FENCE_SOURCE_SHA_CHANGED'
+    }
+    return $f
+  }catch{$f.Dispose();throw}
 }
 $messages=New-Object System.Collections.Generic.List[string]
 $messages.Add('DIAGNOSTIC=SPOTIFY_BOOTSTRAP_PREPARED_ORPHAN_TERMINALIZER_HOLD_R5')
 $messages.Add('APP_BIN_WRITE=NO;SPOTIFY_EXEC=NO;NETWORK=NO;SETTINGS_WRITE=NO;SCHEDULE_WRITE=NO')
 $hosted= -not[string]::IsNullOrWhiteSpace($HostedFixtureRoot)
 $staging=$null
+$legacyMutexes=$null
+$exclusiveBootstrap=$null
 $stage='INITIAL_PREFLIGHT'
 try{
   if([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT){Fail 'WINDOWS_ONLY'}
@@ -198,13 +265,19 @@ try{
     $root=Join-Path $local 'SpotifyControl'
   }
   if($Commit -and ($ApprovalPhrase -cne 'EXACT_PREPARED_NO_BIN_SWAP')){Fail 'EXPLICIT_APPROVAL_MISSING'}
-  # Legacy Bootstrap does not cooperate with custom app turnstile locks.
-  # Active or opaque PowerShell writers and the resident WScript agent must be
-  # absent before ANY journal change. This is only a snapshot, NOT an OS-global
-  # process-admission barrier; production cutover remains on HOLD.
-  $obs=WriterAdmission $root
+  # R6: coordinate with the exact OLD stable v0.6.20/r9 legacy engine.
+  # The VBS resident stays running; its spawned AgentTick must acquire
+  # AgentTick mutex, and normal Maintain must acquire Maintenance mutex.
+  # These OS handles are held on this thread throughout journal repair.
+  # No task disable, agent termination, source replacement or config edit.
+  if($Commit){
+    $stage='LEGACY_DOUBLE_MUTEX_ACQUIRE'
+    $legacyMutexes=EnterLegacyMutexPair
+    $messages.Add('LEGACY_MAINTENANCE_AND_AGENTTICK_MUTEX=HELD')
+  }
+  $obs=WriterAdmission $root ([bool]($null -ne $legacyMutexes))
   $messages.Add('POSSIBLE_CONCURRENT_WRITERS='+$(if($obs.active -gt 0){'DETECTED'}elseif($obs.opaque -gt 0){'UNKNOWN'}else{'NONE_OBSERVED'}))
-  $messages.Add('RESIDENT_AGENT='+$(if($obs.resident -gt 0){'ACTIVE_REQUIRES_QUIESCENCE'}elseif($obs.opaque -gt 0){'UNKNOWN'}else{'NOT_OBSERVED'}))
+  $messages.Add('RESIDENT_AGENT='+$(if($obs.resident -gt 1){'MULTIPLE_BLOCKED'}elseif($obs.resident -eq 1 -and $Commit){'RUNNING_TICKS_MUTEX_FENCED'}elseif($obs.resident -eq 1){'RUNNING_DRYRUN_ONLY'}elseif($obs.opaque -gt 0){'UNKNOWN'}else{'NOT_OBSERVED'}))
   if($Commit -and -not $obs.safe){Fail 'ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE'}
   $stage='FIRST_SOURCE_PROOF'
   $pre=Probe $root
@@ -249,8 +322,17 @@ try{
     # File.Replace atomically archives old journal into a *new* escrow file
     # while replacing the transaction. No original bin files are touched.
     # Do NOT invoke the installed Bootstrap, including -Action Check.
-    $finalAdmission=WriterAdmission $root
+    $finalAdmission=WriterAdmission $root $true
     if(-not $finalAdmission.safe){Fail 'ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE'}
+    # An uncooperative original Bootstrap -File launch is fenced at the
+    # OS file-sharing layer during the critical journal CAS. Before this,
+    # every manifest/source/transaction/backup hash has been rechecked.
+    $stage='EXCLUSIVE_BOOTSTRAP_FENCE'
+    $exclusiveBootstrap=HoldExactBootstrapFile $root
+    $afterFenceAdmission=WriterAdmission $root $true
+    if(-not $afterFenceAdmission.safe){Fail 'ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE'}
+    if((HashFile $pre.txn) -cne $pre.digest){Fail 'TRANSACTION_CHANGED_BEFORE_ATOMIC_REPLACE'}
+    $messages.Add('EXACT_BOOTSTRAP_FILESHARE_NONE=HELD')
     $stage='NTFS_ATOMIC_REPLACE'
     [IO.File]::Replace($staging,$pre.txn,$escrow,$true)
     $stage='POST_COMMIT_VERIFY'
@@ -278,6 +360,9 @@ try{
   $kind=[string]$_.Exception.Message
   $allowed=@('WINDOWS_ONLY','HOSTED_OVERRIDE_DENIED','HOSTED_OVERRIDE_OUTSIDE_RUNNER','LOCAL_ROOT_MISSING',
     'EXPLICIT_APPROVAL_MISSING','PROCESS_INVENTORY_TOO_LARGE','ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE',
+    'CURRENT_USER_SID_UNAVAILABLE','LEGACY_WRITER_MUTEX_BUSY','ABANDONED_LEGACY_MUTEX',
+    'BOOTSTRAP_FENCE_SOURCE_SIZE_CHANGED','BOOTSTRAP_FENCE_SOURCE_SHA_CHANGED',
+    'TRANSACTION_CHANGED_BEFORE_ATOMIC_REPLACE',
     'TRANSACTION_RACE_BETWEEN_PREFLIGHTS','EXISTING_ESCROW_NO_OVERWRITE','ESCROW_PATH_UNSAFE',
     'ESCROW_HASH_MISMATCH','STAGING_PATH_UNSAFE','RACE_OR_ESCROW_CHANGED_BEFORE_REPLACE',
     'POST_RECONCILIATION_INDETERMINATE_DO_NOT_RETRY','POST_RECONCILIATION_TREE_CHANGED_DO_NOT_RETRY')
@@ -285,9 +370,11 @@ try{
   $messages.Add('HOLD_REASON='+$kind)
   $messages.Add('RESULT=HOLD_NO_AUTOMATIC_RETRY')
 }finally{
+  if($null -ne $exclusiveBootstrap){try{$exclusiveBootstrap.Dispose()}catch{}}
   if($null -ne $staging -and [IO.File]::Exists($staging)){
     try{[IO.File]::Delete($staging)}catch{}
   }
+  if($null -ne $legacyMutexes){ExitLegacyMutexPair $legacyMutexes}
 }
 $messages.Add('BOOTSTRAP_CHECK_EXECUTED=NO;INSTALL_AUTHORIZED=NO;USER_DATA_DELETE=NO')
 $messages.Add('PRIVATE_PATHS_TRANSACTION_IDS_ERRORS_EXPORTED=NO')
