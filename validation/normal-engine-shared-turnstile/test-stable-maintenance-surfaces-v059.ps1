@@ -42,7 +42,7 @@ try{[void](Resolve-V059MaintenanceLaunchTopology -TaskState 'INVALID' -ShortcutS
 catch{if([string]$_.Exception.Message -ceq 'V059_INVALID_LAUNCH_TOPOLOGY_STATE'){$threw=$true}else{throw}}
 Assert-V059 $threw 'UNKNOWN_TASK_STATE_WAS_ALLOWED'
 $threw=$false
-try{[void](Resolve-V059MaintenanceLaunchTopology -TaskState 'ABSENT' -ShortcutState 'ABSENT' -ProcessScanComplete $true -SuspectedLegacyProcesses -1 -OpaqueProcesses 0)}
+try{[void](Resolve-V059MaintenanceLaunchTopology -TaskState 'ABSENT' -ShortcutState 'ABSENT' -ProcessScanComplete $true -SuspectedLegacyProcesses ([int](-1)) -OpaqueProcesses 0)}
 catch{if([string]$_.Exception.Message -ceq 'V059_INVALID_LAUNCH_TOPOLOGY_STATE'){$threw=$true}else{throw}}
 Assert-V059 $threw 'INVALID_NEGATIVE_PROCESS_COUNT_ALLOWED'
 Write-Host 'V059_INVALID_ENUM_AND_NEGATIVE_COUNT_REJECTED_PASS'
