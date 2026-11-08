@@ -216,6 +216,42 @@ def emit_mutation_chain_summary(code: dict[str, str]) -> None:
                   " ".join(line.split())[:180])
 
 
+def emit_parent_subprocess_and_mutex_details(code: dict[str, str]) -> None:
+    main = code["stable_main"]
+    funcs = list(SOURCE_FUNCTION.finditer(main))
+    names = [m.group(1) for m in funcs]
+    selected = [(i, m) for i, m in enumerate(funcs)
+                if re.search(r"(?i)AddonManager|MaintenanceMutationPhase", m.group(1))]
+    for i, m in selected:
+        end = funcs[i + 1].start() if i + 1 < len(funcs) else len(main)
+        begin = main.count("\n", 0, m.start()) + 1
+        segment = main[m.start():end].splitlines()
+        print(f"V060_PARENT_CHILD_FUNCTION={m.group(1)}:start={begin}:lines={len(segment)}")
+        for delta, line in enumerate(segment):
+            if not line.strip() or line.lstrip().startswith(("#", "'")):
+                continue
+            if not re.search(
+                r"(?i)^(function|\s*(?:param|try|catch|finally|return|if|foreach))|"
+                r"Invoke-AddonManager|AddonAction|exitCode|ExitCode|ProcessStartInfo|"
+                r"powershell|WaitForExit|Wait|Start-Process|"
+                r"Update-AutoApps|Update|Commit|Rollback|Mutex|lock",
+                line,
+            ):
+                continue
+            if re.search(r"(?i)password|api[_-]?key|bearer|authorization|client_secret", line):
+                continue
+            print(f"V060_PARENT_CHILD_L{begin+delta}=" + " ".join(line.strip().split())[:200])
+            if delta >= 90:
+                break
+    for start, end in [(80, 111), (4155, 4269)]:
+        for line_no in range(start, min(end, len(main.splitlines())) + 1):
+            line = main.splitlines()[line_no - 1].strip()
+            if line and not line.startswith(("#", "'", "<#")):
+                if re.search(r"(?i)password|api[_-]?key|bearer|authorization|client_secret", line):
+                    continue
+                print(f"V060_EXTRA_MAIN_L{line_no}=" + " ".join(line.split())[:230])
+
+
 def selftest() -> None:
     example = "function Alpha {\n -Action Maintain\n}\nfunction Bravo {\n -Action AgentTick\n}"
     a = mini_context(example, re.compile("Maintain"), "stable_main")
@@ -229,5 +265,6 @@ if __name__ == "__main__":
     info = source_summary()
     emit_targeted_control_flow(info["codes"])
     emit_mutation_chain_summary(info["codes"])
+    emit_parent_subprocess_and_mutex_details(info["codes"])
     print("V060_ACTUAL_STABLE_MAIN_ADDON_VBS_TRIPLE_PINNED_DISPATCH_SOURCE_AUDIT_PASS")
     print("V060_SOURCE_CALLSITE_ONLY_NOT_RUNTIME_CUTOVER_OR_LIVE_AUTHORITY_PASS")
