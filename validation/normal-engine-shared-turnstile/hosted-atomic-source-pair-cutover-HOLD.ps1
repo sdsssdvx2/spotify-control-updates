@@ -128,8 +128,27 @@ function New-V064SourceIntent {
  try{
   $cipher=[Security.Cryptography.ProtectedData]::Protect(
     $plain,$entropy,[Security.Cryptography.DataProtectionScope]::CurrentUser)
+  # DPAPI Unprotect can tolerate extra bytes after the DPAPI blob on
+  # Windows. Add an exact-length, checksum-verified envelope so append,
+  # truncate or non-canonical framing cannot silently pass discovery.
+  Assert-V064 ([BitConverter]::IsLittleEndian) 'NONWINDOWS_ENVELOPE_ENDIANNESS'
+  $packed=New-Object byte[] (12+$cipher.Length+32)
+  $magic=[Text.Encoding]::ASCII.GetBytes('V064DP01')
+  [Array]::Copy($magic,0,$packed,0,8)
+  $len=[BitConverter]::GetBytes([int]$cipher.Length)
+  [Array]::Copy($len,0,$packed,8,4)
+  [Array]::Copy($cipher,0,$packed,12,$cipher.Length)
+  $h=[Security.Cryptography.SHA256]::Create()
+  try{$sum=$h.ComputeHash($packed,0,12+$cipher.Length)}
+  finally{$h.Dispose()}
+  [Array]::Copy($sum,0,$packed,12+$cipher.Length,32)
   $f=[IO.File]::Open($journal,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
-  try{$f.Write($cipher,0,$cipher.Length);$f.Flush($true)}finally{$f.Dispose()}
+  try{$f.Write($packed,0,$packed.Length);$f.Flush($true)}
+  finally{
+   $f.Dispose()
+   [Array]::Clear($packed,0,$packed.Length)
+   [Array]::Clear($sum,0,$sum.Length)
+  }
  }finally{
   [Array]::Clear($plain,0,$plain.Length)
   [Array]::Clear($entropy,0,$entropy.Length)
@@ -225,7 +244,25 @@ function Restore-V064HostedSourcePair {
  $nonce=[IO.Path]::GetFileNameWithoutExtension($path).Substring('source-pair-intent-'.Length)
  $utf8=[Text.UTF8Encoding]::new($false,$true)
  Add-Type -AssemblyName System.Security -ErrorAction Stop
- $cipher=[IO.File]::ReadAllBytes($path)
+ $packed=[IO.File]::ReadAllBytes($path)
+ Assert-V064 ([BitConverter]::IsLittleEndian -and
+   $packed.Length -ge 44+150 -and $packed.Length -le 8192) 'INTENT_ENVELOPE_LENGTH_INVALID'
+ Assert-V064 (
+  [Text.Encoding]::ASCII.GetString($packed,0,8) -ceq 'V064DP01'
+ ) 'INTENT_ENVELOPE_MAGIC_INVALID'
+ $blobLength=[BitConverter]::ToInt32($packed,8)
+ Assert-V064 ($blobLength -gt 150 -and
+  $blobLength -eq ($packed.Length-44)) 'INTENT_ENVELOPE_TRAILING_OR_TRUNCATED'
+ $digest=[Security.Cryptography.SHA256]::Create()
+ try{$expected=$digest.ComputeHash($packed,0,12+$blobLength)}
+ finally{$digest.Dispose()}
+ $difference=[int]0
+ for($i=0;$i -lt 32;$i++){
+   $difference=$difference -bor ([int]$expected[$i] -bxor [int]$packed[12+$blobLength+$i])
+ }
+ Assert-V064 ($difference -eq 0) 'INTENT_ENVELOPE_CHECKSUM_MISMATCH'
+ $cipher=New-Object byte[] $blobLength
+ [Array]::Copy($packed,12,$cipher,0,$blobLength)
  $entropy=$utf8.GetBytes('V064-HOSTED-SOURCE-INTENT|'+$p.root+'|'+$nonce)
  $plain=$null
  try{
@@ -239,6 +276,8 @@ function Restore-V064HostedSourcePair {
   $record=$utf8.GetString($plain)|ConvertFrom-Json -ErrorAction Stop
  }finally{
   [Array]::Clear($cipher,0,$cipher.Length)
+  [Array]::Clear($packed,0,$packed.Length)
+  [Array]::Clear($expected,0,$expected.Length)
   [Array]::Clear($entropy,0,$entropy.Length)
   if($null-ne$plain){[Array]::Clear($plain,0,$plain.Length)}
  }
