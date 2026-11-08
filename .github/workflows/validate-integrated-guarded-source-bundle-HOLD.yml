@@ -1,12 +1,9 @@
 name: Coherent guarded Spotify Control and Addon Manager source bundle (HOLD)
+# Archived validation proof: intentionally MANUAL-ONLY.
+# Main's existing Bootstrap 1.0.6 already implements coherent bin swap and
+# rollback. This V064 hosted synthetic experiment is not the production
+# cutover, so repeated pushes must not consume Windows CI budget.
 on:
-  push:
-    branches: [validate/integrated-guarded-source-bundle-HOLD]
-    paths:
-      - 'validation/normal-engine-shared-turnstile/stage-coherent-guarded-sources-HOLD.ps1'
-      - '.github/workflows/validate-integrated-guarded-source-bundle-HOLD.yml'
-      - 'validation/normal-engine-shared-turnstile/hosted-atomic-source-pair-cutover-HOLD.ps1'
-      - 'validation/normal-engine-shared-turnstile/test-hosted-atomic-source-pair-HOLD.ps1'
   workflow_dispatch:
 permissions: {contents: read}
 jobs:
