@@ -1,4 +1,5 @@
-# HOLD: one-purpose idempotent PREPARED-orphan journal reconciliation.
+# HOLD R13: exact PREPARED orphan reconciliation, explicit rollback resume,
+# and read-only already-committed stable v0.6.28 recognition.
 # Does NOT execute Bootstrap, change bin, settings, Spotify, or Spicetify.
 # Default read-only. -Commit -ApprovalPhrase EXACT_PREPARED_NO_BIN_SWAP required.
 # Only for exact v0.6.20/r9 -> v0.6.28 transaction, exact source tree
@@ -112,6 +113,9 @@ function Probe([string]$Root,[string]$ExpectedId='') {
   if(-not(ReparseFreePath $Root (Join-Path $Root 'bin'))){Fail 'BIN_PATH_UNSAFE'}
   if(-not(ReparseFreePath $Root (Join-Path $Root 'bootstrap\spotify-control-self-updater.ps1'))){Fail 'BOOTSTRAP_PATH_UNSAFE'}
   $bin=Join-Path $Root 'bin'
+  if(SourcePin (Join-Path $bin 'spotify-control.ps1') 284321 'af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0'){
+    return (ProbeCommittedStable $Root)
+  }
   if(-not(SourcePin (Join-Path $bin 'spotify-control.ps1') 281585 'e9f0181756cfb84c505c30f54b6067e321f6d178d3a1936489714b8f4441ba18')){Fail 'MAIN_NOT_ORIGINAL_V0620'}
   if(-not(SourcePin (Join-Path $bin 'addon-manager.ps1') 225044 '3a20fcd552b363ebc05e26854a8fe010ffe50e5c756ebd3d7fca54011e8a8b86')){Fail 'ADDON_NOT_ORIGINAL_R9'}
   if(-not(SourcePin (Join-Path $bin 'spotify-control-agent.vbs') 4855 '2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278')){Fail 'AGENT_NOT_ORIGINAL'}
@@ -197,11 +201,12 @@ function Probe([string]$Root,[string]$ExpectedId='') {
   return [pscustomobject]@{
     id=$id;doc=$doc;original=$original;digest=(HashBytes $original);
     txn=$transaction;base=$base;live=$bin;backup=$backup;
-    before=$before;reconciled=$reconciled;officialRollback=$officialRollback
+    before=$before;reconciled=$reconciled;officialRollback=$officialRollback;stableCommitted=$false
   }
 }
 function FindVerifiedPriorPreparedEscrow([string]$Root,[string]$CurrentId,
-    [string]$Before,[string]$After,[string]$Commit,[string]$Payload) {
+    [string]$Before,[string]$After,[string]$Commit,[string]$Payload,
+    [bool]$AllowCommittedAfterMismatch=$false) {
   # A later official Bootstrap rollback can replace our terminal journal ID.
   # Require exactly one authentic earlier PREPARED escrow and two old trees.
   $parent=Join-Path $Root 'backups\self-update-transactions'
@@ -228,7 +233,8 @@ function FindVerifiedPriorPreparedEscrow([string]$Root,[string]$CurrentId,
        [string](Field $archived 'before_version') -cne '0.6.20' -or
        [string](Field $archived 'after_version') -cne '0.6.28' -or
        [string](Field $archived 'before_tree_sha256') -cne $Before -or
-       [string](Field $archived 'after_tree_sha256') -cne $After -or
+       (-not $AllowCommittedAfterMismatch -and
+         [string](Field $archived 'after_tree_sha256') -cne $After) -or
        [string](Field $archived 'source_commit') -cne $Commit -or
        [string](Field $archived 'payload_set_sha256') -cne $Payload -or
        (Field $archived 'prepared_orphan_reconciled_without_bin_swap') -eq $true){
@@ -251,6 +257,65 @@ function FindVerifiedPriorPreparedEscrow([string]$Root,[string]$CurrentId,
   }
   if($found -ne 1){Fail 'PREVIOUS_ORIGINAL_ESCROW_MISSING_OR_MULTIPLE'}
   return $accepted
+}
+function ProbeCommittedStable([string]$Root) {
+  # A late POST-Check network/error must not turn a genuinely committed
+  # verified v0.6.28/r17 into an invitation to update it a second time.
+  # This path is READ-ONLY even if both user approvals were supplied.
+  $bin=Join-Path $Root 'bin'
+  if(-not(SourcePin (Join-Path $bin 'spotify-control.ps1') 284321 'af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0') -or
+     -not(SourcePin (Join-Path $bin 'addon-manager.ps1') 323385 '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285') -or
+     -not(SourcePin (Join-Path $bin 'spotify-control-agent.vbs') 4855 '2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278') -or
+     -not(SourcePin (Join-Path $Root 'bootstrap\spotify-control-self-updater.ps1') 42963 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6')){
+    Fail 'COMMITTED_SOURCE_SET_NOT_EXACT_STABLE'
+  }
+  $txn=Join-Path $Root 'self-update-last-transaction.json'
+  if(-not(ReparseFreePath $Root $txn) -or $null -eq (FileInfo $txn 1048576)){
+    Fail 'COMMITTED_JOURNAL_UNREADABLE_OR_UNSAFE'
+  }
+  $json=([IO.File]::ReadAllText($txn,[Text.Encoding]::UTF8)|ConvertFrom-Json -ErrorAction Stop)
+  if([string](Field $json 'status') -cne 'committed' -or
+     [string](Field $json 'before_version') -cne '0.6.20' -or
+     [string](Field $json 'after_version') -cne '0.6.28' -or
+     [string](Field $json 'source_commit') -cne 'bb6d90146f20b73d36fbf8cb813f1b190f403c48' -or
+     [string](Field $json 'payload_set_sha256') -cne '4be96c5d41c2160ed9ac96001b469998595629232929b82c8b0f34b11fda3b43'){
+    Fail 'COMMITTED_JOURNAL_NOT_EXACT_OFFICIAL_STABLE'
+  }
+  $id=Field $json 'id'
+  if($id -isnot [string] -or $id -cnotmatch '^\d{8}-\d{6}-[0-9a-f]{8}$'){
+    Fail 'COMMITTED_JOURNAL_ID_INVALID'
+  }
+  $before=[string](Field $json 'before_tree_sha256')
+  $after=[string](Field $json 'after_tree_sha256')
+  if($before -cnotmatch '^[a-f0-9]{64}$' -or $after -cnotmatch '^[a-f0-9]{64}$' -or $before -ceq $after){
+    Fail 'COMMITTED_JOURNAL_HASH_PINS_INVALID'
+  }
+  $backup=Join-Path $Root ('backups\self-update-transactions\'+$id+'\bin')
+  $new=Join-Path $Root ('bin.spotifycontrol-new-'+$id)
+  $old=Join-Path $Root ('bin.spotifycontrol-old-'+$id)
+  $restore=Join-Path $Root ('bin.spotifycontrol-restore-'+$id)
+  $failed=Join-Path $Root ('bin.spotifycontrol-failed-'+$id)
+  if(-not(ExactPath ([string](Field $json 'backup_bin')) $backup) -or
+     -not(ExactPath ([string](Field $json 'same_dir_new')) $new) -or
+     -not(ExactPath ([string](Field $json 'same_dir_old')) $old)){
+    Fail 'COMMITTED_JOURNAL_PATH_BINDINGS_INVALID'
+  }
+  foreach($path in @($backup,$new,$old,$restore,$failed)){
+    if(-not(ReparseFreePath $Root $path)){Fail 'COMMITTED_JOURNAL_REPARSE_OR_PATH_UNSAFE'}
+  }
+  foreach($path in @($new,$old,$restore,$failed)){
+    if(Test-Path -LiteralPath $path){Fail 'COMMITTED_TRANSACTION_STAGING_STILL_PRESENT'}
+  }
+  if((ExactTree $backup) -cne $before -or (ExactTree $bin) -cne $after){
+    Fail 'COMMITTED_BIN_OR_BACKUP_TREE_NOT_EXACT'
+  }
+  # Synthetic R7/R8 original PREPARED escrow can have a placeholder
+  # after-tree pin, but the ACTUAL committed transaction authenticates its
+  # complete after-tree independently. This mismatch allowance is strictly
+  # for read-only COMPLETED classification, never an authorization to retry.
+  $prior=FindVerifiedPriorPreparedEscrow -Root $Root -CurrentId $id -Before $before -After $after -Commit ([string](Field $json 'source_commit')) -Payload ([string](Field $json 'payload_set_sha256')) -AllowCommittedAfterMismatch $true
+  if($null -eq $prior){Fail 'COMMITTED_STABLE_MISSING_PREPARED_ESCROW'}
+  return [pscustomobject]@{stableCommitted=$true;status='committed'}
 }
 function WriterAdmission([string]$Root,[bool]$LegacyMutexesHeld=$false) {
   $powershell=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe' OR Name='powershell_ise.exe'" -ErrorAction Stop)
@@ -535,6 +600,11 @@ try{
   if($Commit -and -not $obs.safe){Fail 'ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE'}
   $stage='FIRST_SOURCE_PROOF'
   $pre=Probe $root
+  if($pre.stableCommitted){
+    $messages.Add('OFFICIAL_STABLE_V0628_R17=EXACT_BIN_AND_COMMITTED_JOURNAL')
+    $messages.Add('ORIGINAL_PREPARED_ESCROW_AND_PREVIOUS_BACKUP=EXACT')
+    $messages.Add('RESULT=ALREADY_COMMITTED_STABLE_V0628_VERIFIED_NO_ACTION')
+  }else{
   $messages.Add('SOURCE_AND_FULL_TREES=EXACT_PREPARED_BEFORE')
   $messages.Add('BACKUP_AND_STAGING=NO_CONFLICT')
   $messages.Add('TRANSACTION_ORIGINAL_SHA_PIN=YES')
@@ -658,6 +728,7 @@ try{
     }
     }
   }
+  }
 }catch{
   if($hosted){
     $messages.Add('HOSTED_TEST_FAILURE_STAGE='+$stage)
@@ -688,6 +759,12 @@ try{
     'PREVIOUS_ORIGINAL_ESCROW_UNREADABLE','PREVIOUS_ORIGINAL_ESCROW_SOURCE_MISMATCH',
     'PREVIOUS_ORIGINAL_ESCROW_TREE_OR_PATH_MISMATCH',
     'PREVIOUS_ORIGINAL_ESCROW_AMBIGUOUS','PREVIOUS_ORIGINAL_ESCROW_MISSING_OR_MULTIPLE',
+    'COMMITTED_SOURCE_SET_NOT_EXACT_STABLE','COMMITTED_JOURNAL_UNREADABLE_OR_UNSAFE',
+    'COMMITTED_JOURNAL_NOT_EXACT_OFFICIAL_STABLE','COMMITTED_JOURNAL_ID_INVALID',
+    'COMMITTED_JOURNAL_HASH_PINS_INVALID','COMMITTED_JOURNAL_PATH_BINDINGS_INVALID',
+    'COMMITTED_JOURNAL_REPARSE_OR_PATH_UNSAFE',
+    'COMMITTED_TRANSACTION_STAGING_STILL_PRESENT','COMMITTED_BIN_OR_BACKUP_TREE_NOT_EXACT',
+    'COMMITTED_STABLE_MISSING_PREPARED_ESCROW',
     'OFFICIAL_ROLLBACK_WITHOUT_ORIGINAL_ESCROW','PREVIOUS_ESCROW_PATH_UNSAFE',
     'PREVIOUS_ESCROW_NOT_FOUND','PREVIOUS_ESCROW_UNREADABLE',
     'PREVIOUS_ESCROW_PROVENANCE_INVALID','RECONCILIATION_TIMESTAMP_INVALID',
