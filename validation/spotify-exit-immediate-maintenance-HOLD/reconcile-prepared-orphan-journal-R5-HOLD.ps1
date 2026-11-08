@@ -158,7 +158,13 @@ function WriterAdmission([string]$Root,[bool]$LegacyMutexesHeld=$false) {
   $scriptHosts=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='wscript.exe' OR Name='cscript.exe'" -ErrorAction Stop)
   if(($powershell.Count+$scriptHosts.Count) -gt 4096){Fail 'PROCESS_INVENTORY_TOO_LARGE'}
   $active=0;$opaque=0;$resident=0
-  $agentPath=[regex]::Escape([IO.Path]::GetFullPath((Join-Path $Root 'bin\spotify-control-agent.vbs')))
+  $agentPath=[IO.Path]::GetFullPath((Join-Path $Root 'bin\spotify-control-agent.vbs'))
+  $systemHosts=@(
+    [IO.Path]::GetFullPath((Join-Path $env:WINDIR 'System32\wscript.exe')),
+    [IO.Path]::GetFullPath((Join-Path $env:WINDIR 'System32\cscript.exe')),
+    [IO.Path]::GetFullPath((Join-Path $env:WINDIR 'SysWOW64\wscript.exe')),
+    [IO.Path]::GetFullPath((Join-Path $env:WINDIR 'SysWOW64\cscript.exe'))
+  )
   foreach($p in $powershell){
     $cmd=[string]$p.CommandLine
     if([string]::IsNullOrWhiteSpace($cmd)){$opaque++;continue}
@@ -169,8 +175,28 @@ function WriterAdmission([string]$Root,[bool]$LegacyMutexesHeld=$false) {
   foreach($p in $scriptHosts){
     $cmd=[string]$p.CommandLine
     if([string]::IsNullOrWhiteSpace($cmd)){$opaque++;continue}
-    if($cmd -match $agentPath){$resident++}
-    elseif($cmd -match '(?i)spotify.?control|spicetify|addon.?manager'){$active++}
+    # Only one VBS entrypoint is accepted. A harmless script that merely
+    # cites the pinned agent path as an argument is NOT the real resident.
+    $scripts=[regex]::Matches($cmd,'(?i)(?:"([^"]+\.vbs)"|(?<=\s)([^\s"]+\.vbs)(?=\s|$))')
+    if($scripts.Count -ne 1){
+      if($cmd -match '(?i)spotify.?control|spicetify|addon.?manager'){$opaque++}
+      continue
+    }
+    $raw=if($scripts[0].Groups[1].Success){$scripts[0].Groups[1].Value}else{$scripts[0].Groups[2].Value}
+    $resolved=''
+    try{$resolved=[IO.Path]::GetFullPath($raw)}catch{}
+    $exe=''
+    try{$exe=[IO.Path]::GetFullPath([string]$p.ExecutablePath)}catch{}
+    $hostTrusted=$false
+    foreach($known in $systemHosts){
+      if($exe.Equals($known,[StringComparison]::OrdinalIgnoreCase)){$hostTrusted=$true;break}
+    }
+    if($resolved.Equals($agentPath,[StringComparison]::OrdinalIgnoreCase) -and $hostTrusted){
+      $resident++
+    }elseif($cmd -match '(?i)spotify.?control|spicetify|addon.?manager' -or
+           $resolved.Equals($agentPath,[StringComparison]::OrdinalIgnoreCase)){
+      $opaque++
+    }
   }
   # The pinned resident VBS does not acquire either mutex itself; its
   # child AgentTick acquires Local\SpotifyControl-AgentTick-<SID> before
