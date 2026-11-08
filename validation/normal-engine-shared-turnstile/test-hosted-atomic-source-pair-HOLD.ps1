@@ -184,7 +184,7 @@ try{
  Write-Host 'V064_ONE_HOSTED_REAL_TASK_DISABLED_UNTIL_BOTH_SOURCE_FILES_RESTORED_PASS'
 }finally{
  if($null-ne$taskProof -and -not$taskDone){
-  try{[void](Restore-V058OwnedScratchFromJournal -JournalPath ([string]$taskProof.journal_path)}
+  try{[void](Restore-V058OwnedScratchFromJournal -JournalPath ([string]$taskProof.journal_path))}
   catch{Write-Host 'V064_FAILURE_OWNED_GITHUB_RUNNER_TASK_NEEDS_DISPOSABLE_RUNNER_TEARDOWN'}
  }
 }
