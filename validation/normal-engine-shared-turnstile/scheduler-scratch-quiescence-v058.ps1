@@ -332,7 +332,7 @@ function Restore-V058OwnedScratchFromJournal {
      'created_under_temporary_runner')
    if(@($saved.PSObject.Properties).Count -ne $expected.Count -or
       @($expected|Where-Object{$null-eq $saved.PSObject.Properties[$_]}).Count -ne 0 -or
-      $saved.schema -isnot [int] -or [int]$saved.schema -ne 1 -or
+      ($saved.schema -isnot [int] -and $saved.schema -isnot [long]) -or [int]$saved.schema -ne 1 -or
       [string]$saved.scratch_task -cnotmatch '^V058-Scratch-[0-9a-f]{32}$' -or
       [string]$saved.scratch_task -cne ([IO.Path]::GetFileNameWithoutExtension($path)) -or
       [string]$saved.owner -cne 'V058_ISOLATED_UNRUNNABLE_SCRATCH_ONLY' -or
