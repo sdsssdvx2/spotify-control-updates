@@ -1,0 +1,86 @@
+name: V062 r17 auxiliary XPUI writers shared-lease gate (HOLD)
+on:
+  push:
+    branches: [validate/r17-auxiliary-writers-v062-HOLD]
+    paths:
+      - 'validation/normal-engine-shared-turnstile/build-auxiliary-writers-v062.ps1'
+      - 'validation/normal-engine-shared-turnstile/test-auxiliary-writers-v062.ps1'
+      - '.github/workflows/validate-r17-auxiliary-writers-v062.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  scratch-existing-r17-function-bodies-no-production-deployment:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Verify exact V061 ancestry, immutable operating main and V062 scope
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $parent='8c03cda92ebefc1d70633664c59e45a8a727e92d'
+          $main='d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          $allowed=@(
+            'validation/normal-engine-shared-turnstile/build-auxiliary-writers-v062.ps1',
+            'validation/normal-engine-shared-turnstile/test-auxiliary-writers-v062.ps1',
+            '.github/workflows/validate-r17-auxiliary-writers-v062.yml'
+          )
+          if((git merge-base $parent HEAD).Trim() -cne $parent -or
+             (git rev-parse origin/main).Trim() -cne $main -or
+             (git rev-parse HEAD).Trim() -cne $env:GITHUB_SHA){
+            throw 'V062_PARENT_OR_MAIN_PIN_CHANGED'
+          }
+          $changed=@(git diff --name-only "$parent...HEAD")
+          if($changed.Count -ne 3 -or @($changed | Where-Object {$_ -cnotin $allowed}).Count -ne 0){
+            throw 'V062_OUTSIDE_EXACT_THREE_DEVELOPMENT_FILES'
+          }
+          foreach($p in $allowed[0..1]){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path -LiteralPath $p).Path,[ref]$tokens,[ref]$errors)
+            if($errors.Count){throw ('V062_NEW_SCRIPT_PS51_INVALID_'+$p)}
+          }
+          Write-Host 'V062_V061_PARENT_MAIN_UNCHANGED_DEVELOPMENT_ONLY_PS51_PASS'
+      - name: Reconstruct exact operating r17 without running it
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & python validation/v0.6.28/build_v0628.py --build
+          if($LASTEXITCODE -ne 0){throw 'V062_R17_RECONSTRUCTION_FAILED'}
+          $path='validation/v0.6.28/out/bin/addon-manager.ps1'
+          if((Get-Item -LiteralPath $path).Length -ne 323385 -or
+              (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+              '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285'){
+            throw 'V062_STABLE_R17_PROVENANCE_MISMATCH'
+          }
+          Write-Host 'V062_SOURCE_EXACT_OPERATING_R17_SHA_PIN_PASS'
+      - name: Build V060 and V061 parents then guard only two auxiliary writers and test
+        shell: powershell
+        timeout-minutes: 6
+        run: |
+          $ErrorActionPreference='Stop'
+          $source='validation/v0.6.28/out/bin/addon-manager.ps1'
+          $b='validation/normal-engine-shared-turnstile'
+          $v060=Join-Path $env:RUNNER_TEMP ('v062-outer-'+[guid]::NewGuid().ToString('N'))
+          $v061=Join-Path $env:RUNNER_TEMP ('v062-middle-'+[guid]::NewGuid().ToString('N'))
+          $v062=Join-Path $env:RUNNER_TEMP ('v062-final-'+[guid]::NewGuid().ToString('N'))
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $b 'build-pinned-r17-reentrant-v060.ps1') -ParentCandidate $source -OutputDirectory $v060
+          if($LASTEXITCODE -ne 0){throw 'V062_PINNED_V060_PARENT_FAILED'}
+          $parent=Join-Path $v060 'addon-manager-reentrant-V060-NONDEPLOY.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $b 'build-r17-enrollment-guard-v061.ps1') -ParentCandidate $parent -OutputDirectory $v061
+          if($LASTEXITCODE -ne 0){throw 'V062_PINNED_V061_PARENT_FAILED'}
+          $guarded=Join-Path $v061 'addon-manager-reentrant-enrollment-V061-NONDEPLOY.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $b 'build-auxiliary-writers-v062.ps1') -ParentCandidate $guarded -OutputDirectory $v062
+          if($LASTEXITCODE -ne 0){throw 'V062_AUX_GUARD_BUILD_FAILED'}
+          $candidate=Join-Path $v062 'addon-manager-auxiliary-gated-V062-NONDEPLOY.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $b 'test-auxiliary-writers-v062.ps1') -CandidatePath $candidate
+          if($LASTEXITCODE -ne 0){throw 'V062_ACTUAL_AUX_FUNCTION_TEST_FAILED'}
+          Write-Host 'V062_R17_TWO_REAL_AUX_XPUI_WRITERS_LOCK_AND_ENROLLMENT_GATE_ACCEPTED'
+      - name: Reconfirm stable main and hosted-only scope
+        shell: powershell
+        run: |
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'V062_OPERATING_MAIN_DRIFT'
+          }
+          Write-Host 'V062_OPERATING_SPOTIFY_SCHEDULER_ADDON_SETTINGS_UNCHANGED'
