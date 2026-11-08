@@ -383,6 +383,8 @@ function InvokeControlledOfficialStableUpdate {
 function InvokeControlledBootstrapAction {
   param([string]$Script,[string]$Action)
   if($Action -cnotin @('Check','Update')){Fail 'UNSUPPORTED_BOOTSTRAP_ACTION'}
+  if($Action -ceq 'Check'){$script:originalBootstrapCheckAttempted=$true}
+  if($Action -ceq 'Update'){$script:originalBootstrapUpdateAttempted=$true}
   $out=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $Script -Action $Action -Json 2>&1)
   $code=$LASTEXITCODE
   if($code -ne 0){Fail ('OFFICIAL_BOOTSTRAP_'+$Action.ToUpperInvariant()+'_FAILED_NO_AUTORETRY')}
@@ -401,6 +403,8 @@ $staging=$null
 $legacyMutexes=$null
 $exclusiveBootstrap=$null
 $stage='INITIAL_PREFLIGHT'
+$script:originalBootstrapCheckAttempted=$false
+$script:originalBootstrapUpdateAttempted=$false
 try{
   if([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT){Fail 'WINDOWS_ONLY'}
   if($hosted){
@@ -545,7 +549,10 @@ try{
   }
   if($null -ne $legacyMutexes){ExitLegacyMutexPair $legacyMutexes}
 }
-$messages.Add('BOOTSTRAP_CHECK_EXECUTED=NO;INSTALL_AUTHORIZED=NO;USER_DATA_DELETE=NO')
+$messages.Add('BOOTSTRAP_CHECK_ATTEMPTED='+$(if($script:originalBootstrapCheckAttempted){'YES'}else{'NO'})+
+  ';BOOTSTRAP_UPDATE_ATTEMPTED='+$(if($script:originalBootstrapUpdateAttempted){'YES'}else{'NO'})+
+  ';CORE_UPDATE_APPROVAL='+$(if($ContinueOfficialStableUpdate){'OPT_IN_REQUESTED'}else{'NOT_REQUESTED'})+
+  ';USER_DATA_DELETE=NO')
 $messages.Add('PRIVATE_PATHS_TRANSACTION_IDS_ERRORS_EXPORTED=NO')
 if(-not $hosted){
   try{Set-Clipboard -Value ($messages -join [Environment]::NewLine) -ErrorAction Stop}catch{}
