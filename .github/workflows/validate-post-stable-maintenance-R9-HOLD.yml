@@ -1,0 +1,64 @@
+name: HOLD R9 exact-stable post-upgrade maintenance source contract
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths: ['.github/workflows/validate-post-stable-maintenance-R9-HOLD.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  actual-v0628-checkonly-vs-maintain-source-contract:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Reconstruct and classify actual stable v0.6.28 check-only and mutation functions
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/v0.6.28/build_v0628.py --build
+          if($LASTEXITCODE -ne 0){throw 'PINNED_STABLE_V0628_SOURCE_BUILD_FAILED'}
+          @'
+          import hashlib,re,pathlib,sys
+          root=pathlib.Path('validation/v0.6.28/out/bin')
+          p=root/'spotify-control.ps1'
+          content=p.read_bytes()
+          assert (len(content),hashlib.sha256(content).hexdigest())==(284321,'af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0')
+          s=content.decode('utf-8-sig')
+          defs=list(re.finditer(r'(?im)^function\s+([a-z][\w-]*)\s*\{',s))
+          def section(name):
+            matches=[(i,x) for i,x in enumerate(defs) if x.group(1).casefold()==name.casefold()]
+            if len(matches)!=1:raise RuntimeError('R9_EXPECTED_EXACTLY_ONE_'+name)
+            i,m=matches[0]
+            return s[m.start():defs[i+1].start() if i+1<len(defs) else len(s)]
+          print('R9_EXACT_PINNED_STABLE_V0628_MAIN_SOURCE_ACCEPTED')
+          for fn in ('Enter-SpotifyControlMutex','Invoke-MaintenanceCheckPhase','Invoke-MaintenanceMutationPhase',
+                     'Invoke-ResidentAgentTick','Maintain'):
+            body=section(fn)
+            print('R9_FUNCTION='+fn+';LINES='+str(len(body.splitlines())))
+            if fn=='Invoke-MaintenanceCheckPhase':
+              regex=r'(?i)(invoke-selfupdatemutation|SelfAction|invoke-addonmanager|save-state|check-only|maintenance_check_healthy|pending_self_update|\.pending_maintenance|Update-AutoApps|Invoke-MaintenanceMutationPhase|set-content|Set-Item|spicetify)'
+            elif fn=='Invoke-MaintenanceMutationPhase':
+              regex=r'(?i)(Invoke-SelfUpdateMutation|Update-AutoApps|Invoke-SpotifyTransactionalMaintenance|Invoke-SpicetifyTransactionalMaintenance)'
+            elif fn=='Invoke-ResidentAgentTick':
+              regex=r'(?i)(maintenance_check_healthy|pending_addon_auto_ambiguous|Invoke-MaintenanceCheckPhase|Invoke-MaintenanceMutationPhase|pending_maintenance|Enter-SpotifyControlMutex)'
+            else:
+              regex=r'(?i)(Invoke-MaintenanceCheckPhase|Invoke-MaintenanceMutationPhase|Enter-SpotifyControlMutex|\.WaitOne|Update-AutoApps|CheckOnly|Get-MaintenanceMode|Save-State)'
+            found=[(i,x.strip()) for i,x in enumerate(body.splitlines(),1) if re.search(regex,x) and not x.strip().startswith('#')]
+            if len(found)>160:raise RuntimeError('R9_SOURCE_MATCHES_EXCEED_BOUND_'+fn)
+            for line_no,line in found[:65]:
+              if any(term in line.lower() for term in ('password','api_key','access_token','bearer','secret')):continue
+              print('R9_SOURCE_'+fn+'_L'+str(line_no)+'='+line[:180])
+          # The exact top-level CheckOnly branch must be reachable and
+          # distinct from mutation dispatch, but prior state may remain unhealthy.
+          tail=s[defs[-1].start():]
+          start=tail.find('"CheckOnly"')
+          if start<0:raise RuntimeError('R9_CHECKONLY_NOT_DISPATCHED')
+          excerpt=tail[start:start+700].splitlines()[:22]
+          print('R9_CHECKONLY_DISPATCH_BEGIN')
+          for item in excerpt:
+            if item.strip() and not any(x in item.lower() for x in ('secret','key','password','bearer')):
+              print('R9_DISPATCH='+item.strip()[:180])
+          print('R9_CHECKONLY_DISPATCH_END')
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'R9_STABLE_CHECKONLY_CONTRACT_AUDIT_FAILED'}
