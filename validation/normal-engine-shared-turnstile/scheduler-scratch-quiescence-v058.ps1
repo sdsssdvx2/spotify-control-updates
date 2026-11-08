@@ -31,11 +31,19 @@ function Get-V058ScratchXmlIdentity {
  $doc.XmlResolver=$null
  $reader=New-Object IO.StringReader($TaskXml)
  try{$doc.Load($reader)}finally{$reader.Dispose()}
- $enabled=@($doc.SelectNodes('/*[local-name()="Task"]/*[local-name()="Settings"]/*[local-name()="Enabled"]'))
- if($enabled.Count -ne 1 -or
-    [string]$enabled[0].InnerText -cnotin @('true','false')){
-    throw 'V058_EXPECTED_ONLY_SETTINGS_ENABLED_NODE'
+ $settings=@($doc.SelectNodes('/*[local-name()="Task"]/*[local-name()="Settings"]'))
+ if($settings.Count -ne 1){throw 'V058_EXPECTED_EXACT_TASK_SETTINGS'}
+ $enabled=@($settings[0].SelectNodes('./*[local-name()="Enabled"]'))
+ # TaskScheduler omits schema-default <Enabled>true</Enabled> in some
+ # RegisteredTask.Xml returns. Zero explicit nodes is a default true;
+ # never allow duplicate nodes or unknown text, and ALSO read the
+ # registered task's authoritative COM Enabled property before each write.
+ if($enabled.Count -gt 1 -or
+    ($enabled.Count -eq 1 -and
+     [string]$enabled[0].InnerText -cnotin @('true','false'))){
+    throw 'V058_INVALID_TASK_ENABLED_NODE'
  }
+ $was=if($enabled.Count -eq 0){'true'}else{[string]$enabled[0].InnerText}
  $actions=@($doc.SelectNodes('/*[local-name()="Task"]/*[local-name()="Actions"]/*[local-name()="Exec"]'))
  $allActions=@($doc.SelectNodes('/*[local-name()="Task"]/*[local-name()="Actions"]/*'))
  if($actions.Count -ne 1 -or $allActions.Count -ne 1){
@@ -61,11 +69,11 @@ function Get-V058ScratchXmlIdentity {
     [string]$args[0].InnerText -cne '/c exit 0'){
     throw 'V058_UNRECOGNIZED_EXECUTABLE_OR_ACTION'
  }
- $was=[string]$enabled[0].InnerText
- $enabled[0].InnerText='V058_ENABLED_ONLY_FIELD'
+ if($enabled.Count -eq 1){[void]$settings[0].RemoveChild($enabled[0])}
  return [pscustomobject]@{
    normalized_sha256=(Get-V058Utf8Sha256 -Value $doc.OuterXml)
    enabled=($was -ceq 'true')
+   xml_enabled_explicit=($enabled.Count -eq 1)
    user_task=$false
    action='INERT_FAR_FUTURE_CMD_EXIT_ZERO'
    signed_production_authority=$false
@@ -140,7 +148,14 @@ function Assert-V058ScratchTaskExact {
     [string]$Task.Path -cne ('\'+$ExpectedName)){
    throw 'V058_SCRATCH_TASK_PATH_UNOWNED'
  }
- return Get-V058ScratchXmlIdentity -TaskXml ([string]$Task.Xml)
+ $result=Get-V058ScratchXmlIdentity -TaskXml ([string]$Task.Xml)
+ $runtimeEnabled=[bool]$Task.Enabled
+ if([bool]$result.xml_enabled_explicit -and
+    [bool]$result.enabled -ne $runtimeEnabled){
+   throw 'V058_TASK_ENABLED_XML_AND_COM_CONTRADICT'
+ }
+ $result.enabled=$runtimeEnabled
+ return $result
 }
 function Invoke-V058OwnedScratchQuiescence {
  param([switch]$InjectExceptionAfterDisable)
