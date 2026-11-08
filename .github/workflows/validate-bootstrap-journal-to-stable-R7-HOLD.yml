@@ -1,0 +1,179 @@
+name: HOLD R7 journal-to-official-stable one-pass integrated Windows acceptance
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - '.github/workflows/validate-bootstrap-journal-to-stable-R7-HOLD.yml'
+  workflow_dispatch:
+permissions: {contents: read, actions: read}
+jobs:
+  original-user-v0620-r9-prepared-to-canonical-v0628-r17:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Prove current production and parse R7 original self-update wrapper
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $main=(git rev-parse origin/main).Trim()
+          if($main -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'UNEXPECTED_PRODUCTION_MAIN_DRIFT'}
+          $man=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($man.latest_version -cne '0.6.28' -or
+             $man.source_commit -cne 'bb6d90146f20b73d36fbf8cb813f1b190f403c48' -or
+             $man.payload_set_sha256 -cne '4be96c5d41c2160ed9ac96001b469998595629232929b82c8b0f34b11fda3b43'){
+             throw 'UNEXPECTED_PRODUCTION_STABLE_MANIFEST'
+          }
+          $s='validation/spotify-exit-immediate-maintenance-HOLD/reconcile-prepared-orphan-journal-R5-HOLD.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $s),[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw ('R7_PS51_PARSE_ERROR '+[string]$errors[0].Message)}
+          Write-Host 'R7_ORIGINAL_STABLE_MAIN_SHA_MANIFEST_AND_PS51_PARSE_PASS'
+      - name: Retrieve immutable exact released Bootstrap once
+        shell: bash
+        env:
+          GH_TOKEN: \${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' > bootstrap-r7-carrier.zip
+      - name: Construct exact user installed v0.6.20/r9 and one PREPARED orphan in hosted-only scratch
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/v0.6.20/build_v0620.py --build
+          if($LASTEXITCODE -ne 0){throw 'EXACT_V0620_SOURCE_RECONSTRUCTION_FAILED'}
+          @'
+          from __future__ import annotations
+          from pathlib import Path
+          from io import BytesIO
+          import json,hashlib,os,shutil,runpy,zipfile
+          root=Path.cwd()
+          scratch=Path(os.environ['RUNNER_TEMP'])/'r7-user-baseline'
+          if scratch.exists(): raise RuntimeError('R7_SCRATCH_COLLISION')
+          local=scratch/'LocalAppData'/'SpotifyControl'
+          bin=local/'bin'
+          backing=local/'backups'/'self-update-transactions'/'20261108-131500-cafefeed'/'bin'
+          boot=local/'bootstrap'
+          bin.mkdir(parents=True);backing.mkdir(parents=True);boot.mkdir(parents=True)
+          src=root/'validation'/'v0.6.20'/'out'/'bin'
+          for name,size,dig in (
+            ('spotify-control.ps1',281585,'e9f0181756cfb84c505c30f54b6067e321f6d178d3a1936489714b8f4441ba18'),
+            ('addon-manager.ps1',225044,'3a20fcd552b363ebc05e26854a8fe010ffe50e5c756ebd3d7fca54011e8a8b86')):
+             data=(src/name).read_bytes()
+             assert (len(data),hashlib.sha256(data).hexdigest())==(size,dig)
+             (bin/name).write_bytes(data)
+          vb=runpy.run_path(str(root/'validation/normal-engine-shared-turnstile/audit-pinned-stable-entrypoints-v059.py'))['extract_verified_agent']()
+          assert (len(vb),hashlib.sha256(vb).hexdigest())==(4855,'2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278')
+          assert b' -Action AgentTick -AgentEvent ' in vb and b'shell.Run(cmd, 0, False)' in vb
+          (bin/'spotify-control-agent.vbs').write_bytes(vb)
+          with zipfile.ZipFile('bootstrap-r7-carrier.zip') as carrier:
+             nested=carrier.read('SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip')
+          assert (len(nested),hashlib.sha256(nested).hexdigest())==(30856,'6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdfd267bd95f6c6ddcf06')
+          with zipfile.ZipFile(BytesIO(nested)) as pack:
+             source=pack.read('bootstrap/spotify-control-self-updater.ps1')
+          assert (len(source),hashlib.sha256(source).hexdigest())==(42963,'d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6')
+          (boot/'spotify-control-self-updater.ps1').write_bytes(source)
+          for f in bin.iterdir():shutil.copy2(f,backing/f.name)
+          def tree(d):
+             rows=[]
+             for p in d.rglob('*'):
+               rel=p.relative_to(d).as_posix().lower()
+               if p.is_dir(): rows.append('D|'+rel)
+               else:
+                 b=p.read_bytes()
+                 rows.append('F|'+rel+'|'+str(len(b))+'|'+hashlib.sha256(b).hexdigest())
+             return hashlib.sha256(('\n'.join(sorted(rows))+'\n').encode()).hexdigest()
+          oldsha=tree(bin)
+          assert oldsha==tree(backing)
+          id='20261108-131500-cafefeed'
+          doc=dict(schema=1,id=id,status='prepared',
+            before_version='0.6.20',after_version='0.6.28',
+            source_commit='bb6d90146f20b73d36fbf8cb813f1b190f403c48',
+            payload_set_sha256='4be96c5d41c2160ed9ac96001b469998595629232929b82c8b0f34b11fda3b43',
+            before_tree_sha256=oldsha,after_tree_sha256='f'*64,
+            backup_bin=str(backing),
+            same_dir_new=str(local/('bin.spotifycontrol-new-'+id)),
+            same_dir_old=str(local/('bin.spotifycontrol-old-'+id)),
+            swapped_at=None,post_verified_at=None,committed_at=None,rolled_back_at=None,
+            error='SYNTHETIC_PRIVATE_ERROR_NEVER_OUTPUT')
+          (local/'self-update-last-transaction.json').write_text(json.dumps(doc,separators=(',',':')),encoding='utf-8')
+          (local/'state.json').write_text(json.dumps(dict(schema=20,agent_mutation_enabled=True,
+               pending_maintenance=True,maintenance_check_healthy=False,
+               self_update_last_transaction_status='failed'),separators=(',',':')),encoding='utf-8')
+          (local/'user-unrelated-preserve.txt').write_bytes(b'USER_PRESERVATION_SENTINEL')
+          roaming=scratch/'Roaming'/'spicetify'
+          roaming.mkdir(parents=True)
+          (roaming/'config-xpui.ini').write_text('[Setting]\ncurrent_theme = UserOriginal\n',encoding='utf-8')
+          print('EXACT_USER_V0620_R9_AND_REAL_VBS_ORIGINAL_BOOTSTRAP_SYNTHETIC_PREPARED_READY')
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'HOSTED_EXACT_USER_PREPARED_FIXTURE_FAILED'}
+      - name: Run one approved hosted dual-mutex journal and official manifest update while real VBS stays active
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $fixture=Join-Path $env:RUNNER_TEMP 'r7-user-baseline'
+          $root=Join-Path $fixture 'LocalAppData/SpotifyControl'
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/reconcile-prepared-orphan-journal-R5-HOLD.ps1'
+          $state=Join-Path $root 'state.json'
+          $config=Join-Path $fixture 'Roaming/spicetify/config-xpui.ini'
+          $preserve=Join-Path $root 'user-unrelated-preserve.txt'
+          $stateHash=(Get-FileHash $state -Algorithm SHA256).Hash.ToLowerInvariant()
+          $configHash=(Get-FileHash $config -Algorithm SHA256).Hash.ToLowerInvariant()
+          $otherHash=(Get-FileHash $preserve -Algorithm SHA256).Hash.ToLowerInvariant()
+          $origLocal=$env:LOCALAPPDATA;$origRoaming=$env:APPDATA
+          $resident=$null
+          try {
+            $env:LOCALAPPDATA=Join-Path $fixture 'LocalAppData'
+            $env:APPDATA=Join-Path $fixture 'Roaming'
+            $agent=Join-Path $root 'bin/spotify-control-agent.vbs'
+            $wscript=Join-Path $env:WINDIR 'System32/wscript.exe'
+            $resident=Start-Process -FilePath $wscript -ArgumentList ('//B //NoLogo "'+$agent+'"') -PassThru
+            Start-Sleep -Milliseconds 800
+            if($resident.HasExited){throw 'ORIGINAL_RESIDENT_VBS_EXITED_EARLY'}
+            $output=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture -Commit -ApprovalPhrase EXACT_PREPARED_NO_BIN_SWAP -ContinueOfficialStableUpdate -OfficialUpdateApprovalPhrase APPROVE_OFFICIAL_V0628_CORE_UPGRADE 2>&1)
+            if($LASTEXITCODE -ne 0){throw 'GUARDED_R7_WRAPPER_PROCESS_FAILED'}
+            foreach($exact in @(
+              'LEGACY_MAINTENANCE_AND_AGENTTICK_MUTEX=HELD',
+              'RESIDENT_AGENT=RUNNING_TICKS_MUTEX_FENCED',
+              'EXACT_BOOTSTRAP_FILESHARE_NONE=HELD',
+              'JOURNAL_ORPHAN_TERMINALIZED_WITHOUT_BIN_SWAP=YES',
+              'OFFICIAL_BOOTSTRAP_EIGHT_EDGE_PLAN=EXACT',
+              'OFFICIAL_BOOTSTRAP_EXACT_V0628_R17=COMMITTED',
+              'STABLE_POSTCHECK_ALREADY_CURRENT=TRUE',
+              'RESULT=OFFICIAL_STABLE_V0628_R17_COMMITTED_VERIFIED'
+            )){
+              if($output -cnotcontains $exact){throw ('GUARDED_R7_FULL_CHAIN_EVIDENCE_MISSING_'+$exact+' OUTPUT='+($output -join ','))}
+            }
+            if($resident.HasExited){throw 'R7_QUIESCENCE_INADVERTENTLY_KILLED_RESIDENT'}
+            $bin=Join-Path $root 'bin'
+            if((Get-FileHash (Join-Path $bin 'spotify-control.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0' -or
+               (Get-FileHash (Join-Path $bin 'addon-manager.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() -cne '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285'){
+              throw 'R7_STABLE_MAIN_ADDON_SHA_NOT_EXACT'
+            }
+            if((Get-FileHash $config -Algorithm SHA256).Hash.ToLowerInvariant() -cne $configHash -or
+               (Get-FileHash $state -Algorithm SHA256).Hash.ToLowerInvariant() -cne $stateHash -or
+               (Get-FileHash $preserve -Algorithm SHA256).Hash.ToLowerInvariant() -cne $otherHash){
+              throw 'R7_CHANGED_SPICETIFY_CONFIG_OR_USER_STATE'
+            }
+            $journal=Get-Content (Join-Path $root 'self-update-last-transaction.json') -Raw|ConvertFrom-Json
+            if($journal.status -cne 'committed'){throw 'R7_NEW_BOOTSTRAP_COMMITTED_JOURNAL_ABSENT'}
+            $escrow=Join-Path $root 'backups/self-update-transactions/20261108-131500-cafefeed/original-prepared-transaction-before-reconcile.json'
+            if(-not (Test-Path $escrow)){throw 'R7_PREPARED_ORIGINAL_ESCROW_MISSING'}
+            $old=Get-Content $escrow -Raw | ConvertFrom-Json
+            if($old.status -cne 'prepared'){throw 'R7_PREVIOUS_FAILED_JOURNAL_NOT_PRESERVED'}
+            Write-Host 'R7_HOSTED_REAL_ORIGINAL_BOOTSTRAP_STABLE_UPDATE_AND_PREPARED_RECOVERY_FULL_CHAIN_PASS'
+            Write-Host 'R7_REAL_VBS_ALIVE_AND_USER_PROFILE_CONFIG_ORIGINAL_DATA_UNCHANGED_PASS'
+          }finally{
+            if($null -ne $resident -and -not $resident.HasExited){
+              Stop-Process -Id $resident.Id -Force -ErrorAction SilentlyContinue
+              try{$resident.WaitForExit(5000)|Out-Null}catch{}
+            }
+            $env:LOCALAPPDATA=$origLocal;$env:APPDATA=$origRoaming
+          }
+      - name: Remove only disposable hosted user-equivalent fixture
+        if: always()
+        shell: powershell
+        run: |
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'r7-user-baseline') -Force -Recurse -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath bootstrap-r7-carrier.zip -Force -ErrorAction SilentlyContinue
