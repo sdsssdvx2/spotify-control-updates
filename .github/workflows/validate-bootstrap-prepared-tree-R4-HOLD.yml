@@ -1,0 +1,121 @@
+name: HOLD v1.0.6 prepared-transaction exact-tree proof R4
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - '.github/workflows/validate-bootstrap-prepared-tree-R4-HOLD.yml'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  read-only-transaction-tree-proof-winps51:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse and build exact immutable BEFORE and AFTER tree fixture
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $file='validation/spotify-exit-immediate-maintenance-HOLD/read-prepared-txn-tree-R4.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw ('REAL_PREPARED_TXN_R4_WINPS51_PARSE_ERROR '+[string]$errors[0].Message)}
+          @'
+          import os,hashlib,json,pathlib,shutil
+          runner=pathlib.Path(os.environ['RUNNER_TEMP'])
+          fixture=runner/'spotify-r4-prepared-tree'
+          if fixture.exists(): raise RuntimeError('fixture exists before test')
+          root=fixture/'LocalAppData'/'SpotifyControl'
+          live=root/'bin'
+          backup=root/'backups'/'self-update-transactions'/'20261108-140011-deadbeef'/'bin'
+          new=root/'bin.spotifycontrol-new-20261108-140011-deadbeef'
+          old=root/'bin.spotifycontrol-old-20261108-140011-deadbeef'
+          report=root/'reports'
+          report.mkdir(parents=True,exist_ok=True)
+          (live/'CustomApps').mkdir(parents=True)
+          (live/'spotify-control.ps1').write_bytes(b'$ScriptVersion = "0.6.20"\n')
+          (live/'CustomApps'/'test.txt').write_bytes(b'ORIGINAL\n')
+          shutil.copytree(live,backup)
+          shutil.copytree(live,new)
+          (new/'spotify-control.ps1').write_bytes(b'$ScriptVersion = "0.6.28"\n')
+          def tree_digest(folder):
+            rows=[]
+            for p in folder.rglob('*'):
+              rel=p.relative_to(folder).as_posix().lower()
+              if p.is_dir():rows.append('D|'+rel)
+              else:
+                b=p.read_bytes()
+                rows.append('F|'+rel+'|'+str(len(b))+'|'+hashlib.sha256(b).hexdigest())
+            return hashlib.sha256(('\n'.join(sorted(rows))+'\n').encode()).hexdigest()
+          before=tree_digest(live);after=tree_digest(new)
+          assert before==tree_digest(backup)
+          txn=dict(schema=1,id='20261108-140011-deadbeef',status='prepared',
+            before_version='0.6.20',after_version='0.6.28',
+            before_tree_sha256=before,after_tree_sha256=after,
+            backup_bin=str(backup),same_dir_new=str(new),same_dir_old=str(old),
+            error='Cannot create a file when that file already exists: private path is redacted')
+          (root/'self-update-last-transaction.json').write_text(json.dumps(txn),encoding='utf-8')
+          (report/'self-update-latest.json').write_text(json.dumps(dict(action='Update',success=False,error='Cannot create a file when that file already exists: private path is redacted')),encoding='utf-8')
+          print('BOOTSTRAP_R4_SYNTHETIC_CANONICAL_TREE_FIXTURE_PREPARED')
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'SYNTHETIC_TRANSACTION_FIXTURE_FAILED'}
+          Write-Host 'EXACT_TREE_SHA_CANONICALIZATION_SOURCE_READY'
+      - name: Exact WinPS 5.1 same-volume prepared transaction proof and corrupt backup denial
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $fixture=Join-Path $env:RUNNER_TEMP 'spotify-r4-prepared-tree'
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/read-prepared-txn-tree-R4.ps1'
+          $root=Join-Path $fixture 'LocalAppData/SpotifyControl'
+          $beforeHash=(Get-FileHash (Join-Path $root 'bin/spotify-control.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+          $out=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture 2>&1)
+          if($LASTEXITCODE -ne 0){throw 'READONLY_TOOL_PROCESS_FAILED'}
+          foreach($row in @(
+             'TRANSACTION_STATUS=PREPARED',
+             'TRANSACTION_ERROR_CLASS=MOVE_DESTINATION_EXISTS',
+             'LAST_REPORT_ERROR_CLASS=MOVE_DESTINATION_EXISTS',
+             'ID_FORMAT=VALID_V106',
+             'BEFORE_AFTER_SHA_FORMAT=VALID',
+             'VERSION_PAIR=V0620_TO_V0628',
+             'TRANSACTION_PATH_PINS=EXACT_V106',
+             'LIVE_BIN_TREE=EXACT_BEFORE',
+             'BACKUP_BIN_TREE=EXACT_BEFORE',
+             'SAME_VOLUME_OLD_TREE=MISSING_OR_UNSAFE',
+             'SAME_VOLUME_NEW_TREE=EXACT_AFTER',
+             'PREPARED_BACKUP_AND_LIVE_COHERENT=YES',
+             'RESULT=PREPARED_ORPHAN_COHERENT_HOLD_NO_CHANGES',
+             'BOOTSTRAP_CHECK_ALLOWED=NO;ROLLBACK_ALLOWED=NO;DELETE_AUTHORIZED=NO'
+          )){
+            if($out -cnotcontains $row){throw ('R4_EXPECTED_PROOF_MISSING_'+$row)}
+          }
+          if(($out -join ' ') -match '(?i)(private path|deadbeef|spotify-r4-prepared-tree|\\Users\\)'){
+            throw 'R4_OUTPUT_EXPOSED_PRIVATE_PATH_OR_TRANSACTION_ID'
+          }
+          $afterHash=(Get-FileHash (Join-Path $root 'bin/spotify-control.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($afterHash -cne $beforeHash){throw 'R4_PROBE_CHANGED_LIVE_SOURCE'}
+          Write-Host 'EXACT_BOOTSTRAP_TREE_SHA_AND_READONLY_PREPARED_ORPHAN_ACCEPTANCE_PASS'
+          $backupFile=Join-Path $root 'backups/self-update-transactions/20261108-140011-deadbeef/bin/CustomApps/test.txt'
+          [IO.File]::WriteAllText($backupFile,'TAMPERED')
+          $bad=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture 2>&1)
+          if($LASTEXITCODE -ne 0 -or $bad -cnotcontains 'BACKUP_BIN_TREE=DIFFERENT_FROM_TRANSACTION' -or
+             $bad -cnotcontains 'PREPARED_BACKUP_AND_LIVE_COHERENT=NOT_PROVEN' -or
+             $bad -cnotcontains 'RESULT=HOLD_UNRESOLVED_TREE_OR_TRANSACTION'){
+            throw 'R4_BACKUP_TAMPER_NOT_REJECTED'
+          }
+          Write-Host 'BACKUP_INTEGRITY_VIOLATION_BLOCKED_WITHOUT_RESTORE_PASS'
+          $docPath=Join-Path $root 'self-update-last-transaction.json'
+          $json=Get-Content $docPath -Raw|ConvertFrom-Json
+          $json.backup_bin=(Join-Path $env:RUNNER_TEMP 'unrelated-backup/bin')
+          [IO.File]::WriteAllText($docPath,($json|ConvertTo-Json -Depth 9 -Compress),(New-Object Text.UTF8Encoding($false)))
+          $mismatch=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture 2>&1)
+          if($LASTEXITCODE -ne 0 -or $mismatch -cnotcontains 'TRANSACTION_PATH_PINS=INVALID_OR_UNVERIFIED' -or
+             $mismatch -cnotcontains 'RESULT=HOLD_READONLY_UNVERIFIED'){
+            throw 'R4_TRANSACTION_PATH_SPOOF_NOT_BLOCKED'
+          }
+          Write-Host 'TRANSACTION_PATH_BINDING_ESCAPE_DENIED_PASS'
+      - name: Remove only test fixture in runner temp
+        if: always()
+        shell: powershell
+        run: |
+          $f=Join-Path $env:RUNNER_TEMP 'spotify-r4-prepared-tree'
+          Remove-Item -LiteralPath $f -Recurse -Force -ErrorAction SilentlyContinue
