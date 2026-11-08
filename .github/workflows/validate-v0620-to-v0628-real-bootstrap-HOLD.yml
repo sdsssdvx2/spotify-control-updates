@@ -1,0 +1,81 @@
+name: HOLD exact user v0.6.20 to v0.6.28 eight-edge Bootstrap 1.0.6 acceptance
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - '.github/workflows/validate-v0620-to-v0628-real-bootstrap-HOLD.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  exact-user-v0620-r9-to-stable-v0628-r17:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Source/target pins and exact Windows PS5.1 syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'LIVE_MAIN_SHA_DRIFTED_DO_NOT_BUILD'}
+          $m=Get-Content manifest.json -Raw | ConvertFrom-Json
+          if($m.latest_version -cne '0.6.28' -or
+             $m.latest_files[0].sha256 -cne 'af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0' -or
+             $m.latest_files[1].sha256 -cne '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285'){throw 'STABLE_V0628_RELEASE_DRIFTED'}
+          python -m py_compile validation/spotify-exit-immediate-maintenance-HOLD/rehearse-exact-v0620-to-v0628.py
+          if($LASTEXITCODE -ne 0){throw 'TARGET_PYTHON_SYNTAX_FAIL'}
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/test-exact-v0620-to-v0628-8hop.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw ('TARGET_PS51_SYNTAX_FAIL '+[string]$errors[0].Message)}
+          Write-Host 'EXACT_USER_BASELINE_AND_EIGHT_EDGE_SOURCE_PARSE_PASS'
+      - name: Obtain exact existing 1.0.6 Bootstrap from previously accepted artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' > validated-v0614-repair-artifact.zip
+          python - <<'PY'
+          from pathlib import Path
+          from io import BytesIO
+          import hashlib,zipfile
+          outer=Path('validated-v0614-repair-artifact.zip').read_bytes()
+          with zipfile.ZipFile(BytesIO(outer)) as z:
+              assert z.testzip() is None
+              inner=z.read('SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip')
+          assert len(inner)==30856
+          assert hashlib.sha256(inner).hexdigest()=='6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdfd267bd95f6c6ddcf06'
+          with zipfile.ZipFile(BytesIO(inner)) as z:
+              bootstrap=z.read('bootstrap/spotify-control-self-updater.ps1')
+          assert len(bootstrap)==42963
+          assert hashlib.sha256(bootstrap).hexdigest()=='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
+          print('EXACT_ORIGINAL_BOOTSTRAP_V106_CARRIER_PASS')
+          PY
+      - name: Stage exact CURRENT USER stable v0.6.20/r9 bytes under hosted fixture
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/rehearse-exact-v0620-to-v0628.py
+          if($LASTEXITCODE -ne 0){throw 'EXACT_USER_V0620_R9_FIXTURE_NOT_REPRODUCED'}
+          $target='ci-bootstrap-v0620-to-v0628-exact-user-baseline/LocalAppData/SpotifyControl/bin'
+          if((Get-FileHash (Join-Path $target 'spotify-control.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'e9f0181756cfb84c505c30f54b6067e321f6d178d3a1936489714b8f4441ba18'){throw 'USER_BASELINE_MAIN_SHA_MISMATCH'}
+          if((Get-FileHash (Join-Path $target 'addon-manager.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3a20fcd552b363ebc05e26854a8fe010ffe50e5c756ebd3d7fca54011e8a8b86'){throw 'USER_BASELINE_ADDON_SHA_MISMATCH'}
+          Write-Host 'REAL_USER_EXACT_SOURCE_PAIR_ISOLATED_STAGE_PASS'
+      - name: Execute exact Bootstrap Check RollbackTest Update post-Check across eight edges
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/spotify-exit-immediate-maintenance-HOLD/test-exact-v0620-to-v0628-8hop.ps1 -Fixture ci-bootstrap-v0620-to-v0628-exact-user-baseline
+          if($LASTEXITCODE -ne 0){throw 'REAL_BOOTSTRAP_EIGHT_EDGE_FULL_CHAIN_NOT_VERIFIED'}
+          Write-Host 'REAL_V0620_R9_TO_V0628_R17_BOOTSTRAP_V106_FULL_CHAIN_INTEGRATED_PASS'
+      - name: Cleanup ephemeral 0.6.20 fixture and exact bootstrap carrier
+        if: always()
+        shell: powershell
+        run: |
+          Remove-Item -LiteralPath ci-bootstrap-v0620-to-v0628-exact-user-baseline -Force -Recurse -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath ci-bootstrap-fixture -Force -Recurse -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath validated-v0614-repair-artifact.zip -Force -ErrorAction SilentlyContinue
