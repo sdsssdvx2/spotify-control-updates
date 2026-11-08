@@ -15,7 +15,7 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
 function Fail([string]$Category){throw $Category}
-function Dir([string]$Path){
+function IsPlainDirectory([string]$Path){
   try{$f=Get-Item -LiteralPath $Path -Force -ErrorAction Stop
     return ($f.PSIsContainer -and ($f.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0)}
   catch{return $false}
@@ -53,7 +53,7 @@ function ReparseFreePath([string]$Root,[string]$Target){
   $r=[IO.Path]::GetFullPath($Root).TrimEnd('\','/')
   $p=[IO.Path]::GetFullPath($Target)
   if(-not $p.StartsWith(($r+'\'),[StringComparison]::OrdinalIgnoreCase)){return $false}
-  if(-not(Dir $r)){return $false}
+  if(-not(IsPlainDirectory $r)){return $false}
   $relative=$p.Substring($r.Length).TrimStart('\','/')
   $cursor=$r
   foreach($component in @($relative -split '[\\/]')){
@@ -69,7 +69,7 @@ function ReparseFreePath([string]$Root,[string]$Target){
 # Strictly compatible with v1.0.6 Get-TreeManifest; refuses reparse points,
 # unsafe traversal and unexpected concurrency before it can authorize writing.
 function ExactTree([string]$Root) {
-  if(-not(Dir $Root)){return ''}
+  if(-not(IsPlainDirectory $Root)){return ''}
   $base=[IO.Path]::GetFullPath($Root).TrimEnd('\','/')
   $entries=New-Object 'System.Collections.Generic.List[string]'
   $seen=@{};[int64]$total=0
@@ -108,7 +108,7 @@ function SourcePin([string]$Path,[int64]$Size,[string]$Sha) {
   return ($null -ne $f -and [int64]$f.Length -eq $Size -and (HashFile $Path) -ceq $Sha)
 }
 function Probe([string]$Root,[string]$ExpectedId='') {
-  if(-not(Dir $Root)){Fail 'ROOT_UNSAFE'}
+  if(-not(IsPlainDirectory $Root)){Fail 'ROOT_UNSAFE'}
   if(-not(ReparseFreePath $Root (Join-Path $Root 'bin'))){Fail 'BIN_PATH_UNSAFE'}
   if(-not(ReparseFreePath $Root (Join-Path $Root 'bootstrap\spotify-control-self-updater.ps1'))){Fail 'BOOTSTRAP_PATH_UNSAFE'}
   $bin=Join-Path $Root 'bin'
@@ -145,7 +145,7 @@ function Probe([string]$Root,[string]$ExpectedId='') {
   foreach($p in @($new,$old,$rest,$failed)){
     if(Test-Path -LiteralPath $p){Fail 'LEFTOVER_UPDATE_ROOT_EXISTS'}
   }
-  if(-not(Dir $base) -or -not(Dir $backup)){Fail 'BACKUP_MISSING'}
+  if(-not(IsPlainDirectory $base) -or -not(IsPlainDirectory $backup)){Fail 'BACKUP_MISSING'}
   $liveSha=ExactTree $bin
   $backupSha=ExactTree $backup
   if($liveSha -cne $before -or $backupSha -cne $before){Fail 'TREE_MISMATCH_REFUSE_JOURNAL_CHANGE'}
@@ -287,7 +287,7 @@ function InvokeControlledOfficialStableUpdate {
     }
     [void][IO.Directory]::CreateDirectory($dir)
     $created=$true
-    if(-not(Dir $dir)){Fail 'CONTROLLED_COPY_DIRECTORY_UNSAFE'}
+    if(-not(IsPlainDirectory $dir)){Fail 'CONTROLLED_COPY_DIRECTORY_UNSAFE'}
     $script=Join-Path $dir 'spotify-control-self-updater.ps1'
     $BootstrapFileHandle.Position=0
     $buffer=New-Object byte[] ([int]$BootstrapFileHandle.Length)
@@ -349,7 +349,7 @@ function InvokeControlledOfficialStableUpdate {
        (HashFile $script) -ceq 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'){
       try{[IO.File]::Delete($script)}catch{}
     }
-    if($created -and (Dir $dir)){
+    if($created -and (IsPlainDirectory $dir)){
       try{
         if(@(Get-ChildItem -LiteralPath $dir -Force).Count -eq 0){
           [IO.Directory]::Delete($dir,$false)
