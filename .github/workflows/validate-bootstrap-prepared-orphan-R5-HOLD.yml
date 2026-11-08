@@ -1,0 +1,135 @@
+name: HOLD exact prepared-orphan journal-only terminalizer R5 scratch acceptance
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - '.github/workflows/validate-bootstrap-prepared-orphan-R5-HOLD.yml'
+  workflow_dispatch:
+permissions: {contents: read, actions: read}
+jobs:
+  verify-no-bin-swap-and-no-overwrite:
+    runs-on: windows-2025
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Read original code and build pinned current user main/addon/agent
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $src='validation/spotify-exit-immediate-maintenance-HOLD/reconcile-prepared-orphan-journal-R5-HOLD.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $src),[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw ('R5_WINPS51_PARSE_ERROR '+[string]$errors[0].Message)}
+          python validation/v0.6.20/build_v0620.py --build
+          if($LASTEXITCODE -ne 0){throw 'STABLE_V0620_R9_RECONSTRUCTION_FAILED'}
+          Write-Host 'EXACT_CANONICAL_R5_WINDOWS_SOURCE_PARSE_PASS'
+      - name: Fetch exact 1.0.6 binary artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' > bootstrap-r5-carrier.zip
+      - name: Construct private user-equivalent PREPARED record and exact rollback tree
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          import os,hashlib,zipfile,io,runpy,pathlib,json,shutil
+          ROOT=pathlib.Path.cwd()
+          RUNNER=pathlib.Path(os.environ['RUNNER_TEMP'])
+          USER=RUNNER/'spotify-r5-scratch'
+          assert not USER.exists()
+          local=USER/'LocalAppData'/'SpotifyControl'
+          bindir=local/'bin';backup=local/'backups'/'self-update-transactions'/'20261108-133000-deadbeef'/'bin'
+          boot=local/'bootstrap'/'spotify-control-self-updater.ps1'
+          bindir.mkdir(parents=True);backup.mkdir(parents=True);boot.parent.mkdir(parents=True)
+          src=ROOT/'validation/v0.6.20/out/bin'
+          expected=[
+            ('spotify-control.ps1',281585,'e9f0181756cfb84c505c30f54b6067e321f6d178d3a1936489714b8f4441ba18'),
+            ('addon-manager.ps1',225044,'3a20fcd552b363ebc05e26854a8fe010ffe50e5c756ebd3d7fca54011e8a8b86')
+          ]
+          for name,size,digest in expected:
+            b=(src/name).read_bytes()
+            assert (len(b),hashlib.sha256(b).hexdigest())==(size,digest)
+            (bindir/name).write_bytes(b)
+          agent=runpy.run_path(str(ROOT/'validation/normal-engine-shared-turnstile/audit-pinned-stable-entrypoints-v059.py'))['extract_verified_agent']()
+          assert (len(agent),hashlib.sha256(agent).hexdigest())==(4855,'2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278')
+          (bindir/'spotify-control-agent.vbs').write_bytes(agent)
+          with zipfile.ZipFile('bootstrap-r5-carrier.zip') as z:
+            carrier=z.read('SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip')
+          assert (len(carrier),hashlib.sha256(carrier).hexdigest())==(30856,'6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdfd267bd95f6c6ddcf06')
+          with zipfile.ZipFile(io.BytesIO(carrier)) as z:
+            original=z.read('bootstrap/spotify-control-self-updater.ps1')
+          assert (len(original),hashlib.sha256(original).hexdigest())==(42963,'d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6')
+          boot.write_bytes(original)
+          for f in bindir.iterdir(): shutil.copy2(f,backup/f.name)
+          def digest(folder):
+            rows=[]
+            for file in folder.rglob('*'):
+              rel=file.relative_to(folder).as_posix().lower()
+              if file.is_dir(): rows.append('D|'+rel)
+              else:
+                b=file.read_bytes()
+                rows.append('F|'+rel+'|'+str(len(b))+'|'+hashlib.sha256(b).hexdigest())
+            return hashlib.sha256(('\n'.join(sorted(rows))+'\n').encode()).hexdigest()
+          original_tree=digest(bindir)
+          assert digest(backup)==original_tree
+          txn={
+            'schema':1,'id':'20261108-133000-deadbeef','status':'prepared',
+            'before_version':'0.6.20','after_version':'0.6.28',
+            'source_commit':'bb6d90146f20b73d36fbf8cb813f1b190f403c48',
+            'payload_set_sha256':'4be96c5d41c2160ed9ac96001b469998595629232929b82c8b0f34b11fda3b43',
+            'before_tree_sha256':original_tree,'after_tree_sha256':'f'*64,
+            'backup_bin':str(backup),
+            'same_dir_new':str(local/'bin.spotifycontrol-new-20261108-133000-deadbeef'),
+            'same_dir_old':str(local/'bin.spotifycontrol-old-20261108-133000-deadbeef'),
+            'swapped_at':None,'post_verified_at':None,'committed_at':None,'rolled_back_at':None,
+            'error':'PRIVATE_MUST_BE_RETAINED'
+          }
+          (local/'self-update-last-transaction.json').write_text(json.dumps(txn,ensure_ascii=True,separators=(',',':')),encoding='utf-8')
+          print('PINNED_R5_USER_SOURCE_AND_PREPARED_SCRATCH_CREATED')
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'R5_USER_FIXTURE_CREATION_FAILED'}
+      - name: Verify default is read-only and explicit approval commits journal alone
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $fixture=Join-Path $env:RUNNER_TEMP 'spotify-r5-scratch'
+          $local=Join-Path $fixture 'LocalAppData/SpotifyControl'
+          $bin=Join-Path $local 'bin'
+          $record=Join-Path $local 'self-update-last-transaction.json'
+          $escrow=Join-Path $local 'backups/self-update-transactions/20261108-133000-deadbeef/original-prepared-transaction-before-reconcile.json'
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/reconcile-prepared-orphan-journal-R5-HOLD.ps1'
+          $before=(Get-FileHash $record -Algorithm SHA256).Hash.ToLowerInvariant()
+          $mainBefore=(Get-FileHash (Join-Path $bin 'spotify-control.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+          $addonBefore=(Get-FileHash (Join-Path $bin 'addon-manager.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+          $dry=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture 2>&1)
+          if($LASTEXITCODE -ne 0 -or $dry -cnotcontains 'RESULT=READY_FOR_EXPLICIT_AUTHORIZED_JOURNAL_ONLY_RECONCILIATION' -or
+             (Test-Path $escrow)){throw 'R5_DRY_RUN_CHANGED_OR_REFUSED_FIXTURE'}
+          $no=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture -Commit 2>&1)
+          if($LASTEXITCODE -ne 0 -or $no -cnotcontains 'HOLD_REASON=EXPLICIT_APPROVAL_MISSING' -or
+             (Test-Path $escrow)){throw 'R5_COMMIT_WITHOUT_APPROVAL_WAS_NOT_REFUSED'}
+          $commit=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture -Commit -ApprovalPhrase EXACT_PREPARED_NO_BIN_SWAP 2>&1)
+          if($LASTEXITCODE -ne 0 -or $commit -cnotcontains 'RESULT=JOURNAL_ONLY_RECONCILED_REQUIRES_FRESH_UPDATE_ACCEPTANCE' -or
+             $commit -cnotcontains 'TRANSACTION_TERMINAL=ROLLED_BACK_NO_BIN_SWAP'){throw ('R5_APPROVED_FIXTURE_COMMIT_FAILED '+($commit -join ','))}
+          if(-not (Test-Path $escrow)){throw 'R5_ORIGINAL_TRANSACTION_ESCROW_NOT_CREATED'}
+          if((Get-FileHash $escrow -Algorithm SHA256).Hash.ToLowerInvariant() -cne $before){throw 'R5_ESCROW_BYTES_NOT_ORIGINAL'}
+          if((Get-FileHash (Join-Path $bin 'spotify-control.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $mainBefore -or
+             (Get-FileHash (Join-Path $bin 'addon-manager.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $addonBefore){throw 'R5_ALTERED_INSTALLED_BIN'}
+          $obj=Get-Content -LiteralPath $record -Raw|ConvertFrom-Json
+          if($obj.status -cne 'rolled-back' -or $obj.prepared_orphan_reconciled_without_bin_swap -ne $true){throw 'R5_TERMINAL_RECORD_INCORRECT'}
+          Write-Host 'EXACT_PREPARED_JOURNAL_ONLY_COMMIT_AND_ORIGINAL_ESCROW_PASS'
+          Write-Host 'LIVE_SPOTIFY_CONTROL_BIN_MAIN_AND_ADDON_UNCHANGED_PASS'
+          $again=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture -Commit -ApprovalPhrase EXACT_PREPARED_NO_BIN_SWAP 2>&1)
+          if($LASTEXITCODE -ne 0 -or $again -cnotcontains 'RESULT=HOLD_NO_AUTOMATIC_RETRY' -or
+             (Get-FileHash $escrow -Algorithm SHA256).Hash.ToLowerInvariant() -cne $before){throw 'R5_SECOND_RUN_NOT_FAIL_CLOSED'}
+          Write-Host 'TERMINALIZED_JOURNAL_NOT_MUTATED_AGAIN_PASS'
+          if(($commit -join ' ') -match 'PRIVATE_MUST_BE_RETAINED|deadbeef|\\Users\\'){throw 'PRIVATE_JOURNAL_DATA_LEAKED'}
+      - name: Cleanup Windows-only synthetic fixture
+        if: always()
+        shell: powershell
+        run: |
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'spotify-r5-scratch') -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath bootstrap-r5-carrier.zip -Force -ErrorAction SilentlyContinue
