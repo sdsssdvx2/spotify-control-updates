@@ -103,6 +103,28 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'R10_PREVIEW_TRANSPORT_COMMIT_FAILED'}
           $source=(git rev-parse HEAD).Trim()
           if($source -notmatch '^[a-f0-9]{40}\z'){throw 'R10_SOURCE_COMMIT_INVALID'}
+          # Native Bootstrap 1.0.6 intentionally resolves immutable payload
+          # chunks from RAW github.com/{repo}/{commit}/... . Publish the exact
+          # tested chunks to the nonproduction validation branch FIRST; only
+          # after real Windows E2E succeeds may the preview manifest move.
+          git push origin HEAD:refs/heads/validate/spotify-exit-immediate-maintenance-HOLD
+          if($LASTEXITCODE -ne 0){throw 'R10_TRANSPORT_ONLY_DEV_BRANCH_PUSH_DENIED'}
+          $pin=Get-Content -LiteralPath 'validation/spotify-exit-immediate-maintenance-HOLD/out/bootstrappable-preview-metadata.json' -Raw|ConvertFrom-Json
+          $first=$pin.patch.chunks[0]
+          $remote='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/'+$source+'/'+[string]$first.path
+          $visible=$false
+          for($attempt=0;$attempt -lt 16;$attempt++){
+            try{
+              $wc=New-Object Net.WebClient
+              try{$response=$wc.DownloadData($remote)}finally{$wc.Dispose()}
+              $digest=(New-Object Security.Cryptography.SHA256Managed).ComputeHash($response)
+              $h=[BitConverter]::ToString($digest).Replace('-','').ToLowerInvariant()
+              if($response.Length -eq [int]$first.size -and $h -ceq [string]$first.sha256){$visible=$true;break}
+            }catch{}
+            Start-Sleep -Seconds 1
+          }
+          if(-not $visible){throw 'R10_REMOTE_COMMIT_PINNED_CHUNK_NOT_PUBLICLY_VISIBLE'}
+          Write-Host 'R10_DEVELOPMENT_ONLY_IMMUTABLE_GITHUB_CHUNK_AVAILABLE_SHA_VERIFIED'
           python validation/spotify-exit-immediate-maintenance-HOLD/build-bootstrappable-preview.py --source-commit $source
           if($LASTEXITCODE -ne 0){throw 'R10_SOURCE_COMMIT_PINNED_PREVIEW_FAILED'}
           if((Get-FileHash -LiteralPath 'manifest.json' -Algorithm SHA256).Hash.ToLowerInvariant() -cne $prod){
