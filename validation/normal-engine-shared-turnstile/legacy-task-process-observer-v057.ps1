@@ -23,6 +23,15 @@ function Resolve-CustomAppV057CutoverObservation {
    if($Snapshot.$name -isnot [int] -or $Snapshot.$name -lt 0 -or
       $Snapshot.$name -gt 50000){throw 'V057_SNAPSHOT_INVALID_NONNEGATIVE_COUNT'}
  }
+ # PS5.1 casts nonempty string 'False' to $true; require real booleans.
+ foreach($name in @('task_scan_complete','process_scan_complete','hidden_tasks_requested')){
+    if($Snapshot.$name -isnot [bool]){throw 'V057_SNAPSHOT_INVALID_BOOLEAN'}
+ }
+ if([int]$Snapshot.suspect_task_count -gt [int]$Snapshot.task_count -or
+    [int]$Snapshot.enabled_suspect_task_count -gt [int]$Snapshot.suspect_task_count -or
+    [int]$Snapshot.running_suspect_task_count -gt [int]$Snapshot.suspect_task_count){
+   throw 'V057_SNAPSHOT_INCONSISTENT_COUNTS'
+ }
  $complete=([bool]$Snapshot.task_scan_complete -and
    [bool]$Snapshot.process_scan_complete -and
    [bool]$Snapshot.hidden_tasks_requested -and [int]$Snapshot.read_errors -eq 0)
