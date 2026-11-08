@@ -154,6 +154,30 @@ try{
  # marker. A NEW powershell.exe process validates the synthetic journal,
  # restores the isolated scheduler task, and leaves the old writer fenced.
  $child=Join-Path $PSScriptRoot 'recover-hosted-cutover-rehearsal-HOLD.ps1'
+ # Critical negative recovery case: corrupted ownership metadata must not
+ # cause restoration, task deletion or clearing the unresolved marker.
+ $savedJournal=[IO.File]::ReadAllBytes($journal)
+ try{
+  $tampered=$utf8.GetString($savedJournal).Replace(
+    'GITHUB_HOSTED_ISOLATED_SINGLE_WRITER_REHEARSAL',
+    'GITHUB_HOSTED_ISOLATED_SINGLE_WRITER_TAMPERED')
+  if($tampered -ceq $utf8.GetString($savedJournal)){
+   throw 'CUTOVER_INTEGRATION_TAMPER_INJECTION_NOT_APPLIED'
+  }
+  [IO.File]::WriteAllText($journal,$tampered,$utf8)
+  $savedPreference=$ErrorActionPreference
+  $ErrorActionPreference='Continue'
+  try{
+   & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $child -JournalPath $journal *> $null
+   $badExit=$LASTEXITCODE
+  }finally{$ErrorActionPreference=$savedPreference}
+  Assert-Cutover ($badExit -ne 0) 'MUTATED_JOURNAL_WAS_ACCEPTED'
+  $scheduler=New-Object -ComObject Schedule.Service
+  $scheduler.Connect()
+  $task=$scheduler.GetFolder('\').GetTask([string]$taskProof.scratch_task_name)
+  Assert-Cutover (-not[bool]$task.Enabled -and [IO.File]::Exists($marker)) 'REJECTED_JOURNAL_CHANGED_TASK_OR_MARKER'
+ }finally{[IO.File]::WriteAllBytes($journal,$savedJournal)}
+ Write-Host 'CUTOVER_INTEGRATION_CORRUPT_JOURNAL_REJECTED_BEFORE_TASK_RECOVERY_PASS'
  & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $child -JournalPath $journal
  if($LASTEXITCODE -ne 0){throw 'CUTOVER_INTEGRATION_FRESH_PROCESS_RECOVERY_FAILED'}
  $taskRecovered=$true
