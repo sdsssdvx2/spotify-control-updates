@@ -153,13 +153,27 @@ foreach($spec in $specs){
  [IO.File]::WriteAllText((Join-Path $config 'config-xpui.ini'),$conf,([Text.UTF8Encoding]::new($false)))
  $before=Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui
  $sourceBefore=Get-CustomAppUpdateTreeSnapshotV010 -Root $source
- $configSha=(Get-FileHash (Join-Path $config 'config-xpui.ini') -Algorithm SHA256).Hash
+ # Like the real user's canonical config, this separate ORIGINAL config is
+ # never passed to the child. The scoped private clone may be rewritten by
+ # Spicetify 2.46.4 even for -a refresh; preservation applies to original.
+ $canonical=Join-Path $roaming 'spicetify'
+ [IO.Directory]::CreateDirectory($canonical)|Out-Null
+ $canonicalIni=Join-Path $canonical 'config-xpui.ini'
+ [IO.File]::WriteAllText($canonicalIni,
+    ('[AdditionalOptions]'+[Environment]::NewLine+
+     'custom_apps = ivLyrics|better-local-files|eternal-jukebox|unmanaged'+[Environment]::NewLine),
+    ([Text.UTF8Encoding]::new($false)))
+ $canonicalSha=(Get-FileHash $canonicalIni -Algorithm SHA256).Hash
  $prefsSha=(Get-FileHash $prefs -Algorithm SHA256).Hash
  Invoke-V055VendorRefresh -Binary $bin -Folder $vendor -Name $spec.name -FakeSpotify $spotify -Prefs $prefs -Config $config -Roaming $roaming -Local $local
  $after=Get-CustomAppUpdateTreeSnapshotV010 -Root $xpui
  $scope=Get-ApprovedNativeManifestOwnedScopeV044 -Name $spec.name -SourceAppPath $source
  $proof=Test-ApprovedNativeManifestOnlyOwnedTargetChangedV044 -Before $before -After $after -Name $spec.name -SourceAppPath $source -ExpectedSourceTreeSha256 ([string]$sourceBefore.tree_sha256)
  $exact=Test-CustomAppV054OfficialSourceBoundRoutes -Name $spec.name -SourceAppPath $source -CandidateXpuiRoot $xpui -ExpectedSourceTreeSha256 ([string]$sourceBefore.tree_sha256)
+ $cloneLines=@([IO.File]::ReadAllLines((Join-Path $config 'config-xpui.ini'))|ForEach-Object{$_.Trim()})
+ $exactCloneApps=(@($cloneLines|Where-Object{$_ -ceq ('custom_apps = '+$spec.name)}).Count -eq 1)
+ $exactCloneSpotify=(@($cloneLines|Where-Object{$_ -ceq ('spotify_path = '+$spotify)}).Count -eq 1)
+ $exactClonePrefs=(@($cloneLines|Where-Object{$_ -ceq ('prefs_path = '+$prefs)}).Count -eq 1)
  $accept=[ordered]@{
    proof_ok=[bool]$proof.ok
    foreign_scope_preserved=[bool]$proof.foreign_xpui_preserved
@@ -169,7 +183,10 @@ foreach($spec in $specs){
    source_scope_pin=([string]$scope.source_tree_sha256 -ceq [string]$sourceBefore.tree_sha256)
    foreign_file_untouched=((Get-FileHash $foreign -Algorithm SHA256).Hash -ceq $foreignSha)
    prefs_untouched=((Get-FileHash $prefs -Algorithm SHA256).Hash -ceq $prefsSha)
-   isolated_config_untouched=((Get-FileHash (Join-Path $config 'config-xpui.ini') -Algorithm SHA256).Hash -ceq $configSha)
+   canonical_original_config_untouched=((Get-FileHash $canonicalIni -Algorithm SHA256).Hash -ceq $canonicalSha)
+   isolated_clone_single_app_only=$exactCloneApps
+   isolated_clone_fake_spotify_only=$exactCloneSpotify
+   isolated_clone_fake_prefs_only=$exactClonePrefs
    real_upstream_source_untouched=((Get-CustomAppUpdateTreeSnapshotV010 -Root $source).tree_sha256 -ceq $sourceBefore.tree_sha256)
    pinned_exe_untouched=((Get-FileHash $bin -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $exeHash)
    no_v044_authority=(-not[bool]$proof.production_mutation_authorized)
