@@ -8,6 +8,8 @@
 param(
   [switch]$Commit,
   [string]$ApprovalPhrase='',
+  [switch]$ContinueOfficialStableUpdate,
+  [string]$OfficialUpdateApprovalPhrase='',
   [string]$HostedFixtureRoot=''
 )
 Set-StrictMode -Version 2.0
@@ -267,9 +269,111 @@ function HoldExactBootstrapFile([string]$Root) {
     return $f
   }catch{$f.Dispose();throw}
 }
+function InvokeControlledOfficialStableUpdate {
+  param([string]$Root,[IO.FileStream]$BootstrapFileHandle,[bool]$Hosted,$Messages)
+  # A single trusted process owns both old legacy mutexes AND the exclusive
+  # original Bootstrap file handle. A byte-identical copy runs its authentic
+  # self-hash/manifest checks while original-path -File launches are denied.
+  if($null -eq $BootstrapFileHandle){Fail 'ORIGINAL_BOOTSTRAP_EXCLUSIVE_HANDLE_MISSING'}
+  $dir=Join-Path $Root ('controlled-bootstrap-once-'+[guid]::NewGuid().ToString('N'))
+  $originalLocal=$env:LOCALAPPDATA;$originalRoaming=$env:APPDATA
+  $oldStatePath=Join-Path $Root 'state.json'
+  $oldStateHash=''
+  if($null -ne (FileInfo $oldStatePath 4194304)){$oldStateHash=HashFile $oldStatePath}
+  $created=$false;$script=''
+  try{
+    if(-not(ReparseFreePath $Root $dir) -or (Test-Path -LiteralPath $dir)){
+      Fail 'CONTROLLED_COPY_DESTINATION_NOT_NEW'
+    }
+    [void][IO.Directory]::CreateDirectory($dir)
+    $created=$true
+    if(-not(Dir $dir)){Fail 'CONTROLLED_COPY_DIRECTORY_UNSAFE'}
+    $script=Join-Path $dir 'spotify-control-self-updater.ps1'
+    $BootstrapFileHandle.Position=0
+    $buffer=New-Object byte[] ([int]$BootstrapFileHandle.Length)
+    $read=0
+    while($read -lt $buffer.Length){
+      $n=$BootstrapFileHandle.Read($buffer,$read,$buffer.Length-$read)
+      if($n -le 0){Fail 'ORIGINAL_BOOTSTRAP_READ_INCOMPLETE'}
+      $read+=$n
+    }
+    if((HashBytes $buffer) -cne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'){
+      Fail 'COPIED_BOOTSTRAP_SOURCE_NOT_TRUSTED'
+    }
+    UniqueFile $script $buffer
+    if((HashFile $script) -cne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'){
+      Fail 'CONTROLLED_BOOTSTRAP_COPY_HASH_MISMATCH'
+    }
+    if($Hosted){
+      $fixture=[IO.Path]::GetFullPath($HostedFixtureRoot)
+      $env:LOCALAPPDATA=Join-Path $fixture 'LocalAppData'
+      $env:APPDATA=Join-Path $fixture 'Roaming'
+      [void][IO.Directory]::CreateDirectory($env:APPDATA)
+    }
+    # Do not trust an existing scheduled updater, stale report, or caller's
+    # version claim; the real original bootstrap is the sole update engine.
+    # Capture raw child output only IN MEMORY; never echo remote error text
+    # containing private paths, tokens or usernames.
+    $check=InvokeControlledBootstrapAction -Script $script -Action 'Check'
+    if([string]$check.installed_version -cne '0.6.20' -or
+       [string]$check.result.latest_version -cne '0.6.28' -or
+       [int]$check.result.edge_count -ne 8){Fail 'OFFICIAL_EIGHT_EDGE_PREFLIGHT_NOT_EXACT'}
+    $Messages.Add('OFFICIAL_BOOTSTRAP_EIGHT_EDGE_PLAN=EXACT')
+    $changed=InvokeControlledBootstrapAction -Script $script -Action 'Update'
+    if([string]$changed.transaction_status -cne 'committed' -or
+       [string]$changed.result.Status -cne 'committed'){
+      Fail 'OFFICIAL_UPDATE_NOT_COMMITTED'
+    }
+    if(-not(SourcePin (Join-Path $Root 'bin\spotify-control.ps1') 284321 'af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0') -or
+       -not(SourcePin (Join-Path $Root 'bin\addon-manager.ps1') 323385 '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285') -or
+       -not(SourcePin (Join-Path $Root 'bin\spotify-control-agent.vbs') 4855 '2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278')){
+      Fail 'OFFICIAL_UPDATED_BIN_IDENTITY_NOT_EXACT'
+    }
+    $post=InvokeControlledBootstrapAction -Script $script -Action 'Check'
+    if([string]$post.installed_version -cne '0.6.28' -or
+       $post.result.already_current -ne $true -or
+       [int]$post.result.edge_count -ne 0){
+      Fail 'OFFICIAL_POSTCHECK_NOT_CURRENT'
+    }
+    if($oldStateHash.Length -gt 0 -and
+       (HashFile $oldStatePath) -cne $oldStateHash){
+      Fail 'CONTROLLED_UPDATE_CHANGED_OWNER_STATE'
+    }
+    $Messages.Add('OFFICIAL_BOOTSTRAP_EXACT_V0628_R17=COMMITTED')
+    $Messages.Add('STABLE_POSTCHECK_ALREADY_CURRENT=TRUE')
+    $Messages.Add('USER_STATE_JSON=UNCHANGED')
+  }finally{
+    if($Hosted){$env:LOCALAPPDATA=$originalLocal;$env:APPDATA=$originalRoaming}
+    if($created -and $script.Length -gt 0 -and
+       (FileInfo $script 2097152) -and
+       (HashFile $script) -ceq 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'){
+      try{[IO.File]::Delete($script)}catch{}
+    }
+    if($created -and (Dir $dir)){
+      try{
+        if(@(Get-ChildItem -LiteralPath $dir -Force).Count -eq 0){
+          [IO.Directory]::Delete($dir,$false)
+        }
+      }catch{}
+    }
+  }
+}
+function InvokeControlledBootstrapAction {
+  param([string]$Script,[string]$Action)
+  if($Action -cnotin @('Check','Update')){Fail 'UNSUPPORTED_BOOTSTRAP_ACTION'}
+  $out=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $Script -Action $Action -Json 2>&1)
+  $code=$LASTEXITCODE
+  if($code -ne 0){Fail ('OFFICIAL_BOOTSTRAP_'+$Action.ToUpperInvariant()+'_FAILED_NO_AUTORETRY')}
+  $last=@($out|Where-Object{[string]$_ -match '^\s*\{' }|Select-Object -Last 1)
+  if($last.Count -ne 1){Fail 'OFFICIAL_BOOTSTRAP_JSON_RECEIPT_MISSING'}
+  try{$obj=$last[0]|ConvertFrom-Json -ErrorAction Stop}
+  catch{Fail 'OFFICIAL_BOOTSTRAP_JSON_RECEIPT_INVALID'}
+  if($obj.success -ne $true -or [string]$obj.action -cne $Action){Fail 'OFFICIAL_BOOTSTRAP_ACTION_NOT_SUCCESS'}
+  return $obj
+}
 $messages=New-Object System.Collections.Generic.List[string]
 $messages.Add('DIAGNOSTIC=SPOTIFY_BOOTSTRAP_PREPARED_ORPHAN_TERMINALIZER_HOLD_R5')
-$messages.Add('APP_BIN_WRITE=NO;SPOTIFY_EXEC=NO;NETWORK=NO;SETTINGS_WRITE=NO;SCHEDULE_WRITE=NO')
+$messages.Add($(if($ContinueOfficialStableUpdate){'CORE_UPDATE=OPT_IN_ONLY;NETWORK=BOOTSTRAP_PINNED_OFFICIAL;SETTINGS_WRITE=NO;SCHEDULE_WRITE=NO'}else{'APP_BIN_WRITE=NO;SPOTIFY_EXEC=NO;NETWORK=NO;SETTINGS_WRITE=NO;SCHEDULE_WRITE=NO'}))
 $hosted= -not[string]::IsNullOrWhiteSpace($HostedFixtureRoot)
 $staging=$null
 $legacyMutexes=$null
@@ -291,6 +395,7 @@ try{
     $root=Join-Path $local 'SpotifyControl'
   }
   if($Commit -and ($ApprovalPhrase -cne 'EXACT_PREPARED_NO_BIN_SWAP')){Fail 'EXPLICIT_APPROVAL_MISSING'}
+  if($ContinueOfficialStableUpdate -and (-not $Commit -or $OfficialUpdateApprovalPhrase -cne 'APPROVE_OFFICIAL_V0628_CORE_UPGRADE')){Fail 'OFFICIAL_STABLE_UPDATE_EXPLICIT_APPROVAL_MISSING'}
   # R6: coordinate with the exact OLD stable v0.6.20/r9 legacy engine.
   # The VBS resident stays running; its spawned AgentTick must acquire
   # AgentTick mutex, and normal Maintain must acquire Maintenance mutex.
@@ -372,7 +477,14 @@ try{
     }
     $messages.Add('ORIGINAL_TRANSACTION=ESCROWED_EXACT_NO_OVERWRITE')
     $messages.Add('TRANSACTION_TERMINAL=ROLLED_BACK_NO_BIN_SWAP')
-    $messages.Add('RESULT=JOURNAL_ONLY_RECONCILED_REQUIRES_FRESH_UPDATE_ACCEPTANCE')
+    $messages.Add('JOURNAL_ORPHAN_TERMINALIZED_WITHOUT_BIN_SWAP=YES')
+    if($ContinueOfficialStableUpdate){
+      $stage='OFFICIAL_V0628_STABLE_UPDATE'
+      InvokeControlledOfficialStableUpdate -Root $root -BootstrapFileHandle $exclusiveBootstrap -Hosted $hosted -Messages $messages
+      $messages.Add('RESULT=OFFICIAL_STABLE_V0628_R17_COMMITTED_VERIFIED')
+    }else{
+      $messages.Add('RESULT=JOURNAL_ONLY_RECONCILED_REQUIRES_FRESH_UPDATE_ACCEPTANCE')
+    }
   }
 }catch{
   if($hosted){
@@ -385,10 +497,18 @@ try{
   }
   $kind=[string]$_.Exception.Message
   $allowed=@('WINDOWS_ONLY','HOSTED_OVERRIDE_DENIED','HOSTED_OVERRIDE_OUTSIDE_RUNNER','LOCAL_ROOT_MISSING',
-    'EXPLICIT_APPROVAL_MISSING','PROCESS_INVENTORY_TOO_LARGE','ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE',
+    'EXPLICIT_APPROVAL_MISSING','OFFICIAL_STABLE_UPDATE_EXPLICIT_APPROVAL_MISSING','PROCESS_INVENTORY_TOO_LARGE','ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE',
     'CURRENT_USER_SID_UNAVAILABLE','LEGACY_WRITER_MUTEX_BUSY','ABANDONED_LEGACY_MUTEX',
     'BOOTSTRAP_FENCE_SOURCE_SIZE_CHANGED','BOOTSTRAP_FENCE_SOURCE_SHA_CHANGED',
-    'TRANSACTION_CHANGED_BEFORE_ATOMIC_REPLACE',
+    'TRANSACTION_CHANGED_BEFORE_ATOMIC_REPLACE','ORIGINAL_BOOTSTRAP_EXCLUSIVE_HANDLE_MISSING',
+    'CONTROLLED_COPY_DESTINATION_NOT_NEW','CONTROLLED_COPY_DIRECTORY_UNSAFE',
+    'ORIGINAL_BOOTSTRAP_READ_INCOMPLETE','COPIED_BOOTSTRAP_SOURCE_NOT_TRUSTED',
+    'CONTROLLED_BOOTSTRAP_COPY_HASH_MISMATCH','OFFICIAL_EIGHT_EDGE_PREFLIGHT_NOT_EXACT',
+    'OFFICIAL_UPDATE_NOT_COMMITTED','OFFICIAL_UPDATED_BIN_IDENTITY_NOT_EXACT',
+    'OFFICIAL_POSTCHECK_NOT_CURRENT','CONTROLLED_UPDATE_CHANGED_OWNER_STATE',
+    'OFFICIAL_BOOTSTRAP_CHECK_FAILED_NO_AUTORETRY','OFFICIAL_BOOTSTRAP_UPDATE_FAILED_NO_AUTORETRY',
+    'OFFICIAL_BOOTSTRAP_JSON_RECEIPT_MISSING','OFFICIAL_BOOTSTRAP_JSON_RECEIPT_INVALID',
+    'OFFICIAL_BOOTSTRAP_ACTION_NOT_SUCCESS','UNSUPPORTED_BOOTSTRAP_ACTION',
     'TRANSACTION_RACE_BETWEEN_PREFLIGHTS','EXISTING_ESCROW_NO_OVERWRITE','ESCROW_PATH_UNSAFE',
     'ESCROW_HASH_MISMATCH','STAGING_PATH_UNSAFE','RACE_OR_ESCROW_CHANGED_BEFORE_REPLACE',
     'POST_RECONCILIATION_INDETERMINATE_DO_NOT_RETRY','POST_RECONCILIATION_TREE_CHANGED_DO_NOT_RETRY')
