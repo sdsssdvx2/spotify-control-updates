@@ -33,7 +33,7 @@ jobs:
       - name: Retrieve immutable exact released Bootstrap once
         shell: bash
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' > bootstrap-r7-carrier.zip
