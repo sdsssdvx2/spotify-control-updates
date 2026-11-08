@@ -1,4 +1,4 @@
-name: V059 exact stable r17/agent startup topology read-only audit (HOLD)
+name: V059 exact stable r17 and agent startup topology read-only audit (HOLD)
 on:
   push:
     branches: [validate/pinned-stable-execution-topology-v059-HOLD]
@@ -43,17 +43,18 @@ jobs:
           & python -m py_compile $script
           if($LASTEXITCODE -ne 0){throw 'V059_PYTHON_COMPILE_ERROR'}
           Write-Host 'V059_EXACT_V058_PARENT_OPERATING_MAIN_TWO_AUDIT_FILES_PASS'
-      - name: Reconstruct exact hashed production scripts from existing builders; DO NOT EXECUTE THEM
+      - name: Reconstruct exact hashed stable r17 from existing builders; DO NOT EXECUTE IT
         shell: powershell
         timeout-minutes: 12
         run: |
           $ErrorActionPreference='Stop'
           & python validation/v0.6.28/build_v0628.py --build
           if($LASTEXITCODE -ne 0){throw 'V059_PINNED_R17_BUILDER_FAILED'}
-          & python validation/v0.6.28/bootstrap_prepare_fixture.py
-          if($LASTEXITCODE -ne 0){throw 'V059_PINNED_AGENT_BOOTSTRAP_BUILDER_FAILED'}
-          Write-Host 'V059_EXISTING_VALIDATED_PRODUCTION_BUILDERS_RECONSTRUCTED_PASS'
-      - name: SHA match + classify actual stable 4 scripts without execution or user state
+          # Agent source is independently extracted from exact repository
+          # v0.6.11 chunk archive by the read-only audit below. Historical
+          # v0.6.14 bootstrap repair artifact is not in the checkout.
+          Write-Host 'V059_EXACT_STABLE_R17_RECONSTRUCTED_WITHOUT_MISSING_REPAIR_ARTIFACT_PASS'
+      - name: SHA match + classify 3 stable scripts and bootstrap metadata, without execution
         shell: powershell
         timeout-minutes: 2
         run: |
@@ -70,8 +71,8 @@ jobs:
              'V059_PINNED_SOURCE_CLASSIFICATION_STABLE_MAIN',
              'V059_PINNED_SOURCE_CLASSIFICATION_STABLE_ADDON_R17',
              'V059_PINNED_SOURCE_CLASSIFICATION_RESIDENT_AGENT',
-             'V059_PINNED_SOURCE_CLASSIFICATION_BOOTSTRAP',
-             'V059_OFFLINE_STABLE_MAIN_ADDON_AGENT_BOOTSTRAP_4_OF_4_SHA_SIZE_MATCH_PASS',
+             'V059_EXACT_STABLE_MAIN_ADDON_AGENT_3_OF_3_SHA_SIZE_MATCH_PASS',
+             'V059_BOOTSTRAP_METADATA_ONLY_FULL_BYTES_UNAVAILABLE_NOT_AUDITED_PASS',
              'V059_EXECUTION_TOPOLOGY_SOURCE_ONLY_NO_REAL_TASK_OR_PROCESS_PROOF_PASS',
              'V059_NO_SCRIPT_EXECUTION_NO_SCHEDULER_CHANGE_NO_PRODUCTION_AUTHORITY_PASS')){
              if(-not $body.Contains($marker)){throw ('V059_REQUIRED_CLASSIFICATION_MISSING_'+$marker)}
