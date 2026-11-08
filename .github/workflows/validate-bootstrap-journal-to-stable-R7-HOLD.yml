@@ -134,6 +134,31 @@ jobs:
             if($resident.HasExited){throw 'ORIGINAL_RESIDENT_VBS_EXITED_EARLY'}
             $output=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture -Commit -ApprovalPhrase EXACT_PREPARED_NO_BIN_SWAP -ContinueOfficialStableUpdate -OfficialUpdateApprovalPhrase APPROVE_OFFICIAL_V0628_CORE_UPGRADE 2>&1)
             if($LASTEXITCODE -ne 0){throw 'GUARDED_R7_WRAPPER_PROCESS_FAILED'}
+            if($output -ccontains 'RESULT=HOLD_NO_AUTOMATIC_RETRY'){
+              # ONLY hosted scratch data. Sanitized, bounded error detail
+              # from the original self-updater report to resolve integration
+              # failures without asking the real user to run anything.
+              $rp=Join-Path $root 'reports/self-update-latest.json'
+              if(Test-Path -LiteralPath $rp){
+                $last=Get-Content -LiteralPath $rp -Raw|ConvertFrom-Json
+                $raw=[string]$last.error
+                $category=if($raw -match '(?i)access.*denied|sharing|used.by.another.process|lock|permission'){'ACCESS_OR_LOCK'}
+                    elseif($raw -match '(?i)TLS|timed.out|network|webexception|http|remote.server|download|429|403'){'NETWORK_OR_REMOTE'}
+                    elseif($raw -match '(?i)SelfTest|self.test|parse|candidate'){'CANDIDATE_SELFTEST'}
+                    elseif($raw -match '(?i)Move-Item|move|already.exists|rename|copy|tree'){'TREE_OR_MOVE'}
+                    elseif($raw -match '(?i)manifest|source.commit|patch|payload|sha|hash'){'MANIFEST_OR_PATCH'}
+                    elseif($raw -match '(?i)method.invocation|parameter|cannot.bind|argument'){'PS_ARGUMENT_OR_METHOD'}
+                    else{'OTHER_REDACTED'}
+                $safe=$raw.Replace($root,'[ROOT]').Replace($env:RUNNER_TEMP,'[RUNNER_TEMP]').Replace($env:USERPROFILE,'[USER]')
+                $safe=[regex]::Replace($safe,'(?i)[A-Z]:\\[^\s,;]+','[SCRATCH_PATH]')
+                if($safe.Length -gt 240){$safe=$safe.Substring(0,240)}
+                Write-Host ('R7_HOSTED_BOOTSTRAP_ERROR_CATEGORY='+$category)
+                Write-Host ('R7_HOSTED_BOOTSTRAP_REDACTED_CONTEXT='+$safe)
+                $latest=Get-Content -LiteralPath (Join-Path $root 'self-update-last-transaction.json') -Raw|ConvertFrom-Json
+                $class=if([string]$latest.status -cin @('prepared','rolled-back','committed','swapped','post-verified')){[string]$latest.status}else{'OTHER'}
+                Write-Host ('R7_HOSTED_LATEST_TRANSACTION_STATUS='+$class)
+              }
+            }
             foreach($exact in @(
               'LEGACY_MAINTENANCE_AND_AGENTTICK_MUTEX=HELD',
               'RESIDENT_AGENT=RUNNING_TICKS_MUTEX_FENCED',
