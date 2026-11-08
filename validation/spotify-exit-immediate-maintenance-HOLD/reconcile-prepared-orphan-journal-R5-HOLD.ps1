@@ -203,11 +203,12 @@ try{
     $escrow=Join-Path $pre.base 'original-prepared-transaction-before-reconcile.json'
     if(Test-Path -LiteralPath $escrow){Fail 'EXISTING_ESCROW_NO_OVERWRITE'}
     if(-not(ReparseFreePath $root $escrow)){Fail 'ESCROW_PATH_UNSAFE'}
-    # Atomically publish immutable original journal before any replacement.
-    $stage='ORIGINAL_ESCROW_CREATE'
-    UniqueFile $escrow $pre.original
-    $stage='ORIGINAL_ESCROW_VERIFY'
-    if((HashFile $escrow) -cne $pre.digest){Fail 'ESCROW_HASH_MISMATCH'}
+    # The original journal is preserved *as part of* File.Replace's atomic
+    # backup operation. No second independent escrow write is necessary.
+    # Windows PowerShell 5.1 / .NET Framework rejects a null backup path in
+    # the 4-argument overload, so pass this exact as-yet-absent path.
+    $stage='ORIGINAL_ESCROW_RESERVATION'
+    if(Test-Path -LiteralPath $escrow){Fail 'EXISTING_ESCROW_NO_OVERWRITE'}
     $stage='PREPARE_TERMINAL_JSON'
     $doc=$pre.doc
     $doc.status='rolled-back'
@@ -223,13 +224,14 @@ try{
     UniqueFile $staging $newBytes
     $stage='THIRD_SOURCE_PROOF'
     $third=Probe $root $pre.id
-    if($third.digest -cne $pre.digest -or (HashFile $escrow) -cne $pre.digest){
+    if($third.digest -cne $pre.digest -or (Test-Path -LiteralPath $escrow)){
       Fail 'RACE_OR_ESCROW_CHANGED_BEFORE_REPLACE'
     }
-    # Source is same-volume, no partial journal write. File.Replace is a
-    # single NTFS operation; untrusted real Bootstrap cannot be invoked here.
+    # File.Replace atomically archives old journal into a *new* escrow file
+    # while replacing the transaction. No original bin files are touched.
+    # Do NOT invoke the installed Bootstrap, including -Action Check.
     $stage='NTFS_ATOMIC_REPLACE'
-    [IO.File]::Replace($staging,$pre.txn,$null,$true)
+    [IO.File]::Replace($staging,$pre.txn,$escrow,$true)
     $stage='POST_COMMIT_VERIFY'
     $staging=$null
     $after=([IO.File]::ReadAllText($pre.txn,[Text.Encoding]::UTF8)|ConvertFrom-Json)
