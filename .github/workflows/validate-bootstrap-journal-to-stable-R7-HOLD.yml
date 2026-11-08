@@ -1,4 +1,4 @@
-name: HOLD R11 exact journal-escrow resume and stable Windows E2E
+name: HOLD R12 official rolled-back transaction lineage and stable Windows E2E
 # Original v0.6.28 SelfTest requires installed Bootstrap read-sharing; maintain no-write fence and both named legacy mutexes.
 on:
   push:
@@ -244,8 +244,59 @@ jobs:
               throw 'R11_SYNTHETIC_ESCROW_NOT_EXACTLY_RESTORED'
             }
             Write-Host 'R11_SEPARATE_JOURNAL_ONLY_EXIT_DRYRUN_REPLAY_AND_ESCROW_TAMPER_DENIAL_PASS'
-            # Now and only now a separate explicit official-update approval
-            # resumes under the original two mutexes with the resident alive.
+            # R12 distinct real-world failure form: the original Bootstrap
+            # reaches its own Update transaction, rolls back to old source,
+            # and overwrites our terminalized ledger with a NEW ID. Construct
+            # exactly that rolled-back transaction in hosted scratch ONLY.
+            $rolledId='20261108-152211-faceb00c'
+            $oldPinned=Get-Content -LiteralPath $escrow -Raw|ConvertFrom-Json
+            $rollback=$oldPinned
+            $rollback.id=$rolledId
+            $rollback.status='rolled-back'
+            $rollback.rolled_back_at=[DateTimeOffset]::UtcNow.ToString('o')
+            $rollback.error='HOSTED_SYNTHETIC_BOOTSTRAP_UPDATE_FAILED_AND_RESTORED'
+            $rbParent=Join-Path $root ('backups/self-update-transactions/'+$rolledId)
+            $rbBackup=Join-Path $rbParent 'bin'
+            if(Test-Path $rbParent){throw 'R12_ROLLBACK_SIMULATION_BACKUP_ALREADY_EXISTS'}
+            [IO.Directory]::CreateDirectory($rbParent)|Out-Null
+            Copy-Item -LiteralPath (Join-Path $root 'bin') -Destination $rbBackup -Recurse -Force
+            $rollback.backup_bin=$rbBackup
+            $rollback.same_dir_new=Join-Path $root ('bin.spotifycontrol-new-'+$rolledId)
+            $rollback.same_dir_old=Join-Path $root ('bin.spotifycontrol-old-'+$rolledId)
+            [IO.File]::WriteAllText($originalRecord,($rollback|ConvertTo-Json -Depth 12),(New-Object Text.UTF8Encoding($false)))
+            $rbHash=(Get-FileHash $originalRecord -Algorithm SHA256).Hash.ToLowerInvariant()
+            $receipt=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture 2>&1)
+            if($LASTEXITCODE -ne 0 -or
+               $receipt -cnotcontains 'RESULT=EXACT_PRIOR_ESCROW_AND_OFFICIAL_ROLLBACK_VERIFIED_EXPLICIT_APPROVAL_REQUIRED' -or
+               (Get-FileHash $originalRecord -Algorithm SHA256).Hash.ToLowerInvariant() -cne $rbHash){
+              throw ('R12_EXACT_OFFICIAL_ROLLBACK_NOT_RECONCILED '+($receipt -join ','))
+            }
+            $noop=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture -Commit -ApprovalPhrase EXACT_PREPARED_NO_BIN_SWAP 2>&1)
+            if($LASTEXITCODE -ne 0 -or
+               $noop -cnotcontains 'RESULT=OFFICIAL_ROLLBACK_RECONCILED_NO_MUTATION' -or
+               (Get-FileHash $originalRecord -Algorithm SHA256).Hash.ToLowerInvariant() -cne $rbHash){
+              throw ('R12_SEPARATE_UPGRADE_APPROVAL_NOT_ENFORCED '+($noop -join ','))
+            }
+            # Without exact original escrow provenance, an apparent rolled
+            # back update must never be treated as recoverable.
+            $escrowHidden=$escrow+'.ci-hidden'
+            if(Test-Path $escrowHidden){throw 'R12_ESCROW_TMP_DESTINATION_PRESENT'}
+            try{
+              [IO.File]::Move($escrow,$escrowHidden)
+              $bad=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture 2>&1)
+              if($LASTEXITCODE -ne 0 -or
+                 $bad -cnotcontains 'HOLD_REASON=PREVIOUS_ORIGINAL_ESCROW_MISSING_OR_MULTIPLE' -or
+                 $bad -cnotcontains 'RESULT=HOLD_NO_AUTOMATIC_RETRY' -or
+                 (Get-FileHash $originalRecord -Algorithm SHA256).Hash.ToLowerInvariant() -cne $rbHash){
+                throw ('R12_MISSING_ORIGINAL_PREPARED_ESCROW_NOT_HARD_BLOCKED '+($bad -join ','))
+              }
+            }finally{
+              if(Test-Path $escrowHidden){[IO.File]::Move($escrowHidden,$escrow)}
+            }
+            Write-Host 'R12_OFFICIAL_ROLLBACK_NEW_JOURNAL_RECONCILED_WITH_EXACT_OLDER_ESCROW_PASS'
+            Write-Host 'R12_MISSING_ORIGINAL_PREPARED_ESCROW_BLOCKED_AND_NO_REPLAY_PASS'
+            # Separately approved follow-up resumes the OFFICIAL rollback
+            # without modifying our original PREPARED escrow or repeating CAS.
             $output=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture -Commit -ApprovalPhrase EXACT_PREPARED_NO_BIN_SWAP -ContinueOfficialStableUpdate -OfficialUpdateApprovalPhrase APPROVE_OFFICIAL_V0628_CORE_UPGRADE 2>&1)
             if($LASTEXITCODE -ne 0){throw 'GUARDED_R7_WRAPPER_PROCESS_FAILED'}
             if($output -ccontains 'RESULT=HOLD_NO_AUTOMATIC_RETRY'){
@@ -276,12 +327,13 @@ jobs:
             foreach($exact in @(
               'LEGACY_MAINTENANCE_AND_AGENTTICK_MUTEX=HELD',
               'RESIDENT_AGENT=RUNNING_TICKS_MUTEX_FENCED',
-              'PREVIOUS_ORIGINAL_ESCROW=EXACT_UNCHANGED',
-              'RESUME_RECONCILIATION_CAS=SKIPPED_ALREADY_TERMINAL',
+              'PRIOR_PREPARED_ORIGINAL_ESCROW=EXACT_UNCHANGED',
+              'CURRENT_OFFICIAL_ROLLBACK_AND_OLD_BIN=EXACT',
+              'RESUME_NO_JOURNAL_CAS=YES',
               'OFFICIAL_BOOTSTRAP_EIGHT_EDGE_PLAN=EXACT',
               'OFFICIAL_BOOTSTRAP_EXACT_V0628_R17=COMMITTED',
               'STABLE_POSTCHECK_ALREADY_CURRENT=TRUE',
-              'RESULT=RESUMED_OFFICIAL_STABLE_V0628_R17_COMMITTED_VERIFIED'
+              'RESULT=RESUMED_AFTER_OFFICIAL_ROLLBACK_STABLE_V0628_R17_VERIFIED'
             )){
               if($output -cnotcontains $exact){throw ('GUARDED_R7_FULL_CHAIN_EVIDENCE_MISSING_'+$exact+' OUTPUT='+($output -join ','))}
             }
