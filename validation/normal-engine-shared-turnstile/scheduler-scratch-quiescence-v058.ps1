@@ -158,8 +158,11 @@ function Assert-V058ScratchTaskExact {
  return $result
 }
 function Invoke-V058OwnedScratchQuiescence {
- param([switch]$InjectExceptionAfterDisable)
+ param([switch]$InjectExceptionAfterDisable,[switch]$LeaveDisabledForChild)
  Assert-V058HostedScope
+ if($InjectExceptionAfterDisable -and $LeaveDisabledForChild){
+    throw 'V058_MUTUALLY_EXCLUSIVE_TEST_MODES'
+ }
  $name='V058-Scratch-'+[guid]::NewGuid().ToString('N')
  $base=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\','/')
  $journal=Join-Path $base ($name+'.json')
@@ -167,7 +170,7 @@ function Invoke-V058OwnedScratchQuiescence {
  $service.Connect()
  $folder=$service.GetFolder('\')
  $created=$false;$disabled=$false;$preserved=$false;$cleaned=$false
- $originalHash=$null;$observedDisabled=$false
+ $originalHash=$null;$observedDisabled=$false;$leaveToChild=$false
  $phase='BEFORE_SCRATCH_REGISTER'
  try{
    $def=$service.NewTask(0)
@@ -219,6 +222,16 @@ function Invoke-V058OwnedScratchQuiescence {
       [string]$decision.state -cne 'PROCESS_VISIBILITY_INCOMPLETE'){
      throw 'V058_SCRATCH_GRANTED_FALSE_REAL_PRODUCTION_ADMISSION'
    }
+   if($LeaveDisabledForChild){
+      # A second process can recover from ONLY the disk journal;
+      # the original COM task object/PowerShell process need not survive.
+      $leaveToChild=$true
+      return [pscustomobject]@{
+        journal_path=$journal;scratch_task_name=$name
+        disabled_verified=$true;production_mutation_authorized=$false
+        real_task_touched=$false
+      }
+   }
    if($InjectExceptionAfterDisable){
       throw 'V058_INJECTED_FAILURE_AFTER_JOURNALED_DISABLE'
    }
@@ -243,7 +256,7 @@ function Invoke-V058OwnedScratchQuiescence {
    Write-Host ('V058_SANITIZED_STAGE_FAILURE='+$phase+';reason='+$kind)
    throw
  }finally{
-   if($created){
+   if($created -and -not$leaveToChild){
       # Never touch tasks outside the unique task we just registered.
       # The runner is disposable; unsafe identity drift leaves task
       # untouched rather than clobbering somebody else's edits.
@@ -282,4 +295,84 @@ function Invoke-V058OwnedScratchQuiescence {
    prior_user_tasks_modified=$false
    any_real_spotify_mutation=$false
  }
+}
+
+
+function Restore-V058OwnedScratchFromJournal {
+ param([Parameter(Mandatory=$true)][string]$JournalPath)
+ Assert-V058HostedScope
+ $root=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\','/')
+ $path=[IO.Path]::GetFullPath($JournalPath)
+ if(-not$path.StartsWith($root+'\',[StringComparison]::OrdinalIgnoreCase) -or
+    (Split-Path -Leaf $path) -cnotmatch '^V058-Scratch-[0-9a-f]{32}\.json$' -or
+    -not[IO.File]::Exists($path)){
+    throw 'V058_RECOVERY_JOURNAL_OUTSIDE_HOSTED_SCOPE'
+ }
+ $attributes=[IO.File]::GetAttributes($path)
+ if(($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){
+    throw 'V058_RECOVERY_JOURNAL_REPARSE_POINT'
+ }
+ # Exclusive sharing prevents concurrent attempts through the same journal.
+ $file=[IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
+ try{
+   if($file.Length -le 20 -or $file.Length -gt 4096){
+      throw 'V058_RECOVERY_JOURNAL_SIZE_INVALID'
+   }
+   $bytes=New-Object byte[] ([int]$file.Length)
+   $read=0
+   while($read -lt $bytes.Length){
+     $n=$file.Read($bytes,$read,$bytes.Length-$read)
+     if($n -le 0){throw 'V058_RECOVERY_JOURNAL_TRUNCATED'}
+     $read+=$n
+   }
+   $utf8=[Text.UTF8Encoding]::new($false,$true)
+   $saved=$utf8.GetString($bytes)|ConvertFrom-Json -ErrorAction Stop
+   $expected=@('schema','scratch_task','owner','action_xml_sha256',
+     'originally_enabled','production_mutation_authorized',
+     'created_under_temporary_runner')
+   if(@($saved.PSObject.Properties).Count -ne $expected.Count -or
+      @($expected|Where-Object{$null-eq $saved.PSObject.Properties[$_]}).Count -ne 0 -or
+      $saved.schema -isnot [int] -or [int]$saved.schema -ne 1 -or
+      [string]$saved.scratch_task -cnotmatch '^V058-Scratch-[0-9a-f]{32}$' -or
+      [string]$saved.scratch_task -cne ([IO.Path]::GetFileNameWithoutExtension($path)) -or
+      [string]$saved.owner -cne 'V058_ISOLATED_UNRUNNABLE_SCRATCH_ONLY' -or
+      [string]$saved.action_xml_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
+      $saved.originally_enabled -isnot [bool] -or
+      -not[bool]$saved.originally_enabled -or
+      $saved.created_under_temporary_runner -isnot [bool] -or
+      -not[bool]$saved.created_under_temporary_runner -or
+      $saved.production_mutation_authorized -isnot [bool] -or
+      [bool]$saved.production_mutation_authorized){
+      throw 'V058_RECOVERY_JOURNAL_SCHEMA_OR_POLICY_NOT_VERIFIED'
+   }
+   $name=[string]$saved.scratch_task
+   $service=New-Object -ComObject Schedule.Service
+   $service.Connect()
+   $folder=$service.GetFolder('\')
+   $task=$folder.GetTask($name)
+   $identity=Assert-V058ScratchTaskExact -Task $task -ExpectedName $name
+   if([string]$identity.normalized_sha256 -cne [string]$saved.action_xml_sha256){
+      throw 'V058_RECOVERY_CONCURRENT_TASK_DEFINITION_DRIFT'
+   }
+   if(@($task.GetInstances(0)).Count -ne 0){
+      throw 'V058_RECOVERY_RUNNING_TASK_CANNOT_CHANGE'
+   }
+   $toggled=$false
+   if(-not[bool]$identity.enabled){
+      $task.Enabled=$true
+      $toggled=$true
+   }
+   $rechecked=Assert-V058ScratchTaskExact -Task ($folder.GetTask($name)) -ExpectedName $name
+   if(-not[bool]$rechecked.enabled -or
+      [string]$rechecked.normalized_sha256 -cne [string]$saved.action_xml_sha256){
+      throw 'V058_RECOVERY_ORIGINAL_ENABLED_STATE_NOT_RESTORED'
+   }
+   # Fresh CI task only, never deletion of existing user scheduled jobs.
+   $folder.DeleteTask($name,0)
+   return [pscustomobject]@{
+      recovered_in_fresh_process=$true;enabled_state_restored=$true
+      scratch_task_deleted=$true;enabled_toggled=$toggled
+      user_task_mutation=$false;production_mutation_authorized=$false
+   }
+ }finally{$file.Dispose()}
 }
