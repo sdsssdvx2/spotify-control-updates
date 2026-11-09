@@ -1,0 +1,140 @@
+name: HOLD R46 event-driven Spotify exit final integrated release hosted owner cutover and review custody
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-eventdriven-release-R46-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/stage-eventdriven-fullrelease-R46-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/build-eventdriven-review-git-R46-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/custody-eventdriven-review-R46-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/run-eventdriven-owner-cutover-R46-HOLD.py
+permissions:
+  contents: read
+  actions: read
+jobs:
+  eventdriven-release-integrated-owner-cutover:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Recreate exact combined R37 and R38 accepted payload, no publication
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R43_PRODUCTION_MAIN_SOURCE_CHANGED'
+          }
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-combined-exit-and-shortcut-R37-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R43_MERGED_SOURCE_REBUILD_FAILED'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-eventdriven-vbs-R45-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R46_REAL_EVENT_DRIVEN_SOURCE_BUILD_FAILED'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/stage-eventdriven-fullrelease-R46-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R46_EVENT_DRIVEN_FULL_FILE_STAGING_FAILED'}
+          $stage='validation/spotify-exit-immediate-maintenance-HOLD/out/release-staging-eventdriven-R46'
+          $m=(Get-FileHash -LiteralPath (Join-Path $stage 'bin/spotify-control.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+          $a=(Get-FileHash -LiteralPath (Join-Path $stage 'bin/spotify-control-agent.vbs') -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($m -cne '7caf4afe19c283aef3b5bebb30e0e598b10de147d3ab1ddd9724bf90594c59fe' -or
+             $a -cne '1c1563bff9b9a87ae851b4ca555429b5451ce67c6d225a148b5252256d71cdf7'){
+            throw 'R43_R38_COMBINED_SOURCE_SHA_UNEXPECTED'
+          }
+          Write-Host 'R43_EXACT_FUNCTIONAL_INTEGRATED_PAYLOAD_REPRODUCED_PASS'
+      - name: Retrieve official Bootstrap 1.0.6 original bytes with SHA pin
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' \
+            'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' \
+            > "$RUNNER_TEMP/spotify-r43-bootstrap-carrier.zip"
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,io,os,zipfile
+          root=Path(os.environ['RUNNER_TEMP'])
+          with zipfile.ZipFile(root/'spotify-r43-bootstrap-carrier.zip') as outer:
+              inner=outer.read('SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip')
+          with zipfile.ZipFile(io.BytesIO(inner)) as nested:
+              raw=nested.read('bootstrap/spotify-control-self-updater.ps1')
+          assert (len(raw),hashlib.sha256(raw).hexdigest()) == (
+              42963,'d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6')
+          (root/'spotify-verified-bootstrap-v106.ps1').write_bytes(raw)
+          print('R43_RELEASED_OFFICIAL_BOOTSTRAP_SHA256_VERIFIED')
+          PY
+          rm -f "$RUNNER_TEMP/spotify-r43-bootstrap-carrier.zip"
+      - name: Reuse pinned R28 owner lifecycle test against integrated R38 manifest only
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/run-eventdriven-owner-cutover-R46-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R43_PINNED_R28_HOSTED_SCRIPT_REUSE_FAILED'}
+          $script=Join-Path $env:RUNNER_TEMP 'spotify-r43-integrated-real-owner-cutover.ps1'
+          $prep=Join-Path $env:RUNNER_TEMP 'spotify-r43-integrated-prepare.py'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile(
+            $script,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R43_NATIVE_POWERSHELL_51_REUSED_SCENARIO_INVALID'}
+          python -m py_compile $prep
+          if($LASTEXITCODE -ne 0){throw 'R43_HOSTED_PREPARE_SCRIPT_INVALID'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script
+          if($LASTEXITCODE -ne 0){throw 'R43_INTEGRATED_HOSTED_R28_REAL_OWNER_UPGRADE_FAILED'}
+          $baseline=(git show 'origin/main:manifest.json' | Out-String)
+          if($LASTEXITCODE -ne 0 -or
+             (git diff --exit-code origin/main -- manifest.json) -or
+             $LASTEXITCODE -ne 0){
+            throw 'R43_PUBLIC_MAIN_MANIFEST_NOT_PRESERVED'
+          }
+          Write-Host 'R46_REAL_R28_OWNER_CUTOVER_AND_FAST_EVENT_VBS_BOOTSTRAP_UPDATE_PASS'
+          Write-Host 'R43_OPERATING_SPOTIFY_AND_PRODUCTION_MAIN_UNTOUCHED_PASS'
+      - name: Preserve the R46 event-driven Git source and manifest in a review-only bundle
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-eventdriven-review-git-R46-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R46_REAL_MAIN_PARENT_GIT_BUNDLE_FAILED'}
+          $folder='validation/spotify-exit-immediate-maintenance-HOLD/out/promotion-review-eventdriven-R46'
+          $receipt=Get-Content (Join-Path $folder 'promotion-receipt-HOLD.json') -Raw | ConvertFrom-Json
+          $bundle=Join-Path $folder 'v0630-two-commit-publication-NOT-AUTHORIZED.bundle'
+          if($receipt.status -cne 'REVIEW_CANDIDATE_ONLY_NOT_AUTHORIZED_NOT_PUBLISHED' -or
+             [int]$receipt.source_package_chunks -ne 20 -or
+             [bool]$receipt.release_published -or [bool]$receipt.owner_approval_granted -or
+             (Get-FileHash -LiteralPath $bundle -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                 [string]$receipt.bundle_sha256){
+            throw 'R46_REVIEW_BUNDLE_IDENTITY_NOT_VERIFIED'
+          }
+          Write-Host 'R46_EVENT_DRIVEN_INTEGRATED_GIT_BUNDLE_MAIN_PARENT_SHA=PASS'
+      - name: Keep one bounded review-only R46 bundle for separate post-success custody
+        uses: actions/upload-artifact@v4
+        with:
+          name: Spotify-v0630-fast-event-release-REVIEW-NOT-PUBLISHED
+          path: validation/spotify-exit-immediate-maintenance-HOLD/out/promotion-review-eventdriven-R46/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  eventdriven-review-custody:
+    needs: eventdriven-release-integrated-owner-cutover
+    if: github.ref == 'refs/heads/validate/spotify-exit-immediate-maintenance-HOLD'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Retrieve only the exact post-Windows R46 event-driven bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: Spotify-v0630-fast-event-release-REVIEW-NOT-PUBLISHED
+          path: review-artifact
+      - name: Independently inspect source chunks and create only the isolated HOLD review ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 validation/spotify-exit-immediate-maintenance-HOLD/custody-eventdriven-review-R46-HOLD.py
+          test "$(git rev-parse origin/main)" = 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          echo 'R46_EVENT_DRIVEN_IMMUTABLE_GIT_CUSTODY_NOT_PUBLISHED_PASS'
+
