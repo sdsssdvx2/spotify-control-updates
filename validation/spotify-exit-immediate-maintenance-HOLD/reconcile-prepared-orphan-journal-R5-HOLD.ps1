@@ -279,8 +279,7 @@ function FindVerifiedPriorPreparedEscrow([string]$Root,[string]$CurrentId,
        [string](Field $archived 'before_version') -cne '0.6.20' -or
        [string](Field $archived 'after_version') -cne '0.6.28' -or
        [string](Field $archived 'before_tree_sha256') -cne $Before -or
-       (-not $AllowCommittedAfterMismatch -and
-         [string](Field $archived 'after_tree_sha256') -cne $After) -or
+       [string](Field $archived 'after_tree_sha256') -cnotmatch '^[0-9a-f]{64}$' -or
        [string](Field $archived 'source_commit') -cne $Commit -or
        [string](Field $archived 'payload_set_sha256') -cne $Payload -or
        (Field $archived 'prepared_orphan_reconciled_without_bin_swap') -eq $true){
@@ -301,11 +300,29 @@ function FindVerifiedPriorPreparedEscrow([string]$Root,[string]$CurrentId,
     if(-not(ReparseFreePath $Root $savedRestore)){Fail 'PREVIOUS_PRESERVED_RESTORE_UNSAFE'}
     if((Test-Path -LiteralPath $savedRestore) -and
        (ExactTree $savedRestore) -cne $Before){Fail 'PREVIOUS_PRESERVED_RESTORE_TREE_MISMATCH'}
+    # Audit all genuine escrow records: newest preceding transaction wins
+    # only if its timestamp is unambiguous; all earlier bins stay protected.
+    if(-not $AllowCommittedAfterMismatch -and
+       [string](Field $archived 'after_tree_sha256') -cne $After){continue}
+    $stamp=$d.Name.Substring(0,15)
+    $currentStamp=$CurrentId.Substring(0,15)
+    if([string]::CompareOrdinal($stamp,$currentStamp) -ge 0){
+      Fail 'PREVIOUS_ORIGINAL_ESCROW_CHRONOLOGY_INVALID'
+    }
+    if($found -eq 0){
+      $accepted=[pscustomobject]@{path=$candidate;id=$d.Name;digest=(HashBytes $bytes)}
+      $latestStamp=$stamp
+    }else{
+      $cmp=[string]::CompareOrdinal($stamp,$latestStamp)
+      if($cmp -eq 0){Fail 'PREVIOUS_ORIGINAL_ESCROW_AMBIGUOUS'}
+      if($cmp -gt 0){
+        $accepted=[pscustomobject]@{path=$candidate;id=$d.Name;digest=(HashBytes $bytes)}
+        $latestStamp=$stamp
+      }
+    }
     $found++
-    $accepted=[pscustomobject]@{path=$candidate;id=$d.Name;digest=(HashBytes $bytes)}
-    if($found -gt 1){Fail 'PREVIOUS_ORIGINAL_ESCROW_AMBIGUOUS'}
   }
-  if($found -ne 1){Fail 'PREVIOUS_ORIGINAL_ESCROW_MISSING_OR_MULTIPLE'}
+  if($found -lt 1){Fail 'PREVIOUS_ORIGINAL_ESCROW_MISSING_OR_MULTIPLE'}
   return $accepted
 }
 function ProbeCommittedStable([string]$Root) {
@@ -932,6 +949,7 @@ try{
     'PREVIOUS_ORIGINAL_ESCROW_UNREADABLE','PREVIOUS_ORIGINAL_ESCROW_SOURCE_MISMATCH',
     'PREVIOUS_ORIGINAL_ESCROW_TREE_OR_PATH_MISMATCH',
     'PREVIOUS_ORIGINAL_ESCROW_AMBIGUOUS','PREVIOUS_ORIGINAL_ESCROW_MISSING_OR_MULTIPLE',
+     'PREVIOUS_ORIGINAL_ESCROW_CHRONOLOGY_INVALID',
     'COMMITTED_SOURCE_SET_NOT_EXACT_STABLE','COMMITTED_JOURNAL_UNREADABLE_OR_UNSAFE',
     'COMMITTED_JOURNAL_NOT_EXACT_OFFICIAL_STABLE','COMMITTED_JOURNAL_ID_INVALID',
     'COMMITTED_JOURNAL_HASH_PINS_INVALID','COMMITTED_JOURNAL_PATH_BINDINGS_INVALID',
