@@ -124,7 +124,8 @@ function Probe([string]$Root,[string]$ExpectedId='') {
   if(-not(ReparseFreePath $Root $transaction)){Fail 'TRANSACTION_PATH_UNSAFE'}
   if($null -eq (FileInfo $transaction 1048576)){Fail 'TRANSACTION_UNREADABLE'}
   [byte[]]$original=[IO.File]::ReadAllBytes($transaction)
-  $doc=([Text.Encoding]::UTF8.GetString($original)|ConvertFrom-Json -ErrorAction Stop)
+  try{$doc=([Text.Encoding]::UTF8.GetString($original)|ConvertFrom-Json -ErrorAction Stop)}
+  catch{Fail 'TRANSACTION_JSON_UNREADABLE'}
   # R11 replay-admission recognizes our OWN previously reconciled journal
   # only when the exact original PREPARED bytes are still in immutable escrow.
   # This lets a user explicitly resume a failed *pre-update* Check, without
@@ -850,8 +851,18 @@ try{
     'PREVIOUS_ESCROW_PROVENANCE_INVALID','RECONCILIATION_TIMESTAMP_INVALID',
     'RECONCILED_JOURNAL_NOT_OWN_EXACT_BYTES','RESUME_JOURNAL_OR_BASELINE_CHANGED',
     'ESCROW_HASH_MISMATCH','STAGING_PATH_UNSAFE','RACE_OR_ESCROW_CHANGED_BEFORE_REPLACE',
-    'POST_RECONCILIATION_INDETERMINATE_DO_NOT_RETRY','POST_RECONCILIATION_TREE_CHANGED_DO_NOT_RETRY')
+    'POST_RECONCILIATION_INDETERMINATE_DO_NOT_RETRY','POST_RECONCILIATION_TREE_CHANGED_DO_NOT_RETRY',
+    'ROOT_UNSAFE','BIN_PATH_UNSAFE','BOOTSTRAP_PATH_UNSAFE','MAIN_NOT_ORIGINAL_V0620',
+    'ADDON_NOT_ORIGINAL_R9','AGENT_NOT_ORIGINAL','BOOTSTRAP_NOT_ORIGINAL',
+    'TRANSACTION_PATH_UNSAFE','TRANSACTION_UNREADABLE','TRANSACTION_ID_INVALID',
+    'TRANSACTION_CHANGED_DURING_APPROVAL','TRANSACTION_VERSION_MISMATCH',
+    'TRANSACTION_OFFICIAL_SOURCE_COMMIT_UNKNOWN','TRANSACTION_PAYLOAD_ID_UNKNOWN',
+    'TRANSACTION_HASHES_INVALID','TRANSACTION_PATHS_NOT_EXACT','REPARSE_OR_PATH_DRIFT',
+    'LEFTOVER_UPDATE_ROOT_EXISTS','BACKUP_MISSING','TREE_MISMATCH_REFUSE_JOURNAL_CHANGE',
+    'TRANSACTION_JSON_UNREADABLE')
   if($kind -cnotin $allowed){$kind='UNVERIFIED_FAIL_CLOSED'}
+  # The stage is a script-owned finite label, never an exception's raw path or message.
+  $messages.Add('HOLD_STAGE='+$stage)
   $messages.Add('HOLD_REASON='+$kind)
   $messages.Add('RESULT=HOLD_NO_AUTOMATIC_RETRY')
 }finally{
