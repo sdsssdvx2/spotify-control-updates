@@ -42,7 +42,7 @@ jobs:
           $vbs=Join-Path $sourceRoot 'integrated/spotify-control-agent.vbs'
           foreach($entry in @(
             @{Path=$main;Pin=$meta.merged_main_sha256},
-            @{Path=$addon;Pin='5ab556c1d90b9f8e6d5784e238ffd1798c5363a0d7b8313d1f106b5b6a285'},
+            @{Path=$addon;Pin='5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285'},
             @{Path=$vbs;Pin='da054351cae6927504e735426d35f6d5e7edafcac7e06881f1adf1c20cecab9d'})){
             $actual=(Get-FileHash -LiteralPath $entry.Path -Algorithm SHA256).Hash.ToLowerInvariant()
             if($actual -cne $entry.Pin){throw 'R37_COMBINED_BINARY_SHA_NOT_PINNED'}
