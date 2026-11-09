@@ -19,8 +19,15 @@ PIN_SHA = "af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0"
 REPLACEMENT = r'''# Future managed-shortcut safety: custom owner launchers are immutable.
 # A WScript shortcut targeting another VBS is not ours to change or execute.
 $expectedManagedArgs = '"' + $installedVbs + '"'
+# If the owner has kept only one of the default locations, never recreate
+# the deliberately absent Desktop or Start Menu shortcut on maintenance.
+# For a genuinely fresh install with neither link, create both as before.
+$managedLinkAlreadyPresent = @($managedTargets | Where-Object {
+    Test-Path -LiteralPath $_
+}).Count -gt 0
 foreach ($target in $managedTargets) {
     $exists = Test-Path -LiteralPath $target
+    if (-not $exists -and $managedLinkAlreadyPresent) { continue }
     $ownedOldBin = $false
     $skip = $false
     if ($exists) {
@@ -159,6 +166,7 @@ def build():
       "parent_sha256":sha(original),"parent_size":len(original),
       "candidate_sha256":sha(target),"candidate_size":len(target),
       "scoped_to_unique_official_managed_shortcut_loop":True,
+      "absent_link_preserved_if_other_managed_location_exists":True,
       "published_manifest_unchanged":True,
       "installed_user_state_unchanged":True,
     }
