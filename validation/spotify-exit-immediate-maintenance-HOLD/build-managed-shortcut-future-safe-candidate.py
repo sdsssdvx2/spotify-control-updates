@@ -141,6 +141,9 @@ def build():
     if not all(old.count(a) == 1 for a in anchors):
         raise RuntimeError("ORIGINAL_SHORTCUT_LOOP_ANCHOR_DRIFT")
     if not (7 <= len(old.splitlines()) <= 14):
+        print("CANONICAL_OFFICIAL_SHORTCUT_LOOP_LINE_COUNT",len(old.splitlines()))
+        for idx,line in enumerate(old.splitlines(),1):
+            if idx <= 40: print("CANONICAL_SHORTCUT_LOOP_LINE",idx,repr(line[:200]))
         raise RuntimeError("ORIGINAL_SHORTCUT_LOOP_UNKNOWN_CODE")
     changed = normalized[:start] + REPLACEMENT + normalized[end:]
     if changed.count(first) != 1:
