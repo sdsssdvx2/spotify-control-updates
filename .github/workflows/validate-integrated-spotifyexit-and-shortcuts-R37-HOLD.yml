@@ -27,8 +27,8 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'R37_INTEGRATION_BUILDER_NOT_PYTHON'}
           python $script
           if($LASTEXITCODE -ne 0){throw 'R37_TWO_FEATURE_SOURCE_COMBINATION_FAILED'}
-          $home='validation/spotify-exit-immediate-maintenance-HOLD/out'
-          $meta=Get-Content (Join-Path $home 'integrated-proof/source-attestation.json') -Raw | ConvertFrom-Json
+          $sourceRoot='validation/spotify-exit-immediate-maintenance-HOLD/out'
+          $meta=Get-Content (Join-Path $sourceRoot 'integrated-proof/source-attestation.json') -Raw | ConvertFrom-Json
           if($meta.mode -cne 'R37_COMBINED_HOLD_SCRATCH_NOT_RELEASED' -or
              $meta.main_changes -cne 'ONLY_PREVIOUS_FAST_EXIT_FUNCTION_AND_PREVIOUS_SAFE_SHORTCUT_BLOCK' -or
              -not [bool]$meta.existing_r10_exact_merged_function_proven -or
@@ -37,9 +37,9 @@ jobs:
              [bool]$meta.owner_approval_granted){
              throw 'R37_SOURCE_INTEGRITY_OR_MUTATION_BOUNDARY_FAILED'
           }
-          $main=Join-Path $home 'integrated/spotify-control.ps1'
-          $addon=Join-Path $home 'integrated/addon-manager.ps1'
-          $vbs=Join-Path $home 'integrated/spotify-control-agent.vbs'
+          $main=Join-Path $sourceRoot 'integrated/spotify-control.ps1'
+          $addon=Join-Path $sourceRoot 'integrated/addon-manager.ps1'
+          $vbs=Join-Path $sourceRoot 'integrated/spotify-control-agent.vbs'
           foreach($entry in @(
             @{Path=$main;Pin=$meta.merged_main_sha256},
             @{Path=$addon;Pin='5ab556c1d90b9f8e6d5784e238ffd1798c5363a0d7b8313d1f106b5b6a285'},
