@@ -151,6 +151,12 @@ try{
      (Digest $PinnedR27Source) -cne '096a9d13d499af4057f3a40d15dc105dfe2a5de97296373f949b3e6a58dd8064'){
     StopNow 'PINNED_R27_SOURCE_NOT_MATCHED'
   }
+  # This authorization applies equally to a real public update and a hosted
+  # fixture. Previously it was checked only inside the hosted branch.
+  # No release network, process change, or mutex activity is allowed before it.
+  if($Commit -and $ApprovalPhrase -cne 'APPROVE_EXACT_OWNER_CUTOVER_AND_ONE_STABLE_UPDATE'){
+    StopNow 'OWNER_ONE_SHOT_APPROVAL_REQUIRED'
+  }
   $hosted=$HostedFixtureRoot.Length -gt 0
   if(-not $hosted){
     # Unpublished code remains blocked: require independently approved release pins.
@@ -193,9 +199,6 @@ try{
   $runner=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\','/')
   if(-not $fixture.StartsWith(($runner+'\'),[StringComparison]::OrdinalIgnoreCase)){
     StopNow 'HOSTED_FIXTURE_NOT_UNDER_RUNNER_TEMP'
-  }
-  if($Commit -and $ApprovalPhrase -cne 'APPROVE_EXACT_OWNER_CUTOVER_AND_ONE_STABLE_UPDATE'){
-    StopNow 'OWNER_ONE_SHOT_APPROVAL_REQUIRED'
   }
   foreach($h in @($HostedExpectedManifestSHA256,$HostedExpectedBootstrapSHA256,
       $HostedExpectedMainSHA256,$HostedExpectedAgentSHA256)){
