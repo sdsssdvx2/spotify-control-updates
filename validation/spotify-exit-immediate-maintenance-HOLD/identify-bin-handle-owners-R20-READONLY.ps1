@@ -172,12 +172,12 @@ try{
     $literal=[regex]::Escape($bin)
     foreach($line in $lines){
       if($line.Length -gt 8192){continue}
-      if($line -cnotmatch '^(?<exe>[A-Za-z0-9_.-]+\.exe),(?<pid>[0-9]{1,10}),'){continue}
+      if($line -cnotmatch '^\s*(?<exe>[A-Za-z0-9_.-]+\.exe)\s*,\s*(?<pid>[0-9]{1,10})\s*,'){continue}
       if($line -notmatch ('(?i)'+$literal+'(?:\\|,|$)')){continue}
       $exeName=[string]$Matches['exe']
       # Previous -match populated $Matches with the pathname regexp;
       # reparse process identity explicitly before reporting any label.
-      $match=[regex]::Match($line,'^(?<exe>[A-Za-z0-9_.-]+\.exe),(?<pid>[0-9]{1,10}),')
+      $match=[regex]::Match($line,'^\s*(?<exe>[A-Za-z0-9_.-]+\.exe)\s*,\s*(?<pid>[0-9]{1,10})\s*,')
       if(-not $match.Success){continue}
       $pidText=$match.Groups['pid'].Value
       $cat=CategorizeExe $match.Groups['exe'].Value
