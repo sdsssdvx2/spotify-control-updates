@@ -172,7 +172,7 @@ try{
       $messages.Add('HOSTED_CAPTURE_BIN='+$(if($raw.Contains($bin)){'YES'}else{'NO'}))
       $messages.Add('HOSTED_CAPTURE_ESCAPE_PATH='+$(if($raw.Contains('SpotifyControl')){'YES'}else{'NO'}))
       $messages.Add('HOSTED_CSV_HEADER_REGEX='+$(if([regex]::IsMatch($raw,'(?m)^\\s*[A-Za-z0-9_.-]+\\.exe\\s*,\\s*[0-9]{1,10}\\s*,')){'YES'}else{'NO'}))
-      $messages.Add('HOSTED_FULL_PATH_REGEX='+$(if([regex]::IsMatch($raw,'(?i)'+[regex]::Escape($bin)+'(?:\\\\|,|$)')){'YES'}else{'NO'}))
+      $messages.Add('HOSTED_FULL_PATH_REGEX='+$(if([regex]::IsMatch($raw,'(?i)'+[regex]::Escape($bin)+'(?:\\\\|,|\s*$)')){'YES'}else{'NO'}))
     }
     $categories=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
     $owners=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
@@ -181,7 +181,7 @@ try{
     foreach($line in $lines){
       if($line.Length -gt 8192){continue}
       if($line -cnotmatch '^\s*(?<exe>[A-Za-z0-9_.-]+\.exe)\s*,\s*(?<pid>[0-9]{1,10})\s*,'){continue}
-      if($line -notmatch ('(?i)'+$literal+'(?:\\|,|$)')){continue}
+      if($line -notmatch ('(?i)'+$literal+'(?:\\|,|\s*$)')){continue}
       $exeName=[string]$Matches['exe']
       # Previous -match populated $Matches with the pathname regexp;
       # reparse process identity explicitly before reporting any label.
