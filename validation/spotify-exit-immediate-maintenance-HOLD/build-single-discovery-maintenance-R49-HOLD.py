@@ -173,6 +173,7 @@ def run():
         raise RuntimeError("R49_SINGLE_CHECK_REUSE_NOT_INTEGRATED")
     changed=bom+body.replace("\n",newline).encode("utf-8")
     OUT.mkdir(parents=True,exist_ok=False)
+    (OUT/"isolated-real-functions.ps1").write_text(edited_tick+"\n\n"+edited_maintain+"\n",encoding="utf-8",newline="\n")
     for name,data in {
        "spotify-control.ps1":changed,
        "spotify-control-agent.vbs":vbs,
