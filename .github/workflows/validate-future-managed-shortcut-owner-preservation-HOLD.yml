@@ -63,13 +63,14 @@ jobs:
           foreach($cmd in $pyCommands){
             try{
               $item=Get-Item -LiteralPath $cmd.Source -Force -ErrorAction Stop
+              Write-Host ('R32_PYTHON_ITEM_EXACT_TYPE='+$(if($item.PSIsContainer){'DIR'}else{'FILE'}))
               $probe=@(& $cmd.Source -I -S -B -c 'import sys; print("OK" if sys.version_info >= (3,10) else "OLD")' 2>&1)
               Write-Host ('R32_PYTHON_READONLY_FILETYPE='+$(if($item.PSIsContainer){'DIR'}else{'FILE'}))
               Write-Host ('R32_PYTHON_READONLY_REPARSE='+([bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)))
               Write-Host ('R32_PYTHON_READONLY_VERSION_PROBE_EXIT='+$LASTEXITCODE)
               Write-Host ('R32_PYTHON_READONLY_VERSION_PROBE_COUNT='+$probe.Count)
               if($probe.Count -eq 1){Write-Host ('R32_PYTHON_READONLY_VERSION_PROBE_MARKER='+([string]$probe[0]))}
-            }catch{Write-Host 'R32_PYTHON_READONLY_VERSION_PROBE_ERROR_CLASS=REDACTED'}
+            }catch{Write-Host ('R32_PYTHON_READONLY_VERSION_PROBE_ERROR_CLASS='+$_.Exception.GetType().Name)}
           }
           $fake=@(& $r32 -Commit -ApprovalPhrase 'APPROVE_EXACT_OWNER_CUTOVER_AND_ONE_STABLE_UPDATE' -ApprovedPublicManifestSHA256 ('0'*64) -ApprovedPublicSourceCommit ('1'*40))
           if($fake -cnotcontains 'IMMUTABLE_R27_R28_R29_TOOL_BYTES=PINNED' -or
