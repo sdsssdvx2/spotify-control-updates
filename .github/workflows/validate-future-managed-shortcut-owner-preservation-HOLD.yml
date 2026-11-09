@@ -9,6 +9,7 @@ on:
       - validation/spotify-exit-immediate-maintenance-HOLD/rehearse-localhost-bootstrap-future.py
       - validation/spotify-exit-immediate-maintenance-HOLD/stage-future-official-release-HOLD.py
       - validation/spotify-exit-immediate-maintenance-HOLD/verify-two-commit-future-release-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/guarded-first-update-resident-entry-R27-HOLD.ps1
 permissions: {contents: read, actions: read}
 jobs:
   native-shortcut:
@@ -133,7 +134,7 @@ jobs:
           python validation/spotify-exit-immediate-maintenance-HOLD/verify-two-commit-future-release-HOLD.py
           if($LASTEXITCODE -ne 0){throw 'IMMUTABLE_FUTURE_RELEASE_GIT_PROVENANCE_FAILED'}
           Write-Host 'FUTURE_REAL_IMMUTABLE_SOURCE_COMMIT_AND_LATER_MANIFEST_REHEARSAL_PASS'
-      - name: Real Bootstrap v1.0.6 Check Update Check Rollback in disposable localhost mirror
+      - name: R27 verified old resident cutover then real Bootstrap Check Update Check Rollback in disposable localhost mirror
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -142,6 +143,9 @@ jobs:
           $fixture=Join-Path $env:RUNNER_TEMP 'spotify-future-bootstrap-rehearsal'
           if(Test-Path -LiteralPath $fixture){throw 'BOOTSTRAP_REHEARSAL_ALREADY_EXISTS'}
           $server=$null
+          $oldResident=$null
+          $newResident=$null
+          $legacyLocks=New-Object 'System.Collections.Generic.List[System.Threading.Mutex]'
           $localBefore=$env:LOCALAPPDATA
           $roamingBefore=$env:APPDATA
           try {
@@ -180,7 +184,7 @@ jobs:
             $addonBefore=(Get-FileHash -LiteralPath $addon -Algorithm SHA256).Hash
             # This is NOT the operating Windows user's Start Menu. Guard
             # a synthetic owner-custom OTHER_VBS launcher through both actions.
-            $menu=Join-Path $fixture 'SyntheticStartMenu'
+            $menu=Join-Path $fixture 'StartMenu'
             [void][IO.Directory]::CreateDirectory($menu)
             $otherDir=Join-Path $fixture 'CustomLauncher'
             [void][IO.Directory]::CreateDirectory($otherDir)
@@ -195,6 +199,59 @@ jobs:
             $item.Save()
             $linkHash=(Get-FileHash -LiteralPath $link -Algorithm SHA256).Hash
             $vbsHash=(Get-FileHash -LiteralPath $otherVbs -Algorithm SHA256).Hash
+            # The initial legacy agent is launched with installed-bin CWD;
+            # its live handle blocks the exact Bootstrap bin directory swap.
+            # Keep both SAME-USER maintenance/tick locks across the COMPLETE
+            # R27 cutover and official Bootstrap action sequence. The R27
+            # helper recursively acquires/releases those same named mutexes
+            # on this PowerShell thread, so no writer interleaving is possible.
+            $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+            $safeSid=$sid -replace '[^A-Za-z0-9]','_'
+            foreach($purpose in @('Maintenance','AgentTick')){
+              $m=New-Object System.Threading.Mutex(
+                $false,('Local\SpotifyControl-'+$purpose+'-'+$safeSid))
+              if(-not $m.WaitOne(0,$false)){
+                $m.Dispose()
+                throw 'R27_OUTER_MAINTENANCE_MUTEX_BUSY'
+              }
+              $legacyLocks.Add($m)
+            }
+            if($legacyLocks.Count -ne 2){throw 'R27_OUTER_MUTEX_PAIR_NOT_HELD'}
+            $wscript=Join-Path $env:WINDIR 'System32/wscript.exe'
+            $oldResident=Start-Process -FilePath $wscript -WorkingDirectory $bin -ArgumentList ('//B //NoLogo "'+$agent+'"') -PassThru
+            Start-Sleep -Seconds 2
+            if($oldResident.HasExited){throw 'R27_OLD_RESIDENT_EXITED_PREMATURELY'}
+            $wasLocked=$false
+            try{[IO.Directory]::Move($bin,(Join-Path $app 'bin-locked-test'))}
+            catch [IO.IOException]{$wasLocked=$true}
+            if(-not $wasLocked){throw 'R27_OLD_RESIDENT_BIN_LOCK_NOT_REPRODUCED'}
+            Write-Host 'R27_INTEGRATED_PREUPDATE_LEGACY_WSCRIPT_BIN_LOCK_REPRODUCED_PASS'
+            $r27Source='validation/spotify-exit-immediate-maintenance-HOLD/guarded-first-update-resident-entry-R27-HOLD.ps1'
+            [byte[]]$r27Bytes=[IO.File]::ReadAllBytes((Resolve-Path $r27Source))
+            $r27=[ScriptBlock]::Create([Text.Encoding]::ASCII.GetString($r27Bytes))
+            $dry=@(& $r27 -HostedFixtureRoot $fixture)
+            if($dry -cnotcontains 'RESULT=READY_FOR_EXACT_CUTOVER_NO_CHANGES'){
+              throw ('R27_INTEGRATED_DRYRUN_FAILED '+($dry -join '|'))
+            }
+            $converted=@(& $r27 -HostedFixtureRoot $fixture -Commit -ApprovalPhrase 'APPROVE_ONLY_EXACT_OWNER_RESIDENT_NEUTRAL_CWD')
+            if($converted -cnotcontains 'RESULT=EXACT_RESIDENT_CUTOVER_COMPLETED_OTHER_HANDLES_NOT_CERTIFIED' -or
+               $converted -cnotcontains 'EXACT_OLD_RESIDENT_TERMINATED=YES' -or
+               $converted -cnotcontains 'MAINTENANCE_AND_AGENTTICK_MUTEXES=HELD' -or
+               -not $oldResident.HasExited){
+              throw ('R27_INTEGRATED_APPROVED_CUTOVER_FAILED '+($converted -join '|'))
+            }
+            $living=@(Get-CimInstance Win32_Process -Filter "Name='wscript.exe'" | Where-Object {
+              [string]$_.CommandLine -like ('*"'+$agent+'"*')
+            })
+            if($living.Count -ne 1){throw 'R27_INTEGRATED_REPLACEMENT_COUNT_NOT_ONE'}
+            $newResident=Get-Process -Id ([int]$living[0].ProcessId) -ErrorAction Stop
+            [IO.Directory]::Move($bin,(Join-Path $app 'bin-neutral-test'))
+            [IO.Directory]::Move((Join-Path $app 'bin-neutral-test'),$bin)
+            if($newResident.HasExited){throw 'R27_NEUTRAL_RESIDENT_DIED_DURING_BIN_RENAME'}
+            if((Get-FileHash -LiteralPath $link -Algorithm SHA256).Hash -cne $linkHash){
+              throw 'R27_INTEGRATED_CUSTOM_SHORTCUT_CHANGED'
+            }
+            Write-Host 'R27_INTEGRATED_OWNER_ONLY_BIN_CWD_CUTOVER_AND_OUTER_MUTEXES_HELD_PASS'
             $env:LOCALAPPDATA=Join-Path $fixture 'LocalAppData'
             $env:APPDATA=Join-Path $fixture 'Roaming'
             function Invoke-HostedBootstrap {
@@ -306,6 +363,19 @@ jobs:
             # the Actions PowerShell wrapper mistake it for job failure.
             $global:LASTEXITCODE=0
           } finally {
+            foreach($p in @($oldResident,$newResident)){
+              if($null -ne $p){
+                try{
+                  $p.Refresh()
+                  if(-not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
+                  [void]$p.WaitForExit(5000)
+                }catch{}
+              }
+            }
+            for($i=$legacyLocks.Count-1;$i -ge 0;$i--){
+              try{$legacyLocks[$i].ReleaseMutex()}catch{}
+              try{$legacyLocks[$i].Dispose()}catch{}
+            }
             $env:LOCALAPPDATA=$localBefore
             $env:APPDATA=$roamingBefore
             if($null -ne $server -and -not $server.HasExited){
