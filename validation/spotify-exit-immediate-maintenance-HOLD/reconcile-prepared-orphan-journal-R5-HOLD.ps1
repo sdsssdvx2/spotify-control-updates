@@ -123,7 +123,7 @@ function SourcePin([string]$Path,[int64]$Size,[string]$Sha) {
   $f=FileInfo $Path 2097152
   return ($null -ne $f -and [int64]$f.Length -eq $Size -and (HashFile $Path) -ceq $Sha)
 }
-function Probe([string]$Root,[string]$ExpectedId='') {
+function Probe([string]$Root,[string]$ExpectedId='', [switch]$AcceptExactRestore) {
   if(-not(IsPlainDirectory $Root)){Fail 'ROOT_UNSAFE'}
   if(-not(ReparseFreePath $Root (Join-Path $Root 'bin'))){Fail 'BIN_PATH_UNSAFE'}
   if(-not(ReparseFreePath $Root (Join-Path $Root 'bootstrap\spotify-control-self-updater.ps1'))){Fail 'BOOTSTRAP_PATH_UNSAFE'}
@@ -166,19 +166,31 @@ function Probe([string]$Root,[string]$ExpectedId='') {
   $old=Join-Path $Root ('bin.spotifycontrol-old-'+$id)
   $rest=Join-Path $Root ('bin.spotifycontrol-restore-'+$id)
   $failed=Join-Path $Root ('bin.spotifycontrol-failed-'+$id)
+  $savedRestore=Join-Path $base 'original-restore-bin-preserved-exact-before'
   if(-not (ExactPath ([string](Field $doc 'backup_bin')) $backup) -or
      -not (ExactPath ([string](Field $doc 'same_dir_new')) $new) -or
      -not (ExactPath ([string](Field $doc 'same_dir_old')) $old)){Fail 'TRANSACTION_PATHS_NOT_EXACT'}
-  foreach($p in @($backup,$new,$old,$rest,$failed)){
+  foreach($p in @($backup,$new,$old,$rest,$failed,$savedRestore)){
     if(-not(ReparseFreePath $Root $p)){Fail 'REPARSE_OR_PATH_DRIFT'}
   }
-  foreach($p in @($new,$old,$rest,$failed)){
+  foreach($p in @($new,$old,$failed)){
     if(Test-Path -LiteralPath $p){Fail 'LEFTOVER_UPDATE_ROOT_EXISTS'}
   }
   if(-not(IsPlainDirectory $base) -or -not(IsPlainDirectory $backup)){Fail 'BACKUP_MISSING'}
   $liveSha=ExactTree $bin
   $backupSha=ExactTree $backup
   if($liveSha -cne $before -or $backupSha -cne $before){Fail 'TREE_MISMATCH_REFUSE_JOURNAL_CHANGE'}
+  # Only exact original BEFORE bytes are eligible for protected preservation.
+  $restorePresent=[bool](Test-Path -LiteralPath $rest)
+  $preservedPresent=[bool](Test-Path -LiteralPath $savedRestore)
+  if($restorePresent -and $preservedPresent){Fail 'RESTORE_AND_PRESERVED_COLLISION'}
+  if($restorePresent){
+    if(-not $AcceptExactRestore -or $status -cne 'prepared'){Fail 'LEFTOVER_UPDATE_ROOT_EXISTS'}
+    if((ExactTree $rest) -cne $before){Fail 'RESTORE_TREE_NOT_EXACT_BEFORE'}
+  }
+  if($preservedPresent -and (ExactTree $savedRestore) -cne $before){
+    Fail 'PRESERVED_RESTORE_TREE_NOT_EXACT_BEFORE'
+  }
   if($reconciled){
     $escrow=Join-Path $base 'original-prepared-transaction-before-reconcile.json'
     if(-not(ReparseFreePath $Root $escrow)){Fail 'PREVIOUS_ESCROW_PATH_UNSAFE'}
@@ -217,7 +229,9 @@ function Probe([string]$Root,[string]$ExpectedId='') {
   return [pscustomobject]@{
     id=$id;doc=$doc;original=$original;digest=(HashBytes $original);
     txn=$transaction;base=$base;live=$bin;backup=$backup;
-    before=$before;reconciled=$reconciled;officialRollback=$officialRollback;stableCommitted=$false
+    before=$before;reconciled=$reconciled;officialRollback=$officialRollback;stableCommitted=$false;
+    restorePresent=$restorePresent;preservedPresent=$preservedPresent;
+    restorePath=$rest;preservedRestorePath=$savedRestore
   }
 }
 function FindVerifiedPriorPreparedEscrow([string]$Root,[string]$CurrentId,
@@ -267,6 +281,10 @@ function FindVerifiedPriorPreparedEscrow([string]$Root,[string]$CurrentId,
        (Test-Path -LiteralPath $old)){
       Fail 'PREVIOUS_ORIGINAL_ESCROW_TREE_OR_PATH_MISMATCH'
     }
+    $savedRestore=Join-Path $d.FullName 'original-restore-bin-preserved-exact-before'
+    if(-not(ReparseFreePath $Root $savedRestore)){Fail 'PREVIOUS_PRESERVED_RESTORE_UNSAFE'}
+    if((Test-Path -LiteralPath $savedRestore) -and
+       (ExactTree $savedRestore) -cne $Before){Fail 'PREVIOUS_PRESERVED_RESTORE_TREE_MISMATCH'}
     $found++
     $accepted=[pscustomobject]@{path=$candidate;id=$d.Name;digest=(HashBytes $bytes)}
     if($found -gt 1){Fail 'PREVIOUS_ORIGINAL_ESCROW_AMBIGUOUS'}
@@ -692,13 +710,15 @@ try{
   $messages.Add('RESIDENT_AGENT='+$(if($obs.resident -gt 1){'MULTIPLE_BLOCKED'}elseif($obs.resident -eq 1 -and $Commit){'RUNNING_TICKS_MUTEX_FENCED'}elseif($obs.resident -eq 1){'RUNNING_DRYRUN_ONLY'}elseif($obs.opaque -gt 0){'UNKNOWN'}else{'NOT_OBSERVED'}))
   if($Commit -and -not $obs.safe){Fail 'ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE'}
   $stage='FIRST_SOURCE_PROOF'
-  $pre=Probe $root
+  $pre=Probe $root -AcceptExactRestore
   if($pre.stableCommitted){
     $messages.Add('OFFICIAL_STABLE_V0628_R17=EXACT_BIN_AND_COMMITTED_JOURNAL')
     $messages.Add('ORIGINAL_PREPARED_ESCROW_AND_PREVIOUS_BACKUP=EXACT')
     $messages.Add('RESULT=ALREADY_COMMITTED_STABLE_V0628_VERIFIED_NO_ACTION')
   }else{
   $messages.Add('SOURCE_AND_FULL_TREES=EXACT_PREPARED_BEFORE')
+  if($pre.restorePresent){$messages.Add('RESTORE_BEFORE_TREE=EXACT_REQUIRES_PRESERVATION')}
+  if($pre.preservedPresent){$messages.Add('RESTORE_BEFORE_TREE=ALREADY_PRESERVED_EXACT')}
   $messages.Add('BACKUP_AND_STAGING=NO_CONFLICT')
   $messages.Add('TRANSACTION_ORIGINAL_SHA_PIN=YES')
   if(-not $Commit){
@@ -706,6 +726,7 @@ try{
         'EXACT_PRIOR_RECONCILIATION_VERIFIED_EXPLICIT_UPDATE_APPROVAL_REQUIRED'
      }elseif($pre.officialRollback){
         'EXACT_PRIOR_ESCROW_AND_OFFICIAL_ROLLBACK_VERIFIED_EXPLICIT_APPROVAL_REQUIRED'
+     }elseif($pre.restorePresent){'READY_FOR_APPROVED_RESTORE_PRESERVATION_THEN_RECONCILIATION'
      }else{'READY_FOR_EXPLICIT_AUTHORIZED_JOURNAL_ONLY_RECONCILIATION'}))
   }else{
     if($pre.officialRollback){
@@ -755,8 +776,44 @@ try{
     # Reread the full source tree immediately before write; never rely on an
     # earlier R4 user report or a pre-flight pass from another process.
     $stage='SECOND_SOURCE_PROOF'
-    $second=Probe $root $pre.id
-    if($second.digest -cne $pre.digest){Fail 'TRANSACTION_RACE_BETWEEN_PREFLIGHTS'}
+    $second=Probe $root $pre.id -AcceptExactRestore
+    if($second.digest -cne $pre.digest -or
+       $second.restorePresent -ne $pre.restorePresent -or
+       $second.preservedPresent -ne $pre.preservedPresent){
+      Fail 'TRANSACTION_RACE_BETWEEN_PREFLIGHTS'
+    }
+    if($pre.restorePresent){
+      $stage='RESTORE_ORIGINAL_PRESERVE_PRECHECK'
+      if(-not (WriterAdmission $root $true).safe){
+        Fail 'ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE'
+      }
+      # Fence genuine Bootstrap launches before the new directory move.
+      $exclusiveBootstrap=HoldExactBootstrapFile $root
+      $fenced=Probe $root $pre.id -AcceptExactRestore
+      if($fenced.digest -cne $pre.digest -or
+         -not $fenced.restorePresent -or $fenced.preservedPresent){
+        Fail 'RESTORE_CHANGED_BEFORE_ARCHIVE_MOVE'
+      }
+      if(-not ([IO.Path]::GetPathRoot($fenced.restorePath).Equals(
+          [IO.Path]::GetPathRoot($fenced.preservedRestorePath),
+          [StringComparison]::OrdinalIgnoreCase))){
+        Fail 'RESTORE_ARCHIVE_CROSS_VOLUME_REFUSED'
+      }
+      $stage='RESTORE_ORIGINAL_ATOMIC_PRESERVE_MOVE'
+      # .NET Directory.Move never overwrites a present destination.
+      [IO.Directory]::Move($fenced.restorePath,$fenced.preservedRestorePath)
+      $stage='RESTORE_ORIGINAL_POST_MOVE_VERIFY'
+      if((Test-Path -LiteralPath $fenced.restorePath) -or
+         (ExactTree $fenced.preservedRestorePath) -cne $pre.before){
+        Fail 'RESTORE_PRESERVATION_NOT_EXACT_DO_NOT_RETRY'
+      }
+      $movedProof=Probe $root $pre.id
+      if($movedProof.digest -cne $pre.digest -or
+         $movedProof.restorePresent -or -not $movedProof.preservedPresent){
+        Fail 'RESTORE_PRESERVATION_REPROBE_FAILED'
+      }
+      $messages.Add('RESTORE_ORIGINAL=ATOMICALLY_PRESERVED_EXACT_BEFORE_NO_DELETE')
+    }
     $escrow=Join-Path $pre.base 'original-prepared-transaction-before-reconcile.json'
     if(Test-Path -LiteralPath $escrow){Fail 'EXISTING_ESCROW_NO_OVERWRITE'}
     if(-not(ReparseFreePath $root $escrow)){Fail 'ESCROW_PATH_UNSAFE'}
@@ -796,7 +853,7 @@ try{
     # OS file-sharing layer during the critical journal CAS. Before this,
     # every manifest/source/transaction/backup hash has been rechecked.
     $stage='EXCLUSIVE_BOOTSTRAP_FENCE'
-    $exclusiveBootstrap=HoldExactBootstrapFile $root
+    if($null -eq $exclusiveBootstrap){$exclusiveBootstrap=HoldExactBootstrapFile $root}
     $afterFenceAdmission=WriterAdmission $root $true
     if(-not $afterFenceAdmission.safe){Fail 'ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE'}
     if((HashFile $pre.txn) -cne $pre.digest){Fail 'TRANSACTION_CHANGED_BEFORE_ATOMIC_REPLACE'}
@@ -874,7 +931,12 @@ try{
     'TRANSACTION_OFFICIAL_SOURCE_COMMIT_UNKNOWN','TRANSACTION_PAYLOAD_ID_UNKNOWN',
     'TRANSACTION_HASHES_INVALID','TRANSACTION_PATHS_NOT_EXACT','REPARSE_OR_PATH_DRIFT',
     'LEFTOVER_UPDATE_ROOT_EXISTS','BACKUP_MISSING','TREE_MISMATCH_REFUSE_JOURNAL_CHANGE',
-    'TRANSACTION_JSON_UNREADABLE')
+    'TRANSACTION_JSON_UNREADABLE',
+    'RESTORE_AND_PRESERVED_COLLISION','RESTORE_TREE_NOT_EXACT_BEFORE',
+    'PRESERVED_RESTORE_TREE_NOT_EXACT_BEFORE','PREVIOUS_PRESERVED_RESTORE_UNSAFE',
+    'PREVIOUS_PRESERVED_RESTORE_TREE_MISMATCH','RESTORE_CHANGED_BEFORE_ARCHIVE_MOVE',
+    'RESTORE_ARCHIVE_CROSS_VOLUME_REFUSED','RESTORE_PRESERVATION_NOT_EXACT_DO_NOT_RETRY',
+    'RESTORE_PRESERVATION_REPROBE_FAILED')
   if($kind -cnotin $allowed){$kind='UNVERIFIED_FAIL_CLOSED'}
   # The stage is a script-owned finite label, never an exception's raw path or message.
   $messages.Add('HOLD_STAGE='+$stage)
