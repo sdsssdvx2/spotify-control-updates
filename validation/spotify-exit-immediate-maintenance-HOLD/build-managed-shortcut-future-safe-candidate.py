@@ -124,7 +124,7 @@ def build():
     if normalized.count(first) != 1:
         raise RuntimeError("ORIGINAL_SHORTCUT_LOOP_COUNT_NOT_ONE")
     start = normalized.index(first)
-    end = normalized.find("\n}\n",start)
+    end = normalized.find("\n    }\n",start)
     if end < start:
         raise RuntimeError("ORIGINAL_SHORTCUT_LOOP_NOT_CLOSED")
     end += 2
