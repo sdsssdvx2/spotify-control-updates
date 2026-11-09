@@ -64,21 +64,40 @@ function OwnProcess([int]$processId){
     return $p[0]
   }catch{return $null}
 }
-function EnterOldMutexes{
+function EnterOldMutexes {
+  # Return the fully owned list to the immediate caller, mirroring the
+  # older R18 implementation. Never refer to $script:mutexes from a
+  # function: ScriptBlock.Create invocation does NOT necessarily install
+  # an independent PS script scope as invoking a script file does.
   $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
   if([string]::IsNullOrWhiteSpace($sid)){Fail 'OWNER_SID_UNKNOWN'}
-  $safe=$sid -replace '[^A-Za-z0-9]','_'
-  foreach($purpose in @('Maintenance','AgentTick')){
-    $m=New-Object Threading.Mutex($false,('Local\SpotifyControl-'+$purpose+'-'+$safe))
-    $got=$false
-    try{$got=$m.WaitOne(0,$false)}
-    catch [Threading.AbandonedMutexException] {
-      try{$m.ReleaseMutex()}catch{}
-      $m.Dispose()
-      Fail 'ABANDONED_LEGACY_MUTEX'
+  $safeSid=([string]$sid -replace '[^A-Za-z0-9]','_')
+  $owned=New-Object 'System.Collections.Generic.List[System.Threading.Mutex]'
+  try{
+    foreach($purpose in @('Maintenance','AgentTick')){
+      $name=('Local\SpotifyControl-{0}-{1}' -f $purpose,$safeSid)
+      $m=New-Object System.Threading.Mutex($false,$name)
+      $got=$false
+      try{
+        try{$got=$m.WaitOne(0,$false)}
+        catch [System.Threading.AbandonedMutexException]{
+          try{$m.ReleaseMutex()}catch{}
+          Fail 'ABANDONED_LEGACY_MUTEX'
+        }
+        if(-not $got){Fail 'LEGACY_MUTEX_NOT_IDLE'}
+        $owned.Add($m)
+      }catch{
+        if(-not $got){try{$m.Dispose()}catch{}}
+        throw
+      }
     }
-    if(-not $got){$m.Dispose();Fail 'LEGACY_MUTEX_NOT_IDLE'}
-    $script:mutexes.Add($m)
+    return $owned
+  }catch{
+    for($i=$owned.Count-1;$i -ge 0;$i--){
+      try{$owned[$i].ReleaseMutex()}catch{}
+      try{$owned[$i].Dispose()}catch{}
+    }
+    throw
   }
 }
 if(-not ('SpotifyR21VerifiedProcessEnd' -as [type])){
@@ -223,7 +242,10 @@ try{
     $log.Add('RESULT=READY_FOR_CUSTOM_LINK_PRESERVING_AGENT_CUTOVER_NO_MUTATION')
   }else{
     $stage='LEGACY_MUTEX_ADMISSION'
-    EnterOldMutexes
+    $mutexes=EnterOldMutexes
+    if($null -eq $mutexes -or $mutexes.Count -ne 2){
+      Fail 'LEGACY_MUTEX_PAIR_NOT_COMPLETE'
+    }
     $log.Add('MAINTENANCE_AND_AGENTTICK_MUTEXES=HELD')
     $check=OwnProcess ([int]$old.ProcessId)
     if($null -eq $check -or [datetime]$check.CreationDate -ne $creation -or
@@ -294,7 +316,7 @@ try{
     'CUSTOM_MANAGED_SHORTCUT_CHANGED_DURING_CUTOVER',
     'CUSTOM_MANAGED_SHORTCUT_CHANGED_DURING_OFFICIAL_UPDATE',
     'OWNER_SID_UNKNOWN','ABANDONED_LEGACY_MUTEX',
-    'LEGACY_MUTEX_NOT_IDLE','RESIDENT_CHANGED_BEFORE_CUTOVER',
+    'LEGACY_MUTEX_NOT_IDLE','LEGACY_MUTEX_PAIR_NOT_COMPLETE','RESIDENT_CHANGED_BEFORE_CUTOVER',
     'NEW_AGENT_EXITED_EARLY',
     'NEW_AGENT_IDENTITY_NOT_EXACT','ORIGINAL_AGENT_IDENTITY_CHANGED_DO_NOT_KILL',
     'ORIGINAL_AGENT_EXACT_TERMINATION_UNVERIFIED','NEUTRAL_AGENT_EXITED_AFTER_OLD_END')
