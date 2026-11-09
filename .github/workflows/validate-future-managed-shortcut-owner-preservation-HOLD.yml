@@ -64,9 +64,9 @@ jobs:
           print('PINNED_BOOTSTRAP_V106_SOURCE_SHA256_AND_SIZE_PASS')
           lines=src.splitlines()
           for n,line in enumerate(lines,1):
-              if n<=35 or 'raw.githubusercontent' in line or
+              if (n<=35 or 'raw.githubusercontent' in line or
                   'ManifestUrl' in line or 'BaseUri' in line or
-                  'function Apply-FullFilePatch' in line:
+                  'function Apply-FullFilePatch' in line):
                   print(f'PINNED_BOOTSTRAP_ENTRY_{n}={line.strip()[:240]}')
           for i,line in enumerate(lines):
               if line.lstrip().startswith('function Apply-FullFilePatch'):
