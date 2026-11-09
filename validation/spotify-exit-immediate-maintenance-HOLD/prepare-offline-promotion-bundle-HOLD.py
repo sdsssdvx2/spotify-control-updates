@@ -18,7 +18,7 @@ import json
 import os
 import re
 from pathlib import Path
-import runpy
+from importlib import util as importlib_util
 import shutil
 import subprocess
 import sys
@@ -135,15 +135,20 @@ def run():
 
         # Reuse the existing real git SHA + compressed bytes proof, rather
         # than implementing a parallel transport checker.
-        module=runpy.run_path(str(HERE/"verify-two-commit-future-release-HOLD.py"))
-        # Synthetic rehearsal uses its own fixed directory. The new review
-        # promotion MUST use a distinct scratch, even if old Windows temp
-        # cleanup left a locked item. Bind both the helper's default cwd and
-        # module globals to the isolated review worktree.
-        module["git"].__defaults__=(SCRATCH,)
-        module["attest"].__globals__["SCRATCH"]=SCRATCH
-        attest=module["attest"]
-        attest(candidate,source_commit,final_commit)
+        # Load as a persistent module, NOT runpy.run_path: CPython may
+        # clear run_path function-global namespaces after returning, leaving
+        # the verifier's imported Git helpers with stale/None globals.
+        script=HERE/"verify-two-commit-future-release-HOLD.py"
+        spec=importlib_util.spec_from_file_location("spotify_git_promotion_attest_hold",script)
+        if spec is None or spec.loader is None:
+            fail("SOURCE_ATTEST_MODULE_NOT_LOADABLE")
+        checker=importlib_util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        # Reuse exact verified attestation against this isolated worktree.
+        # git() binds its default cwd at function definition, so update both.
+        checker.SCRATCH=SCRATCH
+        checker.git.__defaults__=(SCRATCH,)
+        checker.attest(candidate,source_commit,final_commit)
         manifest_sha=sha(manifest_raw)
         OUTPUT.mkdir(parents=True,exist_ok=False)
         output_created=True
