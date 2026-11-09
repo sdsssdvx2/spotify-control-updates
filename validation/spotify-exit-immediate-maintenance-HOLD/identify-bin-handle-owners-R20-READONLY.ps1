@@ -125,7 +125,7 @@ try{
      '24bafcc570cc9bbb6b6e6652a57a519e0464e3996891aaba6f55299cce20b04f'){
      throw 'HANDLE64_EXE_HASH_CHANGED'
   }
-  $sig=Get-AuthenticodeSignature -LiteralPath $exe -ErrorAction Stop
+  $sig=Get-AuthenticodeSignature -FilePath $exe -ErrorAction Stop
   if([string]$sig.Status -cne 'Valid' -or
      [string]$sig.SignerCertificate.Subject -notmatch 'Microsoft'){
      throw 'MICROSOFT_SIGNATURE_INVALID'
@@ -176,13 +176,12 @@ try{
         [void]$exactOwners.Add($pidText)
       }
     }
-    $found=@($categories.ToArray())
+    [string[]]$found=@($categories | ForEach-Object {[string]$_})
     [Array]::Sort([string[]]$found,[StringComparer]::Ordinal)
     $messages.Add('BIN_HANDLE_OWNER_PROCESS_COUNT='+[string]$owners.Count)
     $messages.Add('BIN_DIRECTORY_EXACT_HANDLE_OWNER_COUNT='+[string]$exactOwners.Count)
     $messages.Add('BIN_HANDLE_OWNER_CATEGORIES='+$(if($found.Count){$found -join ','}else{'NONE_OBSERVED'}))
     $messages.Add('HANDLE_INVENTORY_SCOPE='+$(if($admin){'ELEVATED_PROCESS_VIEW'}else{'STANDARD_USER_LIMITED_VIEW'}))
-    $messages.Add('RESULT=READONLY_BIN_HANDLE_INVENTORY_COMPLETE')
   }finally{
     $p.Dispose()
   }
@@ -193,6 +192,7 @@ try{
     }
     $messages.Add('TRANSACTION_STABLE_DURING_AUDIT=YES')
   }
+  $messages.Add('RESULT=READONLY_BIN_HANDLE_INVENTORY_COMPLETE')
 }catch{
   # Do not export raw exception messages, file paths, PIDs, source or usernames.
   $messages.Add('FAILED_PHASE='+$phase)
