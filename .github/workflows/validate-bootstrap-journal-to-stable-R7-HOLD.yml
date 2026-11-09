@@ -107,6 +107,10 @@ jobs:
           oldsha=tree(bin)
           assert oldsha==tree(backing)
           id='20261108-131500-cafefeed'
+          # Real R17 found an exact BEFORE restore tree that must be kept.
+          restore=local/('bin.spotifycontrol-restore-'+id)
+          shutil.copytree(bin,restore)
+          assert tree(restore)==oldsha
           doc=dict(schema=1,id=id,status='prepared',
             before_version='0.6.20',after_version='0.6.28',
             source_commit='bb6d90146f20b73d36fbf8cb813f1b190f403c48',
@@ -210,11 +214,29 @@ jobs:
             $one=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture -Commit -ApprovalPhrase EXACT_PREPARED_NO_BIN_SWAP 2>&1)
             if($LASTEXITCODE -ne 0 -or
                $one -cnotcontains 'RESULT=JOURNAL_ONLY_RECONCILED_REQUIRES_FRESH_UPDATE_ACCEPTANCE' -or
-               $one -cnotcontains 'TRANSACTION_TERMINAL=ROLLED_BACK_NO_BIN_SWAP'){
+               $one -cnotcontains 'TRANSACTION_TERMINAL=ROLLED_BACK_NO_BIN_SWAP' -or
+               $one -cnotcontains 'RESTORE_ORIGINAL=ATOMICALLY_PRESERVED_EXACT_BEFORE_NO_DELETE'){
                throw ('R11_FIRST_JOURNAL_ONLY_CAS_NOT_ACCEPTED '+($one -join ','))
             }
             $escrow=Join-Path $root 'backups/self-update-transactions/20261108-131500-cafefeed/original-prepared-transaction-before-reconcile.json'
             if((Get-FileHash $escrow -Algorithm SHA256).Hash.ToLowerInvariant() -cne $orig){throw 'R11_ORIGINAL_ESCROW_MISMATCH'}
+            $backup=Join-Path (Split-Path $escrow -Parent) 'bin'
+            $restore=Join-Path $root 'bin.spotifycontrol-restore-20261108-131500-cafefeed'
+            $saved=Join-Path (Split-Path $escrow -Parent) 'original-restore-bin-preserved-exact-before'
+            if(Test-Path -LiteralPath $restore){throw 'R18_RESTORE_SOURCE_STILL_PRESENT'}
+            if(-not(Test-Path -LiteralPath $saved)){throw 'R18_PRESERVED_TREE_MISSING'}
+            $originalFiles=@(Get-ChildItem -LiteralPath $backup -File -Recurse -Force |
+               ForEach-Object { $_.FullName.Substring($backup.Length).TrimStart('\','/') } | Sort-Object)
+            $savedFiles=@(Get-ChildItem -LiteralPath $saved -File -Recurse -Force |
+               ForEach-Object { $_.FullName.Substring($saved.Length).TrimStart('\','/') } | Sort-Object)
+            if(($originalFiles -join '|') -cne ($savedFiles -join '|')){throw 'R18_PRESERVED_FILES_CHANGED'}
+            foreach($rel in $originalFiles){
+              if((Get-FileHash -LiteralPath (Join-Path $backup $rel) -Algorithm SHA256).Hash -cne
+                 (Get-FileHash -LiteralPath (Join-Path $saved $rel) -Algorithm SHA256).Hash){
+                throw 'R18_PRESERVED_FILE_SHA_DRIFT'
+              }
+            }
+            Write-Host 'R18_ORPHAN_RESTORE_EXACT_BEFORE_NO_DELETE_PRESERVED_PASS'
             $terminalHash=(Get-FileHash $originalRecord -Algorithm SHA256).Hash.ToLowerInvariant()
             $dry=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture 2>&1)
             if($LASTEXITCODE -ne 0 -or $dry -cnotcontains 'RESULT=EXACT_PRIOR_RECONCILIATION_VERIFIED_EXPLICIT_UPDATE_APPROVAL_REQUIRED'){
