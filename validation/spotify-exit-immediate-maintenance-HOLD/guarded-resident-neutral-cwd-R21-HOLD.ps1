@@ -125,8 +125,8 @@ try{
   if($Commit -and $ApprovalPhrase -cne 'APPROVE_EXACT_VBS_RESTART_AND_MANAGED_SHORTCUT_CWD'){
     Fail 'EXACT_AGENT_RESTART_APPROVAL_REQUIRED'
   }
-  if($null -eq $PinnedR18Source -or $PinnedR18Source.Length -ne 54515 -or
-     (Sha $PinnedR18Source) -cne 'ec8c86a7d79611702dab926c131f1e4fddca0bca22edff50d0512e37484fb121'){
+  if($null -eq $PinnedR18Source -or $PinnedR18Source.Length -ne 55283 -or
+     (Sha $PinnedR18Source) -cne '619d7a012099fd037a19e8d181b5a9f140947aba7df7cb87626abb0aeeb2dda5'){
      Fail 'R18_SOURCE_PIN_MISSING'
   }
   $hosted=$HostedFixtureRoot.Length -gt 0
