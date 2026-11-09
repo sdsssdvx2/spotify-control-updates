@@ -28,7 +28,7 @@ function GitBlobSha([byte[]]$data){
   return (Hash $all 'SHA1')
 }
 function FetchPinned([string]$name,[long]$size,[string]$blob){
-  $ref='798c331c1c88a163bef8fbfac469c5e589325d2d'
+  $ref='3346fac610b33a95d3dac9f3ce3ae8ddf18ae81d'
   $url='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/'+$ref+'/validation/spotify-exit-immediate-maintenance-HOLD/'+$name
   $web=New-Object Net.WebClient
   try{[byte[]]$data=$web.DownloadData($url)}finally{$web.Dispose()}
@@ -82,8 +82,8 @@ try{
   $stage='FROZEN_SOURCES'
   $net='PINNED_PUBLIC_GITHUB_READONLY'
   [byte[]]$r27=FetchPinned 'guarded-first-update-resident-entry-R27-HOLD.ps1' 14472 '98df17ed1c4d81445bbf34cf4bfa3b2889bc2cc0'
-  [byte[]]$r28=FetchPinned 'owner-approved-next-stable-upgrade-R28-HOLD.ps1' 22820 '2391c459d7a74dfcfe439e92faf96e275b379837'
-  [byte[]]$r29=FetchPinned 'verify-public-release-transport-R29-HOLD.py' 17328 '0c49335c303b569cdb5c9f17335d95869a4141a1'
+  [byte[]]$r28=FetchPinned 'owner-approved-next-stable-upgrade-R28-HOLD.ps1' 22820 '6526e47c0858183d33b3ec4dc51b94b0aa7c69a9'
+  [byte[]]$r29=FetchPinned 'verify-public-release-transport-R29-HOLD.py' 17328 'dc1fed031f66048928fd2cab4076feb7fb1977c5'
   if((Hash $r27 'SHA256') -cne '096a9d13d499af4057f3a40d15dc105dfe2a5de97296373f949b3e6a58dd8064'){
     Deny 'R27_SHA256_PIN_MISMATCH'
   }
