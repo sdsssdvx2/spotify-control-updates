@@ -66,3 +66,54 @@ jobs:
             }
           }
           Write-Host 'R14_ONLY_ISOLATED_SYNTHETIC_CHILD_NO_SPOTIFY_OR_CONFIG_MUTATION_PASS'
+      - name: Verify fail-closed error taxonomy and valid zero-byte bin entries
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $source='validation/spotify-exit-immediate-maintenance-HOLD/reconcile-prepared-orphan-journal-R5-HOLD.ps1'
+          $text=[IO.File]::ReadAllText((Resolve-Path $source))
+          $tokens=$null;$errors=$null
+          $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R15_SOURCE_PARSE_FAILED'}
+          if($text -cnotmatch "\$messages\.Add\('HOLD_STAGE='\+\$stage\)"){
+            throw 'R15_FIXED_STAGE_REPORT_MISSING'
+          }
+          $whitelist=[regex]::Match($text,'(?s)\$allowed=@\((.*?)\)\s*if\(\$kind -cnotin \$allowed\)')
+          if(-not $whitelist.Success){throw 'R15_ALLOWLIST_NOT_FOUND'}
+          $categories=@([regex]::Matches($whitelist.Groups[1].Value,"'([A-Z0-9_]+)'") | ForEach-Object {$_.Groups[1].Value})
+          $failures=@([regex]::Matches($text,"(?i)\bFail\s+'([A-Z0-9_]+)'") | ForEach-Object {$_.Groups[1].Value} | Sort-Object -Unique)
+          $missing=@($failures | Where-Object {$_ -cnotin $categories})
+          if($missing.Count -ne 0){throw 'R15_UNLISTED_FIXED_FAILURE_ENUM'}
+          if($text -cnotmatch "if\(\$kind -cnotin \$allowed\)\{\$kind='UNVERIFIED_FAIL_CLOSED'\}"){
+            throw 'R15_UNKNOWN_EXCEPTION_REDACTION_NOT_PRESERVED'
+          }
+          Write-Host 'R15_ALL_FIXED_ERROR_CATEGORIES_VISIBLE_NO_RAW_ERROR_PASS'
+          foreach($name in @('IsPlainDirectory','FileInfo','HashBytes','HashFile','ExactTree')){
+            $found=@($ast.FindAll({param($n)
+              $n -is [Management.Automation.Language.FunctionDefinitionAst] -and
+              $n.Name -ceq $name
+            },$true))
+            if($found.Count -ne 1){throw 'R15_REQUIRED_FUNCTION_MISSING'}
+            Invoke-Expression $found[0].Extent.Text
+          }
+          $dir=Join-Path $env:RUNNER_TEMP ('spotify-r15-zerobyte-'+[guid]::NewGuid().ToString('N'))
+          try {
+            [void](New-Item -ItemType Directory -Path $dir -ErrorAction Stop)
+            $zero=Join-Path $dir 'empty.dat'
+            $normal=Join-Path $dir 'normal.dat'
+            [IO.File]::WriteAllBytes($zero,[byte[]]@())
+            [IO.File]::WriteAllBytes($normal,[Text.Encoding]::UTF8.GetBytes('nonempty'))
+            if($null -ne (FileInfo $zero)){throw 'R15_EMPTY_TRANSACTION_FILE_UNEXPECTEDLY_ALLOWED'}
+            if($null -eq (FileInfo $zero 2097152 -AllowEmpty)){throw 'R15_EMPTY_BIN_FILE_NOT_ALLOWED'}
+            $rows=@(
+              ('F|empty.dat|0|'+(HashFile $zero)),
+              ('F|normal.dat|8|'+(HashFile $normal))
+            )
+            [Array]::Sort($rows,[StringComparer]::Ordinal)
+            $expected=HashBytes ([Text.Encoding]::UTF8.GetBytes(([string]::Join([string][char]10,$rows)+[char]10)))
+            $actual=ExactTree $dir
+            if($actual -cne $expected){throw 'R15_ZERO_BYTE_CANONICAL_TREE_NOT_EQUAL'}
+            Write-Host 'R15_OFFICIAL_EMPTY_FILE_TREE_EQUIVALENCE_PASS'
+          } finally {
+            if(Test-Path -LiteralPath $dir){Remove-Item -LiteralPath $dir -Force -Recurse -ErrorAction Stop}
+          }
