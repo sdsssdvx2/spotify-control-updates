@@ -1,0 +1,123 @@
+name: HOLD future managed link ownership and neutral CWD (Windows native)
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-future-managed-shortcut-owner-preservation-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/build-managed-shortcut-future-safe-candidate.py
+permissions: {contents: read}
+jobs:
+  native-shortcut:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Rebuild canonical stable and create scoped future candidate (not published)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $main=(git rev-parse origin/main).Trim()
+          if($main -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'UNEXPECTED_MAIN_BRANCH_PROVENANCE'
+          }
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-managed-shortcut-future-safe-candidate.py
+          if($LASTEXITCODE -ne 0){throw 'CANDIDATE_BUILDER_FAILED'}
+          $report='validation/spotify-exit-immediate-maintenance-HOLD/out/future-safe/candidate-report.json'
+          $r=Get-Content -LiteralPath $report -Raw|ConvertFrom-Json
+          if($r.parent_sha256 -cne 'af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0'){
+            throw 'CANONICAL_STABLE_SHA_DRIFT'
+          }
+          $status=@(git status --short manifest.json README.md)
+          if($status.Count -gt 0){throw 'RELEASE_MANIFEST_OR_README_MUTATED'}
+          Write-Host 'FUTURE_SAFE_CANONICAL_V0628_SOURCE_PIN_AND_NO_RELEASE_MUTATION_PASS'
+      - name: Exercise actual Windows COM shortcut ownership, neutral CWD and idempotence
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $candidate='validation/spotify-exit-immediate-maintenance-HOLD/out/future-safe/spotify-control.ps1'
+          $src=[IO.File]::ReadAllText((Resolve-Path $candidate),[Text.Encoding]::UTF8)
+          $tok=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseInput($src,[ref]$tok,[ref]$errors)
+          if(@($errors).Count -ne 0){throw ('FUTURE_SAFE_PS51_PARSE_ERROR '+$errors[0].Message)}
+          $normalized=$src.Replace(([string][char]13+[string][char]10),[string][char]10)
+          $begin=$normalized.IndexOf('# Future managed-shortcut safety:',[StringComparison]::Ordinal)
+          $end=$normalized.IndexOf(([string][char]10+'if (-not [string]::IsNullOrWhiteSpace($startMenu))'),$begin,[StringComparison]::Ordinal)
+          if($begin -lt 0 -or $end -le $begin){throw 'FUTURE_SAFE_LOOP_EXTRACTION_FAILED'}
+          $block=[ScriptBlock]::Create($normalized.Substring($begin,$end-$begin))
+          $sandbox=Join-Path $env:RUNNER_TEMP 'spotify-shortcut-safe-fixture'
+          if(Test-Path -LiteralPath $sandbox){throw 'FUTURE_SHORTCUT_TEST_ALREADY_EXISTS'}
+          $Root=Join-Path $sandbox 'LocalAppData/SpotifyControl'
+          $installedBin=Join-Path $Root 'bin'
+          $installedVbs=Join-Path $installedBin 'spotify-control-agent.vbs'
+          $startMenu=Join-Path $sandbox 'StartMenu'
+          $desktop=Join-Path $sandbox 'Desktop'
+          $other=Join-Path $sandbox 'CustomWorkdir'
+          $foreignVbs=Join-Path $other 'user-custom-spotify-wrapper.vbs'
+          foreach($folder in @($installedBin,$startMenu,$desktop,$other)){
+            [void][IO.Directory]::CreateDirectory($folder)
+          }
+          [IO.File]::WriteAllText($installedVbs,"' pinned VBS placeholder",[Text.Encoding]::ASCII)
+          [IO.File]::WriteAllText($foreignVbs,"' owner custom content must not change",[Text.Encoding]::ASCII)
+          $wscript=Join-Path $env:WINDIR 'System32/wscript.exe'
+          $spotifyExe=$null
+          $shell=New-Object -ComObject WScript.Shell
+          function Test-UsablePath { param([string]$Path,[string]$PathType) return $false }
+          function Write-Log { param([string]$Message,[string]$Level='INFO') throw ('UNEXPECTED_SHORTCUT_WRITE_WARNING_'+$Level) }
+          $menuLink=Join-Path $startMenu 'Spotify (Managed).lnk'
+          $deskLink=Join-Path $desktop 'Spotify (Managed).lnk'
+          $owned=$shell.CreateShortcut($menuLink)
+          $owned.TargetPath=$wscript
+          $owned.Arguments='"'+$foreignVbs+'"'
+          $owned.WorkingDirectory=$other
+          $owned.Description='CUSTOM_OWNER_SETTING_MUST_SURVIVE'
+          $owned.Save()
+          $originalMenu=(Get-FileHash $menuLink -Algorithm SHA256).Hash
+          $originalUserScript=(Get-FileHash $foreignVbs -Algorithm SHA256).Hash
+          $managedTargets=@($deskLink,$menuLink)
+          try{
+            & $block
+            if((Get-FileHash $menuLink -Algorithm SHA256).Hash -cne $originalMenu){throw 'FUTURE_SHORTCUT_CUSTOM_OTHER_VBS_MODIFIED'}
+            if((Get-FileHash $foreignVbs -Algorithm SHA256).Hash -cne $originalUserScript){throw 'FUTURE_SHORTCUT_CUSTOM_SCRIPT_MODIFIED'}
+            $new=$shell.CreateShortcut($deskLink)
+            if(-not [string]::Equals([string]$new.WorkingDirectory,$Root,[StringComparison]::OrdinalIgnoreCase) -or
+               -not [string]::Equals([string]$new.TargetPath,$wscript,[StringComparison]::OrdinalIgnoreCase) -or
+               [string]$new.Arguments -cne ('"'+$installedVbs+'"')){
+              throw 'FUTURE_SHORTCUT_NEW_OFFICIAL_NOT_NEUTRAL'
+            }
+            Write-Host 'FUTURE_SAFE_CUSTOM_VBS_STARTMENU_BYTE_IDENTICAL_AND_NEW_OFFICIAL_CWD_NEUTRAL_PASS'
+            $d=$shell.CreateShortcut($deskLink)
+            $d.WorkingDirectory=$installedBin
+            $d.Save()
+            $previousOfficial=(Get-FileHash $deskLink -Algorithm SHA256).Hash
+            & $block
+            $migrated=$shell.CreateShortcut($deskLink)
+            if(-not [string]::Equals([string]$migrated.WorkingDirectory,$Root,[StringComparison]::OrdinalIgnoreCase)){
+              throw 'FUTURE_SHORTCUT_OLD_OFFICIAL_BIN_CWD_NOT_NORMALIZED'
+            }
+            $saves=@(Get-ChildItem -LiteralPath $desktop -Force -File -Filter '.spotify-control-managed-before-neutral-*.lnk')
+            if($saves.Count -ne 1 -or
+               (Get-FileHash $saves[0].FullName -Algorithm SHA256).Hash -cne $previousOfficial){
+              throw 'FUTURE_SHORTCUT_BACKUP_NOT_ATOMIC_OR_EXACT'
+            }
+            $shaAfter=(Get-FileHash $deskLink -Algorithm SHA256).Hash
+            & $block
+            if((Get-FileHash $deskLink -Algorithm SHA256).Hash -cne $shaAfter -or
+               @(Get-ChildItem -LiteralPath $desktop -Force -File -Filter '.spotify-control-managed-before-neutral-*.lnk').Count -ne 1 -or
+               (Get-FileHash $menuLink -Algorithm SHA256).Hash -cne $originalMenu){
+              throw 'FUTURE_SHORTCUT_IDEMPOTENCE_OR_CUSTOM_PRESERVATION_FAILED'
+            }
+            Write-Host 'FUTURE_SAFE_OLD_OFFICIAL_MIGRATION_ORIGINAL_BACKUP_AND_IDEMPOTENCE_PASS'
+            $customOfficial=$shell.CreateShortcut($deskLink)
+            $customOfficial.WorkingDirectory=$other
+            $customOfficial.Save()
+            $customSha=(Get-FileHash $deskLink -Algorithm SHA256).Hash
+            & $block
+            if((Get-FileHash $deskLink -Algorithm SHA256).Hash -cne $customSha){
+              throw 'FUTURE_SHORTCUT_CUSTOM_OFFICIAL_WORKDIR_NOT_PRESERVED'
+            }
+            Write-Host 'FUTURE_SAFE_OWNER_CUSTOM_WORKDIR_PRESERVED_PASS'
+          }finally{
+            Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          Write-Host 'FUTURE_SHORTCUT_NATIVE_WINDOWS_FIXTURE_CLEANUP_PASS'
