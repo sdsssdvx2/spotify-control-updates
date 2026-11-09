@@ -224,6 +224,8 @@ try{
   $messages.Add('HOLD_REASON='+$kind)
   if($env:GITHUB_ACTIONS -ceq 'true'){
     $messages.Add('HOSTED_EXCEPTION_TYPE='+$_.Exception.GetType().Name)
+    $messages.Add('HOSTED_FAILED_LINE='+[string]$_.InvocationInfo.ScriptLineNumber)
+    $messages.Add('HOSTED_EXCEPTION_HRESULT='+[string]$_.Exception.HResult)
   }
   $messages.Add('RESULT=HOLD_DIAGNOSTIC_INCOMPLETE')
 }finally{
