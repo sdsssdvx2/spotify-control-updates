@@ -48,3 +48,73 @@ jobs:
               print(f'R21_MAIN_{i+1}={text}')
           '@ | python -
           if($LASTEXITCODE -ne 0){throw 'R21_PINNED_SOURCE_AUDIT_FAILED'}
+
+      - name: Reproduce true Windows directory rename failure caused by original pinned resident VBS CWD
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $scratch=Join-Path $env:RUNNER_TEMP 'spotify-r21-real-vbs-cwd'
+          if(Test-Path -LiteralPath $scratch){throw 'R21_SCRATCH_PREEXISTING'}
+          $bin=Join-Path $scratch 'bin'
+          [void][IO.Directory]::CreateDirectory($bin)
+          @'
+          import hashlib,runpy,sys
+          from pathlib import Path
+          root=Path.cwd()
+          dest=Path(sys.argv[1])
+          agent=runpy.run_path(str(root/'validation/normal-engine-shared-turnstile/audit-pinned-stable-entrypoints-v059.py'))['extract_verified_agent']()
+          assert (len(agent),hashlib.sha256(agent).hexdigest())==(4855,'2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278')
+          (dest/'bin'/'spotify-control-agent.vbs').write_bytes(agent)
+          (dest/'bin'/'spotify-control.ps1').write_bytes(b'# hosted fake: never execute')
+          '@ | python - $scratch
+          if($LASTEXITCODE -ne 0){throw 'R21_REAL_AGENT_EXTRACTION_FAILED'}
+          $zip=Join-Path $scratch 'microsoft-Handle.zip'
+          (New-Object Net.WebClient).DownloadFile('https://download.sysinternals.com/files/Handle.zip',$zip)
+          if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+              '279aaf8eccb6f79147f4dcc6ba091fb895c4cb8b199a0dd186a4c76bc519d2cd'){
+            throw 'R21_MICROSOFT_HANDLE_ZIP_MISMATCH'
+          }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $tools=Join-Path $scratch 'tools'
+          [IO.Compression.ZipFile]::ExtractToDirectory($zip,$tools)
+          $exe=Join-Path $tools 'handle64.exe'
+          if((Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+             '24bafcc570cc9bbb6b6e6652a57a519e0464e3996891aaba6f55299cce20b04f' -or
+             [string](Get-AuthenticodeSignature $exe).Status -cne 'Valid'){
+            throw 'R21_MICROSOFT_HANDLE_EXE_UNTRUSTED'
+          }
+          $wscript=Join-Path $env:WINDIR 'System32/wscript.exe'
+          $agent=Join-Path $bin 'spotify-control-agent.vbs'
+          $old=$null;$neutral=$null
+          try{
+            $old=Start-Process -FilePath $wscript -WorkingDirectory $bin -ArgumentList ('//B //NoLogo "'+$agent+'"') -PassThru
+            Start-Sleep -Seconds 2
+            if($old.HasExited){throw 'R21_PINNED_AGENT_OLD_CWD_EXITED'}
+            $lines=@(& $exe -nobanner -accepteula -v $bin 2>&1)
+            $matching=@($lines | Where-Object { [string]$_ -match ('(?i)^wscript\.exe,'+$old.Id+',File,[^,]+,') -and [string]$_ -like ('*'+$bin+'*') })
+            if($matching.Count -ne 1){throw ('R21_VBS_BIN_LOCK_NOT_REPRODUCED count='+$matching.Count)}
+            Write-Host 'R21_EXACT_RESIDENT_VBS_WORKING_DIRECTORY_BIN_HOLD_REPRODUCED_PASS'
+            $moved=$false
+            try { [IO.Directory]::Move($bin,(Join-Path $scratch 'bin-moved'));$moved=$true }
+            catch [IO.IOException]{}
+            catch [System.UnauthorizedAccessException]{}
+            if($moved){[IO.Directory]::Move((Join-Path $scratch 'bin-moved'),$bin);throw 'R21_EXPECTED_OLD_AGENT_CWD_SWAP_BLOCK_NOT_REPRODUCED'}
+            Write-Host 'R21_ORIGINAL_BOOTSTRAP_DIRECTORY_RENAME_BLOCKED_BY_RESIDENT_PASS'
+            Stop-Process -Id $old.Id -Force -ErrorAction Stop
+            $old.WaitForExit(5000)|Out-Null
+            $neutral=Start-Process -FilePath $wscript -WorkingDirectory $scratch -ArgumentList ('//B //NoLogo "'+$agent+'"') -PassThru
+            Start-Sleep -Seconds 2
+            if($neutral.HasExited){throw 'R21_PINNED_AGENT_NEUTRAL_CWD_EXITED'}
+            $newLines=@(& $exe -nobanner -accepteula -v $bin 2>&1)
+            $neutralExact=@($newLines | Where-Object { [string]$_ -match ('(?i)^wscript\.exe,'+$neutral.Id+',File,[^,]+,') -and [string]$_ -like ('*'+$bin+'*')})
+            if($neutralExact.Count -ne 0){throw 'R21_NEUTRAL_AGENT_STILL_HOLDS_BIN'}
+            [IO.Directory]::Move($bin,(Join-Path $scratch 'bin-moved'))
+            [IO.Directory]::Move((Join-Path $scratch 'bin-moved'),$bin)
+            if($neutral.HasExited){throw 'R21_NEUTRAL_AGENT_EXITED_AFTER_RENAME'}
+            Write-Host 'R21_EXACT_PINNED_VBS_NEUTRAL_CWD_RELEASES_BIN_AND_RENAME_PASS'
+          }finally{
+            if($null -ne $neutral -and -not $neutral.HasExited){Stop-Process -Id $neutral.Id -Force -ErrorAction SilentlyContinue}
+            if($null -ne $old -and -not $old.HasExited){Stop-Process -Id $old.Id -Force -ErrorAction SilentlyContinue}
+            if(Test-Path -LiteralPath $scratch){Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue}
+          }
+          Write-Host 'R21_ONLY_HOSTED_DISPOSABLE_PROCESS_AND_FILES_USED_PASS'
