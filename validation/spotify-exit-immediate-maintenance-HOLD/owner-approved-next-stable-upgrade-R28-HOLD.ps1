@@ -224,7 +224,8 @@ try{
      -not(ExactFile $main 284321 'af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0') -or
      -not(ExactFile $addon 323385 '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285') -or
      -not(ExactFile $agent 4855 '2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278') -or
-     -not(ExactFile $boot 42963 $expectedBootstrap)){
+     (($hosted -and (FileSHA $boot) -cne $expectedBootstrap) -or
+      (-not $hosted -and -not(ExactFile $boot 42963 $expectedBootstrap)))){
     StopNow 'INSTALLED_STABLE_OR_BOOTSTRAP_NOT_EXACT'
   }
   if(@(Get-Process -Name Spotify -ErrorAction SilentlyContinue).Count -ne 0){
