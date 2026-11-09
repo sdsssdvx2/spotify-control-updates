@@ -5,6 +5,7 @@ Source: exact official v0.6.28/r17, pinned SHA. No release or install changes.
 from __future__ import annotations
 import hashlib
 import json
+import runpy
 from pathlib import Path
 import subprocess
 import sys
@@ -13,6 +14,21 @@ ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "validation/spotify-exit-immediate-maintenance-HOLD/out/future-safe"
 PIN_SIZE = 284321
 PIN_SHA = "af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0"
+PIN_AGENT_SIZE = 4855
+PIN_AGENT_SHA = "2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278"
+AGENT_CWD_GUARD = """' Always release the installed bin directory before running any resident tick.
+' Shell.CurrentDirectory changes the actual WScript host process CWD, and
+' is independent of the owner-controlled shortcut / invoking wrapper CWD.
+On Error Resume Next
+Err.Clear
+shell.CurrentDirectory = rootDir
+If Err.Number <> 0 Then WScript.Quit 10
+Err.Clear
+On Error GoTo 0
+If StrComp(shell.CurrentDirectory, rootDir, vbTextCompare) <> 0 Then
+    WScript.Quit 10
+End If
+"""
 
 # Only replace the known original shortcut-creation loop, and never change
 # a user-custom WScript link to their own VBS.
@@ -159,11 +175,35 @@ def build():
               + changed.replace("\n",newline).encode("utf-8"))
     if (len(target),sha(target)) == (len(original),sha(original)):
         raise RuntimeError("NO_ACTUAL_CHANGE")
+    # Recover the exact publicly pinned official VBS from the historical
+    # delivery archive; never infer content or use an unrelated newer VBS.
+    auditor = runpy.run_path(str(ROOT / "validation/normal-engine-shared-turnstile/audit-pinned-stable-entrypoints-v059.py"))
+    agent = auditor["extract_verified_agent"]()
+    if (len(agent),sha(agent)) != (PIN_AGENT_SIZE,PIN_AGENT_SHA):
+        raise RuntimeError("CANONICAL_AGENT_SOURCE_SHA_OR_SIZE_DRIFT")
+    agent_text = agent.decode("utf-8-sig")
+    agent_line = "rootDir = fso.GetParentFolderName(scriptDir)"
+    if agent_text.count(agent_line) != 1 or "shell.CurrentDirectory" in agent_text:
+        raise RuntimeError("CANONICAL_AGENT_INIT_ANCHOR_DRIFT")
+    agent_nl = "\r\n" if "\r\n" in agent_text else "\n"
+    agent_norm = agent_text.replace("\r\n","\n")
+    agent_target = agent_norm.replace(agent_line+"\n",agent_line+"\n"+AGENT_CWD_GUARD,1)
+    if agent_target == agent_norm or agent_target.count("shell.CurrentDirectory") != 2:
+        raise RuntimeError("AGENT_CWD_GUARD_NOT_EXACT_ONCE")
+    future_agent = (b"\xef\xbb\xbf" if agent.startswith(b"\xef\xbb\xbf") else b"") + agent_target.replace("\n",agent_nl).encode("utf-8")
+    if sha(future_agent) == sha(agent):
+        raise RuntimeError("FUTURE_AGENT_UNCHANGED")
     OUT.mkdir(parents=True,exist_ok=True)
     (OUT / "spotify-control.ps1").write_bytes(target)
+    (OUT / "spotify-control-agent.vbs").write_bytes(future_agent)
     report = {
       "schema":1,"mode":"HOLD_CANDIDATE_NO_RELEASE_OR_OPERATING_WRITE",
       "parent_sha256":sha(original),"parent_size":len(original),
+      "original_resident_sha256":sha(agent),
+      "original_resident_size":len(agent),
+      "future_resident_sha256":sha(future_agent),
+      "future_resident_size":len(future_agent),
+      "resident_sets_process_cwd_to_app_root_before_any_tick":True,
       "candidate_sha256":sha(target),"candidate_size":len(target),
       "scoped_to_unique_official_managed_shortcut_loop":True,
       "absent_link_preserved_if_other_managed_location_exists":True,
@@ -174,6 +214,7 @@ def build():
     print("CANONICAL_V0628_R17_SOURCE_PIN=PASS")
     print("FUTURE_MANAGED_SHORTCUT_SINGLE_LOOP_REWRITE=PASS")
     print("FUTURE_SHORTCUT_CANDIDATE_SHA256="+sha(target))
+    print("FUTURE_RESIDENT_CWD_GUARD_SHA256="+sha(future_agent))
     print("PRODUCTION_MANIFEST_AND_USER_INSTALL=UNCHANGED")
 
 
