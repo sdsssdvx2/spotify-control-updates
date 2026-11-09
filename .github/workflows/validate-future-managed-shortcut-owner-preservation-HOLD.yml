@@ -283,6 +283,16 @@ jobs:
               throw 'R28_POST_UPDATE_SHA_DRIFT'
             }
             Write-Host 'R28_ONE_OWNER_APPROVAL_THROUGH_BOOTSTRAP_AND_NEW_VBS_COMPLETE_PASS'
+            $committedTxnSha=(Get-FileHash -LiteralPath $txnPath -Algorithm SHA256).Hash
+            $repeat=@(& $driver @r28Args -Commit -ApprovalPhrase 'APPROVE_EXACT_OWNER_CUTOVER_AND_ONE_STABLE_UPDATE')
+            if($repeat -cnotcontains 'HOLD_REASON=INSTALLED_STABLE_OR_BOOTSTRAP_NOT_EXACT' -or
+               $repeat -cnotcontains 'EXACT_INITIAL_CUTOVER_DONE=NO' -or
+               $repeat -cnotcontains 'OFFICIAL_UPDATE_INVOKED_SUCCESS=NO' -or
+               (Get-FileHash -LiteralPath $txnPath -Algorithm SHA256).Hash -cne $committedTxnSha -or
+               $newResident.HasExited){
+              throw ('R28_POSTCOMMIT_REEXECUTION_NOT_BLOCKED '+($repeat -join '|'))
+            }
+            Write-Host 'R28_SUCCESSFUL_UPDATE_NO_SECOND_ATTEMPT_AND_RESIDENT_PRESERVED_PASS'
             # The following rollback is a DIFFERENT, destructive hosted-only
             # compatibility test. Stop the exact test-owned process first.
             $newResident.Refresh()
