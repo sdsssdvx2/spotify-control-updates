@@ -16,6 +16,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import runpy
 import shutil
@@ -195,5 +196,12 @@ if __name__=="__main__":
     try:
         run()
     except Exception as exc:
+        # These are internal fixed failure labels; never emit Git stderr,
+        # runner paths, environment, user data, or arbitrary exception text.
+        reason=str(exc)
+        if type(exc) is RuntimeError and re.fullmatch(r"[A-Z0-9_]{1,96}",reason):
+            print("PROMOTION_BUNDLE_HOLD_REASON="+reason)
+        else:
+            print("PROMOTION_BUNDLE_HOLD_REASON=UNVERIFIED_INTERNAL_ERROR")
         print("PROMOTION_BUNDLE_RESULT=HOLD_"+type(exc).__name__.upper())
         raise SystemExit(1)
