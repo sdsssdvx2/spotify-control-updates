@@ -1,0 +1,46 @@
+name: HOLD R21 inspect real exact resident VBS CWD and installed launcher path
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths: [.github/workflows/inspect-exact-vbs-resident-cwd-R21-HOLD.yml]
+permissions: {contents: read}
+jobs:
+  analyze:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect source-pinned VBS and exact v0.6.20 startup contract without executing it
+        shell: pwsh
+        run: |
+          @'
+          import hashlib,runpy,re
+          from pathlib import Path
+          root=Path.cwd()
+          a=runpy.run_path(str(root/'validation/normal-engine-shared-turnstile/audit-pinned-stable-entrypoints-v059.py'))
+          vb=a['extract_verified_agent']()
+          assert len(vb)==4855 and hashlib.sha256(vb).hexdigest()=='2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278'
+          print('R21_VBS_EXACT_BYTES_SHA_PASS')
+          for line_no,line in enumerate(vb.decode('utf-8-sig').splitlines(),1):
+              if re.search(r'(?i)(CurrentDirectory|WScript|shell\.Run|shell\.Exec|Sleep|Quit|Loop|Kill|Terminate|Stop|FileSystem|bin\\|ScriptFullName|powershell|CreateObject)',line):
+                  safe=line.replace('\t',' ').strip()
+                  print(f'R21_VBS_{line_no}={safe[:450]}')
+          # The exact old v0.6.20 source is reproducible from pinned existing chunks.
+          # Build in runner only, check exact hash, and print ONLY source lines around
+          # resident creation, scheduled task, startup, or working directory.
+          builder=runpy.run_path(str(root/'validation/v0.6.20/build_v0620.py'))
+          builder['build']()
+          p=root/'validation/v0.6.20/out/bin/spotify-control.ps1'
+          raw=p.read_bytes()
+          assert len(raw)==281585 and hashlib.sha256(raw).hexdigest()=='e9f0181756cfb84c505c30f54b6067e321f6d178d3a1936489714b8f4441ba18'
+          print('R21_MAIN_EXACT_BYTES_SHA_PASS')
+          lines=raw.decode('utf-8-sig').splitlines()
+          interesting=[i for i,x in enumerate(lines) if re.search(
+            r'(?i)(agent\.vbs|scheduledtaskaction|Register-ScheduledTask|Start-ScheduledTask|Stop-ScheduledTask|WorkingDirectory|CurrentDirectory|wscript\.exe|cscript\.exe|Launch-Agent)',x)]
+          print('R21_MAIN_RELEVANT_LINE_COUNT='+str(len(interesting)))
+          for i in sorted(set(j for v in interesting for j in range(max(0,v-2),min(len(lines),v+3)))):
+              text=lines[i].strip()
+              if len(text)>500:text=text[:500]+'<TRUNCATED>'
+              print(f'R21_MAIN_{i+1}={text}')
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'R21_PINNED_SOURCE_AUDIT_FAILED'}
