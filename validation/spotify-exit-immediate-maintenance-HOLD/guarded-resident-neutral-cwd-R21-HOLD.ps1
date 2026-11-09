@@ -234,10 +234,11 @@ try{
     foreach($change in $todo){
       $index++
       $location=Join-Path $backups ('original-'+$tag+'-'+$index+'.lnk')
-      $f=New-Object IO.FileStream($location,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
-      try{$f.Write($change.orig,0,$change.orig.Length);$f.Flush($true)}
-      finally{$f.Dispose()}
-      if((ReadHash $location) -cne $change.origSha){Fail 'ORIGINAL_LINK_BACKUP_SHA_DRIFT'}
+      if(Test-Path -LiteralPath $location){Fail 'ORIGINAL_LINK_BACKUP_PATH_COLLISION'}
+      if(-not([IO.Path]::GetPathRoot($change.path).Equals(
+           [IO.Path]::GetPathRoot($location),[StringComparison]::OrdinalIgnoreCase))){
+        Fail 'SHORTCUT_BACKUP_MUST_BE_SAME_VOLUME'
+      }
       $change.backup=$location
     }
     $stage='COMMIT_NEUTRAL_MANAGED_LINK_WORKDIR'
@@ -252,7 +253,9 @@ try{
         if(-not(EqPath ([string]$shell.CreateShortcut($new).WorkingDirectory) $root)){
           Fail 'STAGED_LINK_NOT_NEUTRAL'
         }
-        [IO.File]::Replace($new,$change.path,$null,$true)
+        if(Test-Path -LiteralPath $change.backup){Fail 'ORIGINAL_LINK_BACKUP_PATH_COLLISION'}
+        [IO.File]::Replace($new,$change.path,$change.backup,$true)
+        if((ReadHash $change.backup) -cne $change.origSha){Fail 'ORIGINAL_LINK_BACKUP_SHA_DRIFT'}
         if(-not(EqPath ([string]$shell.CreateShortcut($change.path).WorkingDirectory) $root)){
           Fail 'COMMITTED_LINK_NOT_NEUTRAL'
         }
@@ -312,6 +315,7 @@ try{
     'MANAGED_LINK_UNEXPECTED_SIZE','OWNER_SID_UNKNOWN','ABANDONED_LEGACY_MUTEX',
     'LEGACY_MUTEX_NOT_IDLE','RESIDENT_CHANGED_BEFORE_CUTOVER',
     'SHORTCUT_BACKUP_DIRECTORY_UNSAFE','ORIGINAL_LINK_BACKUP_SHA_DRIFT',
+    'ORIGINAL_LINK_BACKUP_PATH_COLLISION','SHORTCUT_BACKUP_MUST_BE_SAME_VOLUME',
     'MANAGED_LINK_RACE_BEFORE_CAS','STAGED_LINK_NOT_NEUTRAL',
     'COMMITTED_LINK_NOT_NEUTRAL','NEW_AGENT_EXITED_EARLY',
     'NEW_AGENT_IDENTITY_NOT_EXACT','ORIGINAL_AGENT_IDENTITY_CHANGED_DO_NOT_KILL',
