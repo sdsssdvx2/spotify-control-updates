@@ -40,7 +40,7 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $scratch=Join-Path $env:RUNNER_TEMP 'r20-synthetic-lock'
-          $bin=Join-Path $scratch 'bin'
+          $bin=Join-Path $scratch 'LocalAppData/SpotifyControl/bin'
           [void][IO.Directory]::CreateDirectory($bin)
           $ready=Join-Path $scratch 'ready.txt'
           # A synthetic separate cmd.exe with its CWD set to /bin.
@@ -62,6 +62,48 @@ jobs:
             })
             if($selected.Count -lt 1){throw ('R20_CWD_DIRECTORY_HANDLE_NOT_OBSERVED lineCount='+$raw.Count)}
             Write-Host 'R20_PROCESS_CWD_DIRECTORY_FILE_HANDLE_DETECTED_PASS'
+            $script='validation/spotify-exit-immediate-maintenance-HOLD/identify-bin-handle-owners-R20-READONLY.ps1'
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $script),[ref]$tokens,[ref]$errors)
+            if(@($errors).Count -ne 0){throw 'R20_POWER_SHELL_51_PARSE_FAILED'}
+            $out=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -AcceptMicrosoftHandleEula -HostedFixtureRoot $scratch)
+            if($LASTEXITCODE -ne 0){throw 'R20_SCRIPT_PROCESS_FAILED'}
+            foreach($required in @(
+              'TRANSACTION=HOSTED_SYNTHETIC_ONLY',
+              'OFFICIAL_MICROSOFT_HANDLE=SHA256_AND_AUTHENTICODE_PASS',
+              'BIN_HANDLE_OWNER_CATEGORIES=CONSOLE',
+              'RESULT=READONLY_BIN_HANDLE_INVENTORY_COMPLETE',
+              'TEMP_CLEANUP=REMOVED',
+              'RAW_PATHS_PIDS_USERS_HANDLES_AND_ERRORS_EXPORTED=NO'
+            )){
+              if($out -cnotcontains $required){
+                throw ('R20_WITNESS_EXPECTED_RESULT_MISSING_'+$required+' '+($out -join '|'))
+              }
+            }
+            $count=@($out | Where-Object {$_ -match '^BIN_DIRECTORY_EXACT_HANDLE_OWNER_COUNT=[1-9][0-9]*
+          }finally{
+            if($null -ne $hold -and -not $hold.HasExited){Stop-Process -Id $hold.Id -Force -ErrorAction SilentlyContinue}
+            try{Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction Stop}catch{}
+          }
+      - name: Clean only disposable hosted utility and verify no production mutation
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($p in @(
+            (Join-Path $env:RUNNER_TEMP 'r20-microsoft-Handle.zip'),
+            (Join-Path $env:RUNNER_TEMP 'r20-sysinternals-handle')
+          )){
+            if(Test-Path -LiteralPath $p){Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop}
+          }
+          Write-Host 'R20_ONLY_GITHUB_RUNNER_SCRATCH_CHANGED_PASS'
+})
+            if($count.Count -ne 1){throw ('R20_WITNESS_EXACT_BIN_NOT_FOUND '+($out -join '|'))}
+            if(($out -join '|') -match '(?i)r20-synthetic-lock|[A-Z]:\\|cmd\.exe,|2026[0-9]'){
+              throw 'R20_WITNESS_PRIVATE_PATH_OR_PID_EXPORTED'
+            }
+            Write-Host 'R20_PINNED_SIGNED_READONLY_USER_WITNESS_SYNTHETIC_CWD_PASS'
           }finally{
             if($null -ne $hold -and -not $hold.HasExited){Stop-Process -Id $hold.Id -Force -ErrorAction SilentlyContinue}
             try{Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction Stop}catch{}
