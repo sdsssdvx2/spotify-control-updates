@@ -1,0 +1,81 @@
+name: HOLD R29 public immutable GitHub transport read-only
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-public-immutable-transport-R29-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/verify-public-release-transport-R29-HOLD.py
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Read-only release: baseline or next-stable'
+        type: choice
+        options: [baseline, next-stable]
+        default: baseline
+        required: true
+      approved_manifest_sha:
+        description: 'For next-stable: independently approved public manifest SHA-256'
+        type: string
+        required: false
+      approved_source_sha:
+        description: 'For next-stable: independently approved immutable 40-char Git commit'
+        type: string
+        required: false
+permissions: {contents: read}
+jobs:
+  read-only-network:
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Validate pinned stable public source before any external network call
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $main=(git rev-parse origin/main).Trim()
+          if($main -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R29_PUBLIC_STABLE_MAIN_SHA_CHANGED_HOLD'
+          }
+          @'
+          import ast
+          from pathlib import Path
+          source=Path('validation/spotify-exit-immediate-maintenance-HOLD/verify-public-release-transport-R29-HOLD.py').read_bytes()
+          if not source or any(b>127 for b in source):raise SystemExit('R29_SOURCE_NON_ASCII')
+          ast.parse(source.decode('ascii'))
+          print('R29_SOURCE_ASCII_AND_SYNTAX_PASS')
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'R29_PINNED_GATE_PYTHON_SOURCE_PARSE_FAILED'}
+          Write-Host 'R29_PUBLISHED_MAIN_SHA_PIN=PASS'
+      - name: Verify ACTUAL raw GitHub manifest and all immutable official v0.6.28 chunks
+        shell: pwsh
+        env:
+          R29_MODE: ${{ inputs.mode || 'baseline' }}
+          R29_APPROVED_MANIFEST: ${{ inputs.approved_manifest_sha || '' }}
+          R29_APPROVED_SOURCE: ${{ inputs.approved_source_sha || '' }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/verify-public-release-transport-R29-HOLD.py'
+          if($env:R29_MODE -eq 'baseline'){
+            if($env:R29_APPROVED_MANIFEST -ne '' -or $env:R29_APPROVED_SOURCE -ne ''){
+              throw 'R29_BASELINE_MUST_NOT_HAVE_FUTURE_PINS'
+            }
+            python $p --mode baseline
+          }elseif($env:R29_MODE -eq 'next-stable'){
+            if($env:R29_APPROVED_MANIFEST -cnotmatch '^[0-9a-f]{64}$' -or
+               $env:R29_APPROVED_SOURCE -cnotmatch '^[0-9a-f]{40}$'){
+              throw 'R29_NEXT_RELEASE_REQUIRES_INDEPENDENT_PINS'
+            }
+            python $p --mode next-stable --approved-manifest-sha $env:R29_APPROVED_MANIFEST --approved-source-sha $env:R29_APPROVED_SOURCE
+          }else{
+            throw 'R29_UNEXPECTED_MODE'
+          }
+          if($LASTEXITCODE -ne 0){throw 'R29_PUBLIC_READONLY_NETWORK_GATE_HOLD'}
+          Write-Host 'R29_GITHUB_ACTUAL_RAW_HTTPS_SOURCE_CHAIN_READONLY_PASS'
+      - name: Ensure no operating release artifacts were modified
+        shell: pwsh
+        run: |
+          $status=@(git status --porcelain -- manifest.json packages/ bootstrap/ bin/)
+          if($status.Count -ne 0){throw 'R29_PUBLIC_RELEASE_OR_INSTALLATION_MUTATED'}
+          Write-Host 'R29_OPERATING_STABLE_AND_PATCH_CHUNKS_UNCHANGED=YES'
+          Write-Host 'R29_UPGRADE_ROLLBACK_AND_RELEASE_PUBLICATION=NONE'
