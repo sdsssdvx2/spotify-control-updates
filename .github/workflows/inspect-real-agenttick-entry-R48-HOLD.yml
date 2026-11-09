@@ -1,0 +1,37 @@
+name: HOLD R48 inspect real main agenttick entry and state receipt without execution
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths: [.github/workflows/inspect-real-agenttick-entry-R48-HOLD.yml]
+permissions: {contents: read}
+jobs:
+  exact-fullmain-source-inspection:
+    runs-on: windows-2025
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect immutable released-candidate AgentTick and report handling, source-only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-combined-exit-and-shortcut-R37-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R48_INSPECTION_SOURCE_NOT_VERIFIED'}
+          @'
+          import hashlib,re
+          from pathlib import Path
+          path=Path("validation/spotify-exit-immediate-maintenance-HOLD/out/integrated/spotify-control.ps1")
+          raw=path.read_bytes()
+          assert hashlib.sha256(raw).hexdigest()=="48714938d5ca1b40db0b1caf2fbc1e13afb69c46226e89949cfde129d643222a"
+          lines=raw.decode("utf-8-sig").splitlines()
+          matches=[i for i,s in enumerate(lines) if re.search(
+            r"(?i)(AgentTick|AgentReport|agent-report|last_agent_event|last_agent_decision|agent_mutation_enabled|function Load-State|function Save-State|function Ensure-StateShape|appDataRoot|LOCALAPPDATA|ParameterSet|switch \(\$Action\)|Invoke-ResidentAgentTick)",s)]
+          print("R48_SOURCE_INSPECTION_MATCHES="+str(len(matches)))
+          indexes=sorted(set(i for m in matches for i in range(max(0,m-2),min(len(lines),m+4))))
+          if len(indexes)>520:
+              print("R48_INSPECTION_TRUNCATED_FOR_SAFE_SOURCE_BOUND")
+              indexes=indexes[:520]
+          for i in indexes:
+              print(f"R48_SOURCE_{i+1}={lines[i].strip()[:260]}")
+          print("R48_SOURCE_READ_ONLY_NO_ACTUAL_AGENT_EXECUTION=PASS")
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'R48_FULLMAIN_SOURCE_INSPECTION_FAILED'}
