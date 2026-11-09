@@ -1,0 +1,300 @@
+name: HOLD R21 exact resident cwd repair and real stable Bootstrap E2E
+# Reconstructed source from R11 baseline with byte-literal insertion and function uniqueness verified.
+# Original v0.6.28 SelfTest requires installed Bootstrap read-sharing; maintain no-write fence and both named legacy mutexes.
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - '.github/workflows/validate-resident-neutral-cwd-R21-HOLD.yml'
+  workflow_dispatch:
+permissions: {contents: read, actions: read}
+jobs:
+  original-user-v0620-r9-prepared-to-canonical-v0628-r17:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Prove current production and parse R7 original self-update wrapper
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $main=(git rev-parse origin/main).Trim()
+          if($main -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'UNEXPECTED_PRODUCTION_MAIN_DRIFT'}
+          $man=Get-Content manifest.json -Raw|ConvertFrom-Json
+          if($man.latest_version -cne '0.6.28' -or
+             $man.source_commit -cne 'bb6d90146f20b73d36fbf8cb813f1b190f403c48' -or
+             $man.payload_set_sha256 -cne '4be96c5d41c2160ed9ac96001b469998595629232929b82c8b0f34b11fda3b43'){
+             throw 'UNEXPECTED_PRODUCTION_STABLE_MANIFEST'
+          }
+          $s='validation/spotify-exit-immediate-maintenance-HOLD/reconcile-prepared-orphan-journal-R5-HOLD.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $s),[ref]$tokens,[ref]$errors)
+          if($errors.Count){throw ('R7_PS51_PARSE_ERROR '+[string]$errors[0].Message)}
+          Write-Host 'R7_ORIGINAL_STABLE_MAIN_SHA_MANIFEST_AND_PS51_PARSE_PASS'
+      - name: Retrieve immutable exact released Bootstrap once
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' > bootstrap-r7-carrier.zip
+      - name: Construct exact user installed v0.6.20/r9 and one PREPARED orphan in hosted-only scratch
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/v0.6.20/build_v0620.py --build
+          if($LASTEXITCODE -ne 0){throw 'EXACT_V0620_SOURCE_RECONSTRUCTION_FAILED'}
+          @'
+          from __future__ import annotations
+          from pathlib import Path
+          from io import BytesIO
+          import json,hashlib,os,shutil,runpy,zipfile
+          root=Path.cwd()
+          scratch=Path(os.environ['RUNNER_TEMP'])/'r7-user-baseline'
+          if scratch.exists(): raise RuntimeError('R7_SCRATCH_COLLISION')
+          local=scratch/'LocalAppData'/'SpotifyControl'
+          bin=local/'bin'
+          backing=local/'backups'/'self-update-transactions'/'20261108-131500-cafefeed'/'bin'
+          boot=local/'bootstrap'
+          bin.mkdir(parents=True);backing.mkdir(parents=True);boot.mkdir(parents=True)
+          src=root/'validation'/'v0.6.20'/'out'/'bin'
+          for name,size,dig in (
+            ('spotify-control.ps1',281585,'e9f0181756cfb84c505c30f54b6067e321f6d178d3a1936489714b8f4441ba18'),
+            ('addon-manager.ps1',225044,'3a20fcd552b363ebc05e26854a8fe010ffe50e5c756ebd3d7fca54011e8a8b86')):
+             data=(src/name).read_bytes()
+             assert (len(data),hashlib.sha256(data).hexdigest())==(size,dig)
+             (bin/name).write_bytes(data)
+          vb=runpy.run_path(str(root/'validation/normal-engine-shared-turnstile/audit-pinned-stable-entrypoints-v059.py'))['extract_verified_agent']()
+          assert (len(vb),hashlib.sha256(vb).hexdigest())==(4855,'2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278')
+          assert b' -Action AgentTick -AgentEvent ' in vb and b'shell.Run(cmd, 0, False)' in vb
+          (bin/'spotify-control-agent.vbs').write_bytes(vb)
+          with zipfile.ZipFile('bootstrap-r7-carrier.zip') as carrier:
+             nested=carrier.read('SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip')
+          assert (len(nested),hashlib.sha256(nested).hexdigest())==(30856,'6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdfd267bd95f6c6ddcf06')
+          with zipfile.ZipFile(BytesIO(nested)) as pack:
+             source=pack.read('bootstrap/spotify-control-self-updater.ps1')
+          assert (len(source),hashlib.sha256(source).hexdigest())==(42963,'d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6')
+          (boot/'spotify-control-self-updater.ps1').write_bytes(source)
+          # Reuse the *same* exact installation acceptance fixture invariants
+          # as the previously PASSed 8-hop Bootstrap test: long-lived helpers
+          # and structurally valid local Marketplace tree are not updated by
+          # the manifest, but are required by v0.6.28 SelfTest.
+          (scratch/'LocalAppData'/'Spotify').mkdir(parents=True)
+          for name in ('collect-spotify-diagnostics.ps1','performance-profiler.ps1',
+                       'health-report.ps1','performance-ab-profiler.ps1',
+                       'marketplace-isolation-profiler.ps1'):
+            (bin/name).write_text('# Spotify Control bootstrap-contract CI installed-helper fixture\n',
+                                  encoding='utf-8',newline='\n')
+          marketplace=scratch/'LocalAppData'/'spicetify'/'CustomApps'/'marketplace'
+          marketplace.mkdir(parents=True)
+          for name,content in (
+             ('index.js','// CI Marketplace fixture\n'),
+             ('extension.js','// CI Marketplace fixture\n'),
+             ('style.css','/* CI Marketplace fixture */\n'),
+             ('manifest.json','{"name":"Spotify Marketplace CI Fixture"}\n')):
+            (marketplace/name).write_text(content,encoding='utf-8',newline='\n')
+          for f in bin.iterdir():shutil.copy2(f,backing/f.name)
+          def tree(d):
+             rows=[]
+             for p in d.rglob('*'):
+               rel=p.relative_to(d).as_posix().lower()
+               if p.is_dir(): rows.append('D|'+rel)
+               else:
+                 b=p.read_bytes()
+                 rows.append('F|'+rel+'|'+str(len(b))+'|'+hashlib.sha256(b).hexdigest())
+             return hashlib.sha256(('\n'.join(sorted(rows))+'\n').encode()).hexdigest()
+          oldsha=tree(bin)
+          assert oldsha==tree(backing)
+          id='20261108-131500-cafefeed'
+          # R18 targeted retry: reproduce exact BEFORE restore tree, retain evidence.
+          restore=local/('bin.spotifycontrol-restore-'+id)
+          shutil.copytree(bin,restore)
+          assert tree(restore)==oldsha
+          doc=dict(schema=1,id=id,status='prepared',
+            before_version='0.6.20',after_version='0.6.28',
+            source_commit='bb6d90146f20b73d36fbf8cb813f1b190f403c48',
+            payload_set_sha256='4be96c5d41c2160ed9ac96001b469998595629232929b82c8b0f34b11fda3b43',
+            before_tree_sha256=oldsha,after_tree_sha256='f'*64,
+            backup_bin=str(backing),
+            same_dir_new=str(local/('bin.spotifycontrol-new-'+id)),
+            same_dir_old=str(local/('bin.spotifycontrol-old-'+id)),
+            swapped_at=None,post_verified_at=None,committed_at=None,rolled_back_at=None,
+            error='SYNTHETIC_PRIVATE_ERROR_NEVER_OUTPUT')
+          # Windows owner's PREPARED record may carry UTF-8 BOM. Keep its
+          # exact original bytes for escrow and verify the full Bootstrap route.
+          (local/'self-update-last-transaction.json').write_bytes(b'\xef\xbb\xbf'+json.dumps(doc,separators=(',',':')).encode('utf-8'))
+          (local/'state.json').write_text(json.dumps(dict(schema=20,agent_mutation_enabled=True,
+               pending_maintenance=True,maintenance_check_healthy=False,
+               self_update_last_transaction_status='failed'),separators=(',',':')),encoding='utf-8')
+          (local/'user-unrelated-preserve.txt').write_bytes(b'USER_PRESERVATION_SENTINEL')
+          roaming=scratch/'Roaming'/'spicetify'
+          roaming.mkdir(parents=True)
+          (roaming/'config-xpui.ini').write_text('[Setting]\ncurrent_theme = UserOriginal\n',encoding='utf-8')
+          # Preserve the real owner's four auto-managed CustomApp *classes*
+          # and the separate protected data/extension classes. All bytes
+          # here are synthetic: no user profile is loaded by this workflow.
+          appbase=roaming/'CustomApps'
+          appnames=('better-local-files','eternal-jukebox','ivLyrics','playlist-maker',
+                    'star-ratings','tagify','splitify','sc-cover-ambience')
+          for name in appnames:
+             app=(appbase/name)
+             app.mkdir(parents=True)
+             (app/'index.js').write_bytes(('// Owner protected '+name+' original\n').encode('utf-8'))
+             (app/'preferences.json').write_bytes(json.dumps(
+                 dict(owner='user',app=name,settings=dict(enabled=True,custom=True)),
+                 sort_keys=True).encode())
+          ratings=roaming/'Backups'/'star-ratings'
+          ratings.mkdir(parents=True)
+          (ratings/'ratings-user.json').write_bytes(b'{"playlist-ratings":[5,1,4],"note":"preserve"}')
+          notes=roaming/'Backups'/'tagify'
+          notes.mkdir(parents=True)
+          (notes/'tags-user.json').write_bytes(b'{"tags":["favorite","personal"],"note":"keep"}')
+          owners=(scratch/'Roaming'/'spicetify',scratch/'LocalAppData'/'spicetify',
+                  scratch/'LocalAppData'/'SpotifyControl'/'user-unrelated-preserve.txt')
+          def snapshot():
+             result={}
+             for obj in owners:
+                if obj.is_file():
+                   result[str(obj.relative_to(scratch)).replace('\\','/')]=hashlib.sha256(obj.read_bytes()).hexdigest()
+                else:
+                   for entry in obj.rglob('*'):
+                      rel=str(entry.relative_to(scratch)).replace('\\','/')
+                      if entry.is_dir():result[rel]='DIR'
+                      else:result[rel]=hashlib.sha256(entry.read_bytes()).hexdigest()
+             return result
+          preserve=snapshot()
+          assert len(preserve)>24 and all(any(n in k for k in preserve) for n in appnames)
+          (scratch/'preservation-fixture-manifest.json').write_text(json.dumps(
+             dict(schema=1,files=preserve),sort_keys=True,separators=(',',':')),encoding='utf-8')
+          print('R8_FOUR_MANAGED_AND_PROTECTED_CUSTOMAPP_AND_OWNER_DATA_BYTES_SEEDED')
+          print('EXACT_USER_V0620_R9_AND_REAL_VBS_ORIGINAL_BOOTSTRAP_SYNTHETIC_PREPARED_READY')
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'HOSTED_EXACT_USER_PREPARED_FIXTURE_FAILED'}
+      - name: Validate original resident bin lock, agent cutover and optional official stable update
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $fixture=Join-Path $env:RUNNER_TEMP 'r7-user-baseline'
+          $root=Join-Path $fixture 'LocalAppData/SpotifyControl'
+          $bin=Join-Path $root 'bin'
+          $wscript=Join-Path $env:WINDIR 'System32/wscript.exe'
+          $agent=Join-Path $bin 'spotify-control-agent.vbs'
+          $main=Join-Path $bin 'spotify-control.ps1'
+          $r21='validation/spotify-exit-immediate-maintenance-HOLD/guarded-resident-neutral-cwd-R21-HOLD.ps1'
+          $r18='validation/spotify-exit-immediate-maintenance-HOLD/reconcile-prepared-orphan-journal-R5-HOLD.ps1'
+          $t=$null;$err=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $r21),[ref]$t,[ref]$err)
+          if(@($err).Count -gt 0){throw ('R21_SOURCE_PS51_PARSE_FAILED '+$err[0].Message)}
+          [byte[]]$r18Bytes=[IO.File]::ReadAllBytes((Resolve-Path $r18))
+          $h=[Security.Cryptography.SHA256]::Create()
+          try{$r18Hash=[BitConverter]::ToString($h.ComputeHash($r18Bytes)).Replace('-','').ToLowerInvariant()}
+          finally{$h.Dispose()}
+          if($r18Bytes.Length -ne 54515 -or
+             $r18Hash -cne 'ec8c86a7d79611702dab926c131f1e4fddca0bca22edff50d0512e37484fb121'){
+             throw 'R21_R18_PIN_WRONG'
+          }
+          # No real user profile is used. Construct exact two official launch
+          # shortcuts with real WScript COM and old installed-bin cwd.
+          foreach($part in @('Desktop','StartMenu')) {
+            $dir=Join-Path $fixture $part
+            [void][IO.Directory]::CreateDirectory($dir)
+            $lnk=Join-Path $dir 'Spotify (Managed).lnk'
+            $sh=New-Object -ComObject WScript.Shell
+            $link=$sh.CreateShortcut($lnk)
+            $link.TargetPath=$wscript
+            $link.Arguments='"'+$agent+'"'
+            $link.WorkingDirectory=$bin
+            $link.Description='Spotify Managed exact synthetic official link'
+            $link.Save()
+            if((Get-Item $lnk).Length -lt 30){throw 'R21_CI_SHORTCUT_NOT_CREATED'}
+          }
+          $originalJournal=Join-Path $root 'self-update-last-transaction.json'
+          $origHash=(Get-FileHash $originalJournal -Algorithm SHA256).Hash.ToLowerInvariant()
+          $state=Join-Path $root 'state.json'
+          $stateHash=(Get-FileHash $state -Algorithm SHA256).Hash.ToLowerInvariant()
+          $shortHashes=@{}
+          foreach($part in @('Desktop','StartMenu')){
+            $lnk=Join-Path $fixture ($part+'/Spotify (Managed).lnk')
+            $shortHashes[$part]=(Get-FileHash $lnk -Algorithm SHA256).Hash.ToLowerInvariant()
+          }
+          $old=$null
+          $originalLocal=$env:LOCALAPPDATA
+          $originalRoaming=$env:APPDATA
+          try {
+            $env:LOCALAPPDATA=Join-Path $fixture 'LocalAppData'
+            $env:APPDATA=Join-Path $fixture 'Roaming'
+            $old=Start-Process -FilePath $wscript -WorkingDirectory $bin -ArgumentList ('//B //NoLogo "'+$agent+'"') -PassThru
+            Start-Sleep -Seconds 2
+            if($old.HasExited){throw 'R21_REAL_RESIDENT_EXITED_BEFORE_TEST'}
+            # The real resident's process CWD is a directory handle that
+            # blocks Bootstrap's exact first [Directory]::Move operation.
+            $blocked=$false
+            try{[IO.Directory]::Move($bin,(Join-Path $root 'bin-hosted-temp-move'))}
+            catch [IO.IOException]{$blocked=$true}
+            catch [System.UnauthorizedAccessException]{$blocked=$true}
+            if(-not $blocked){
+              [IO.Directory]::Move((Join-Path $root 'bin-hosted-temp-move'),$bin)
+              throw 'R21_HOSTED_OLD_RESIDENT_BIN_MOVE_WAS_NOT_BLOCKED'
+            }
+            Write-Host 'R21_REAL_OLD_RESIDENT_CWD_BLOCKS_OFFICIAL_BIN_SWAP_PASS'
+            $dry=@(& $r21 -PinnedR18Source $r18Bytes -HostedFixtureRoot $fixture)
+            if($dry -cnotcontains 'RESULT=READY_FOR_EXACT_AGENT_CUTOVER_NO_MUTATION' -or
+               $dry -cnotcontains 'MANAGED_LINKS_REQUIRE_WORKDIR_CHANGE=2'){
+              throw ('R21_DRYRUN_NOT_READY '+($dry -join '|'))
+            }
+            if((Get-FileHash $originalJournal -Algorithm SHA256).Hash.ToLowerInvariant() -cne $origHash -or
+               (Get-FileHash (Join-Path $fixture 'Desktop/Spotify (Managed).lnk') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $shortHashes['Desktop']){
+               throw 'R21_DRYRUN_CHANGED_HOSTED_FIXTURE'
+            }
+            Write-Host 'R21_DRYRUN_SOURCE_AND_SHORTCUTS_UNCHANGED_PASS'
+            $deny=@(& $r21 -PinnedR18Source $r18Bytes -HostedFixtureRoot $fixture -Commit)
+            if($deny -cnotcontains 'HOLD_REASON=EXACT_AGENT_RESTART_APPROVAL_REQUIRED' -or
+               (Get-FileHash $originalJournal -Algorithm SHA256).Hash.ToLowerInvariant() -cne $origHash){
+              throw 'R21_MISSING_APPROVAL_NOT_BLOCKED'
+            }
+            Write-Host 'R21_EXPLICIT_AGENT_RESTART_APPROVAL_FAIL_CLOSED_PASS'
+            $receipt=@(& $r21 -PinnedR18Source $r18Bytes -HostedFixtureRoot $fixture -Commit -ApprovalPhrase 'APPROVE_EXACT_VBS_RESTART_AND_MANAGED_SHORTCUT_CWD' -RunApprovedStableUpdate)
+            foreach($line in $receipt){Write-Host ('R21_RECEIPT_'+$line)}
+            if($receipt -cnotcontains 'RESULT=R21_AGENT_CWD_FIXED_AND_STABLE_V0628_R17_COMMITTED'){
+              throw ('R21_GUARDED_REAL_BOOTSTRAP_FULL_CHAIN_NOT_ACCEPTED '+($receipt -join '|'))
+            }
+            if(-not $old.HasExited){throw 'R21_OLD_EXACT_VBS_NOT_ENDED'}
+            foreach($part in @('Desktop','StartMenu')){
+              $lnk=Join-Path $fixture ($part+'/Spotify (Managed).lnk')
+              if(-not $sh.CreateShortcut($lnk).WorkingDirectory.Equals($root,[StringComparison]::OrdinalIgnoreCase)){
+                throw 'R21_MANAGED_SHORTCUT_NOT_NEUTRAL'
+              }
+            }
+            $backups=Join-Path $root 'backups/agent-shortcut-neutral-cwd-R21'
+            if(@(Get-ChildItem -LiteralPath $backups -File -Filter '*.lnk').Count -ne 2){
+              throw 'R21_ORIGINAL_SHORTCUT_BACKUP_COUNT_WRONG'
+            }
+            if((Get-FileHash $state -Algorithm SHA256).Hash.ToLowerInvariant() -cne $stateHash){
+              throw 'R21_USER_STATE_JSON_CHANGED'
+            }
+            if((Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+              'af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0'){
+              throw 'R21_STABLE_MAIN_NOT_PINNED'
+            }
+            Write-Host 'R21_EXACT_VBS_AGENT_NEUTRAL_CWD_AND_OFFICIAL_V0628_R17_FULL_CHAIN_PASS'
+          } finally {
+            $env:LOCALAPPDATA=$originalLocal
+            $env:APPDATA=$originalRoaming
+            if($null -ne $old -and -not $old.HasExited){
+              Stop-Process -Id $old.Id -Force -ErrorAction SilentlyContinue
+            }
+            # Only hosted runner's already recognized disposable VBS.
+            $w=@(Get-CimInstance Win32_Process -Filter "Name='wscript.exe'" -ErrorAction SilentlyContinue)
+            foreach($process in $w){
+              if(([string]$process.CommandLine) -like ('*'+$agent+'*')){
+                Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+              }
+            }
+          }
+      - name: Cleanup only hosted R21 scratch
+        if: always()
+        shell: powershell
+        run: |
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'r7-user-baseline') -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath bootstrap-r7-carrier.zip -Force -ErrorAction SilentlyContinue
