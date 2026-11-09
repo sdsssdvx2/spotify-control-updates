@@ -121,7 +121,10 @@ public class ReadOnlySpicetifyFixture {
   $env:LOCALAPPDATA=Join-Path $root 'LocalAppData'
   $env:APPDATA=Join-Path $root 'Roaming'
   [void][IO.Directory]::CreateDirectory($env:APPDATA)
-  $stateRaw='{{"schema":20,"agent_mutation_enabled":false,"pending_maintenance":false,"maintenance_check_healthy":false,"pending_addon_auto_ambiguous":0,"last_agent_event":null}}'
+  # Prevent a duplicate unrelated network scan at startup. The real exit
+  # still triggers its own exact full-main discovery independently.
+  $nowCheck=[DateTimeOffset]::UtcNow.ToString("o")
+  $stateRaw='{{"schema":20,"agent_mutation_enabled":false,"pending_maintenance":false,"maintenance_check_healthy":false,"pending_addon_auto_ambiguous":0,"last_agent_event":null,"last_check_only_utc":"'+$nowCheck+'"}}'
   [IO.File]::WriteAllText($statePath,$stateRaw,[Text.Encoding]::ASCII)
 {harmless_spicetify}  $sourceMain='{SOURCE}/bin/spotify-control.ps1'
   if((Hash $sourceMain) -cne '{MAIN_PIN}'){{throw 'R48_SOURCE_MAIN_IS_NOT_THE_EXACT_RELEASE'}}
@@ -133,6 +136,43 @@ public class ReadOnlySpicetifyFixture {
   Write-Host 'R48_REAL_UNMODIFIED_MAIN_PLUS_FAST_VBS_INSTALLED_SCRATCH_ONLY=PASS'
 """
     text=text[:start]+real_main+text[end:]
+    # R44's stub completed almost instantly, while the complete real main
+    # may still be reading its script when VBS logs "TICK LAUNCHED". Wait
+    # for the real startup receipt and require the bin handle to become
+    # movable within a small bounded drain, rather than treating transient
+    # PowerShell script-open handles as a permanent WScript CWD leak.
+    old_move="""  $moved=Join-Path $root 'bin-temporary-rename'
+  [IO.Directory]::Move($bin,$moved)
+  [IO.Directory]::Move($moved,$bin)"""
+    new_move="""  $startupObserved=$false
+  for($j=0;$j -lt 80;$j++){
+    if(Test-Path -LiteralPath $statePath -PathType Leaf){
+      try{
+        $startup=Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+        if([string]$startup.last_agent_event -ceq 'Startup'){
+          $startupObserved=$true;break
+        }
+      }catch{}
+    }
+    Start-Sleep -Milliseconds 250
+  }
+  if(-not $startupObserved){throw 'R48_REAL_STARTUP_TICK_NOT_FINISHED'}
+  $moved=Join-Path $root 'bin-temporary-rename'
+  $binReleased=$false
+  for($j=0;$j -lt 30;$j++){
+    try {
+      [IO.Directory]::Move($bin,$moved)
+      [IO.Directory]::Move($moved,$bin)
+      $binReleased=$true
+      break
+    } catch [System.IO.IOException] {
+      Start-Sleep -Milliseconds 250
+    } catch [System.UnauthorizedAccessException] {
+      Start-Sleep -Milliseconds 250
+    }
+  }
+  if(-not $binReleased){throw 'R48_BIN_REMAINED_LOCKED_AFTER_REAL_STARTUP_COMPLETE'}"""
+    text=one(text,old_move,new_move,"R48_REAL_STARTUP_CHILD_FINISH_AND_BIN_DRAIN")
     text=one(text,
        "  if(-not(WaitEvent 'SpotifyExit' 105)){",
        """  if(-not(WaitEvent 'SpotifyExit' 75)){
