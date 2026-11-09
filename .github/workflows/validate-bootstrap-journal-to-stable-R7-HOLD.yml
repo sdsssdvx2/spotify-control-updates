@@ -199,6 +199,16 @@ jobs:
             # mandatory. Test the REAL script under active original VBS.
             $originalRecord=Join-Path $root 'self-update-last-transaction.json'
             $beforeUnapproved=(Get-FileHash $originalRecord -Algorithm SHA256).Hash.ToLowerInvariant()
+            $dryRestore=Join-Path $root 'bin.spotifycontrol-restore-20261108-131500-cafefeed'
+            $dryRestoreSha=(Get-FileHash (Join-Path $dryRestore 'spotify-control.ps1') -Algorithm SHA256).Hash.ToLowerInvariant()
+            $drySnapshot=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture 2>&1)
+            if($LASTEXITCODE -ne 0 -or
+               $drySnapshot -cnotcontains 'RESULT=READY_FOR_APPROVED_RESTORE_PRESERVATION_THEN_RECONCILIATION' -or
+               (Get-FileHash $originalRecord -Algorithm SHA256).Hash.ToLowerInvariant() -cne $beforeUnapproved -or
+               (Get-FileHash (Join-Path $dryRestore 'spotify-control.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $dryRestoreSha){
+               throw 'R18_RESTORE_DRYRUN_MUTATED_OR_DID_NOT_CLASSIFY_EXACT'
+            }
+            Write-Host 'R18_RESTORE_DRYRUN_NO_MUTATION_PASS'
             $no=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture -Commit -ApprovalPhrase EXACT_PREPARED_NO_BIN_SWAP -ContinueOfficialStableUpdate 2>&1)
             if($LASTEXITCODE -ne 0 -or
                $no -cnotcontains 'HOLD_REASON=OFFICIAL_STABLE_UPDATE_EXPLICIT_APPROVAL_MISSING' -or
