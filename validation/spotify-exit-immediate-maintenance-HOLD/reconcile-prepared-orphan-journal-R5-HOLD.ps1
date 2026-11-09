@@ -123,7 +123,8 @@ function SourcePin([string]$Path,[int64]$Size,[string]$Sha) {
   $f=FileInfo $Path 2097152
   return ($null -ne $f -and [int64]$f.Length -eq $Size -and (HashFile $Path) -ceq $Sha)
 }
-function Probe([string]$Root,[string]$ExpectedId='', [switch]$AcceptExactRestore) {
+function Probe([string]$Root,[string]$ExpectedId='', [switch]$AcceptExactRestore,
+    [IO.FileStream]$VerifiedBootstrapHandle=$null) {
   if(-not(IsPlainDirectory $Root)){Fail 'ROOT_UNSAFE'}
   if(-not(ReparseFreePath $Root (Join-Path $Root 'bin'))){Fail 'BIN_PATH_UNSAFE'}
   if(-not(ReparseFreePath $Root (Join-Path $Root 'bootstrap\spotify-control-self-updater.ps1'))){Fail 'BOOTSTRAP_PATH_UNSAFE'}
@@ -134,7 +135,22 @@ function Probe([string]$Root,[string]$ExpectedId='', [switch]$AcceptExactRestore
   if(-not(SourcePin (Join-Path $bin 'spotify-control.ps1') 281585 'e9f0181756cfb84c505c30f54b6067e321f6d178d3a1936489714b8f4441ba18')){Fail 'MAIN_NOT_ORIGINAL_V0620'}
   if(-not(SourcePin (Join-Path $bin 'addon-manager.ps1') 225044 '3a20fcd552b363ebc05e26854a8fe010ffe50e5c756ebd3d7fca54011e8a8b86')){Fail 'ADDON_NOT_ORIGINAL_R9'}
   if(-not(SourcePin (Join-Path $bin 'spotify-control-agent.vbs') 4855 '2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278')){Fail 'AGENT_NOT_ORIGINAL'}
-  if(-not(SourcePin (Join-Path $Root 'bootstrap\spotify-control-self-updater.ps1') 42963 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6')){Fail 'BOOTSTRAP_NOT_ORIGINAL'}
+  $bootstrapPath=Join-Path $Root 'bootstrap\spotify-control-self-updater.ps1'
+  if($null -eq $VerifiedBootstrapHandle){
+    if(-not(SourcePin $bootstrapPath 42963 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6')){
+      Fail 'BOOTSTRAP_NOT_ORIGINAL'
+    }
+  }else{
+    # The caller already SHA-verified this exact FileStream in
+    # HoldExactBootstrapFile. FileShare.None denies a second Get-FileHash
+    # open even from THIS process: keep the authoritative handle locked.
+    if(-not $VerifiedBootstrapHandle.CanRead -or
+       $VerifiedBootstrapHandle.SafeFileHandle.IsClosed -or
+       [int64]$VerifiedBootstrapHandle.Length -ne 42963 -or
+       -not(ExactPath $VerifiedBootstrapHandle.Name $bootstrapPath)){
+      Fail 'BOOTSTRAP_VERIFIED_FENCE_HANDLE_INVALID'
+    }
+  }
   $transaction=Join-Path $Root 'self-update-last-transaction.json'
   if(-not(ReparseFreePath $Root $transaction)){Fail 'TRANSACTION_PATH_UNSAFE'}
   if($null -eq (FileInfo $transaction 1048576)){Fail 'TRANSACTION_UNREADABLE'}
@@ -792,7 +808,7 @@ try{
       $stage='RESTORE_PRESERVE_BOOTSTRAP_EXCLUSIVE_FENCE'
       $exclusiveBootstrap=HoldExactBootstrapFile $root
       $stage='RESTORE_PRESERVE_FENCED_REPROBE'
-      $fenced=Probe $root $pre.id -AcceptExactRestore
+      $fenced=Probe $root $pre.id -AcceptExactRestore -VerifiedBootstrapHandle $exclusiveBootstrap
       if($fenced.digest -cne $pre.digest -or
          -not $fenced.restorePresent -or $fenced.preservedPresent){
         Fail 'RESTORE_CHANGED_BEFORE_ARCHIVE_MOVE'
@@ -811,7 +827,7 @@ try{
          (ExactTree $fenced.preservedRestorePath) -cne $pre.before){
         Fail 'RESTORE_PRESERVATION_NOT_EXACT_DO_NOT_RETRY'
       }
-      $movedProof=Probe $root $pre.id
+      $movedProof=Probe $root $pre.id -VerifiedBootstrapHandle $exclusiveBootstrap
       if($movedProof.digest -cne $pre.digest -or
          $movedProof.restorePresent -or -not $movedProof.preservedPresent){
         Fail 'RESTORE_PRESERVATION_REPROBE_FAILED'
@@ -844,7 +860,7 @@ try{
     # A pre-existing file that made CreateNew fail must never be deleted.
     $stagingOwned=$true
     $stage='THIRD_SOURCE_PROOF'
-    $third=Probe $root $pre.id
+    $third=Probe $root $pre.id -VerifiedBootstrapHandle $exclusiveBootstrap
     if($third.digest -cne $pre.digest -or (Test-Path -LiteralPath $escrow)){
       Fail 'RACE_OR_ESCROW_CHANGED_BEFORE_REPLACE'
     }
@@ -940,7 +956,7 @@ try{
     'PRESERVED_RESTORE_TREE_NOT_EXACT_BEFORE','PREVIOUS_PRESERVED_RESTORE_UNSAFE',
     'PREVIOUS_PRESERVED_RESTORE_TREE_MISMATCH','RESTORE_CHANGED_BEFORE_ARCHIVE_MOVE',
     'RESTORE_ARCHIVE_CROSS_VOLUME_REFUSED','RESTORE_PRESERVATION_NOT_EXACT_DO_NOT_RETRY',
-    'RESTORE_PRESERVATION_REPROBE_FAILED')
+    'RESTORE_PRESERVATION_REPROBE_FAILED','BOOTSTRAP_VERIFIED_FENCE_HANDLE_INVALID')
   if($kind -cnotin $allowed){$kind='UNVERIFIED_FAIL_CLOSED'}
   # The stage is a script-owned finite label, never an exception's raw path or message.
   $messages.Add('HOLD_STAGE='+$stage)
