@@ -211,9 +211,21 @@ jobs:
             Write-Host 'R28_OLD_WSCRIPT_REAL_BIN_LOCK_REPRODUCED_PASS'
             $env:LOCALAPPDATA=Join-Path $fixture 'LocalAppData'
             $env:APPDATA=Join-Path $fixture 'Roaming'
-            $r27Source='validation/spotify-exit-immediate-maintenance-HOLD/guarded-first-update-resident-entry-R27-HOLD.ps1'
             $r28Source='validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-next-stable-upgrade-R28-HOLD.ps1'
-            [byte[]]$r27Bytes=[IO.File]::ReadAllBytes((Resolve-Path $r27Source))
+            # Windows checkout can normalize LF to CRLF, unlike the exact
+            # pinned production source bytes. Retrieve immutable R27 bytes
+            # at its original commit, then enforce length + SHA256 locally.
+            $r27Url='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/43876ee1d99456b2cd55186bf51f02027a407816/validation/spotify-exit-immediate-maintenance-HOLD/guarded-first-update-resident-entry-R27-HOLD.ps1'
+            [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+            $wc=New-Object Net.WebClient
+            try{[byte[]]$r27Bytes=$wc.DownloadData($r27Url)}finally{$wc.Dispose()}
+            $h=[Security.Cryptography.SHA256]::Create()
+            try{$r27Sha=[BitConverter]::ToString($h.ComputeHash($r27Bytes)).Replace('-','').ToLowerInvariant()}
+            finally{$h.Dispose()}
+            if($r27Bytes.Length -ne 14472 -or
+               $r27Sha -cne '096a9d13d499af4057f3a40d15dc105dfe2a5de97296373f949b3e6a58dd8064'){
+              throw 'R28_R27_IMMUTABLE_SOURCE_PIN_FAILED'
+            }
             [byte[]]$r28Bytes=[IO.File]::ReadAllBytes((Resolve-Path $r28Source))
             $parseTokens=$null;$parseErrors=$null
             [void][Management.Automation.Language.Parser]::ParseInput(
