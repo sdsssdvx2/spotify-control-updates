@@ -152,6 +152,12 @@ jobs:
               $code=$LASTEXITCODE
               if($code -ne 0){
                 Write-Host ('HOSTED_BOOTSTRAP_'+$Action+'_RESULT=FAILED_EXIT_'+$code)
+                # This fixture contains ONLY generated public code and scratch
+                # data, never a real user path, account or secret.
+                foreach($line in @($output|Select-Object -Last 3)){
+                  Write-Host ('HOSTED_SYNTHETIC_ERROR_DETAIL='+
+                    ([string]$line).Substring(0,[Math]::Min(800,([string]$line).Length)))
+                }
                 throw ('HOSTED_BOOTSTRAP_ACTION_FAILED_'+$Action)
               }
               if($output.Count -lt 1){throw ('HOSTED_BOOTSTRAP_EMPTY_RESULT_'+$Action)}
