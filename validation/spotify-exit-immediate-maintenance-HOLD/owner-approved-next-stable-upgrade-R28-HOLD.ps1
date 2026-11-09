@@ -10,7 +10,8 @@ param(
   [string]$HostedExpectedManifestSHA256='',
   [string]$HostedExpectedBootstrapSHA256='',
   [string]$HostedExpectedMainSHA256='',
-  [string]$HostedExpectedAgentSHA256=''
+  [string]$HostedExpectedAgentSHA256='',
+  [string]$PinnedReleaseFactsJson=''
 )
 Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
@@ -222,6 +223,31 @@ try{
      $new['bin/addon-manager.ps1'] -cne '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285'){
     StopNow 'NEXT_STABLE_RELEASE_FILE_PINS_MISMATCH'
   }
+  # Bind factual release-source admission to the same manifest and target
+  # bytes that the approved one-shot Bootstrap will consume. The facts by
+  # themselves do NOT authorize a process cutover or a release.
+  $phase='RELEASE_SOURCE_FACTS_CROSS_CHECK'
+  if([string]::IsNullOrWhiteSpace($PinnedReleaseFactsJson) -or
+     $PinnedReleaseFactsJson.Length -gt 2400){
+    StopNow 'PINNED_RELEASE_SOURCE_FACTS_REQUIRED'
+  }
+  try{$facts=$PinnedReleaseFactsJson | ConvertFrom-Json -ErrorAction Stop}
+  catch{StopNow 'RELEASE_SOURCE_FACTS_JSON_INVALID'}
+  if($facts.schema -cne 'SPOTIFY_R30_PUBLIC_RELEASE_FACTS_V1' -or
+     $facts.status -cne 'HOSTED_SYNTHETIC_SOURCE_ONLY_NOT_PUBLIC_VERIFIED' -or
+     $facts.from_version -cne '0.6.28' -or
+     $facts.to_version -cne '0.6.30' -or
+     [string]$facts.source_commit -cne ('f'*40) -or
+     [string]$facts.manifest_sha256 -cne $HostedExpectedManifestSHA256 -or
+     [string]$facts.payload_set_sha256 -cne [string]$manifest.payload_set_sha256 -or
+     [string]$facts.bootstrap_sha256 -cne $HostedExpectedBootstrapSHA256 -or
+     [string]$facts.main_sha256 -cne $HostedExpectedMainSHA256 -or
+     [string]$facts.agent_sha256 -cne $HostedExpectedAgentSHA256 -or
+     [string]$facts.addon_sha256 -cne $new['bin/addon-manager.ps1'] -or
+     [int]$facts.chunk_count -ne 20){
+    StopNow 'RELEASE_SOURCE_FACTS_NOT_BOUND_TO_MANIFEST_AND_PAYLOAD'
+  }
+  $log.Add('R30_RELEASE_SOURCE_FACTS=EXACT_HOSTED_UNPUBLISHED_ONLY')
   $log.Add('NEXT_RELEASE=EXACT_HOSTED_ONLY_TEST_MANIFEST')
   $phase='SNAPSHOT_OWNER_SHORTCUTS_AND_DATA'
   foreach($base in @((Join-Path $fixture 'Desktop'),(Join-Path $fixture 'StartMenu'))){
@@ -330,6 +356,8 @@ try{
     'FUTURE_PUBLIC_STABLE_NOT_YET_PUBLISHED','HOSTED_RELEASE_OVERRIDE_NOT_ALLOWED',
     'HOSTED_FIXTURE_NOT_UNDER_RUNNER_TEMP','OWNER_ONE_SHOT_APPROVAL_REQUIRED',
     'HOSTED_RELEASE_SHA_PIN_REQUIRED','INSTALLED_STABLE_OR_BOOTSTRAP_NOT_EXACT',
+    'PINNED_RELEASE_SOURCE_FACTS_REQUIRED','RELEASE_SOURCE_FACTS_JSON_INVALID',
+    'RELEASE_SOURCE_FACTS_NOT_BOUND_TO_MANIFEST_AND_PAYLOAD',
     'SPOTIFY_MUST_BE_CLOSED','HOSTED_LOOPBACK_PORT_INVALID',
     'NEXT_STABLE_MANIFEST_SHA_NOT_PINNED','NEXT_STABLE_MANIFEST_NOT_JSON',
     'NEXT_STABLE_MANIFEST_NOT_SPECIFIED_TEST_RELEASE','NEXT_STABLE_RELEASE_FILE_PINS_MISMATCH',
