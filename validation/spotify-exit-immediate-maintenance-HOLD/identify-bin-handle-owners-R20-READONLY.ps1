@@ -166,6 +166,12 @@ try{
     if($raw.Length -gt 4000000){throw 'HANDLE_OUTPUT_OVERSIZED'}
     if($p.ExitCode -ne 0 -and $p.ExitCode -ne 1){throw 'HANDLE_QUERY_NONZERO_OR_PERMISSION'}
     $lines=@($raw -split '\r?\n')
+    if($HostedFixtureRoot.Length -gt 0 -and $env:GITHUB_ACTIONS -ceq 'true'){
+      $messages.Add('HOSTED_CAPTURE_LINE_COUNT='+[string]$lines.Count)
+      $messages.Add('HOSTED_CAPTURE_CMD='+$(if($raw -match '(?i)cmd\.exe,\s*[0-9]+,'){'YES'}else{'NO'}))
+      $messages.Add('HOSTED_CAPTURE_BIN='+$(if($raw.Contains($bin)){'YES'}else{'NO'}))
+      $messages.Add('HOSTED_CAPTURE_ESCAPE_PATH='+$(if($raw.Contains('SpotifyControl')){'YES'}else{'NO'}))
+    }
     $categories=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
     $owners=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
     $exactOwners=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
