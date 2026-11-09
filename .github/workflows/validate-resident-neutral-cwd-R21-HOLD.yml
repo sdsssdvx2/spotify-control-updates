@@ -186,7 +186,13 @@ jobs:
           $t=$null;$err=$null
           [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $r21),[ref]$t,[ref]$err)
           if(@($err).Count -gt 0){throw ('R21_SOURCE_PS51_PARSE_FAILED '+$err[0].Message)}
-          [byte[]]$r18Bytes=[IO.File]::ReadAllBytes((Resolve-Path $r18))
+          # Exactly the same immutable raw bytes consumed by the Windows
+          # one-shot wrapper. Git checkout CRLF may differ from the wire bytes.
+          [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+          $raw18='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/b3b350554fa57dfc8c082ffc08832a9bd345fd27/validation/spotify-exit-immediate-maintenance-HOLD/reconcile-prepared-orphan-journal-R5-HOLD.ps1'
+          $client=New-Object Net.WebClient
+          try{[byte[]]$r18Bytes=$client.DownloadData($raw18)}
+          finally{$client.Dispose()}
           $h=[Security.Cryptography.SHA256]::Create()
           try{$r18Hash=[BitConverter]::ToString($h.ComputeHash($r18Bytes)).Replace('-','').ToLowerInvariant()}
           finally{$h.Dispose()}
