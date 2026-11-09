@@ -1,0 +1,24 @@
+name: HOLD R36 real public GitHub review transport (read-only)
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/verify-pinned-spotify-v0630-review-remote-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/verify-pinned-review-remote-R36-HOLD.py
+permissions:
+  contents: read
+jobs:
+  verify-github-remote-review-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Read actual public raw GitHub review manifest and all 20 immutable chunks through original R29
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 validation/spotify-exit-immediate-maintenance-HOLD/verify-pinned-review-remote-R36-HOLD.py
+          echo 'R36_NO_PUBLIC_MAIN_OR_SPOTIFY_PC_CHANGE_AND_NO_OWNER_APPROVAL_PASS'
