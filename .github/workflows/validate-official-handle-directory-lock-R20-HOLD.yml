@@ -43,18 +43,12 @@ jobs:
           $bin=Join-Path $scratch 'bin'
           [void][IO.Directory]::CreateDirectory($bin)
           $ready=Join-Path $scratch 'ready.txt'
-          $script=Join-Path $scratch 'hold-cwd.ps1'
-          $literal=$bin.Replace("'","''")
-          $readyQuoted=$ready.Replace("'","''")
-          $body=(@(
-            "Set-Location -LiteralPath '"+$literal+"'",
-            "[IO.File]::WriteAllText('"+$readyQuoted+"','READY')",
-            "Start-Sleep -Seconds 40"
-          ) -join [Environment]::NewLine)
-          [IO.File]::WriteAllText($script,$body,[Text.Encoding]::ASCII)
+          # A synthetic separate cmd.exe with its CWD set to /bin.
+          # Nothing is launched against the real installed Spotify files.
           $hold=$null
           try{
-            $hold=Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList @('-NoProfile','-NonInteractive','-File',('"' + $script + '"')) -PassThru
+            $args='/d /c cd /d "'+$bin+'" && echo READY > "'+$ready+'" && ping -n 40 127.0.0.1 >nul'
+            $hold=Start-Process -FilePath $env:ComSpec -ArgumentList $args -PassThru
             $readyAt=(Get-Date).AddSeconds(10)
             while((Get-Date) -lt $readyAt -and -not(Test-Path -LiteralPath $ready)){Start-Sleep -Milliseconds 200}
             if(-not(Test-Path -LiteralPath $ready)){throw 'R20_HOLDER_CHILD_NOT_READY'}
@@ -63,7 +57,7 @@ jobs:
             $exit=$LASTEXITCODE
             if($exit -ne 0){throw ('R20_HANDLE_QUERY_FAILED_'+$exit)}
             $selected=@($raw|Where-Object{
-              $_ -match ('(?i)powershell(?:\.exe)?,\s*'+$hold.Id+',') -and
+              $_ -match ('(?i)cmd(?:\.exe)?,\s*'+$hold.Id+',') -and
               $_ -match '(?i)r20-synthetic-lock[\\/]bin'
             })
             if($selected.Count -lt 1){throw ('R20_CWD_DIRECTORY_HANDLE_NOT_OBSERVED lineCount='+$raw.Count)}
