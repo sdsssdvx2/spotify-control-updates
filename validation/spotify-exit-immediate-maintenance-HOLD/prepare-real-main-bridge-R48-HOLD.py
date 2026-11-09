@@ -87,6 +87,33 @@ def main():
     text=text[:start]+receiver+text[end:]
     start=text.index("  # The normal VBS dispatch is unmodified.")
     end=text.index("  if(@(Get-CimInstance Win32_Process",start)
+    # Unlike R44's no-op PowerShell receiver, the authentic product main
+    # refuses AgentTick when Spicetify is not installed/discoverable.
+    # Provide only a scratch, version-query-capable Spicetify CLI. Every
+    # potential configuration or mutation CLI action returns exit 79.
+    harmless_spicetify=r"""
+  $spicetifyFixture=Join-Path $env:LOCALAPPDATA 'spicetify'
+  [void][IO.Directory]::CreateDirectory($spicetifyFixture)
+  $spicetifyExe=Join-Path $spicetifyFixture 'spicetify.exe'
+  Add-Type -TypeDefinition @'
+using System;
+public class ReadOnlySpicetifyFixture {
+  public static int Main(string[] args) {
+    if (args.Length == 1 && (args[0] == "-v" || args[0] == "--version" || args[0] == "version")) {
+      Console.WriteLine("2.41.0");
+      return 0;
+    }
+    return 79;
+  }
+}
+'@ -OutputAssembly $spicetifyExe -OutputType ConsoleApplication -ErrorAction Stop
+  $env:PATH=$spicetifyFixture+';'+$env:PATH
+  $located=Get-Command spicetify.exe -ErrorAction Stop
+  if(-not [string]::Equals([string]$located.Source,$spicetifyExe,[StringComparison]::OrdinalIgnoreCase)){
+    throw 'R48_SPICETIFY_NAME_NOT_RESOLVED_TO_HOSTED_MOCK'
+  }
+  Write-Host 'R48_HOSTED_SPICETIFY_READ_ONLY_VERSION_FIXTURE_REGISTERED=PASS'
+"""
     real_main=f"""  # Exact complete product main; all writes redirected to this isolated
   # account-shaped TEMP profile with owner mutation OFF.
   $env:LOCALAPPDATA=Join-Path $root 'LocalAppData'
@@ -94,7 +121,7 @@ def main():
   [void][IO.Directory]::CreateDirectory($env:APPDATA)
   $stateRaw='{{"schema":20,"agent_mutation_enabled":false,"pending_maintenance":false,"maintenance_check_healthy":false,"pending_addon_auto_ambiguous":0,"last_agent_event":null}}'
   [IO.File]::WriteAllText($statePath,$stateRaw,[Text.Encoding]::ASCII)
-  $sourceMain='{SOURCE}/bin/spotify-control.ps1'
+{harmless_spicetify}  $sourceMain='{SOURCE}/bin/spotify-control.ps1'
   if((Hash $sourceMain) -cne '{MAIN_PIN}'){{throw 'R48_SOURCE_MAIN_IS_NOT_THE_EXACT_RELEASE'}}
   [IO.File]::Copy((Resolve-Path $sourceMain).Path,$control,$false)
   if((Hash $control) -cne '{MAIN_PIN}'){{throw 'R48_STAGED_FULL_MAIN_FILE_CHANGED'}}
@@ -106,7 +133,28 @@ def main():
     text=text[:start]+real_main+text[end:]
     text=one(text,
        "  if(-not(WaitEvent 'SpotifyExit' 105)){",
-       "  if(-not(WaitEvent 'SpotifyExit' 75)){",
+       """  if(-not(WaitEvent 'SpotifyExit' 75)){
+    if(Test-Path -LiteralPath $hostLog -PathType Leaf){
+      $messages=@(Get-Content -LiteralPath $hostLog -ErrorAction SilentlyContinue)
+      foreach($message in @($messages | Where-Object {
+        $_ -match 'TICK LAUNCHED|SPOTIFY EXIT confirmed|FATAL|ERROR'
+      } | Select-Object -Last 9)){
+        Write-Host ('R48_DIAG_SCRATCH_WSCRIPT='+[string]$message)
+      }
+    }
+    if(Test-Path -LiteralPath $statePath -PathType Leaf){
+      try {
+        $snapshot=Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+        Write-Host ('R48_DIAG_LAST_EVENT='+[string]$snapshot.last_agent_event)
+        Write-Host ('R48_DIAG_LAST_DECISION='+[string]$snapshot.last_agent_decision)
+      }catch{Write-Host 'R48_DIAG_STATE_READ_FAILED'}
+    }
+    $appRoot=Split-Path -Parent $bin
+    foreach($file in @(Get-ChildItem -LiteralPath $appRoot -Recurse -File -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -in @('resident-agent-latest.json','spotify-control.log','resident-agent-host.log') })){
+      Write-Host ('R48_DIAG_SCRATCH_REPORT_EXISTS='+[string]$file.Name)
+    }
+    """,
        "BOUND_FULL_MAIN_AGENT_COMPLETION")
     text=one(text,
        "  Write-Host 'R44_REAL_POWERSHELL_MAINTENANCE_HANDLER=NOT_INVOKED_STUB_ONLY'",
