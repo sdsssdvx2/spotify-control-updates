@@ -47,6 +47,10 @@ def main():
     module=runpy.run_path(str(R29))
     function=module["attest_future_release"]
     namespace=function.__globals__
+    # Historical R30 scenario attests the immutable shortcut-only fixture.
+    # The real R29 public admission now correctly targets the integrated R38.
+    namespace["FUTURE"]=dict(namespace["FUTURE"])
+    namespace["FUTURE"]["bin/spotify-control.ps1"]="37eda0638c428ed3474a06812c067ca10f5771216ae509d3cd4ce10fdafbd3ec"
     raw_url=namespace["RAW"]
     allowed={}
     patches=future["updates"][-1]["patches"]

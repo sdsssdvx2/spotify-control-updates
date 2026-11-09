@@ -32,6 +32,10 @@ def run():
         raise RuntimeError("ORIGINAL_R29_AUDITOR_NOT_LOADABLE")
     r29=importlib.util.module_from_spec(spec)
     spec.loader.exec_module(r29)
+    # Historic shortcut-only review remains independently readable after R29
+    # switches the real future release target to the integrated candidate.
+    r29.FUTURE=dict(r29.FUTURE)
+    r29.FUTURE["bin/spotify-control.ps1"]="37eda0638c428ed3474a06812c067ca10f5771216ae509d3cd4ce10fdafbd3ec"
     raw_baseline=r29.download(r29.RAW+r29.BASE_MAIN_COMMIT+"/manifest.json",200_000)
     checked_in=(ROOT/"manifest.json").read_bytes()
     if raw_baseline!=checked_in:
