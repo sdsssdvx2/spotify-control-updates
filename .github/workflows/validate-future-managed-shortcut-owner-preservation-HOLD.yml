@@ -11,6 +11,8 @@ on:
       - validation/spotify-exit-immediate-maintenance-HOLD/verify-two-commit-future-release-HOLD.py
       - validation/spotify-exit-immediate-maintenance-HOLD/guarded-first-update-resident-entry-R27-HOLD.ps1
       - validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-next-stable-upgrade-R28-HOLD.ps1
+      - validation/spotify-exit-immediate-maintenance-HOLD/verify-r30-future-facts-offline-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/verify-public-release-transport-R29-HOLD.py
 permissions: {contents: read, actions: read}
 jobs:
   native-shortcut:
@@ -417,6 +419,13 @@ jobs:
             Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'spotify-verified-bootstrap-v106.ps1') -Force -ErrorAction SilentlyContinue
           }
           Write-Host 'FUTURE_OFFICIAL_BOOTSTRAP_HOSTED_SCRATCH_ONLY_CLEANUP_PASS'
+      - name: R30 factual release admission and corruption negatives from exact staged chunk set
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/verify-r30-future-facts-offline-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R30_FUTURE_FACTS_ADMISSION_OFFLINE_FAILED'}
+          Write-Host 'R30_RELEASE_SOURCE_ADMISSION_CONTENT_BOUND_NO_APPROVAL_PASS'
       - name: Actual resident candidate launched from BIN releases process CWD lock
         shell: powershell
         run: |
