@@ -15,9 +15,9 @@ $messages.Add('DIAGNOSTIC=SPOTIFY_R20_BIN_HANDLE_WITNESS')
 $messages.Add('SPOTIFY_INSTALL_WRITE=NO;BOOTSTRAP_EXEC=NO;UPDATE=NO;ROLLBACK=NO')
 $messages.Add('NETWORK=PINNED_MICROSOFT_HANDLE_ZIP_ONLY;TEMP_FILES=CREATED_AND_REMOVED')
 $messages.Add('OTHER_PROCESS_KILL=NO;FOREIGN_HANDLE_CLOSE=NO;REGISTRY_EULA_ACCEPTANCE=POSSIBLE')
-function HashBytes([byte[]]$input) {
+function HashBytes([byte[]]$data) {
   $sha=[Security.Cryptography.SHA256]::Create()
-  try{return [BitConverter]::ToString($sha.ComputeHash($input)).Replace('-','').ToLowerInvariant()}
+  try{return [BitConverter]::ToString($sha.ComputeHash($data)).Replace('-','').ToLowerInvariant()}
   finally{$sha.Dispose()}
 }
 function CategorizeExe([string]$exe) {
