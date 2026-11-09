@@ -280,6 +280,7 @@ def prepare() -> None:
         "future_agent_sha256":digest(future_agent),
         "addon_sha256_unchanged":digest(old_addon),
         "future_payload_set_sha256":manifest["payload_set_sha256"],
+        "staged_manifest_sha256":digest(staged_bytes),
         "patch_chunks":[len(p["chunks"]) for p in patches],
         "production_manifest_untouched":True,
     }
