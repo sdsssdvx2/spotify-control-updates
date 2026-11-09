@@ -31,6 +31,49 @@ jobs:
           $status=@(git status --short manifest.json README.md)
           if($status.Count -gt 0){throw 'RELEASE_MANIFEST_OR_README_MUTATED'}
           Write-Host 'FUTURE_SAFE_CANONICAL_V0628_SOURCE_PIN_AND_NO_RELEASE_MUTATION_PASS'
+      - name: Actual resident candidate launched from BIN releases process CWD lock
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $reported=(Get-Content -LiteralPath 'validation/spotify-exit-immediate-maintenance-HOLD/out/future-safe/candidate-report.json' -Raw | ConvertFrom-Json)
+          $candidate='validation/spotify-exit-immediate-maintenance-HOLD/out/future-safe/spotify-control-agent.vbs'
+          $vbs=[IO.File]::ReadAllBytes((Resolve-Path $candidate))
+          $h=[Security.Cryptography.SHA256]::Create()
+          try{$sha=[BitConverter]::ToString($h.ComputeHash($vbs)).Replace('-','').ToLowerInvariant()}
+          finally{$h.Dispose()}
+          if($reported.original_resident_sha256 -cne '2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278' -or
+             $sha -cne $reported.future_resident_sha256 -or
+             $vbs.Length -ne $reported.future_resident_size){
+            throw 'FUTURE_RESIDENT_PIN_OR_REPORT_DRIFT'
+          }
+          $fixture=Join-Path $env:RUNNER_TEMP 'spotify-future-resident-cwd'
+          if(Test-Path -LiteralPath $fixture){throw 'FUTURE_RESIDENT_FIXTURE_PREEXISTS'}
+          $bin=Join-Path $fixture 'bin'
+          [void][IO.Directory]::CreateDirectory($bin)
+          $vbsFile=Join-Path $bin 'spotify-control-agent.vbs'
+          [IO.File]::WriteAllBytes($vbsFile,$vbs)
+          [IO.File]::WriteAllText((Join-Path $bin 'spotify-control.ps1'),"# unused scratch control script; never execute",[Text.Encoding]::ASCII)
+          $wscript=Join-Path $env:WINDIR 'System32/wscript.exe'
+          $p=$null
+          try{
+            $p=Start-Process -FilePath $wscript -WorkingDirectory $bin -ArgumentList ('//B //NoLogo "'+$vbsFile+'"') -PassThru
+            Start-Sleep -Milliseconds 2300
+            if($p.HasExited){throw 'FUTURE_RESIDENT_EXITED_BEFORE_CWD_PROOF'}
+            # The legacy resident blocks this exact operation when the
+            # invoking shortcut sets cwd=bin. The candidate must not.
+            [IO.Directory]::Move($bin,(Join-Path $fixture 'bin-shifted'))
+            if($p.HasExited){throw 'FUTURE_RESIDENT_EXITED_DURING_CWD_RENAME'}
+            [IO.Directory]::Move((Join-Path $fixture 'bin-shifted'),$bin)
+            if($p.HasExited){throw 'FUTURE_RESIDENT_EXITED_AFTER_CWD_RENAME'}
+            Write-Host 'FUTURE_RESIDENT_LIVE_WSCRIPT_BIN_CWD_AUTO_RELEASE_AND_RENAME_PASS'
+          }finally{
+            if($null -ne $p -and -not $p.HasExited){
+              Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+              [void]$p.WaitForExit(5000)
+            }
+            Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          Write-Host 'FUTURE_RESIDENT_HOSTED_ONLY_PROCESS_AND_FILES_CLEANUP_PASS'
       - name: Exercise actual Windows COM shortcut ownership, neutral CWD and idempotence
         shell: powershell
         run: |
