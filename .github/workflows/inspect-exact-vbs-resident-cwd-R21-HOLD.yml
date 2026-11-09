@@ -10,6 +10,8 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Inspect source-pinned VBS and exact v0.6.20 startup contract without executing it
         shell: pwsh
         run: |
@@ -22,7 +24,7 @@ jobs:
           assert len(vb)==4855 and hashlib.sha256(vb).hexdigest()=='2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278'
           print('R21_VBS_EXACT_BYTES_SHA_PASS')
           for line_no,line in enumerate(vb.decode('utf-8-sig').splitlines(),1):
-              if re.search(r'(?i)(CurrentDirectory|WScript|shell\.Run|shell\.Exec|Sleep|Quit|Loop|Kill|Terminate|Stop|FileSystem|bin\\|ScriptFullName|powershell|CreateObject)',line):
+              if True:
                   safe=line.replace('\t',' ').strip()
                   print(f'R21_VBS_{line_no}={safe[:450]}')
           # The exact old v0.6.20 source is reproducible from pinned existing chunks.
