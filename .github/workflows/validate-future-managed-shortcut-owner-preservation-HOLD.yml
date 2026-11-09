@@ -7,6 +7,7 @@ on:
       - validation/spotify-exit-immediate-maintenance-HOLD/build-managed-shortcut-future-safe-candidate.py
       - validation/spotify-exit-immediate-maintenance-HOLD/validate-future-offline-transport.py
       - validation/spotify-exit-immediate-maintenance-HOLD/rehearse-localhost-bootstrap-future.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/stage-future-official-release-HOLD.py
 permissions: {contents: read, actions: read}
 jobs:
   native-shortcut:
@@ -88,6 +89,42 @@ jobs:
           python validation/spotify-exit-immediate-maintenance-HOLD/validate-future-offline-transport.py
           if($LASTEXITCODE -ne 0){throw 'FUTURE_OFFLINE_TWO_FILE_TRANSPORT_FAILED'}
           Write-Host 'FUTURE_STABLE_TRANSPORT_ADMISSION_ONLY_NO_MANIFEST_PUBLISH_PASS'
+          $publicBefore=(Get-FileHash -LiteralPath 'manifest.json' -Algorithm SHA256).Hash
+          python validation/spotify-exit-immediate-maintenance-HOLD/stage-future-official-release-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'FUTURE_STABLE_STAGE_FAILED'}
+          $stage='validation/spotify-exit-immediate-maintenance-HOLD/out/release-staging'
+          $candidate=Get-Content -LiteralPath (Join-Path $stage 'manifest-UNPUBLISHABLE.json') -Raw|ConvertFrom-Json
+          $receipt=Get-Content -LiteralPath (Join-Path $stage 'stage-receipt.json') -Raw|ConvertFrom-Json
+          if($candidate.source_commit -cne ('f'*40) -or
+             $candidate.latest_version -cne '0.6.30' -or
+             $candidate.channel -cne 'stable' -or
+             @($candidate.updates).Count -ne 19 -or
+             $candidate.updates[18].from_version -cne '0.6.28' -or
+             @($candidate.updates[18].patches).Count -ne 2 -or
+             $receipt.publishable -ne $false -or
+             $receipt.production_manifest_write -ne $false){
+            throw 'FUTURE_STAGE_STRUCTURE_OR_NONPUBLISHABLE_GUARD_FAILED'
+          }
+          $all=@()
+          foreach($patch in $candidate.updates[18].patches){
+            foreach($part in $patch.chunks){
+              $full=Join-Path $stage ($part.path.Replace('/','\'))
+              if(-not(Test-Path -LiteralPath $full -PathType Leaf)){
+                throw 'FUTURE_STAGE_IMMUTABLE_CHUNK_MISSING'
+              }
+              if((Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$part.sha256){
+                throw 'FUTURE_STAGE_CHUNK_SHA_MISMATCH'
+              }
+              $all+=,$full
+            }
+          }
+          if($all.Count -ne 20){throw 'FUTURE_STAGE_EXPECTED_20_CHUNKS'}
+          if((Get-FileHash -LiteralPath 'manifest.json' -Algorithm SHA256).Hash -cne $publicBefore){
+            throw 'PUBLISHED_STABLE_MANIFEST_CHANGED'
+          }
+          $status=@(git status --porcelain -- manifest.json packages/)
+          if($status.Count -ne 0){throw 'PUBLISHED_PACKAGES_CHANGED'}
+          Write-Host 'FUTURE_STABLE_RELEASE_STAGE_20_CHUNKS_SHA_PINNED_AND_UNPUBLISHABLE_PASS'
       - name: Real Bootstrap v1.0.6 Check Update Check Rollback in disposable localhost mirror
         shell: powershell
         run: |
