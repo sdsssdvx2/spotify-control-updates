@@ -9,6 +9,24 @@ $ErrorActionPreference='Stop'
 function ErrorClass([string]$errorText) {
   if([string]::IsNullOrWhiteSpace($errorText)){return 'ABSENT'}
   if($errorText.Length -gt 131072){return 'OVERSIZED_REDACTED'}
+  # Windows PowerShell reports the underlying filesystem failure in the
+  # current UI language. The first R19 only recognized English "move.+cannot";
+  # the actual failure may be "Cannot move item ... in use" or Korean text.
+  # Regex Unicode escapes keep this helper ASCII on Windows PowerShell 5.1.
+  $move=($errorText -match '(?i)cannot\s+move\s+item|cannot\s+(rename|move)\b|move[\-\s]?item|failed\s+to\s+move|move\s+failed|\uC774\uB3D9')
+  $busy=($errorText -match '(?i)\bin\s+use\b|in\s+use\.\s*$|used\s+by\s+another\s+process|being\s+used|sharing\s+violation|\uC0AC\uC6A9.{0,12}\uC911|\uB2E4\uB978.{0,15}\uD504\uB85C\uC138\uC2A4')
+  $denied=($errorText -match '(?i)access.{0,20}denied|permission.{0,20}denied|unauthorized|not\s+permitted|\uC561\uC138\uC2A4.{0,12}\uAC70\uBD80|\uAD8C\uD55C.{0,12}(\uC5C6|\uBD80\uC871)')
+  $exists=($errorText -match '(?i)already\s+exists|cannot\s+create\s+a\s+file\s+when\s+that\s+file|\uC774\uBBF8.{0,16}\uC874\uC7AC')
+  $missing=($errorText -match '(?i)cannot\s+find\s+(the\s+)?path|could\s+not\s+find\s+a\s+part\s+of\s+the\s+path|not\s+found|\uACBD\uB85C.{0,24}\uCC3E\uC744.{0,12}\uC5C6')
+  if($move -and $busy){return 'MOVE_ITEM_IN_USE_OR_SHARING'}
+  if($move -and $denied){return 'MOVE_ITEM_ACCESS_DENIED'}
+  if($move -and $exists){return 'MOVE_ITEM_DESTINATION_EXISTS'}
+  if($move -and $missing){return 'MOVE_ITEM_PATH_NOT_FOUND'}
+  if($move){return 'MOVE_ITEM_OTHER_FAILURE'}
+  if($busy){return 'FILE_IN_USE_OR_SHARING'}
+  if($denied){return 'ACCESS_DENIED_OR_PERMISSION'}
+  if($exists){return 'DESTINATION_ALREADY_EXISTS'}
+  if($missing){return 'FILE_OR_PATH_NOT_FOUND'}
   if($errorText -match '(?i)Candidate main SelfTest failed'){return 'CANDIDATE_MAIN_SELFTEST'}
   if($errorText -match '(?i)Candidate Addon Manager SelfTest failed'){return 'CANDIDATE_ADDON_SELFTEST'}
   if($errorText -match '(?i)rollback backup is missing'){return 'ROLLBACK_BACKUP_MISSING'}
@@ -26,6 +44,12 @@ function ErrorClass([string]$errorText) {
   if($errorText -match '(?i)network|tls|http|dns|remote.server|timed.out|connect|download|webexception|proxy'){return 'NETWORK_OR_REMOTE'}
   if($errorText -match '(?i)Parser rejected|PowerShell parser|syntax.error'){return 'SCRIPT_PARSER'}
   return 'OTHER_REDACTED'
+}
+function ErrorLocale([string]$errorText) {
+  if([string]::IsNullOrWhiteSpace($errorText)){return 'EMPTY'}
+  if($errorText.Length -gt 131072){return 'OVERSIZED'}
+  if($errorText -match '[\uAC00-\uD7A3]'){return 'HANGUL_PRESENT'}
+  return 'NO_HANGUL'
 }
 function ReadSafeReport([string]$root,[string]$target) {
   $answer=[pscustomobject]@{status='UNVERIFIED';object=$null}
@@ -189,6 +213,7 @@ try {
   $txnError=Field $doc 'error'
   if($txnError -is [string]){
     $lines.Add('TRANSACTION_ERROR_CLASS='+(ErrorClass $txnError))
+    $lines.Add('TRANSACTION_ERROR_LOCALE='+(ErrorLocale $txnError))
   }else{
     $lines.Add('TRANSACTION_ERROR_CLASS=UNVERIFIED')
   }
@@ -220,6 +245,8 @@ try {
         $lines.Add('REPORT_ERROR_TEMPLATE=UPDATE_AND_ROLLBACK_FAILED')
         $lines.Add('UPDATE_ERROR_CLASS='+(ErrorClass $updateError))
         $lines.Add('ROLLBACK_ERROR_CLASS='+(ErrorClass $rollbackError))
+        $lines.Add('UPDATE_ERROR_LOCALE='+(ErrorLocale $updateError))
+        $lines.Add('ROLLBACK_ERROR_LOCALE='+(ErrorLocale $rollbackError))
       }else{
         $lines.Add('REPORT_ERROR_TEMPLATE=OTHER_REDACTED')
         $lines.Add('UNSPLIT_REPORT_ERROR_CLASS='+(ErrorClass $rawError))
