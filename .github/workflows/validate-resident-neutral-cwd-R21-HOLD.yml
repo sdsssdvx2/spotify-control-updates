@@ -189,15 +189,15 @@ jobs:
           # Exactly the same immutable raw bytes consumed by the Windows
           # one-shot wrapper. Git checkout CRLF may differ from the wire bytes.
           [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
-          $raw18='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/b3b350554fa57dfc8c082ffc08832a9bd345fd27/validation/spotify-exit-immediate-maintenance-HOLD/reconcile-prepared-orphan-journal-R5-HOLD.ps1'
+          $raw18='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/fab4dcdc5d5da2748b548197c5bd1492e07ea5df/validation/spotify-exit-immediate-maintenance-HOLD/reconcile-prepared-orphan-journal-R5-HOLD.ps1'
           $client=New-Object Net.WebClient
           try{[byte[]]$r18Bytes=$client.DownloadData($raw18)}
           finally{$client.Dispose()}
           $h=[Security.Cryptography.SHA256]::Create()
           try{$r18Hash=[BitConverter]::ToString($h.ComputeHash($r18Bytes)).Replace('-','').ToLowerInvariant()}
           finally{$h.Dispose()}
-          if($r18Bytes.Length -ne 54515 -or
-             $r18Hash -cne 'ec8c86a7d79611702dab926c131f1e4fddca0bca22edff50d0512e37484fb121'){
+          if($r18Bytes.Length -ne 55283 -or
+             $r18Hash -cne '619d7a012099fd037a19e8d181b5a9f140947aba7df7cb87626abb0aeeb2dda5'){
              throw 'R21_R18_PIN_WRONG'
           }
           # No real user profile is used. Construct exact two official launch
@@ -215,6 +215,31 @@ jobs:
             $link.Save()
             if((Get-Item $lnk).Length -lt 30){throw 'R21_CI_SHORTCUT_NOT_CREATED'}
           }
+          # The real owner has already escrowed an OLDER PREPARED failure.
+          # Reproduce that exact multi-generation state before this attempt.
+          @'
+          from pathlib import Path
+          import hashlib,os,json,shutil
+          root=Path(os.environ['RUNNER_TEMP'])/'r7-user-baseline'/'LocalAppData'/'SpotifyControl'
+          earlier='20261108-091500-deadbeef'
+          parent=root/'backups'/'self-update-transactions'/earlier
+          if parent.exists():raise RuntimeError('OLDER_ESCROW_COLLISION')
+          older_bin=parent/'bin'
+          shutil.copytree(root/'bin',older_bin)
+          older_restore=parent/'original-restore-bin-preserved-exact-before'
+          shutil.copytree(root/'bin',older_restore)
+          current=json.loads((root/'self-update-last-transaction.json').read_text(encoding='utf-8-sig'))
+          archive=dict(current)
+          archive['id']=earlier
+          archive['backup_bin']=str(older_bin)
+          archive['same_dir_new']=str(root/('bin.spotifycontrol-new-'+earlier))
+          archive['same_dir_old']=str(root/('bin.spotifycontrol-old-'+earlier))
+          archive['after_tree_sha256']='e'*64
+          (parent/'original-prepared-transaction-before-reconcile.json').write_bytes(
+            b'\xef\xbb\xbf'+json.dumps(archive,separators=(',',':')).encode('utf-8'))
+          print('R21_TWO_SEPARATE_VERIFIED_PREPARED_ESCROW_GENERATIONS_SEEDED_PASS')
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'HISTORIC_ESCROW_FIXTURE_FAILED'}
           $originalJournal=Join-Path $root 'self-update-last-transaction.json'
           $origHash=(Get-FileHash $originalJournal -Algorithm SHA256).Hash.ToLowerInvariant()
           $state=Join-Path $root 'state.json'
@@ -283,6 +308,21 @@ jobs:
               'af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0'){
               throw 'R21_STABLE_MAIN_NOT_PINNED'
             }
+            # The third genuine transaction (COMMITTED) must reconcile
+            # TWO separately archived earlier PREPARED failures without
+            # reissuing Check/Update and without losing historical escrow.
+            $proof=@(& ([ScriptBlock]::Create([Text.Encoding]::ASCII.GetString($r18Bytes))) -HostedFixtureRoot $fixture)
+            if($proof -cnotcontains 'RESULT=ALREADY_COMMITTED_STABLE_V0628_VERIFIED_NO_ACTION'){
+              throw ('R21_MULTI_GENERATION_COMPLETED_STATE_NOT_VERIFIED '+($proof -join '|'))
+            }
+            $doneHash=(Get-FileHash $originalJournal -Algorithm SHA256).Hash.ToLowerInvariant()
+            $replay=@(& ([ScriptBlock]::Create([Text.Encoding]::ASCII.GetString($r18Bytes))) -HostedFixtureRoot $fixture -Commit -ApprovalPhrase 'EXACT_PREPARED_NO_BIN_SWAP' -ContinueOfficialStableUpdate -OfficialUpdateApprovalPhrase 'APPROVE_OFFICIAL_V0628_CORE_UPGRADE')
+            if($replay -cnotcontains 'RESULT=ALREADY_COMMITTED_STABLE_V0628_VERIFIED_NO_ACTION' -or
+              $replay -ccontains 'BOOTSTRAP_UPDATE_ATTEMPTED=YES' -or
+              (Get-FileHash $originalJournal -Algorithm SHA256).Hash.ToLowerInvariant() -cne $doneHash){
+              throw 'R21_HISTORICAL_ESCROWS_DID_NOT_PROTECT_IDEMPOTENCE'
+            }
+            Write-Host 'R21_TWO_HISTORICAL_ORIGINAL_ESCROWS_VALIDATED_AND_NO_SECOND_UPDATE_PASS'
             Write-Host 'R21_EXACT_VBS_AGENT_NEUTRAL_CWD_AND_OFFICIAL_V0628_R17_FULL_CHAIN_PASS'
           } finally {
             $env:LOCALAPPDATA=$originalLocal
