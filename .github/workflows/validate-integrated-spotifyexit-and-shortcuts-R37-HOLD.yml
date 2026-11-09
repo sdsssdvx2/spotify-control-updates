@@ -1,0 +1,67 @@
+name: HOLD R37 combined immediate SpotifyExit maintenance plus safe owner shortcuts
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - '.github/workflows/validate-integrated-spotifyexit-and-shortcuts-R37-HOLD.yml'
+      - 'validation/spotify-exit-immediate-maintenance-HOLD/build-combined-exit-and-shortcut-R37-HOLD.py'
+permissions:
+  contents: read
+jobs:
+  combined-source-behavior:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Reuse exactly pinned original R10 immediate-exit and reviewed R34 shortcut code
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $operating=(git rev-parse origin/main).Trim()
+          if($LASTEXITCODE -ne 0 -or $operating -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R37_PUBLIC_MAIN_BASE_CHANGED'
+          }
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/build-combined-exit-and-shortcut-R37-HOLD.py'
+          python -m py_compile $script
+          if($LASTEXITCODE -ne 0){throw 'R37_INTEGRATION_BUILDER_NOT_PYTHON'}
+          python $script
+          if($LASTEXITCODE -ne 0){throw 'R37_TWO_FEATURE_SOURCE_COMBINATION_FAILED'}
+          $home='validation/spotify-exit-immediate-maintenance-HOLD/out'
+          $meta=Get-Content (Join-Path $home 'integrated-proof/source-attestation.json') -Raw | ConvertFrom-Json
+          if($meta.mode -cne 'R37_COMBINED_HOLD_SCRATCH_NOT_RELEASED' -or
+             $meta.main_changes -cne 'ONLY_PREVIOUS_FAST_EXIT_FUNCTION_AND_PREVIOUS_SAFE_SHORTCUT_BLOCK' -or
+             -not [bool]$meta.existing_r10_exact_merged_function_proven -or
+             [bool]$meta.public_main_changed -or
+             [bool]$meta.user_pc_changed -or
+             [bool]$meta.owner_approval_granted){
+             throw 'R37_SOURCE_INTEGRITY_OR_MUTATION_BOUNDARY_FAILED'
+          }
+          $main=Join-Path $home 'integrated/spotify-control.ps1'
+          $addon=Join-Path $home 'integrated/addon-manager.ps1'
+          $vbs=Join-Path $home 'integrated/spotify-control-agent.vbs'
+          foreach($entry in @(
+            @{Path=$main;Pin=$meta.merged_main_sha256},
+            @{Path=$addon;Pin='5ab556c1d90b9f8e6d5784e238ffd1798c5363a0d7b8313d1f106b5b6a285'},
+            @{Path=$vbs;Pin='da054351cae6927504e735426d35f6d5e7edafcac7e06881f1adf1c20cecab9d'})){
+            $actual=(Get-FileHash -LiteralPath $entry.Path -Algorithm SHA256).Hash.ToLowerInvariant()
+            if($actual -cne $entry.Pin){throw 'R37_COMBINED_BINARY_SHA_NOT_PINNED'}
+          }
+          foreach($ps in @($main,
+            'validation/spotify-exit-immediate-maintenance-HOLD/test-real-agenttick.ps1')){
+            $tokens=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile(
+                (Join-Path (Get-Location) $ps),[ref]$tokens,[ref]$errors)
+            if(@($errors).Count -ne 0){throw ('R37_WINDOWS_POWERSHELL_51_PARSE_FAILED_'+$ps)}
+          }
+          Write-Host 'R37_FINAL_COMBINED_MAIN_AND_AGENT_RELEASE_SOURCE_PS51_SHA=PASS'
+          Write-Host 'R37_PREVIOUS_REVIEWED_SHORTCUT_BYTES_PLUS_EXACT_EXIT_FUNCTION=PASS'
+      - name: Exercise the actual merged AgentTick immediate exit maintenance branches, not standalone prototype
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $stage=(Resolve-Path 'validation/spotify-exit-immediate-maintenance-HOLD/out/integrated-proof/isolated').Path
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File validation/spotify-exit-immediate-maintenance-HOLD/test-real-agenttick.ps1 -StagedDirectory $stage
+          if($LASTEXITCODE -ne 0){throw 'R37_MERGED_REAL_AGENTTICK_BEHAVIOR_FAILED'}
+          Write-Host 'R37_COMBINED_SPOTIFY_EXIT_IMMEDIATE_MAINTENANCE_AND_SAFE_SHORTCUTS_PASS'
+          Write-Host 'R37_PRODUCTION_RELEASE=NOT_PUBLISHED;USER_SPOTIFY=NOT_TOUCHED'
