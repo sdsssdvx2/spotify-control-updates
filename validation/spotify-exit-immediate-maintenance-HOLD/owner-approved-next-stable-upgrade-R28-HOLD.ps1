@@ -144,7 +144,7 @@ try{
   if($PSVersionTable.PSEdition -cne 'Desktop' -or $PSVersionTable.PSVersion.Major -ne 5 -or
      -not [Environment]::Is64BitProcess){StopNow 'WINDOWS_PS51_X64_REQUIRED'}
   if($null -eq $PinnedR27Source -or $PinnedR27Source.Length -ne 14472 -or
-     (Digest $PinnedR27Source) -cne 'R27_SOURCE_SHA_PLACEHOLDER'){
+     (Digest $PinnedR27Source) -cne '096a9d13d499af4057f3a40d15dc105dfe2a5de97296373f949b3e6a58dd8064'){
     StopNow 'PINNED_R27_SOURCE_NOT_MATCHED'
   }
   $hosted=$HostedFixtureRoot.Length -gt 0
