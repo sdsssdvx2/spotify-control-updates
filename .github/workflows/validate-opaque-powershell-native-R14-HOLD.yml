@@ -1,0 +1,68 @@
+name: HOLD R14 isolated native PowerShell command-line fallback
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths: [.github/workflows/validate-opaque-powershell-native-R14-HOLD.yml]
+permissions: {contents: read}
+jobs:
+  native-observation-only:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse actual R14 source and test read-only native process identity fallback
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $source='validation/spotify-exit-immediate-maintenance-HOLD/reconcile-prepared-orphan-journal-R5-HOLD.ps1'
+          $text=[IO.File]::ReadAllText((Resolve-Path $source))
+          $tok=$null;$err=$null
+          $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tok,[ref]$err)
+          if($err.Count -ne 0){throw 'R14_SOURCE_PS51_PARSE_FAILED'}
+          $functions=@($ast.FindAll({param($n)
+            $n -is [Management.Automation.Language.FunctionDefinitionAst] -and
+            $n.Name -ceq 'RecoverOpaquePowerShellCommandLine'
+          },$true))
+          if($functions.Count -ne 1){throw 'R14_SINGLE_NATIVE_HELPER_FUNCTION_REQUIRED'}
+          if($text -cnotmatch 'if\(\[string\]::IsNullOrWhiteSpace\(\$cmd\)\)\s*\{\s*\$cmd=RecoverOpaquePowerShellCommandLine \$p'){
+            throw 'R14_HELPER_NOT_CONNECTED_TO_REAL_ADMISSION'
+          }
+          Invoke-Expression $functions[0].Extent.Text
+          $proc=$null
+          try {
+            $powershell=Join-Path $PSHOME 'powershell.exe'
+            $proc=Start-Process -FilePath $powershell -ArgumentList '-NoProfile -NonInteractive -Command "Start-Sleep -Seconds 30"' -PassThru -WindowStyle Hidden
+            Start-Sleep -Milliseconds 450
+            $script:observed=Get-CimInstance -ClassName Win32_Process -Filter ('ProcessId='+$proc.Id) -ErrorAction Stop
+            if($null -eq $script:observed -or [int]$script:observed.ProcessId -ne $proc.Id){
+              throw 'R14_CHILD_NOT_OBSERVABLE'
+            }
+            $command=RecoverOpaquePowerShellCommandLine $script:observed
+            if([string]::IsNullOrWhiteSpace($command) -or $command -cnotmatch 'Start-Sleep'){
+              throw 'R14_NATIVE_SAME_USER_READ_ONLY_COMMANDLINE_NOT_RECOVERED'
+            }
+            if([SpotifyR14NativeCommandLine]::Read(0)){
+              throw 'R14_ZERO_PID_WAS_NOT_REJECTED'
+            }
+            Write-Host 'R14_NATIVE_SAME_USER_WINDOWS_COMMANDLINE_RECOVERY_PASS'
+            function Get-CimInstance {
+              param($ClassName,$Filter,$ErrorAction)
+              return [pscustomobject]@{
+                ProcessId=$script:observed.ProcessId
+                Name=$script:observed.Name
+                CreationDate=$script:observed.CreationDate.AddMinutes(-5)
+              }
+            }
+            try {
+              if(RecoverOpaquePowerShellCommandLine $script:observed){
+                throw 'R14_PID_REUSE_IDENTITY_DRIFT_NOT_REJECTED'
+              }
+            } finally {Remove-Item Function:Get-CimInstance -ErrorAction SilentlyContinue}
+            Write-Host 'R14_POST_NATIVE_PROCESS_IDENTITY_DRIFT_DENIED_PASS'
+          } finally {
+            if($null -ne $proc){
+              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+              $proc.Dispose()
+            }
+          }
+          Write-Host 'R14_ONLY_ISOLATED_SYNTHETIC_CHILD_NO_SPOTIFY_OR_CONFIG_MUTATION_PASS'
