@@ -117,7 +117,9 @@ jobs:
             same_dir_old=str(local/('bin.spotifycontrol-old-'+id)),
             swapped_at=None,post_verified_at=None,committed_at=None,rolled_back_at=None,
             error='SYNTHETIC_PRIVATE_ERROR_NEVER_OUTPUT')
-          (local/'self-update-last-transaction.json').write_text(json.dumps(doc,separators=(',',':')),encoding='utf-8')
+          # Windows owner's PREPARED record may carry UTF-8 BOM. Keep its
+          # exact original bytes for escrow and verify the full Bootstrap route.
+          (local/'self-update-last-transaction.json').write_bytes(b'\xef\xbb\xbf'+json.dumps(doc,separators=(',',':')).encode('utf-8'))
           (local/'state.json').write_text(json.dumps(dict(schema=20,agent_mutation_enabled=True,
                pending_maintenance=True,maintenance_check_healthy=False,
                self_update_last_transaction_status='failed'),separators=(',',':')),encoding='utf-8')
