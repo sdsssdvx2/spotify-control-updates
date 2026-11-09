@@ -1,4 +1,4 @@
-name: HOLD R23 preserve custom Managed VBS shortcut and stable Windows E2E
+name: HOLD R24 genuine dynamic ScriptBlock mutex ownership and stable Windows E2E
 # Reconstructed source from R11 baseline with byte-literal insertion and function uniqueness verified.
 # Original v0.6.28 SelfTest requires installed Bootstrap read-sharing; maintain no-write fence and both named legacy mutexes.
 on:
@@ -187,6 +187,27 @@ jobs:
           $t=$null;$err=$null
           [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $r21),[ref]$t,[ref]$err)
           if(@($err).Count -gt 0){throw ('R21_SOURCE_PS51_PARSE_FAILED '+$err[0].Message)}
+          # The user's actual command invokes IN-MEMORY ScriptBlock.Create,
+          # not a .ps1 file, which differs in $script: variable binding.
+          # Verify exact pinned R24 bytes and execute via precisely that form.
+          $raw24='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/34c6645d2388d720a81101a44ec2b987c652c3e2/validation/spotify-exit-immediate-maintenance-HOLD/guarded-resident-neutral-cwd-R21-HOLD.ps1'
+          [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+          $wc24=New-Object Net.WebClient
+          try{[byte[]]$r24Bytes=$wc24.DownloadData($raw24)}
+          finally{$wc24.Dispose()}
+          $sha24=[Security.Cryptography.SHA256]::Create()
+          try{$hash24=[BitConverter]::ToString($sha24.ComputeHash($r24Bytes)).Replace('-','').ToLowerInvariant()}
+          finally{$sha24.Dispose()}
+          if($r24Bytes.Length -ne 16772 -or
+             $hash24 -cne '6f1b53687a811ccefa958575cf46d1acb07b32e6ec6f3ffae132b0bab1f037df'){
+             throw 'R24_SOURCE_SHA256_PIN_FAILED'
+          }
+          $tokens24=$null;$errors24=$null
+          [void][Management.Automation.Language.Parser]::ParseInput(
+            [Text.Encoding]::ASCII.GetString($r24Bytes),
+            [ref]$tokens24,[ref]$errors24)
+          if(@($errors24).Count -ne 0){throw 'R24_MEMORY_SOURCE_PS51_PARSE_FAILED'}
+          Write-Host 'R24_EXACT_IMMUTABLE_SOURCE_PIN_AND_PS51_MEMORY_PARSE_PASS'
           # Exactly the same immutable raw bytes consumed by the Windows
           # one-shot wrapper. Git checkout CRLF may differ from the wire bytes.
           [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
@@ -287,7 +308,7 @@ jobs:
               throw 'R21_HOSTED_OLD_RESIDENT_BIN_MOVE_WAS_NOT_BLOCKED'
             }
             Write-Host 'R21_REAL_OLD_RESIDENT_CWD_BLOCKS_OFFICIAL_BIN_SWAP_PASS'
-            $dry=@(& $r21 -PinnedR18Source $r18Bytes -PinnedR22Source $r22Bytes -HostedFixtureRoot $fixture)
+            $dry=@(& ([ScriptBlock]::Create([Text.Encoding]::ASCII.GetString($r24Bytes))) -PinnedR18Source $r18Bytes -PinnedR22Source $r22Bytes -HostedFixtureRoot $fixture)
             if($dry -cnotcontains 'RESULT=READY_FOR_CUSTOM_LINK_PRESERVING_AGENT_CUTOVER_NO_MUTATION' -or
                $dry -cnotcontains 'STARTMENU_MANAGED_LINK=CUSTOM_VBS_AND_WORKDIR_PRESERVE' -or
                $dry -cnotcontains 'DESKTOP_MANAGED_LINK=ABSENT_PRESERVED'){
@@ -299,15 +320,16 @@ jobs:
                throw 'R21_DRYRUN_CHANGED_HOSTED_FIXTURE'
             }
             Write-Host 'R21_DRYRUN_SOURCE_AND_SHORTCUTS_UNCHANGED_PASS'
-            $deny=@(& $r21 -PinnedR18Source $r18Bytes -PinnedR22Source $r22Bytes -HostedFixtureRoot $fixture -Commit)
+            $deny=@(& ([ScriptBlock]::Create([Text.Encoding]::ASCII.GetString($r24Bytes))) -PinnedR18Source $r18Bytes -PinnedR22Source $r22Bytes -HostedFixtureRoot $fixture -Commit)
             if($deny -cnotcontains 'HOLD_REASON=EXACT_AGENT_RESTART_APPROVAL_REQUIRED' -or
                (Get-FileHash $originalJournal -Algorithm SHA256).Hash.ToLowerInvariant() -cne $origHash){
               throw 'R21_MISSING_APPROVAL_NOT_BLOCKED'
             }
             Write-Host 'R21_EXPLICIT_AGENT_RESTART_APPROVAL_FAIL_CLOSED_PASS'
-            $receipt=@(& $r21 -PinnedR18Source $r18Bytes -PinnedR22Source $r22Bytes -HostedFixtureRoot $fixture -Commit -ApprovalPhrase 'APPROVE_EXACT_VBS_RESTART_AND_MANAGED_SHORTCUT_CWD' -RunApprovedStableUpdate)
+            $receipt=@(& ([ScriptBlock]::Create([Text.Encoding]::ASCII.GetString($r24Bytes))) -PinnedR18Source $r18Bytes -PinnedR22Source $r22Bytes -HostedFixtureRoot $fixture -Commit -ApprovalPhrase 'APPROVE_EXACT_VBS_RESTART_AND_MANAGED_SHORTCUT_CWD' -RunApprovedStableUpdate)
             foreach($line in $receipt){Write-Host ('R21_RECEIPT_'+$line)}
-            if($receipt -cnotcontains 'RESULT=R23_CUSTOM_SHORTCUT_PRESERVED_STABLE_V0628_R17_COMMITTED' -or
+            if($receipt -cnotcontains 'MAINTENANCE_AND_AGENTTICK_MUTEXES=HELD' -or
+               $receipt -cnotcontains 'RESULT=R23_CUSTOM_SHORTCUT_PRESERVED_STABLE_V0628_R17_COMMITTED' -or
                $receipt -cnotcontains 'USER_CUSTOM_MANAGED_SHORTCUT=BYTE_IDENTICAL_AFTER_OFFICIAL_UPDATE'){
               throw ('R21_GUARDED_REAL_BOOTSTRAP_FULL_CHAIN_NOT_ACCEPTED '+($receipt -join '|'))
             }
@@ -346,7 +368,7 @@ jobs:
               throw 'R21_HISTORICAL_ESCROWS_DID_NOT_PROTECT_IDEMPOTENCE'
             }
             Write-Host 'R21_TWO_HISTORICAL_ORIGINAL_ESCROWS_VALIDATED_AND_NO_SECOND_UPDATE_PASS'
-            Write-Host 'R23_EXACT_OWNER_AGENT_ONLY_NEUTRAL_CWD_AND_STABLE_V0628_R17_FULL_CHAIN_PASS'
+            Write-Host 'R24_MEMORY_SCRIPTBLOCK_LEGACY_MUTEX_PAIR_AND_REAL_STABLE_FULL_CHAIN_PASS'
           } finally {
             $env:LOCALAPPDATA=$originalLocal
             $env:APPDATA=$originalRoaming
