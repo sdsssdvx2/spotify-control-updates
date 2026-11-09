@@ -232,6 +232,56 @@ def attest_downloaded(obj: dict, expected_to: dict[str,str],
     return len(jobs),decoded
 
 
+def attest_future_release(
+    live_raw: bytes, baseline: dict,
+    approved_manifest_sha: str | None,
+    approved_source_sha: str | None,
+) -> dict:
+    """Return a content-bound FACTUAL receipt, never release authorization.
+
+    It is safe to pass to a separate owner-approval workflow only when that
+    workflow verifies it came from this exact auditor and binds its complete
+    result to a fresh unmodified public manifest. This does not execute code.
+    """
+    if (not approved_manifest_sha or not approved_source_sha or
+        not HEX64.fullmatch(approved_manifest_sha) or
+        not HEX40.fullmatch(approved_source_sha) or
+        approved_source_sha in (BASE_PAYLOAD_COMMIT, "f"*40, "e"*40)):
+        raise RuntimeError("NEXT_STABLE_INDEPENDENT_RELEASE_APPROVAL_PINS_REQUIRED")
+    if hash_bytes(live_raw)!=approved_manifest_sha:
+        raise RuntimeError("NEXT_STABLE_APPROVED_MANIFEST_SHA_MISMATCH")
+    live=parse_manifest(live_raw,"LIVE")
+    if (live.get("latest_version")!=FUTURE_LATEST or
+        live.get("source_commit")!=approved_source_sha or
+        len(live.get("updates",[]))!=19 or
+        live["updates"][:-1]!=baseline["updates"] or
+        live.get("bootstrap")!=baseline["bootstrap"]):
+        raise RuntimeError("NEXT_STABLE_VERSION_HISTORY_OR_SOURCE_NOT_APPROVED")
+    validate_latest(live,FUTURE)
+    patches=newest_edge(live,BASE_LATEST,FUTURE_LATEST,
+                        ["bin/spotify-control.ps1","bin/spotify-control-agent.vbs"])
+    before={p:ORIGINAL[p][1] for p in
+            ["bin/spotify-control.ps1","bin/spotify-control-agent.vbs"]}
+    chunk_count,decoded=attest_downloaded(live,FUTURE,before,FUTURE_LATEST,patches,approved_source_sha)
+    if chunk_count != 20 or len(decoded)!=2:
+        raise RuntimeError("NEXT_STABLE_EXPECTED_FULL_CHUNK_SET_NOT_PRESENT")
+    return {
+        "schema":"SPOTIFY_R30_PUBLIC_RELEASE_FACTS_V1",
+        "status":"PUBLIC_SOURCE_AND_PAYLOAD_READONLY_VERIFIED_NOT_OWNER_AUTHORIZED",
+        "from_version":BASE_LATEST,
+        "to_version":FUTURE_LATEST,
+        "manifest_sha256":hash_bytes(live_raw),
+        "source_commit":approved_source_sha,
+        "payload_set_sha256":live["payload_set_sha256"],
+        "bootstrap_sha256":live["bootstrap"]["sha256"],
+        "main_sha256":FUTURE["bin/spotify-control.ps1"],
+        "agent_sha256":FUTURE["bin/spotify-control-agent.vbs"],
+        "addon_sha256":FUTURE["bin/addon-manager.ps1"],
+        "chunk_count":chunk_count,
+        "model":"READ_ONLY_PROVENANCE_NO_EXECUTION",
+    }
+
+
 def run(mode: str, approved_manifest_sha: str | None, approved_source_sha: str | None) -> None:
     old_raw=download(RAW+BASE_MAIN_COMMIT+"/manifest.json",200_000)
     baseline=parse_manifest(old_raw,"ORIGINAL")
@@ -264,35 +314,18 @@ def run(mode: str, approved_manifest_sha: str | None, approved_source_sha: str |
         print("PUBLIC_STABLE_V0628_FULL_DECODED_MAIN_AND_ADDON_SHA=PASS")
         print("NEXT_STABLE_V0630=NOT_PUBLISHED_NOT_ACTIVATED")
     elif mode=="next-stable":
-        if (not approved_manifest_sha or not approved_source_sha or
-            not HEX64.fullmatch(approved_manifest_sha) or
-            not HEX40.fullmatch(approved_source_sha)):
-            raise RuntimeError("NEXT_STABLE_INDEPENDENT_RELEASE_APPROVAL_PINS_REQUIRED")
-        if hash_bytes(live_raw)!=approved_manifest_sha:
-            raise RuntimeError("NEXT_STABLE_APPROVED_MANIFEST_SHA_MISMATCH")
-        if (live.get("latest_version")!=FUTURE_LATEST or
-            live.get("source_commit")!=approved_source_sha or
-            len(live.get("updates",[]))!=19 or
-            live["updates"][:-1]!=baseline["updates"] or
-            live.get("bootstrap")!=baseline["bootstrap"]):
-            raise RuntimeError("NEXT_STABLE_VERSION_HISTORY_OR_SOURCE_NOT_APPROVED")
-        validate_latest(live,FUTURE)
-        patches=newest_edge(live,BASE_LATEST,FUTURE_LATEST,
-                            ["bin/spotify-control.ps1","bin/spotify-control-agent.vbs"])
-        before={p:ORIGINAL[p][1] for p in
-                ["bin/spotify-control.ps1","bin/spotify-control-agent.vbs"]}
-        chunk_count,decoded=attest_downloaded(live,FUTURE,before,FUTURE_LATEST,patches,approved_source_sha)
-        if chunk_count != 20 or len(decoded)!=2:
-            raise RuntimeError("NEXT_STABLE_EXPECTED_FULL_CHUNK_SET_NOT_PRESENT")
+        receipt=attest_future_release(live_raw,baseline,approved_manifest_sha,approved_source_sha)
         print("PUBLIC_NEXT_STABLE_MANIFEST_INDEPENDENT_SHA_APPROVED=PASS")
         print("PUBLIC_NEXT_STABLE_IMMUTABLE_SOURCE_20_CHUNKS=PASS")
         print("PUBLIC_NEXT_STABLE_V0628_TO_V0630_MAIN_AND_VBS_SHA=PASS")
         print("PUBLIC_NEXT_STABLE_MANIFEST=READONLY_ADMITTED_NO_UPDATE_OR_PROCESS_CHANGE")
+        return receipt
     else:
         raise RuntimeError("UNKNOWN_AUDIT_MODE")
     print("PRODUCTION_GIT_AND_WINDOWS_MUTATIONS=NONE")
     print("NETWORK=HTTPS_OFFICIAL_PUBLIC_RAW_ONLY")
     print("BOOTSTRAP_UPDATE_ROLLBACK=NOT_INVOKED")
+    return None
 
 
 def main():
@@ -300,9 +333,14 @@ def main():
     parser.add_argument("--mode",choices=["baseline","next-stable"],default="baseline")
     parser.add_argument("--approved-manifest-sha")
     parser.add_argument("--approved-source-sha")
+    parser.add_argument("--release-facts-json",action="store_true")
     args=parser.parse_args()
     try:
-        run(args.mode,args.approved_manifest_sha,args.approved_source_sha)
+        facts=run(args.mode,args.approved_manifest_sha,args.approved_source_sha)
+        if args.release_facts_json:
+            if args.mode != "next-stable" or facts is None:
+                raise RuntimeError("RELEASE_FACTS_ONLY_FOR_VERIFIED_NEXT_STABLE")
+            print("PUBLIC_RELEASE_FACTS_JSON="+json.dumps(facts,sort_keys=True,separators=(",",":")))
     except Exception as exc:
         # Do not emit raw URLs, usernames, path data, response bodies or
         # exception traces. The only runtime output is a bounded error class.
