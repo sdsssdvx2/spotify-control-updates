@@ -1,26 +1,27 @@
-# R21: exact installed resident VBS neutral workdir + two managed links.
-# Optional R18 once-only official stable recovery; zero background retries.
-# This module is HOLD until Windows fixture acceptance.
+# R23: exact installed resident VBS neutral workdir; custom user managed link
+# remains BYTE-IDENTICAL. Original R18 stable recovery; no background retries.
+# This module is HOLD until native Windows full E2E acceptance.
 [CmdletBinding()]
 param(
   [switch]$Commit,
   [string]$ApprovalPhrase='',
   [byte[]]$PinnedR18Source=$null,
+  [byte[]]$PinnedR22Source=$null,
   [switch]$RunApprovedStableUpdate,
   [string]$HostedFixtureRoot=''
 )
 Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
 $log=New-Object 'System.Collections.Generic.List[string]'
-$log.Add('DIAGNOSTIC=SPOTIFY_R21_EXACT_AGENT_CWD_NEUTRAL_CUTOVER')
+$log.Add('DIAGNOSTIC=SPOTIFY_R23_CUSTOM_LINK_PRESERVED_EXACT_AGENT_CUTOVER')
 $log.Add('USER_DATA_DELETE=NO;FOREIGN_PROCESS_KILL=NO;V0629=FORBIDDEN')
-$log.Add('SCOPE=EXACT_MANAGED_SHORTCUT_WORKDIR_AND_SAME_USER_AGENT_ONLY')
+$log.Add('SCOPE=EXACT_SAME_USER_AGENT_ONLY;MANAGED_SHORTCUTS=READONLY_UNCHANGED')
 $stage='INITIAL'
 $mutexes=New-Object 'System.Collections.Generic.List[System.Threading.Mutex]'
 $oldEnded=$false
 $newAgent=$null
-$changes=New-Object 'System.Collections.Generic.List[object]'
-$shortcutChangesMade=0
+$shortcutOriginalSha=''
+$shortcutPath=''
 function Fail([string]$code){throw [InvalidOperationException]::new($code)}
 function Sha([byte[]]$data){
   $h=[Security.Cryptography.SHA256]::Create()
@@ -129,6 +130,10 @@ try{
      (Sha $PinnedR18Source) -cne '619d7a012099fd037a19e8d181b5a9f140947aba7df7cb87626abb0aeeb2dda5'){
      Fail 'R18_SOURCE_PIN_MISSING'
   }
+  if($null -eq $PinnedR22Source -or $PinnedR22Source.Length -ne 5798 -or
+     (Sha $PinnedR22Source) -cne 'b80fce4cacd2efefcb002ae3474a623c25a4d4d79d70e16e67e3e39937a85a6d'){
+     Fail 'R22_SOURCE_PIN_MISSING'
+  }
   $hosted=$HostedFixtureRoot.Length -gt 0
   if($hosted){
     if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows' -or
@@ -184,36 +189,38 @@ try{
   $creation=[datetime]$old.CreationDate
   if($null -eq (OwnProcess ([int]$old.ProcessId))){Fail 'RESIDENT_PROCESS_RACE'}
   $log.Add('RESIDENT=EXACT_SINGLE_USER_OWNED_WSCRIPT')
-  $stage='MANAGED_SHORTCUT_PROOF'
-  $links=@()
-  foreach($folder in @($desktop,$startMenu)){
-    if([string]::IsNullOrWhiteSpace($folder)){continue}
-    $link=Join-Path $folder 'Spotify (Managed).lnk'
-    if(Test-Path -LiteralPath $link){$links+=,$link}
-  }
-  if($links.Count -lt 1 -or $links.Count -gt 2){Fail 'EXPECTED_ONE_OR_TWO_MANAGED_LINKS'}
-  $shell=New-Object -ComObject WScript.Shell
-  foreach($link in $links){
-    $item=Get-Item -LiteralPath $link -Force -ErrorAction Stop
-    if($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){
-      Fail 'MANAGED_LINK_NOT_PLAIN_FILE'
+  $stage='CUSTOM_MANAGED_SHORTCUT_EXACT_USER_OBSERVATION'
+  $r22=[ScriptBlock]::Create([Text.Encoding]::ASCII.GetString($PinnedR22Source))
+  $shortcutProof=@(& $r22 -HostedFixtureRoot $HostedFixtureRoot)
+  $expected=@(
+    'DESKTOP_FOLDER_RESOLUTION=SAME',
+    'DESKTOP_LINK=ABSENT',
+    'STARTMENU_LINK=PRESENT_PLAIN',
+    'STARTMENU_TARGET=SYSTEM32_WSCRIPT',
+    'STARTMENU_ARGUMENTS=OTHER_VBS',
+    'STARTMENU_WORKDIR=OTHER_WORKDIR',
+    'RESULT=READONLY_SHORTCUT_CATEGORIES_COMPLETE'
+  )
+  foreach($needed in $expected){
+    if($shortcutProof -cnotcontains $needed){
+      Fail 'USER_CUSTOM_MANAGED_SHORTCUT_STATE_CHANGED'
     }
-    $shortcut=$shell.CreateShortcut($link)
-    if(-not(EqPath ([string]$shortcut.TargetPath) $wscript) -or
-       [string]$shortcut.Arguments -cne ('"'+$agent+'"')){Fail 'MANAGED_LINK_TARGET_NOT_EXACT'}
-    $work=[string]$shortcut.WorkingDirectory
-    if(-not(EqPath $work $bin) -and -not(EqPath $work $root)){Fail 'MANAGED_LINK_CUSTOM_WORKDIR_PRESERVE'}
-    $orig=[IO.File]::ReadAllBytes($link)
-    if($orig.Length -gt 102400 -or $orig.Length -lt 30){Fail 'MANAGED_LINK_UNEXPECTED_SIZE'}
-    $changes.Add([pscustomobject]@{
-      path=$link;orig=$orig;origSha=(Sha $orig);needsChange=(EqPath $work $bin);backup='';
-    })
   }
-  $todo=@($changes|Where-Object {$_.needsChange})
-  $log.Add('MANAGED_LINKS_EXACT_COUNT='+[string]$links.Count)
-  $log.Add('MANAGED_LINKS_REQUIRE_WORKDIR_CHANGE='+[string]$todo.Count)
+  # Preserve the discovered wrapper EXACTLY: never read or execute its script.
+  # Pre/post SHA attestation proves neither our cutover nor Bootstrap changed
+  # the user's custom Start Menu launch semantics or icon/metadata.
+  $shortcutPath=Join-Path $startMenu 'Spotify (Managed).lnk'
+  $shortcutInfo=Get-Item -LiteralPath $shortcutPath -Force -ErrorAction Stop
+  if($shortcutInfo.PSIsContainer -or
+     ($shortcutInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+     $shortcutInfo.Length -lt 30 -or $shortcutInfo.Length -gt 102400){
+    Fail 'USER_CUSTOM_MANAGED_SHORTCUT_UNSAFE'
+  }
+  $shortcutOriginalSha=ReadHash $shortcutPath
+  $log.Add('DESKTOP_MANAGED_LINK=ABSENT_PRESERVED')
+  $log.Add('STARTMENU_MANAGED_LINK=CUSTOM_VBS_AND_WORKDIR_PRESERVE')
   if(-not $Commit){
-    $log.Add('RESULT=READY_FOR_EXACT_AGENT_CUTOVER_NO_MUTATION')
+    $log.Add('RESULT=READY_FOR_CUSTOM_LINK_PRESERVING_AGENT_CUTOVER_NO_MUTATION')
   }else{
     $stage='LEGACY_MUTEX_ADMISSION'
     EnterOldMutexes
@@ -223,46 +230,11 @@ try{
        -not(EqPath (VbsArgument ([string]$check.CommandLine)) $agent)){
       Fail 'RESIDENT_CHANGED_BEFORE_CUTOVER'
     }
-    $stage='PRESERVE_ORIGINAL_MANAGED_LINKS'
-    $backups=Join-Path $root 'backups\agent-shortcut-neutral-cwd-R21'
-    if(-not(Test-Path -LiteralPath $backups)){
-      [void][IO.Directory]::CreateDirectory($backups)
+    $stage='READONLY_CUSTOM_SHORTCUT_CONSISTENCY_CHECK'
+    if((ReadHash $shortcutPath) -cne $shortcutOriginalSha){
+      Fail 'CUSTOM_MANAGED_SHORTCUT_CHANGED_BEFORE_CUTOVER'
     }
-    if(-not(PlainFolder $backups)){Fail 'SHORTCUT_BACKUP_DIRECTORY_UNSAFE'}
-    $tag=[guid]::NewGuid().ToString('N')
-    $index=0
-    foreach($change in $todo){
-      $index++
-      $location=Join-Path $backups ('original-'+$tag+'-'+$index+'.lnk')
-      if(Test-Path -LiteralPath $location){Fail 'ORIGINAL_LINK_BACKUP_PATH_COLLISION'}
-      if(-not([IO.Path]::GetPathRoot($change.path).Equals(
-           [IO.Path]::GetPathRoot($location),[StringComparison]::OrdinalIgnoreCase))){
-        Fail 'SHORTCUT_BACKUP_MUST_BE_SAME_VOLUME'
-      }
-      $change.backup=$location
-    }
-    $stage='COMMIT_NEUTRAL_MANAGED_LINK_WORKDIR'
-    foreach($change in $todo){
-      if((ReadHash $change.path) -cne $change.origSha){Fail 'MANAGED_LINK_RACE_BEFORE_CAS'}
-      $new=Join-Path (Split-Path $change.path -Parent) ('.SpotifyManaged-R21-'+$tag+'.lnk')
-      [IO.File]::Copy($change.path,$new,$false)
-      try{
-        $staged=$shell.CreateShortcut($new)
-        $staged.WorkingDirectory=$root
-        $staged.Save()
-        if(-not(EqPath ([string]$shell.CreateShortcut($new).WorkingDirectory) $root)){
-          Fail 'STAGED_LINK_NOT_NEUTRAL'
-        }
-        if(Test-Path -LiteralPath $change.backup){Fail 'ORIGINAL_LINK_BACKUP_PATH_COLLISION'}
-        [IO.File]::Replace($new,$change.path,$change.backup,$true)
-        if((ReadHash $change.backup) -cne $change.origSha){Fail 'ORIGINAL_LINK_BACKUP_SHA_DRIFT'}
-        if(-not(EqPath ([string]$shell.CreateShortcut($change.path).WorkingDirectory) $root)){
-          Fail 'COMMITTED_LINK_NOT_NEUTRAL'
-        }
-      }finally{if(Test-Path -LiteralPath $new){[IO.File]::Delete($new)}}
-      $shortcutChangesMade++
-    }
-    $log.Add('MANAGED_LINKS_NEUTRALIZED='+[string]$shortcutChangesMade)
+    $log.Add('STARTMENU_MANAGED_LINK=BYTE_IDENTICAL_PRE_CUTOVER')
     $stage='START_NEUTRAL_CWD_AGENT'
     $newAgent=Start-Process -FilePath $wscript -WorkingDirectory $root -ArgumentList ('//B //NoLogo "'+$agent+'"') -PassThru
     Start-Sleep -Seconds 2
@@ -288,36 +260,42 @@ try{
     if($newAgent.HasExited){Fail 'NEUTRAL_AGENT_EXITED_AFTER_OLD_END'}
     $log.Add('ORIGINAL_AGENT=EXACT_VERIFIED_PROCESS_ONLY_ENDED')
     $log.Add('NEUTRAL_AGENT=ONE_RESIDENT_RUNNING')
+    if((ReadHash $shortcutPath) -cne $shortcutOriginalSha){
+      Fail 'CUSTOM_MANAGED_SHORTCUT_CHANGED_DURING_CUTOVER'
+    }
     if($RunApprovedStableUpdate){
       $stage='ONE_APPROVED_R18_OFFICIAL_RECOVERY_AND_STABLE_UPDATE'
       $receipt=@(& $r18 -HostedFixtureRoot $HostedFixtureRoot -Commit -ApprovalPhrase 'EXACT_PREPARED_NO_BIN_SWAP' -ContinueOfficialStableUpdate -OfficialUpdateApprovalPhrase 'APPROVE_OFFICIAL_V0628_CORE_UPGRADE')
       foreach($line in $receipt){$log.Add([string]$line)}
+      if((ReadHash $shortcutPath) -cne $shortcutOriginalSha){
+        Fail 'CUSTOM_MANAGED_SHORTCUT_CHANGED_DURING_OFFICIAL_UPDATE'
+      }
+      $log.Add('USER_CUSTOM_MANAGED_SHORTCUT=BYTE_IDENTICAL_AFTER_OFFICIAL_UPDATE')
       if($receipt -contains 'RESULT=OFFICIAL_STABLE_V0628_R17_COMMITTED_VERIFIED'){
-        $log.Add('RESULT=R21_AGENT_CWD_FIXED_AND_STABLE_V0628_R17_COMMITTED')
+        $log.Add('RESULT=R23_CUSTOM_SHORTCUT_PRESERVED_STABLE_V0628_R17_COMMITTED')
       }else{
-        $log.Add('RESULT=R21_AGENT_CWD_FIXED_OFFICIAL_UPDATE_HOLD_NO_RETRY')
+        $log.Add('RESULT=R23_AGENT_CWD_FIXED_OFFICIAL_UPDATE_HOLD_NO_RETRY')
       }
     }else{
-      $log.Add('RESULT=R21_AGENT_CWD_FIXED_NO_OFFICIAL_UPDATE_ATTEMPTED')
+      $log.Add('RESULT=R23_AGENT_CWD_FIXED_NO_OFFICIAL_UPDATE_ATTEMPTED')
     }
   }
 }catch{
   $kind=[string]$_.Exception.Message
   $allowed=@('WINDOWS_REQUIRED','WINDOWS_PS51_X64_REQUIRED','STABLE_UPDATE_REQUIRES_COMMIT',
-    'EXACT_AGENT_RESTART_APPROVAL_REQUIRED','R18_SOURCE_PIN_MISSING',
+    'EXACT_AGENT_RESTART_APPROVAL_REQUIRED','R18_SOURCE_PIN_MISSING','R22_SOURCE_PIN_MISSING',
     'HOSTED_OVERRIDE_DENIED','HOSTED_OVERRIDE_NOT_IN_RUNNER_TEMP','RUN_AS_ORIGINAL_NONADMIN_USER_ONLY',
     'SPOTIFY_MUST_BE_CLOSED','INSTALLED_RESIDENT_SOURCE_NOT_PINNED',
     'R18_READONLY_PREPARED_PROOF_NOT_READY','SCRIPT_HOST_INVENTORY_TOO_LARGE',
     'RESIDENT_HOST_IMAGE_NOT_SYSTEM32','RESIDENT_OWNER_NOT_CURRENT_USER',
     'SINGLE_EXACT_RESIDENT_REQUIRED','RESIDENT_PROCESS_RACE',
-    'EXPECTED_ONE_OR_TWO_MANAGED_LINKS','MANAGED_LINK_NOT_PLAIN_FILE',
-    'MANAGED_LINK_TARGET_NOT_EXACT','MANAGED_LINK_CUSTOM_WORKDIR_PRESERVE',
-    'MANAGED_LINK_UNEXPECTED_SIZE','OWNER_SID_UNKNOWN','ABANDONED_LEGACY_MUTEX',
+    'USER_CUSTOM_MANAGED_SHORTCUT_STATE_CHANGED','USER_CUSTOM_MANAGED_SHORTCUT_UNSAFE',
+    'CUSTOM_MANAGED_SHORTCUT_CHANGED_BEFORE_CUTOVER',
+    'CUSTOM_MANAGED_SHORTCUT_CHANGED_DURING_CUTOVER',
+    'CUSTOM_MANAGED_SHORTCUT_CHANGED_DURING_OFFICIAL_UPDATE',
+    'OWNER_SID_UNKNOWN','ABANDONED_LEGACY_MUTEX',
     'LEGACY_MUTEX_NOT_IDLE','RESIDENT_CHANGED_BEFORE_CUTOVER',
-    'SHORTCUT_BACKUP_DIRECTORY_UNSAFE','ORIGINAL_LINK_BACKUP_SHA_DRIFT',
-    'ORIGINAL_LINK_BACKUP_PATH_COLLISION','SHORTCUT_BACKUP_MUST_BE_SAME_VOLUME',
-    'MANAGED_LINK_RACE_BEFORE_CAS','STAGED_LINK_NOT_NEUTRAL',
-    'COMMITTED_LINK_NOT_NEUTRAL','NEW_AGENT_EXITED_EARLY',
+    'NEW_AGENT_EXITED_EARLY',
     'NEW_AGENT_IDENTITY_NOT_EXACT','ORIGINAL_AGENT_IDENTITY_CHANGED_DO_NOT_KILL',
     'ORIGINAL_AGENT_EXACT_TERMINATION_UNVERIFIED','NEUTRAL_AGENT_EXITED_AFTER_OLD_END')
   if($kind -cnotin $allowed){$kind='UNVERIFIED_WINDOWS_OR_COM_ERROR'}
