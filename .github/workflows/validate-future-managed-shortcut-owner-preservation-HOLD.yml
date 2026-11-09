@@ -31,10 +31,10 @@ jobs:
           $tokens=$null; $errors=$null
           [void][Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
           if(@($errors).Count -ne 0){throw ('R32_WINDOWS_PS51_PARSE_FAILED '+$errors[0].Message)}
-          $frozen='aedd8219391574e910c1fae4198cff7b7db31884'
+          $frozen='2cad89cc3f9e4c823f0b7ec04f7b09f2fd536748'
           $expect=@{
             'guarded-first-update-resident-entry-R27-HOLD.ps1'='98df17ed1c4d81445bbf34cf4bfa3b2889bc2cc0'
-            'owner-approved-next-stable-upgrade-R28-HOLD.ps1'='6a9a5bfbeb9a357b14345037bbf1419fade8304d'
+            'owner-approved-next-stable-upgrade-R28-HOLD.ps1'='57df24bae036151810f461ddaa4e6ba0e3da6ac4'
             'verify-public-release-transport-R29-HOLD.py'='558f1f54a6c04afa72d013cef02b807fb3a148fd'
           }
           foreach($name in @($expect.Keys)){
@@ -309,6 +309,19 @@ jobs:
               HostedExpectedMainSHA256=[string]$expect.future_main_sha256
               HostedExpectedAgentSHA256=[string]$expect.future_agent_sha256
             }
+            # The R28 owner phrase must be mandatory in the PUBLIC route,
+            # not only in the hosted fixture. This is evaluated with shaped
+            # pins, before any public manifest request or resident cutover.
+            $publicNoPhrase=@(& $driver -PinnedR27Source $r27Bytes -Commit -ApprovedPublicManifestSHA256 ('0'*64) -ApprovedPublicSourceCommit ('1'*40))
+            if($publicNoPhrase -cnotcontains 'HOLD_REASON=OWNER_ONE_SHOT_APPROVAL_REQUIRED' -or
+               $publicNoPhrase -cnotcontains 'EXACT_INITIAL_CUTOVER_DONE=NO' -or
+               $publicNoPhrase -cnotcontains 'OFFICIAL_UPDATE_INVOKED_SUCCESS=NO' -or
+               -not $oldResident -or $oldResident.HasExited){
+              throw ('R33_R28_PUBLIC_OWNER_APPROVAL_BYPASS_NOT_BLOCKED '+($publicNoPhrase -join '|'))
+            }
+            Write-Host 'R33_R28_PUBLIC_OWNER_APPROVAL_REQUIRED_BEFORE_NETWORK_OR_CUTOVER_PASS'
+            # A public owner phrase with no actual release pins cannot trigger
+            # network, the Bootstrap or an owner process modification.
             # No next-stable release has been published. Even an explicit
             # -Commit authorization without independent public pins must NOT
             # touch the real profile or enter the hosted process cutover.
