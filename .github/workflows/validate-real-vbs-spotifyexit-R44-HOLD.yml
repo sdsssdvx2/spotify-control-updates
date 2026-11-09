@@ -1,0 +1,42 @@
+name: HOLD R44 real WScript WMI Spotify.exe exit and PowerShell AgentTick dispatch
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-real-vbs-spotifyexit-R44-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/accept-real-vbs-spotifyexit-event-R44-HOLD.ps1
+permissions: {contents: read}
+jobs:
+  real-wscript-wmi-event:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Rebuild exact previously integrated neutral WScript resident bytes without installation
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R44_PUBLIC_MAIN_PARENT_CHANGED'
+          }
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-combined-exit-and-shortcut-R37-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R44_INTEGRATED_RESIDENT_BUILD_FAILED'}
+          $agent='validation/spotify-exit-immediate-maintenance-HOLD/out/integrated/spotify-control-agent.vbs'
+          if((Get-FileHash -LiteralPath $agent -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+              'da054351cae6927504e735426d35f6d5e7edafcac7e06881f1adf1c20cecab9d'){
+            throw 'R44_RESIDENT_ORIGINAL_SHA256_MISMATCH'
+          }
+          Write-Host 'R44_EXACT_INTEGRATED_VBS_SOURCE_PIN=PASS'
+      - name: Test WMI process transition with unchanged VBS polling and actual PowerShell dispatch
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $test='validation/spotify-exit-immediate-maintenance-HOLD/accept-real-vbs-spotifyexit-event-R44-HOLD.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path (Get-Location) $test),[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R44_NATIVE_POWERSHELL_51_PARSE_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test
+          if($LASTEXITCODE -ne 0){throw 'R44_VBS_REAL_EXIT_AND_POWERSHELL_DISPATCH_FAILED'}
+          Write-Host 'R44_TRUE_WSCRIPT_WMI_SPOTIFYEXIT_TO_POWERSHELL_EVENT=ACCEPTED_HOLD'
