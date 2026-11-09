@@ -1,0 +1,104 @@
+name: HOLD R22 Windows read-only managed shortcut classification
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-managed-shortcut-categories-R22-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/inspect-managed-shortcuts-R22-READONLY.ps1
+permissions: {contents: read}
+jobs:
+  classify:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Classify official managed links and divergent user link without editing originals
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $source='validation/spotify-exit-immediate-maintenance-HOLD/inspect-managed-shortcuts-R22-READONLY.ps1'
+          $tokens=$null;$parse=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $source),[ref]$tokens,[ref]$parse)
+          if(@($parse).Count -ne 0){throw 'R22_POWERSHELL_51_PARSE_FAIL'}
+          $base=Join-Path $env:RUNNER_TEMP 'spotify-r22-fixture'
+          if(Test-Path -LiteralPath $base){throw 'R22_FIXTURE_PREEXISTS'}
+          $root=Join-Path $base 'LocalAppData/SpotifyControl'
+          $bin=Join-Path $root 'bin'
+          $desk=Join-Path $base 'Desktop'
+          $menu=Join-Path $base 'StartMenu'
+          foreach($p in @($bin,$desk,$menu)){[void][IO.Directory]::CreateDirectory($p)}
+          $agent=Join-Path $bin 'spotify-control-agent.vbs'
+          $wscript=Join-Path $env:WINDIR 'System32/wscript.exe'
+          $sh=New-Object -ComObject WScript.Shell
+          $desktopLink=Join-Path $desk 'Spotify (Managed).lnk'
+          $menuLink=Join-Path $menu 'Spotify (Managed).lnk'
+          try{
+            foreach($link in @($desktopLink,$menuLink)){
+              $v=$sh.CreateShortcut($link)
+              $v.TargetPath=$wscript
+              $v.Arguments='"'+$agent+'"'
+              $v.WorkingDirectory=$bin
+              $v.Save()
+            }
+            $before=@{}
+            foreach($link in @($desktopLink,$menuLink)){
+              $before[$link]=(Get-FileHash -LiteralPath $link -Algorithm SHA256).Hash
+            }
+            $out=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $source -HostedFixtureRoot $base)
+            foreach($expected in @(
+              'DESKTOP_FOLDER_RESOLUTION=SAME',
+              'DESKTOP_LINK=PRESENT_PLAIN',
+              'DESKTOP_TARGET=SYSTEM32_WSCRIPT',
+              'DESKTOP_ARGUMENTS=EXACT_QUOTED_AGENT',
+              'DESKTOP_WORKDIR=INSTALLED_BIN',
+              'STARTMENU_TARGET=SYSTEM32_WSCRIPT',
+              'STARTMENU_ARGUMENTS=EXACT_QUOTED_AGENT',
+              'STARTMENU_WORKDIR=INSTALLED_BIN',
+              'RESULT=READONLY_SHORTCUT_CATEGORIES_COMPLETE'
+            )){
+              if($out -cnotcontains $expected){throw ('R22_OFFICIAL_LINK_CLASSIFICATION_FAILED '+$expected+' '+($out -join '|'))}
+            }
+            foreach($link in @($desktopLink,$menuLink)){
+              if((Get-FileHash -LiteralPath $link -Algorithm SHA256).Hash -cne $before[$link]){
+                throw 'R22_READONLY_MUTATED_LINK'
+              }
+            }
+            Write-Host 'R22_REAL_WINDOWS_ORIGINAL_LINK_CLASSIFIED_NO_MUTATION_PASS'
+            # Simulate one common divergent user-managed target/argument.
+            $d=$sh.CreateShortcut($desktopLink)
+            $d.TargetPath=Join-Path $env:WINDIR 'explorer.exe'
+            $d.Arguments=''
+            $d.WorkingDirectory=$root
+            $d.Save()
+            $m=$sh.CreateShortcut($menuLink)
+            $m.Arguments='//B "'+$agent+'"'
+            $m.Save()
+            $before=@{}
+            foreach($link in @($desktopLink,$menuLink)){
+              $before[$link]=(Get-FileHash -LiteralPath $link -Algorithm SHA256).Hash
+            }
+            $out=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $source -HostedFixtureRoot $base)
+            foreach($expected in @(
+              'DESKTOP_TARGET=OTHER_TARGET',
+              'DESKTOP_ARGUMENTS=EMPTY',
+              'DESKTOP_WORKDIR=APP_ROOT',
+              'STARTMENU_TARGET=SYSTEM32_WSCRIPT',
+              'STARTMENU_ARGUMENTS=AGENT_WITH_EXTRA_ARGUMENTS',
+              'STARTMENU_WORKDIR=INSTALLED_BIN',
+              'RESULT=READONLY_SHORTCUT_CATEGORIES_COMPLETE'
+            )){
+              if($out -cnotcontains $expected){throw ('R22_DIVERGENT_LINK_CLASSIFICATION_FAILED '+$expected+' '+($out -join '|'))}
+            }
+            foreach($link in @($desktopLink,$menuLink)){
+              if((Get-FileHash -LiteralPath $link -Algorithm SHA256).Hash -cne $before[$link]){
+                throw 'R22_READONLY_MUTATED_DIVERGENT_LINK'
+              }
+            }
+            if(($out -join '|') -match '(?i)spotify-r22-fixture|\.vbs|[A-Z]:\\|explorer\.exe|wscript\.exe'){
+              throw 'R22_PRIVATE_PATH_OR_ARGS_EXPORTED'
+            }
+            Write-Host 'R22_WINDOWS_DIVERGENT_LINK_CLASSIFIED_NO_MUTATION_PASS'
+          }finally{
+            if(Test-Path -LiteralPath $base){Remove-Item -LiteralPath $base -Recurse -Force}
+          }
+          Write-Host 'R22_ONLY_SYNTHETIC_TEMP_LINKS_CREATED_AND_REMOVED_PASS'
