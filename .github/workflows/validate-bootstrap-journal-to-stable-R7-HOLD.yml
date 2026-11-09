@@ -107,7 +107,7 @@ jobs:
           oldsha=tree(bin)
           assert oldsha==tree(backing)
           id='20261108-131500-cafefeed'
-          # Real R17 found an exact BEFORE restore tree that must be kept.
+          # R18 targeted retry: reproduce exact BEFORE restore tree, retain evidence.
           restore=local/('bin.spotifycontrol-restore-'+id)
           shutil.copytree(bin,restore)
           assert tree(restore)==oldsha
