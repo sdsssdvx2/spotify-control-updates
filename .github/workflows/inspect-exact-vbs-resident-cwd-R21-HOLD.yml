@@ -118,3 +118,6 @@ jobs:
             if(Test-Path -LiteralPath $scratch){Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue}
           }
           Write-Host 'R21_ONLY_HOSTED_DISPOSABLE_PROCESS_AND_FILES_USED_PASS'
+          # Handle returns 1 for the expected negative (no handle owner) probe.
+          # Do not let that informational exit code fail an otherwise proven job.
+          $global:LASTEXITCODE=0
