@@ -148,7 +148,13 @@ jobs:
             $env:APPDATA=Join-Path $fixture 'Roaming'
             function Invoke-HostedBootstrap {
               param([string]$Action)
-              $output=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $bootstrap -Action $Action -Json 2>&1)
+              $extra=@()
+              if($Action -ceq 'Rollback'){
+                # Deliberate rollback authorization ONLY for this disposable
+                # hosted synthetic transaction after COMMITTED verification.
+                $extra=@('-Force')
+              }
+              $output=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $bootstrap -Action $Action -Json @extra 2>&1)
               $code=$LASTEXITCODE
               if($code -ne 0){
                 Write-Host ('HOSTED_BOOTSTRAP_'+$Action+'_RESULT=FAILED_EXIT_'+$code)
