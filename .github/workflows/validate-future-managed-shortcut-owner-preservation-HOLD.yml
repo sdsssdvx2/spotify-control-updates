@@ -64,7 +64,7 @@ jobs:
             try{
               $item=Get-Item -LiteralPath $cmd.Source -Force -ErrorAction Stop
               Write-Host ('R32_PYTHON_ITEM_EXACT_TYPE='+$(if($item.PSIsContainer){'DIR'}else{'FILE'}))
-              $probe=@(& $cmd.Source -I -S -B -c 'import sys; print("OK" if sys.version_info >= (3,10) else "OLD")' 2>&1)
+              $probe=@(& $cmd.Source -I -S -B -c 'import sys; print(sys.version_info.major,sys.version_info.minor)' 2>&1)
               Write-Host ('R32_PYTHON_READONLY_FILETYPE='+$(if($item.PSIsContainer){'DIR'}else{'FILE'}))
               Write-Host ('R32_PYTHON_READONLY_REPARSE='+([bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)))
               Write-Host ('R32_PYTHON_READONLY_VERSION_PROBE_EXIT='+$LASTEXITCODE)
