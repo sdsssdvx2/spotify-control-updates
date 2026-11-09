@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/validate-integrated-spotifyexit-and-shortcuts-R37-HOLD.yml'
       - 'validation/spotify-exit-immediate-maintenance-HOLD/build-combined-exit-and-shortcut-R37-HOLD.py'
+      - 'validation/spotify-exit-immediate-maintenance-HOLD/stage-combined-official-transport-R38-HOLD.py'
 permissions:
   contents: read
 jobs:
@@ -65,3 +66,26 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'R37_MERGED_REAL_AGENTTICK_BEHAVIOR_FAILED'}
           Write-Host 'R37_COMBINED_SPOTIFY_EXIT_IMMEDIATE_MAINTENANCE_AND_SAFE_SHORTCUTS_PASS'
           Write-Host 'R37_PRODUCTION_RELEASE=NOT_PUBLISHED;USER_SPOTIFY=NOT_TOUCHED'
+      - name: Stage official full-file release transport from THE combined functional candidate only
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/stage-combined-official-transport-R38-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R38_COMBINED_FUTURE_FULL_FILE_STAGING_FAILED'}
+          $root='validation/spotify-exit-immediate-maintenance-HOLD/out/release-staging-combined'
+          $report=Get-Content -LiteralPath (Join-Path $root 'stage-receipt.json') -Raw | ConvertFrom-Json
+          $manifest=Get-Content -LiteralPath (Join-Path $root 'manifest-UNPUBLISHABLE.json') -Raw | ConvertFrom-Json
+          if($report.status -cne 'STAGED_HOLD_NOT_PUBLISHABLE' -or
+             $report.publishable -ne $false -or
+             $manifest.latest_version -cne '0.6.30' -or
+             [string]$manifest.source_commit -cne ('f'*40) -or
+             @($manifest.updates[-1].patches).Count -ne 2){
+            throw 'R38_FULL_FILE_MANIFEST_RELEASE_AUTHORITY_MISMATCH'
+          }
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path (Get-Location) (Join-Path $root 'bin/spotify-control.ps1')),
+            [ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R38_FINAL_FULL_FILE_MAIN_WINDOWS_PS51_PARSE_FAILED'}
+          Write-Host 'R38_TARGETED_BOOTSTRAP_FULL_FILE_STAGE_AND_UNPUBLISHED_MANIFEST_PASS'
+          Write-Host 'R38_SINGLE_FUTURE_VERSION_HAS_BOTH_USER_FACING_FEATURES_PASS'
