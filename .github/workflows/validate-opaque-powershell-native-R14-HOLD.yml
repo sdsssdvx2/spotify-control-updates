@@ -75,7 +75,7 @@ jobs:
           $tokens=$null;$errors=$null
           $ast=[Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
           if(@($errors).Count -ne 0){throw 'R15_SOURCE_PARSE_FAILED'}
-          if($text -cnotmatch "\$messages\.Add\('HOLD_STAGE='\+\$stage\)"){
+          if(-not $text.Contains('$messages.Add(''HOLD_STAGE=''+$stage)')){
             throw 'R15_FIXED_STAGE_REPORT_MISSING'
           }
           $whitelist=[regex]::Match($text,'(?s)\$allowed=@\((.*?)\)\s*if\(\$kind -cnotin \$allowed\)')
@@ -84,7 +84,7 @@ jobs:
           $failures=@([regex]::Matches($text,"(?i)\bFail\s+'([A-Z0-9_]+)'") | ForEach-Object {$_.Groups[1].Value} | Sort-Object -Unique)
           $missing=@($failures | Where-Object {$_ -cnotin $categories})
           if($missing.Count -ne 0){throw 'R15_UNLISTED_FIXED_FAILURE_ENUM'}
-          if($text -cnotmatch "if\(\$kind -cnotin \$allowed\)\{\$kind='UNVERIFIED_FAIL_CLOSED'\}"){
+          if($text -cnotmatch 'if\(\$kind -cnotin \$allowed\)\{\$kind=''UNVERIFIED_FAIL_CLOSED''\}'){
             throw 'R15_UNKNOWN_EXCEPTION_REDACTION_NOT_PRESERVED'
           }
           Write-Host 'R15_ALL_FIXED_ERROR_CATEGORIES_VISIBLE_NO_RAW_ERROR_PASS'
