@@ -12,7 +12,7 @@ $ErrorActionPreference='Stop'
 $log=New-Object 'System.Collections.Generic.List[string]'
 $log.Add('DIAGNOSTIC=SPOTIFY_R32_PUBLIC_NEXT_STABLE_ONE_APPROVAL_HOLD')
 $log.Add('PUBLISH=NO;AUTO_RETRY=NO;SCRIPT_INSTALL=NO;SHORTCUT_WRITE_BY_WRAPPER=NO')
-$stage='ADMISSION';$net='NONE';$cutover='NO';$updated='NO'
+$stage='ADMISSION';$net='NONE';$cutover='NOT_STARTED';$updated='NOT_STARTED'
 function Deny([string]$why){throw [InvalidOperationException]::new($why)}
 function Hash([byte[]]$data,[string]$alg){
   $h=[Security.Cryptography.HashAlgorithm]::Create($alg)
@@ -114,9 +114,55 @@ try{
     $owner.Commit=$true
     $owner.ApprovalPhrase=$ApprovalPhrase
   }
+  # After invoking an action-capable controller, an exception cannot imply NO.
+  $cutover='UNKNOWN';$updated='UNKNOWN'
   $receipt=@(& $r28Controller @owner)
   if($receipt -ccontains 'EXACT_INITIAL_CUTOVER_DONE=YES'){$cutover='YES'}
+  elseif($receipt -ccontains 'EXACT_INITIAL_CUTOVER_DONE=NO'){$cutover='NO'}
   if($receipt -ccontains 'OFFICIAL_UPDATE_INVOKED_SUCCESS=YES'){$updated='YES'}
+  elseif($receipt -ccontains 'OFFICIAL_UPDATE_INVOKED_SUCCESS=NO'){$updated='NO'}
+  foreach($key in @('HOLD_STAGE','HOLD_REASON')){
+    $values=@($receipt | Where-Object { [string]$_ -cmatch ('^'+$key+'=[A-Z0-9_]{1,100}
+  if($Commit){
+    foreach($line in @(
+      'RESULT=PINNED_PUBLIC_STABLE_ONESHOT_COMMITTED',
+      'OFFICIAL_POSTCHECK=PASS',
+      'NEW_RELEASE_VBS=ONE_EXACT_OWNER_RESIDENT_RUNNING',
+      'USER_SHORTCUTS_AND_STATE=BYTE_IDENTICAL')){
+      if($receipt -cnotcontains $line){Deny 'R28_PUBLIC_COMMIT_NOT_CONFIRMED'}
+    }
+    $log.Add('R28_SINGLE_APPROVED_OFFICIAL_UPDATE_AND_NEW_VBS=PASS')
+    $log.Add('RESULT=PINNED_PUBLIC_STABLE_ONESHOT_COMMITTED')
+  }else{
+    if($receipt -cnotcontains 'RESULT=READY_FOR_ONE_SHOT_APPROVED_STABLE_NO_MUTATION'){
+      Deny 'R28_READONLY_OWNER_PREFLIGHT_NOT_READY'
+    }
+    $log.Add('R28_OWNER_PREFLIGHT=PASS_READONLY')
+    $log.Add('RESULT=READY_FOR_EXPLICIT_OWNER_APPROVAL_NO_CHANGES')
+  }
+}catch{
+  $reason=[string]$_.Exception.Message
+  $known=@('WINDOWS_POWERSHELL_51_X64_REQUIRED','ONE_SHOT_OWNER_APPROVAL_REQUIRED',
+     'UNPUBLISHED_OR_UNAPPROVED_PUBLIC_RELEASE','EXISTING_PYTHON_310_REQUIRED',
+     'PINNED_SOURCE_BLOB_MISMATCH','R27_SHA256_PIN_MISMATCH',
+     'REAL_PUBLIC_RELEASE_R29_FAILED','PUBLIC_RELEASE_FACTUAL_PROOF_MISSING',
+     'PUBLIC_RELEASE_RECEIPT_COUNT_INVALID','PUBLIC_RELEASE_RECEIPT_SIZE_INVALID',
+     'R28_PUBLIC_COMMIT_NOT_CONFIRMED','R28_READONLY_OWNER_PREFLIGHT_NOT_READY')
+  if($reason -cnotin $known){$reason='UNVERIFIED_INTERNAL_OR_WINDOWS_ERROR'}
+  $log.Add('HOLD_STAGE='+$stage)
+  $log.Add('HOLD_REASON='+$reason)
+  $log.Add('RESULT=HOLD_NO_AUTOMATIC_RETRY')
+}finally{
+  $log.Add('R28_OWNER_CUTOVER_OBSERVED='+$cutover)
+  $log.Add('OFFICIAL_UPDATE_SUCCESS_OBSERVED='+$updated)
+  $log.Add('NETWORK='+$net)
+  $log.Add('RAW_PATHS_SECRETS_AND_PROCESS_IDS_EXPORTED=NO')
+  try{Set-Clipboard -Value ($log -join [Environment]::NewLine) -ErrorAction Stop}catch{}
+  $log | ForEach-Object {Write-Output $_}
+}
+) })
+    if($values.Count -eq 1){$log.Add('R28_'+[string]$values[0])}
+  }
   if($Commit){
     foreach($line in @(
       'RESULT=PINNED_PUBLIC_STABLE_ONESHOT_COMMITTED',
