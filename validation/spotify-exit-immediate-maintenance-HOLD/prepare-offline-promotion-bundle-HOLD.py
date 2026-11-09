@@ -27,7 +27,7 @@ ROOT=Path(__file__).resolve().parents[2]
 HERE=Path(__file__).resolve().parent
 STAGE=HERE/"out"/"release-staging"
 BASE_MAIN="d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2"
-SCRATCH=Path(os.environ.get("RUNNER_TEMP","/invalid")).resolve()/"spotify-future-two-commit-provenance"
+SCRATCH=Path(os.environ.get("RUNNER_TEMP","/invalid")).resolve()/"spotify-v0630-main-parent-promotion-review"
 OUTPUT=HERE/"out"/"promotion-review-HOLD"
 CHUNKS=20
 BRANCH="hold-v0630-promotion"
@@ -64,8 +64,10 @@ def run():
         fail("HOLD_DEVELOPMENT_BRANCH_REQUIRED")
     if git("status","--porcelain","--","manifest.json","packages/"):
         fail("PUBLIC_TRACKED_OR_PACKAGE_PATHS_MODIFIED")
-    if SCRATCH.exists() or OUTPUT.exists():
-        fail("PROMOTION_REVIEW_ALREADY_EXISTS_NO_OVERWRITE")
+    if SCRATCH.exists():
+        fail("PROMOTION_SCRATCH_ALREADY_EXISTS_NO_OVERWRITE")
+    if OUTPUT.exists():
+        fail("PROMOTION_OUTPUT_ALREADY_EXISTS_NO_OVERWRITE")
     old_raw=canonical_file(ROOT/"manifest.json")
     old=json.loads(old_raw.decode("utf-8-sig"))
     stage=json.loads(canonical_file(STAGE/"manifest-UNPUBLISHABLE.json").decode("ascii"))
@@ -134,6 +136,12 @@ def run():
         # Reuse the existing real git SHA + compressed bytes proof, rather
         # than implementing a parallel transport checker.
         module=runpy.run_path(str(HERE/"verify-two-commit-future-release-HOLD.py"))
+        # Synthetic rehearsal uses its own fixed directory. The new review
+        # promotion MUST use a distinct scratch, even if old Windows temp
+        # cleanup left a locked item. Bind both the helper's default cwd and
+        # module globals to the isolated review worktree.
+        module["git"].__defaults__=(SCRATCH,)
+        module["attest"].__globals__["SCRATCH"]=SCRATCH
         attest=module["attest"]
         attest(candidate,source_commit,final_commit)
         manifest_sha=sha(manifest_raw)
