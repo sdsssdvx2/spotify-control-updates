@@ -171,6 +171,8 @@ try{
       $messages.Add('HOSTED_CAPTURE_CMD='+$(if($raw -match '(?i)cmd\.exe,\s*[0-9]+,'){'YES'}else{'NO'}))
       $messages.Add('HOSTED_CAPTURE_BIN='+$(if($raw.Contains($bin)){'YES'}else{'NO'}))
       $messages.Add('HOSTED_CAPTURE_ESCAPE_PATH='+$(if($raw.Contains('SpotifyControl')){'YES'}else{'NO'}))
+      $messages.Add('HOSTED_CSV_HEADER_REGEX='+$(if([regex]::IsMatch($raw,'(?m)^\\s*[A-Za-z0-9_.-]+\\.exe\\s*,\\s*[0-9]{1,10}\\s*,')){'YES'}else{'NO'}))
+      $messages.Add('HOSTED_FULL_PATH_REGEX='+$(if([regex]::IsMatch($raw,'(?i)'+[regex]::Escape($bin)+'(?:\\\\|,|$)')){'YES'}else{'NO'}))
     }
     $categories=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
     $owners=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
