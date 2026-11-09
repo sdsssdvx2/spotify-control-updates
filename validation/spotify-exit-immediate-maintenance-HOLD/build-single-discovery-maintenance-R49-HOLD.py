@@ -88,7 +88,18 @@ def change_maintain(chunk:str)->str:
     # Spotify/Spicetify/Marketplace/CustomApp targets and is safe while Spotify runs.
     $check = Invoke-MaintenanceCheckPhase -State $State
     $State = Ensure-StateShape $check.State""",
-        """    Save-State $State
+        """    # A concurrent owner disarm or another state/health invalidation
+    # between AgentTick discovery and the Maintenance mutex must not cause
+    # even a second network check, much less an automatic mutation.
+    if ($FromResidentAgent -and
+        (-not [bool]$State.agent_mutation_enabled -or
+         -not [bool]$State.pending_maintenance -or
+         $State.maintenance_check_healthy -ne $true -or
+         [int]$State.pending_addon_auto_ambiguous -gt 0)) {
+        Write-Log "Resident maintenance deferred at mutex: owner disarmed or discovery not healthy." "WARN"
+        return
+    }
+    Save-State $State
 
     # Independent manual/Launch calls always discover as before. The agent
     # can reuse only the result of its own most recent check. Any mismatch
