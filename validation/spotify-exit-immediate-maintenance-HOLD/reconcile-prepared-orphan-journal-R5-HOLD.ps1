@@ -44,6 +44,18 @@ function Field($o,[string]$name){
   if($null -eq $p){return $null}
   return $p.Value
 }
+# Decode a raw, hash-pinned transaction snapshot like R4's ReadAllText,
+# including an optional BOM. Never read the live path a second time: callers
+# must authenticate/archive the SAME original bytes they parsed.
+function ParseExactSnapshotJson([byte[]]$Raw) {
+  $memory=[IO.MemoryStream]::new($Raw,$false)
+  try {
+    $reader=[IO.StreamReader]::new($memory,[Text.Encoding]::UTF8,$true)
+    try{$json=$reader.ReadToEnd()}
+    finally{$reader.Dispose()}
+  }finally{$memory.Dispose()}
+  return ($json|ConvertFrom-Json -ErrorAction Stop)
+}
 function ExactPath([string]$Current,[string]$Expected){
   if([string]::IsNullOrWhiteSpace($Current)){return $false}
   try{return [IO.Path]::GetFullPath($Current).TrimEnd('\','/').Equals(
@@ -127,7 +139,7 @@ function Probe([string]$Root,[string]$ExpectedId='') {
   if(-not(ReparseFreePath $Root $transaction)){Fail 'TRANSACTION_PATH_UNSAFE'}
   if($null -eq (FileInfo $transaction 1048576)){Fail 'TRANSACTION_UNREADABLE'}
   [byte[]]$original=[IO.File]::ReadAllBytes($transaction)
-  try{$doc=([Text.Encoding]::UTF8.GetString($original)|ConvertFrom-Json -ErrorAction Stop)}
+  try{$doc=ParseExactSnapshotJson $original}
   catch{Fail 'TRANSACTION_JSON_UNREADABLE'}
   # R11 replay-admission recognizes our OWN previously reconciled journal
   # only when the exact original PREPARED bytes are still in immutable escrow.
@@ -172,7 +184,7 @@ function Probe([string]$Root,[string]$ExpectedId='') {
     if(-not(ReparseFreePath $Root $escrow)){Fail 'PREVIOUS_ESCROW_PATH_UNSAFE'}
     if($null -eq (FileInfo $escrow 1048576)){Fail 'PREVIOUS_ESCROW_NOT_FOUND'}
     [byte[]]$prevBytes=[IO.File]::ReadAllBytes($escrow)
-    try{$prev=([Text.Encoding]::UTF8.GetString($prevBytes)|ConvertFrom-Json -ErrorAction Stop)}
+    try{$prev=ParseExactSnapshotJson $prevBytes}
     catch{Fail 'PREVIOUS_ESCROW_UNREADABLE'}
     if([string](Field $prev 'status') -cne 'prepared' -or
        [string](Field $prev 'id') -cne $id -or
@@ -230,7 +242,7 @@ function FindVerifiedPriorPreparedEscrow([string]$Root,[string]$CurrentId,
       Fail 'PREVIOUS_ORIGINAL_ESCROW_UNSAFE'
     }
     [byte[]]$bytes=[IO.File]::ReadAllBytes($candidate)
-    try{$archived=[Text.Encoding]::UTF8.GetString($bytes)|ConvertFrom-Json -ErrorAction Stop}
+    try{$archived=ParseExactSnapshotJson $bytes}
     catch{Fail 'PREVIOUS_ORIGINAL_ESCROW_UNREADABLE'}
     if([string](Field $archived 'id') -cne $d.Name -or
        [string](Field $archived 'status') -cne 'prepared' -or
