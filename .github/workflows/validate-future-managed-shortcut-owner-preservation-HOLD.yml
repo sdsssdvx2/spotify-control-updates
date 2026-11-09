@@ -259,6 +259,16 @@ jobs:
               HostedExpectedMainSHA256=[string]$expect.future_main_sha256
               HostedExpectedAgentSHA256=[string]$expect.future_agent_sha256
             }
+            # No next-stable release has been published. Even an explicit
+            # -Commit authorization without independent public pins must NOT
+            # touch the real profile or enter the hosted process cutover.
+            $unpublished=@(& $driver -PinnedR27Source $r27Bytes -Commit -ApprovalPhrase 'APPROVE_EXACT_OWNER_CUTOVER_AND_ONE_STABLE_UPDATE')
+            if($unpublished -cnotcontains 'HOLD_REASON=PUBLIC_RELEASE_INDEPENDENT_PINS_REQUIRED' -or
+               $unpublished -cnotcontains 'EXACT_INITIAL_CUTOVER_DONE=NO' -or
+               -not $oldResident -or $oldResident.HasExited){
+              throw ('R31_UNPUBLISHED_PUBLIC_OWNER_PATH_WAS_NOT_BLOCKED '+($unpublished -join '|'))
+            }
+            Write-Host 'R31_UNPUBLISHED_PUBLIC_RELEASE_OWNER_APPROVAL_DENIED_BEFORE_CUTOVER_PASS'
             $wrongReleaseFacts=($syntheticFacts | ConvertFrom-Json)
             $wrongReleaseFacts.manifest_sha256=('0'*64)
             $tamperedArgs=$r28Args.Clone()
