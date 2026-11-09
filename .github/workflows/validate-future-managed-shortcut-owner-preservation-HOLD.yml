@@ -213,6 +213,44 @@ jobs:
               throw 'HOSTED_BOOTSTRAP_USER_DATA_OR_CUSTOM_SHORTCUT_MODIFIED'
             }
             Write-Host 'FUTURE_OFFICIAL_BOOTSTRAP_LOCALHOST_EXACT_ROLLBACK_AND_USER_DATA_PRESERVATION_PASS'
+            # One bounded negative: corrupt the bytes of exactly ONE hosted
+            # base64 chunk. The real official Bootstrap must reject its hash
+            # and preserve the already restored original bin and owner data.
+            $m=Get-Content -LiteralPath (Join-Path $fixture 'loopback-source/manifest.json') -Raw | ConvertFrom-Json
+            $edges=@($m.updates)
+            $lastEdge=$edges[$edges.Count-1]
+            $mainPatch=@($lastEdge.patches | Where-Object { $_.path -ceq 'bin/spotify-control.ps1' })
+            if($mainPatch.Count -ne 1){throw 'HOSTED_CORRUPT_CHUNK_MAIN_PATCH_NOT_UNIQUE'}
+            $chunkRel=[string]$mainPatch[0].chunks[0].path
+            $mirror=Join-Path $fixture ('loopback-source/sdsssdvx2/spotify-control-updates/'+('e'*40))
+            $chunkFile=Join-Path $mirror $chunkRel.Replace('/','\')
+            [byte[]]$chunkBytes=[IO.File]::ReadAllBytes($chunkFile)
+            if($chunkBytes.Length -lt 8){throw 'HOSTED_CORRUPT_CHUNK_UNEXPECTED_SIZE'}
+            $chunkBytes[0]=if($chunkBytes[0] -eq [byte][char]'A') {[byte][char]'B'} else {[byte][char]'A'}
+            [IO.File]::WriteAllBytes($chunkFile,$chunkBytes)
+            $invalidOut=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $bootstrap -Action Update -Json 2>&1)
+            $invalidExit=$LASTEXITCODE
+            if($invalidExit -eq 0 -or $invalidOut.Count -lt 1){
+              throw 'HOSTED_CORRUPTED_CHUNK_WAS_INCORRECTLY_ACCEPTED'
+            }
+            try{$failedDoc=$invalidOut[-1]|ConvertFrom-Json -ErrorAction Stop}
+            catch{throw 'HOSTED_CORRUPTED_CHUNK_FAILURE_NOT_TYPED_JSON'}
+            if($failedDoc.success -ne $false -or
+               [string]$failedDoc.error -notmatch '(?i)chunk.*sha-256.*mismatch'){
+              throw 'HOSTED_CORRUPTED_CHUNK_NOT_SHA_REJECTED'
+            }
+            $stillRolled=Get-Content -LiteralPath $txnPath -Raw|ConvertFrom-Json
+            if([string]$stillRolled.status -cne 'rolled-back' -or
+               (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expect.original_main_sha256 -or
+               (Get-FileHash $agent -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expect.original_agent_sha256 -or
+               (Get-FileHash $addon -Algorithm SHA256).Hash -cne $addonBefore -or
+               (Get-FileHash $state -Algorithm SHA256).Hash -cne $beforeState -or
+               (Get-FileHash $sentinel -Algorithm SHA256).Hash -cne $beforeSentinel -or
+               (Get-FileHash $link -Algorithm SHA256).Hash -cne $linkHash -or
+               (Get-FileHash $otherVbs -Algorithm SHA256).Hash -cne $vbsHash){
+              throw 'HOSTED_CORRUPTED_CHUNK_CHANGED_ORIGINAL_OR_OWNER_DATA'
+            }
+            Write-Host 'FUTURE_OFFICIAL_BOOTSTRAP_CORRUPT_CHUNK_REJECTED_ORIGINAL_AND_OWNER_DATA_UNCHANGED_PASS'
           } finally {
             $env:LOCALAPPDATA=$localBefore
             $env:APPDATA=$roamingBefore
