@@ -234,7 +234,22 @@ jobs:
             $driver=[ScriptBlock]::Create([Text.Encoding]::ASCII.GetString($r28Bytes))
             $manifestFile=Join-Path $fixture 'loopback-source/manifest.json'
             $manifestSha=(Get-FileHash -LiteralPath $manifestFile -Algorithm SHA256).Hash.ToLowerInvariant()
+            $syntheticFacts=[ordered]@{
+              schema='SPOTIFY_R30_PUBLIC_RELEASE_FACTS_V1'
+              status='HOSTED_SYNTHETIC_SOURCE_ONLY_NOT_PUBLIC_VERIFIED'
+              from_version='0.6.28'
+              to_version='0.6.30'
+              source_commit=('f'*40)
+              manifest_sha256=$manifestSha
+              payload_set_sha256=[string]$expect.future_payload_set_sha256
+              bootstrap_sha256=[string]$expect.bootstrap_locator_only_copy_sha256
+              main_sha256=[string]$expect.future_main_sha256
+              agent_sha256=[string]$expect.future_agent_sha256
+              addon_sha256='5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285'
+              chunk_count=20
+            } | ConvertTo-Json -Compress
             $r28Args=@{
+              PinnedReleaseFactsJson=$syntheticFacts
               HostedFixtureRoot=$fixture
               PinnedR27Source=$r27Bytes
               HostedExpectedManifestSHA256=$manifestSha
@@ -242,6 +257,17 @@ jobs:
               HostedExpectedMainSHA256=[string]$expect.future_main_sha256
               HostedExpectedAgentSHA256=[string]$expect.future_agent_sha256
             }
+            $wrongReleaseFacts=($syntheticFacts | ConvertFrom-Json)
+            $wrongReleaseFacts.manifest_sha256=('0'*64)
+            $tamperedArgs=$r28Args.Clone()
+            $tamperedArgs.PinnedReleaseFactsJson=($wrongReleaseFacts | ConvertTo-Json -Compress)
+            $notAdmitted=@(& $driver @tamperedArgs -Commit -ApprovalPhrase 'APPROVE_EXACT_OWNER_CUTOVER_AND_ONE_STABLE_UPDATE')
+            if($notAdmitted -cnotcontains 'HOLD_REASON=RELEASE_SOURCE_FACTS_NOT_BOUND_TO_MANIFEST_AND_PAYLOAD' -or
+               $notAdmitted -cnotcontains 'EXACT_INITIAL_CUTOVER_DONE=NO' -or
+               -not $oldResident -or $oldResident.HasExited){
+              throw ('R30_FACTUAL_ADMISSION_TAMPER_NOT_REJECTED '+($notAdmitted -join '|'))
+            }
+            Write-Host 'R30_MISMATCHED_RELEASE_SOURCE_FACTS_DENIED_BEFORE_PROCESS_CUTOVER_PASS'
             $plan=@(& $driver @r28Args)
             if($plan -cnotcontains 'RESULT=READY_FOR_ONE_SHOT_APPROVED_STABLE_NO_MUTATION' -or
                $plan -cnotcontains 'EXACT_INITIAL_CUTOVER_DONE=NO' -or
@@ -261,7 +287,8 @@ jobs:
                $receipt -cnotcontains 'NEW_RELEASE_VBS=ONE_EXACT_OWNER_RESIDENT_RUNNING' -or
                $receipt -cnotcontains 'OFFICIAL_MAIN_AND_RESIDENT_VBS=STABLE_COMMITTED_PINNED' -or
                $receipt -cnotcontains 'OFFICIAL_POSTCHECK=PASS' -or
-               $receipt -cnotcontains 'USER_SHORTCUTS_AND_STATE=BYTE_IDENTICAL'){
+               $receipt -cnotcontains 'USER_SHORTCUTS_AND_STATE=BYTE_IDENTICAL' -or
+               $receipt -cnotcontains 'R30_RELEASE_SOURCE_FACTS=EXACT_HOSTED_UNPUBLISHED_ONLY'){
               throw ('R28_SINGLE_APPROVED_DRIVER_NOT_COMMITTED '+($receipt -join '|'))
             }
             if(-not $oldResident.HasExited){throw 'R28_OLD_AGENT_NOT_TERMINATED'}
