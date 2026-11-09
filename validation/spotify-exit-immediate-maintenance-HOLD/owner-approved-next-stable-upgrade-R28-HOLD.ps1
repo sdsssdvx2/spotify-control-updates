@@ -21,6 +21,7 @@ $phase='INITIAL'
 $mutexes=New-Object 'System.Collections.Generic.List[System.Threading.Mutex]'
 $cutoverDone=$false
 $updateCommitted=$false
+$oldNeutralEnded=$false
 $newVersionProcess=$null
 $finished=$false
 $links=@{}
@@ -308,6 +309,7 @@ try{
          [int]$oldNeutral.ProcessId,$oldNeutralCreation.ToUniversalTime().ToFileTimeUtc(),$wscript)){
       StopNow 'OLD_NEUTRAL_RESIDENT_TERMINATION_UNVERIFIED'
     }
+    $oldNeutralEnded=$true
     $phase='VERIFY_ONE_NEW_RESIDENT_AND_OWNER_DATA'
     $one=OneExactResident $agent $wscript
     if([int]$one.ProcessId -ne [int]$newVersionProcess.Id -or $newVersionProcess.HasExited){
@@ -354,16 +356,23 @@ try{
   # Win32 identity, if final handoff was NOT completed and a former
   # known resident may still be active. Never stop a foreign process.
   if(-not $finished -and $null -ne $newVersionProcess -and -not $newVersionProcess.HasExited){
-    try{
-      $p=OwnerProcess ([int]$newVersionProcess.Id)
-      if($null -ne $p -and
-         (Same ([string]$p.ExecutablePath) (Join-Path $env:WINDIR 'System32\wscript.exe')) -and
-         (Same (VbsArg ([string]$p.CommandLine)) $agent)){
-        [void][SpotifyR27VerifiedProcessEnd]::TerminateOnlyExact(
-          [int]$p.ProcessId,([datetime]$p.CreationDate).ToUniversalTime().ToFileTimeUtc(),
-          (Join-Path $env:WINDIR 'System32\wscript.exe'))
-      }
-    }catch{}
+    if($oldNeutralEnded){
+      # Never leave the owner WITHOUT a resident merely because a late
+      # receipt/state validation failed after the old agent was already
+      # terminated. Continue HOLD/no retries; preserve the exact new one.
+      $log.Add('NEW_RELEASE_RESIDENT=RETAINED_AFTER_OLD_RESIDENT_ENDED_HOLD')
+    }else{
+      try{
+        $p=OwnerProcess ([int]$newVersionProcess.Id)
+        if($null -ne $p -and
+           (Same ([string]$p.ExecutablePath) (Join-Path $env:WINDIR 'System32\wscript.exe')) -and
+           (Same (VbsArg ([string]$p.CommandLine)) $agent)){
+          [void][SpotifyR27VerifiedProcessEnd]::TerminateOnlyExact(
+            [int]$p.ProcessId,([datetime]$p.CreationDate).ToUniversalTime().ToFileTimeUtc(),
+            (Join-Path $env:WINDIR 'System32\wscript.exe'))
+        }
+      }catch{}
+    }
   }
   for($i=$mutexes.Count-1;$i -ge 0;$i--){
     try{$mutexes[$i].ReleaseMutex()}catch{}
