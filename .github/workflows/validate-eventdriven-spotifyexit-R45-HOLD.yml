@@ -1,0 +1,51 @@
+name: HOLD R45 near-immediate WMI Spotify stop event versus original 68s lag
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-eventdriven-spotifyexit-R45-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/build-eventdriven-vbs-R45-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/run-eventdriven-real-exit-R45-HOLD.py
+permissions: {contents: read}
+jobs:
+  real-event-driven-spotifyexit:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Build R37 verified functional main and R45 candidate VBS with event subscription fallback
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R45_PUBLIC_MAIN_BASE_CHANGED'
+          }
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-combined-exit-and-shortcut-R37-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R45_R37_CANDIDATE_SOURCE_REBUILD_FAILED'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-eventdriven-vbs-R45-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R45_EVENT_DRIVEN_VBS_CONSTRUCTION_FAILED'}
+          $receipt=Get-Content -LiteralPath 'validation/spotify-exit-immediate-maintenance-HOLD/out/eventdriven-r45/receipt.json' -Raw|ConvertFrom-Json
+          $vbs='validation/spotify-exit-immediate-maintenance-HOLD/out/eventdriven-r45/spotify-control-agent.vbs'
+          if($receipt.mode -cne 'R45_WMI_STOP_EVENT_HOLD_NOT_PUBLISHED' -or
+             (Get-FileHash -LiteralPath $vbs -Algorithm SHA256).Hash.ToLowerInvariant() -cne $receipt.new_event_driven_vbs_sha256 -or
+             [bool]$receipt.publication_authorized -or
+             [bool]$receipt.production_source_changed -or
+             [bool]$receipt.agent_mutation_authority_changed){
+            throw 'R45_WMI_EVENT_BINARY_OR_HOLD_SCOPE_INVALID'
+          }
+          Write-Host 'R45_EVENT_DRIVEN_REAL_VBS_EXACT_SOURCE_AND_FALLBACK_PIN=PASS'
+      - name: Real Windows WMI stop event and actual WScript to PowerShell in at most 12 seconds
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/run-eventdriven-real-exit-R45-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R45_REAL_EVENT_SCRIPT_PREPARATION_FAILED'}
+          $test=Join-Path $env:RUNNER_TEMP 'spotify-r45-eventdriven-real-exit.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($test,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R45_NATIVE_POWERSHELL_SYNTAX_INVALID'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test
+          if($LASTEXITCODE -ne 0){throw 'R45_REAL_WMI_STOP_EVENT_VBS_TEST_FAILED'}
+          Write-Host 'R45_ACTUAL_SPOTIFY_STOP_TRACE_TO_REAL_VBS_TO_POWERSHELL=FAST_PASS'
+          Remove-Item -LiteralPath $test -Force -ErrorAction SilentlyContinue
