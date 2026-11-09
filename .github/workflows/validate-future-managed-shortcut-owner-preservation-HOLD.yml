@@ -58,6 +58,19 @@ jobs:
           # Unlike the previous no-pin fast gate, this exercises the actual
           # immutable source fetch and R29 standard-library Python stdin
           # verifier. It still cannot trigger R28 because public SHA is false.
+          $pyCommands=@(Get-Command python.exe -All -CommandType Application -ErrorAction SilentlyContinue)
+          Write-Host ('R32_PYTHON_DISCOVERY_APPS='+$pyCommands.Count)
+          foreach($cmd in $pyCommands){
+            try{
+              $item=Get-Item -LiteralPath $cmd.Source -Force -ErrorAction Stop
+              $probe=@(& $cmd.Source -I -S -B -c 'import sys; print("OK" if sys.version_info >= (3,10) else "OLD")' 2>&1)
+              Write-Host ('R32_PYTHON_READONLY_FILETYPE='+(if($item.PSIsContainer){'DIR'}else{'FILE'}))
+              Write-Host ('R32_PYTHON_READONLY_REPARSE='+([bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)))
+              Write-Host ('R32_PYTHON_READONLY_VERSION_PROBE_EXIT='+$LASTEXITCODE)
+              Write-Host ('R32_PYTHON_READONLY_VERSION_PROBE_COUNT='+$probe.Count)
+              if($probe.Count -eq 1){Write-Host ('R32_PYTHON_READONLY_VERSION_PROBE_MARKER='+([string]$probe[0]))}
+            }catch{Write-Host 'R32_PYTHON_READONLY_VERSION_PROBE_ERROR_CLASS=REDACTED'}
+          }
           $fake=@(& $r32 -Commit -ApprovalPhrase 'APPROVE_EXACT_OWNER_CUTOVER_AND_ONE_STABLE_UPDATE' -ApprovedPublicManifestSHA256 ('0'*64) -ApprovedPublicSourceCommit ('1'*40))
           if($fake -cnotcontains 'IMMUTABLE_R27_R28_R29_TOOL_BYTES=PINNED' -or
              $fake -cnotcontains 'HOLD_STAGE=R29_REAL_PUBLIC_RELEASE_VERIFY' -or
