@@ -79,14 +79,15 @@ jobs:
             & $block
             if((Get-FileHash $menuLink -Algorithm SHA256).Hash -cne $originalMenu){throw 'FUTURE_SHORTCUT_CUSTOM_OTHER_VBS_MODIFIED'}
             if((Get-FileHash $foreignVbs -Algorithm SHA256).Hash -cne $originalUserScript){throw 'FUTURE_SHORTCUT_CUSTOM_SCRIPT_MODIFIED'}
-            $new=$shell.CreateShortcut($deskLink)
-            if(-not [string]::Equals([string]$new.WorkingDirectory,$Root,[StringComparison]::OrdinalIgnoreCase) -or
-               -not [string]::Equals([string]$new.TargetPath,$wscript,[StringComparison]::OrdinalIgnoreCase) -or
-               [string]$new.Arguments -cne ('"'+$installedVbs+'"')){
-              throw 'FUTURE_SHORTCUT_NEW_OFFICIAL_NOT_NEUTRAL'
+            if(Test-Path -LiteralPath $deskLink){
+              throw 'FUTURE_SHORTCUT_RECREATED_DELETED_DESKTOP_LINK'
             }
-            Write-Host 'FUTURE_SAFE_CUSTOM_VBS_STARTMENU_BYTE_IDENTICAL_AND_NEW_OFFICIAL_CWD_NEUTRAL_PASS'
+            Write-Host 'FUTURE_SAFE_CUSTOM_VBS_AND_ABSENT_DESKTOP_BYTE_PRESERVED_PASS'
+            # Provide an existing exact canonical old shortcut to validate
+            # same-volume one-time migration without creating a missing user link.
             $d=$shell.CreateShortcut($deskLink)
+            $d.TargetPath=$wscript
+            $d.Arguments='"'+$installedVbs+'"'
             $d.WorkingDirectory=$installedBin
             $d.Save()
             $previousOfficial=(Get-FileHash $deskLink -Algorithm SHA256).Hash
@@ -117,6 +118,24 @@ jobs:
               throw 'FUTURE_SHORTCUT_CUSTOM_OFFICIAL_WORKDIR_NOT_PRESERVED'
             }
             Write-Host 'FUTURE_SAFE_OWNER_CUSTOM_WORKDIR_PRESERVED_PASS'
+            # Fresh initial setup with neither link must still create both.
+            $freshDesk=Join-Path $sandbox 'FreshDesktop'
+            $freshMenu=Join-Path $sandbox 'FreshStartMenu'
+            foreach($dir in @($freshDesk,$freshMenu)){[void][IO.Directory]::CreateDirectory($dir)}
+            $managedTargets=@(
+              (Join-Path $freshDesk 'Spotify (Managed).lnk'),
+              (Join-Path $freshMenu 'Spotify (Managed).lnk')
+            )
+            & $block
+            foreach($newLink in $managedTargets){
+              if(-not(Test-Path -LiteralPath $newLink)){throw 'FUTURE_SHORTCUT_FRESH_INSTALL_MISSING_LINK'}
+              $check=$shell.CreateShortcut($newLink)
+              if(-not [string]::Equals([string]$check.WorkingDirectory,$Root,[StringComparison]::OrdinalIgnoreCase) -or
+                 [string]$check.Arguments -cne ('"'+$installedVbs+'"')){
+                throw 'FUTURE_SHORTCUT_FRESH_INSTALL_NOT_NEUTRAL'
+              }
+            }
+            Write-Host 'FUTURE_SAFE_BOTH_ABSENT_FRESH_INSTALL_NEUTRAL_DEFAULT_LINKS_PASS'
           }finally{
             Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction SilentlyContinue
           }
