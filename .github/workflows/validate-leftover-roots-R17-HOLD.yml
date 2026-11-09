@@ -1,0 +1,116 @@
+name: HOLD R17 exact leftover root forensic inventory
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-leftover-roots-R17-HOLD.yml
+permissions: {contents: read}
+jobs:
+  read-only:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build synthetic PREPARED fixture with mixed old, empty, and nonempty leftover roots
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          import os,hashlib,json,shutil
+          from pathlib import Path
+          base=Path(os.environ['RUNNER_TEMP'])/'spotify-r17-fixture'
+          if base.exists():raise RuntimeError('SCRATCH_COLLISION')
+          root=base/'LocalAppData'/'SpotifyControl'
+          root.mkdir(parents=True)
+          def populate(p,entries):
+              p.mkdir(parents=True)
+              for name,data in entries.items():(p/name).write_bytes(data)
+          data={'spotify-control.ps1':b'canonical-before-file','empty.txt':b''}
+          populate(root/'bin',data)
+          txnid='20261108-131500-cafefeed'
+          backup=root/'backups'/'self-update-transactions'/txnid/'bin'
+          populate(backup,data)
+          new=root/('bin.spotifycontrol-new-'+txnid);new.mkdir()
+          restore=root/('bin.spotifycontrol-restore-'+txnid);populate(restore,data)
+          failed=root/('bin.spotifycontrol-failed-'+txnid);populate(failed,{'failed.marker':b'opaque different data'})
+          def tree(p):
+              rows=[]
+              for entry in p.rglob('*'):
+                  rel=entry.relative_to(p).as_posix().lower()
+                  if entry.is_dir():rows.append('D|'+rel)
+                  else:
+                      b=entry.read_bytes()
+                      rows.append('F|'+rel+'|'+str(len(b))+'|'+hashlib.sha256(b).hexdigest())
+              return hashlib.sha256(('\n'.join(sorted(rows))+'\n').encode()).hexdigest()
+          before=tree(root/'bin')
+          assert before==tree(backup)==tree(restore)
+          record=dict(schema=1,id=txnid,status='prepared',
+            before_version='0.6.20',after_version='0.6.28',
+            source_commit='bb6d90146f20b73d36fbf8cb813f1b190f403c48',
+            payload_set_sha256='4be96c5d41c2160ed9ac96001b469998595629232929b82c8b0f34b11fda3b43',
+            before_tree_sha256=before,after_tree_sha256='f'*64,
+            backup_bin=str(backup),
+            same_dir_new=str(new),
+            same_dir_old=str(root/('bin.spotifycontrol-old-'+txnid)))
+          (root/'self-update-last-transaction.json').write_bytes(
+            b'\xef\xbb\xbf'+json.dumps(record,separators=(',',':')).encode('utf-8'))
+          def snapshot():
+              return {str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest()
+                      for p in root.rglob('*') if p.is_file()}
+          (base/'before.json').write_text(json.dumps(snapshot(),sort_keys=True))
+          print('R17_SYNTHETIC_ROOT_FIXTURE_READY')
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'R17_FIXTURE_SETUP_FAILED'}
+      - name: Check actual R17 PowerShell 5.1 source and all read-only root classifications
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/inspect-leftover-roots-R17-READONLY.ps1'
+          $ast=[Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path $script),[ref]$null,[ref]$null)
+          $token=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path $script),[ref]$token,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R17_PS51_PARSE_FAILED'}
+          $fixture=Join-Path $env:RUNNER_TEMP 'spotify-r17-fixture'
+          $output=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture)
+          foreach($line in @(
+            'TRANSACTION_STATUS=PREPARED;LINEAGE=EXACT',
+            'TRANSACTION_BOM=UTF8_PRESENT',
+            'LIVE=EXACT_TRANSACTION_BEFORE_TREE',
+            'BACKUP=EXACT_TRANSACTION_BEFORE_TREE',
+            'NEW=EMPTY_PLAIN_DIRECTORY_PRESERVE',
+            'OLD=ABSENT',
+            'RESTORE=EXACT_TRANSACTION_BEFORE_TREE',
+            'FAILED=NONEMPTY_UNMATCHED_TREE_PRESERVE',
+            'TRANSACTION_STABLE_DURING_AUDIT=YES',
+            'RESULT=READONLY_LEFTOVER_INVENTORY_COMPLETE',
+            'RAW_PATHS_IDS_CONTENTS_AND_ERRORS_EXPORTED=NO'
+          )){
+            if($output -cnotcontains $line){throw ('R17_EXPECTED_CLASSIFICATION_MISSING: '+$line+' OUTPUT='+($output -join '|'))}
+          }
+          $privatePattern='20261108-131500-cafefeed|C:\\Users\\|RUNNER_TEMP|opaque different data'
+          if(($output -join '|') -match $privatePattern){throw 'R17_PRIVATE_CONTENT_EXPORTED'}
+          Write-Host 'R17_WINDOWS_PS51_ALL_FOUR_ROOTS_CORRECTLY_CLASSIFIED_PASS'
+          Write-Host 'R17_BOM_TRANSACTION_AND_READONLY_POLICY_PASS'
+      - name: Prove no fixture mutation and clean disposable scratch
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $fixture=Join-Path $env:RUNNER_TEMP 'spotify-r17-fixture'
+          if(Test-Path -LiteralPath $fixture){
+            @'
+            import hashlib,json,os
+            from pathlib import Path
+            base=Path(os.environ['RUNNER_TEMP'])/'spotify-r17-fixture'
+            root=base/'LocalAppData'/'SpotifyControl'
+            before=json.loads((base/'before.json').read_text())
+            after={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest()
+                   for p in root.rglob('*') if p.is_file()}
+            assert after==before,'R17_INSPECTION_MUTATED_FIXTURE'
+            print('R17_FULL_ROOT_FILE_SET_BYTE_SHA_UNCHANGED_PASS')
+            '@ | python -
+            if($LASTEXITCODE -ne 0){throw 'R17_ROOT_MUTATION_DETECTED'}
+            Remove-Item -LiteralPath $fixture -Force -Recurse
+          }
