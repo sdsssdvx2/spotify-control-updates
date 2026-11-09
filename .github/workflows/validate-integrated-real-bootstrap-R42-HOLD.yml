@@ -1,0 +1,62 @@
+name: HOLD R42 true Bootstrap v106 on fully combined SpotifyExit and shortcuts payload
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-integrated-real-bootstrap-R42-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/accept-combined-official-bootstrap-R42-HOLD.ps1
+permissions: {contents: read, actions: read}
+jobs:
+  real-hosted-bootstrap-integration:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Reproduce exact R37 functionally combined main and R38 full-file patch bytes
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R42_PUBLIC_MAIN_CHANGED'
+          }
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-combined-exit-and-shortcut-R37-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R42_CANONICAL_FUNCTIONAL_MERGE_REBUILD_FAILED'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/stage-combined-official-transport-R38-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R42_R38_RELEASE_FULL_FILE_STAGE_FAILED'}
+          Write-Host 'R42_EXACT_R37_AND_R38_COMBINED_PAYLOAD_REBUILT_PASS'
+      - name: Acquire original immutable Bootstrap v106 from previously verified official GitHub Actions source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' \
+            'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' \
+            > "$RUNNER_TEMP/spotify-pinned-bootstrap-inspect.zip"
+          python - <<'PY'
+          import zipfile,hashlib,io,os
+          from pathlib import Path
+          root=Path(os.environ["RUNNER_TEMP"])
+          with zipfile.ZipFile(root/"spotify-pinned-bootstrap-inspect.zip") as z:
+              inner=z.read("SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip")
+          with zipfile.ZipFile(io.BytesIO(inner)) as z:
+              b=z.read("bootstrap/spotify-control-self-updater.ps1")
+          assert (len(b),hashlib.sha256(b).hexdigest())==(
+            42963,"d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6")
+          (root/"spotify-verified-bootstrap-v106.ps1").write_bytes(b)
+          print("R42_IMMUTABLE_ORIGINAL_BOOTSTRAP_V106_SHA256=PASS")
+          PY
+          rm -f "$RUNNER_TEMP/spotify-pinned-bootstrap-inspect.zip"
+      - name: Test real pinned Bootstrap Check Update Check with the integrated functional candidate
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $file='validation/spotify-exit-immediate-maintenance-HOLD/accept-combined-official-bootstrap-R42-HOLD.ps1'
+          $tokens=$null; $errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path (Get-Location) $file),[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R42_WINDOWS_PS51_ENTRY_PARSE_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $file
+          if($LASTEXITCODE -ne 0){throw 'R42_TRUE_OFFICIAL_BOOTSTRAP_COMBINED_UPDATE_NOT_ACCEPTED'}
+          Write-Host 'R42_COMBINED_NEW_MAIN_AND_VBS_ACTUAL_BOOTSTRAP_ACCEPTANCE_COMPLETE_HOLD'
