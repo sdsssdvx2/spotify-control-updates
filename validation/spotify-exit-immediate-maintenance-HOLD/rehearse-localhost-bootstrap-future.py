@@ -244,11 +244,28 @@ def prepare() -> None:
         ("index.js",b"// hosted market fixture\n"),
         ("extension.js",b"// hosted market fixture\n"),
         ("style.css",b"/* hosted market fixture */\n"),
-        ("manifest.json",b'{"name":"hosted-market-fixture"}\n'),
+        ("manifest.json",b'{"name":"Spotify Marketplace CI Fixture"}\n'),
     ):
         checked_write(market / name,data)
     roaming = REHEARSAL / "Roaming" / "spicetify"
-    checked_write(roaming / "config-xpui.ini",b"[Setting]\ncurrent_theme = OwnerUnchanged\n")
+    checked_write(roaming / "config-xpui.ini",b"[Setting]\ncurrent_theme = UserOriginal\n")
+    # Reproduce the full synthetic protected-app topology from the already
+    # successful native Windows R18 stable upgrade fixture; no user source.
+    for appname in (
+        "better-local-files", "eternal-jukebox", "ivLyrics", "playlist-maker",
+        "star-ratings", "tagify", "splitify", "sc-cover-ambience"
+    ):
+        appbase = roaming / "CustomApps" / appname
+        checked_write(appbase / "index.js",
+                      ("// Owner protected "+appname+" original\n").encode("ascii"))
+        checked_write(appbase / "preferences.json",
+                      json.dumps({"owner":"user","app":appname,
+                                  "settings":{"enabled":True,"custom":True}},
+                                 sort_keys=True).encode("ascii"))
+    checked_write(roaming / "Backups" / "star-ratings" / "ratings-user.json",
+                  b'{"playlist-ratings":[5,1,4],"note":"preserve"}')
+    checked_write(roaming / "Backups" / "tagify" / "tags-user.json",
+                  b'{"tags":["favorite","personal"],"note":"keep"}')
     report = {
         "mode":"HOSTED_LOCALHOST_REHEARSAL_NOT_PRODUCTION",
         "version":VERSION,"fake_unpublished_source_commit":COMMIT,
