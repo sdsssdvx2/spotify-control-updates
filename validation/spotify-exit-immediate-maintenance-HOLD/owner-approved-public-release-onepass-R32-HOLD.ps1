@@ -52,8 +52,11 @@ function ExistingPython{
     try {
       $entry=Get-Item -LiteralPath $path -Force -ErrorAction Stop
       if($entry.PSIsContainer -or ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){continue}
-      $probe=@(& $path -I -S -B -c 'import sys; print("OK" if sys.version_info >= (3,10) else "OLD")' 2>&1)
-      if($LASTEXITCODE -eq 0 -and $probe.Count -eq 1 -and [string]$probe[0] -ceq 'OK'){return $path}
+      # PowerShell 5.1 native argv can strip nested quote characters from -c.
+      # Use an all-numeric Python expression, not double-quoted string literals.
+      $probe=@(& $path -I -S -B -c 'import sys; print(sys.version_info.major,sys.version_info.minor)' 2>&1)
+      if($LASTEXITCODE -eq 0 -and $probe.Count -eq 1 -and
+         [string]$probe[0] -match '^3 (1[0-9]|[2-9][0-9])$'){return $path}
     }catch{}
   }
   return ''
