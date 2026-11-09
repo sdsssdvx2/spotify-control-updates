@@ -43,7 +43,8 @@ def transport(path: str, before: bytes, after: bytes) -> dict:
     compressed = gzip.compress(after, mtime=0)
     encoded = base64.b64encode(compressed)
     chunks = [encoded[i:i+4096] for i in range(0,len(encoded),4096)]
-    if not 1 <= len(chunks) <= 128:
+    # The immutable real Bootstrap 1.0.6 rejects more than 32 chunks.
+    if not 1 <= len(chunks) <= 32:
         raise RuntimeError("TRANSPORT_CHUNK_COUNT_EXCEEDS_CAP")
     encoded_back = b"".join(chunks)
     if encoded_back != encoded:
@@ -149,6 +150,7 @@ def main():
 
     print("FUTURE_OFFLINE_FULL_FILE_SCHEMA_V1=PASS")
     print("FUTURE_OFFLINE_MAIN_AND_VBS_PATCHES=2")
+    print("FUTURE_OFFLINE_BOOTSTRAP_V106_32_CHUNK_LIMIT_AND_GENERIC_AGENT_PATH=PASS")
     print("FUTURE_OFFLINE_AGENT_VBS_HASH_AND_CHUNK_ROUNDTRIP=PASS")
     print("FUTURE_OFFLINE_ADDON_R17_BYTE_IDENTICAL=PASS")
     print("FUTURE_OFFLINE_STAGE_AND_ORIGINAL_ROLLBACK_SNAPSHOT=PASS")
