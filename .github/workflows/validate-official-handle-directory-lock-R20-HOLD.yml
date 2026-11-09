@@ -4,6 +4,7 @@ on:
     branches: [validate/spotify-exit-immediate-maintenance-HOLD]
     paths:
       - .github/workflows/validate-official-handle-directory-lock-R20-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/identify-bin-handle-owners-R20-READONLY.ps1
 permissions: {contents: read}
 jobs:
   synthetic-handle:
@@ -67,7 +68,7 @@ jobs:
             [void][Management.Automation.Language.Parser]::ParseFile(
               (Resolve-Path $script),[ref]$tokens,[ref]$errors)
             if(@($errors).Count -ne 0){throw 'R20_POWER_SHELL_51_PARSE_FAILED'}
-            $out=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -AcceptMicrosoftHandleEula -HostedFixtureRoot $scratch)
+            $out=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -AcceptMicrosoftHandleEula -HostedFixtureRoot $scratch -HostedExactHandleZipPath (Join-Path $env:RUNNER_TEMP 'r20-microsoft-Handle.zip'))
             if($LASTEXITCODE -ne 0){throw 'R20_SCRIPT_PROCESS_FAILED'}
             foreach($required in @(
               'TRANSACTION=HOSTED_SYNTHETIC_ONLY',
