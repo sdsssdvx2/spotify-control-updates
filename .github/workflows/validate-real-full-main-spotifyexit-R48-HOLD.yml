@@ -1,0 +1,41 @@
+name: HOLD R48 real WScript SpotifyExit through complete owner-disarmed PowerShell AgentTick
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-real-full-main-spotifyexit-R48-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/prepare-real-main-bridge-R48-HOLD.py
+permissions: {contents: read}
+jobs:
+  real-native-wscript-to-main:
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Rebuild the exact reviewed integrated v0630 PowerShell main and 4s WMI resident without touching Windows installation
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'R48_PUBLIC_STABLE_PARENT_DRIFT'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-combined-exit-and-shortcut-R37-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R48_VERIFIED_MAIN_MERGE_SOURCE_FAILED'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-eventdriven-vbs-R45-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R48_VERIFIED_WMI_AGENT_SOURCE_FAILED'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/stage-eventdriven-fullrelease-R46-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R48_REVIEWED_FAST_AGENT_RELEASE_STAGING_FAILED'}
+          Write-Host 'R48_FROZEN_RELEASE_SOURCE_MAIN_PLUS_WMI_RESIDENT_BOTH_BYTE_VERIFIED_PASS'
+      - name: Run authentic fast WScript event, real full PowerShell main and owner-disarmed persistent decision in isolated profile
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/prepare-real-main-bridge-R48-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R48_R44_SOURCE_PINNED_REAL_MAIN_TEST_BUILD_FAILED'}
+          $test=Join-Path $env:RUNNER_TEMP 'spotify-r48-real-full-main-spotifyexit.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($test,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R48_NATIVE_FULL_MAIN_TEST_POWERSHELL_PARSE_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test
+          if($LASTEXITCODE -ne 0){throw 'R48_REAL_VBS_TO_FULL_MAIN_AGENTTICK_NOT_PROVEN'}
+          Remove-Item -LiteralPath $test -Force -ErrorAction SilentlyContinue
+          Write-Host 'R48_REAL_PROCESSEXIT_TO_NATIVE_MAIN_NO_OWNER_MUTATION_PASS'
