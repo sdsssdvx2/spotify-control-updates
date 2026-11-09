@@ -11,7 +11,9 @@ param(
   [string]$HostedExpectedBootstrapSHA256='',
   [string]$HostedExpectedMainSHA256='',
   [string]$HostedExpectedAgentSHA256='',
-  [string]$PinnedReleaseFactsJson=''
+  [string]$PinnedReleaseFactsJson='',
+  [string]$ApprovedPublicManifestSHA256='',
+  [string]$ApprovedPublicSourceCommit=''
 )
 Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
@@ -151,10 +153,37 @@ try{
   }
   $hosted=$HostedFixtureRoot.Length -gt 0
   if(-not $hosted){
-    # Intentional release gate: there is no approved public stable 0.6.30,
-    # source_commit, manifest SHA or signed bootstrap chain yet.
-    StopNow 'FUTURE_PUBLIC_STABLE_NOT_YET_PUBLISHED'
+    # Unpublished code remains blocked: require independently approved release pins.
+    if(-not(ExpectedSha $ApprovedPublicManifestSHA256) -or
+       $ApprovedPublicSourceCommit -cnotmatch '^[0-9a-f]{40}$' -or
+       $ApprovedPublicSourceCommit -cin @('bb6d90146f20b73d36fbf8cb813f1b190f403c48',('f'*40),('e'*40))){
+      StopNow 'PUBLIC_RELEASE_INDEPENDENT_PINS_REQUIRED'
+    }
+    if($HostedExpectedManifestSHA256.Length -ne 0 -or
+       $HostedExpectedBootstrapSHA256.Length -ne 0 -or
+       $HostedExpectedMainSHA256.Length -ne 0 -or
+       $HostedExpectedAgentSHA256.Length -ne 0){
+      StopNow 'HOSTED_RELEASE_OVERRIDES_FORBIDDEN_IN_PUBLIC_MODE'
+    }
+    $ident=[Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal=New-Object Security.Principal.WindowsPrincipal($ident)
+    if($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){
+      StopNow 'ORIGINAL_NORMAL_USER_ONLY'
+    }
+    $root=Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) 'SpotifyControl'
+    $linkDirs=@(
+      [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory),
+      (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'))
+    $expectedManifest=$ApprovedPublicManifestSHA256
+    $expectedSource=$ApprovedPublicSourceCommit
+    $expectedBootstrap='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
+    $expectedMain='37eda0638c428ed3474a06812c067ca10f5771216ae509d3cd4ce10fdafbd3ec'
+    $expectedAgent='da054351cae6927504e735426d35f6d5e7edafcac7e06881f1adf1c20cecab9d'
+    $manifestURL='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/main/manifest.json'
+    $fixture=''
   }
+  if($hosted){
+  if($ApprovedPublicManifestSHA256.Length -ne 0 -or $ApprovedPublicSourceCommit.Length -ne 0){StopNow 'PUBLIC_RELEASE_PINS_FORBIDDEN_IN_HOSTED_MODE'}
   if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows' -or
      $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or
      [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)){
@@ -173,6 +202,17 @@ try{
     if(-not(ExpectedSha $h)){StopNow 'HOSTED_RELEASE_SHA_PIN_REQUIRED'}
   }
   $root=Join-Path $fixture 'LocalAppData\SpotifyControl'
+  $linkDirs=@((Join-Path $fixture 'Desktop'),(Join-Path $fixture 'StartMenu'))
+  $expectedManifest=$HostedExpectedManifestSHA256
+  $expectedSource=('f'*40)
+  $expectedBootstrap=$HostedExpectedBootstrapSHA256
+  $expectedMain=$HostedExpectedMainSHA256
+  $expectedAgent=$HostedExpectedAgentSHA256
+  $portFile=Join-Path $fixture 'server-port'
+  $port=[int]([IO.File]::ReadAllText($portFile))
+  if($port -lt 1 -or $port -gt 65535){StopNow 'HOSTED_LOOPBACK_PORT_INVALID'}
+  $manifestURL='http://127.0.0.1:'+([string]$port)+'/manifest.json'
+  }
   $bin=Join-Path $root 'bin'
   $main=Join-Path $bin 'spotify-control.ps1'
   $addon=Join-Path $bin 'addon-manager.ps1'
@@ -184,7 +224,7 @@ try{
      -not(ExactFile $main 284321 'af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0') -or
      -not(ExactFile $addon 323385 '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285') -or
      -not(ExactFile $agent 4855 '2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278') -or
-     (FileSHA $boot) -cne $HostedExpectedBootstrapSHA256){
+     -not(ExactFile $boot 42963 $expectedBootstrap)){
     StopNow 'INSTALLED_STABLE_OR_BOOTSTRAP_NOT_EXACT'
   }
   if(@(Get-Process -Name Spotify -ErrorAction SilentlyContinue).Count -ne 0){
@@ -192,22 +232,19 @@ try{
   }
   $log.Add('CURRENT_STABLE_V0628_R17_AND_BOOTSTRAP=EXACT_PINNED')
   $phase='NEXT_STABLE_MANIFEST_ADMISSION'
-  $portFile=Join-Path $fixture 'server-port'
-  $port=[int]([IO.File]::ReadAllText($portFile))
-  if($port -lt 1 -or $port -gt 65535){StopNow 'HOSTED_LOOPBACK_PORT_INVALID'}
-  $manifestURL='http://127.0.0.1:'+([string]$port)+'/manifest.json'
   $wc=New-Object Net.WebClient
   try{$rawManifest=[byte[]]$wc.DownloadData($manifestURL)}
   finally{$wc.Dispose()}
   if($rawManifest.Length -lt 1000 -or $rawManifest.Length -gt 200000 -or
-     (Digest $rawManifest) -cne $HostedExpectedManifestSHA256){
+     (Digest $rawManifest) -cne $expectedManifest){
     StopNow 'NEXT_STABLE_MANIFEST_SHA_NOT_PINNED'
   }
   try{$manifest=[Text.Encoding]::UTF8.GetString($rawManifest)|ConvertFrom-Json -ErrorAction Stop}
   catch{StopNow 'NEXT_STABLE_MANIFEST_NOT_JSON'}
   if($manifest.channel -cne 'stable' -or $manifest.latest_version -cne '0.6.30' -or
-     [string]$manifest.source_commit -cne ('f'*40) -or
-     [string]$manifest.bootstrap.sha256 -cne $HostedExpectedBootstrapSHA256 -or
+     [string]$manifest.source_commit -cne $expectedSource -or
+     [string]$manifest.source_repository -cne 'sdsssdvx2/spotify-control-updates' -or
+     [string]$manifest.bootstrap.sha256 -cne $expectedBootstrap -or
      @($manifest.updates).Count -ne 19 -or
      [string]$manifest.updates[18].from_version -cne '0.6.28' -or
      [string]$manifest.updates[18].to_version -cne '0.6.30'){
@@ -218,8 +255,8 @@ try{
     $new[[string]$f.path]=[string]$f.sha256
   }
   if($new.Count -ne 3 -or
-     $new['bin/spotify-control.ps1'] -cne $HostedExpectedMainSHA256 -or
-     $new['bin/spotify-control-agent.vbs'] -cne $HostedExpectedAgentSHA256 -or
+     $new['bin/spotify-control.ps1'] -cne $expectedMain -or
+     $new['bin/spotify-control-agent.vbs'] -cne $expectedAgent -or
      $new['bin/addon-manager.ps1'] -cne '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285'){
     StopNow 'NEXT_STABLE_RELEASE_FILE_PINS_MISMATCH'
   }
@@ -233,24 +270,30 @@ try{
   }
   try{$facts=$PinnedReleaseFactsJson | ConvertFrom-Json -ErrorAction Stop}
   catch{StopNow 'RELEASE_SOURCE_FACTS_JSON_INVALID'}
+  $expectedFactStatus=if($hosted){'HOSTED_SYNTHETIC_SOURCE_ONLY_NOT_PUBLIC_VERIFIED'}else{'PUBLIC_SOURCE_AND_PAYLOAD_READONLY_VERIFIED_NOT_OWNER_AUTHORIZED'}
   if($facts.schema -cne 'SPOTIFY_R30_PUBLIC_RELEASE_FACTS_V1' -or
-     $facts.status -cne 'HOSTED_SYNTHETIC_SOURCE_ONLY_NOT_PUBLIC_VERIFIED' -or
+     $facts.status -cne $expectedFactStatus -or
      $facts.from_version -cne '0.6.28' -or
      $facts.to_version -cne '0.6.30' -or
-     [string]$facts.source_commit -cne ('f'*40) -or
-     [string]$facts.manifest_sha256 -cne $HostedExpectedManifestSHA256 -or
+     [string]$facts.source_commit -cne $expectedSource -or
+     [string]$facts.manifest_sha256 -cne $expectedManifest -or
      [string]$facts.payload_set_sha256 -cne [string]$manifest.payload_set_sha256 -or
-     [string]$facts.bootstrap_sha256 -cne $HostedExpectedBootstrapSHA256 -or
-     [string]$facts.main_sha256 -cne $HostedExpectedMainSHA256 -or
-     [string]$facts.agent_sha256 -cne $HostedExpectedAgentSHA256 -or
+     [string]$facts.bootstrap_sha256 -cne $expectedBootstrap -or
+     [string]$facts.main_sha256 -cne $expectedMain -or
+     [string]$facts.agent_sha256 -cne $expectedAgent -or
      [string]$facts.addon_sha256 -cne $new['bin/addon-manager.ps1'] -or
      [int]$facts.chunk_count -ne 20){
     StopNow 'RELEASE_SOURCE_FACTS_NOT_BOUND_TO_MANIFEST_AND_PAYLOAD'
   }
-  $log.Add('R30_RELEASE_SOURCE_FACTS=EXACT_HOSTED_UNPUBLISHED_ONLY')
-  $log.Add('NEXT_RELEASE=EXACT_HOSTED_ONLY_TEST_MANIFEST')
+  if($hosted){
+    $log.Add('R30_RELEASE_SOURCE_FACTS=EXACT_HOSTED_UNPUBLISHED_ONLY')
+    $log.Add('NEXT_RELEASE=EXACT_HOSTED_ONLY_TEST_MANIFEST')
+  }else{
+    $log.Add('R30_RELEASE_SOURCE_FACTS=PUBLIC_PINS_AND_FACTS_MATCH_NOT_OWNER_AUTHORITY')
+    $log.Add('NEXT_RELEASE=EXACT_PINNED_PUBLIC_STABLE_MANIFEST')
+  }
   $phase='SNAPSHOT_OWNER_SHORTCUTS_AND_DATA'
-  foreach($base in @((Join-Path $fixture 'Desktop'),(Join-Path $fixture 'StartMenu'))){
+  foreach($base in $linkDirs){
     $link=Join-Path $base 'Spotify (Managed).lnk'
     if(Test-Path -LiteralPath $link){
       $info=Get-Item -LiteralPath $link -Force -ErrorAction Stop
@@ -263,7 +306,7 @@ try{
   $stateFile=Join-Path $root 'state.json'
   $sentinelFile=Join-Path $root 'unrelated-user-preserve.txt'
   $stateBefore=FileSHA $stateFile
-  $sentinelBefore=FileSHA $sentinelFile
+  $sentinelBefore=if($hosted){FileSHA $sentinelFile}else{''}
   $r27=[ScriptBlock]::Create([Text.Encoding]::ASCII.GetString($PinnedR27Source))
   $phase='R27_READONLY_OWNER_PROOF'
   $pre=@(& $r27 -HostedFixtureRoot $fixture)
@@ -296,8 +339,8 @@ try{
     $phase='OFFICIAL_BOOTSTRAP_UPDATE_ONCE'
     [void](InvokeOfficial $boot 'Update')
     $updateCommitted=$true
-    if((FileSHA $main) -cne $HostedExpectedMainSHA256 -or
-       (FileSHA $agent) -cne $HostedExpectedAgentSHA256 -or
+    if((FileSHA $main) -cne $expectedMain -or
+       (FileSHA $agent) -cne $expectedAgent -or
        (FileSHA $addon) -cne $new['bin/addon-manager.ps1']){
       StopNow 'OFFICIAL_BOOTSTRAP_COMMIT_FILE_PINS_MISMATCH'
     }
@@ -342,18 +385,20 @@ try{
       StopNow 'NEW_RELEASE_RESIDENT_NOT_SINGLE'
     }
     if(-not(LinksStable) -or (FileSHA $stateFile) -cne $stateBefore -or
-       (FileSHA $sentinelFile) -cne $sentinelBefore){
+       ($hosted -and (FileSHA $sentinelFile) -cne $sentinelBefore)){
       StopNow 'OWNER_SHORTCUTS_OR_STATE_CHANGED'
     }
     $log.Add('NEW_RELEASE_VBS=ONE_EXACT_OWNER_RESIDENT_RUNNING')
     $log.Add('USER_SHORTCUTS_AND_STATE=BYTE_IDENTICAL')
-    $log.Add('RESULT=HOSTED_FUTURE_STABLE_ONESHOT_COMMITTED')
+    $log.Add($(if($hosted){'RESULT=HOSTED_FUTURE_STABLE_ONESHOT_COMMITTED'}else{'RESULT=PINNED_PUBLIC_STABLE_ONESHOT_COMMITTED'}))
     $finished=$true
   }
 }catch{
   $r=[string]$_.Exception.Message
   $permitted=@('WINDOWS_REQUIRED','WINDOWS_PS51_X64_REQUIRED','PINNED_R27_SOURCE_NOT_MATCHED',
-    'FUTURE_PUBLIC_STABLE_NOT_YET_PUBLISHED','HOSTED_RELEASE_OVERRIDE_NOT_ALLOWED',
+    'PUBLIC_RELEASE_INDEPENDENT_PINS_REQUIRED','HOSTED_RELEASE_OVERRIDE_NOT_ALLOWED',
+    'PUBLIC_RELEASE_PINS_FORBIDDEN_IN_HOSTED_MODE','HOSTED_RELEASE_OVERRIDES_FORBIDDEN_IN_PUBLIC_MODE',
+    'ORIGINAL_NORMAL_USER_ONLY',
     'HOSTED_FIXTURE_NOT_UNDER_RUNNER_TEMP','OWNER_ONE_SHOT_APPROVAL_REQUIRED',
     'HOSTED_RELEASE_SHA_PIN_REQUIRED','INSTALLED_STABLE_OR_BOOTSTRAP_NOT_EXACT',
     'PINNED_RELEASE_SOURCE_FACTS_REQUIRED','RELEASE_SOURCE_FACTS_JSON_INVALID',
