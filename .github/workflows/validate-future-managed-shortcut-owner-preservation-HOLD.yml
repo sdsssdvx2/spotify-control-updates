@@ -6,7 +6,7 @@ on:
       - .github/workflows/validate-future-managed-shortcut-owner-preservation-HOLD.yml
       - validation/spotify-exit-immediate-maintenance-HOLD/build-managed-shortcut-future-safe-candidate.py
       - validation/spotify-exit-immediate-maintenance-HOLD/validate-future-offline-transport.py
-permissions: {contents: read}
+permissions: {contents: read, actions: read}
 jobs:
   native-shortcut:
     runs-on: windows-2025
@@ -32,6 +32,37 @@ jobs:
           $status=@(git status --short manifest.json README.md)
           if($status.Count -gt 0){throw 'RELEASE_MANIFEST_OR_README_MUTATED'}
           Write-Host 'FUTURE_SAFE_CANONICAL_V0628_SOURCE_PIN_AND_NO_RELEASE_MUTATION_PASS'
+      - name: Retrieve exact immutable released Bootstrap artifact for static audit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' > "$RUNNER_TEMP/spotify-pinned-bootstrap-inspect.zip"
+      - name: Audit official Bootstrap patch allowed paths and full-file transport
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          import zipfile,hashlib,io,os
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'spotify-pinned-bootstrap-inspect.zip'
+          with zipfile.ZipFile(p) as z:
+              nested=z.read('SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip')
+          assert hashlib.sha256(nested).hexdigest()=='6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdf267bd95f6c6ddcf06'
+          with zipfile.ZipFile(io.BytesIO(nested)) as z:
+              raw=z.read('bootstrap/spotify-control-self-updater.ps1')
+          assert (len(raw),hashlib.sha256(raw).hexdigest())==(42963,'d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6')
+          src=raw.decode('utf-8-sig')
+          for i,line in enumerate(src.splitlines(),1):
+              if ('gzip-base64-full-file' in line or 'latest_files' in line or
+                  'patch' in line.lower() and
+                  ('path' in line.lower() or 'encoding' in line.lower())):
+                  print(f'PINNED_BOOTSTRAP_CONTRACT_LINE_{i}={line.strip()[:280]}')
+          print('PINNED_BOOTSTRAP_V106_SOURCE_SHA256_AND_SIZE_PASS')
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'PINNED_BOOTSTRAP_CONTRACT_AUDIT_FAILED'}
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'spotify-pinned-bootstrap-inspect.zip') -Force -ErrorAction SilentlyContinue
       - name: Offline full-file forward and rollback transport admission for MAIN+resident
         shell: pwsh
         run: |
