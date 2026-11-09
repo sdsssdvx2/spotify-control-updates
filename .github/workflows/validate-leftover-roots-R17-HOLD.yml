@@ -138,6 +138,39 @@ jobs:
           }
           Write-Host 'R19_WINDOWS_GENUINE_BOOTSTRAP_COMPOUND_ERROR_SPLIT_PASS'
           Write-Host 'R19_SIX_PROTECTED_TREES_AND_TRANSACTION_READONLY_PASS'
+          # Verify the specific Windows Move-Item "in use" message missed by
+          # the first R19, and Korean locale, without any raw text export.
+          # Synthetic report mutation is rolled back byte-for-byte.
+          $reportPath=Join-Path $fixture 'LocalAppData/SpotifyControl/reports/self-update-latest.json'
+          [byte[]]$originalReport=[IO.File]::ReadAllBytes($reportPath)
+          try{
+            $doc=([IO.File]::ReadAllText($reportPath,[Text.Encoding]::UTF8)|ConvertFrom-Json)
+            $en='Cannot move item because the item at PRIVATE_SCRATCH_PATH is in use.'
+            $ko=('"\uC774\uB3D9\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. \uC0AC\uC6A9 \uC911\uC785\uB2C8\uB2E4."'|ConvertFrom-Json)
+            $doc.error='Self-update failed and rollback also failed. update_error='+$en+'; rollback_error='+$ko
+            [IO.File]::WriteAllText($reportPath,($doc|ConvertTo-Json -Depth 10 -Compress),(New-Object Text.UTF8Encoding($false)))
+            $localized=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture)
+            if($LASTEXITCODE -ne 0){throw 'R19_LOCALIZED_PROCESS_FAILED'}
+            foreach($expect in @(
+              'REPORT_ERROR_TEMPLATE=UPDATE_AND_ROLLBACK_FAILED',
+              'UPDATE_ERROR_CLASS=MOVE_ITEM_IN_USE_OR_SHARING',
+              'ROLLBACK_ERROR_CLASS=MOVE_ITEM_IN_USE_OR_SHARING',
+              'UPDATE_ERROR_LOCALE=NO_HANGUL',
+              'ROLLBACK_ERROR_LOCALE=HANGUL_PRESENT',
+              'LIVE=EXACT_TRANSACTION_BEFORE_TREE',
+              'BACKUP=EXACT_TRANSACTION_BEFORE_TREE',
+              'TRANSACTION_STABLE_DURING_AUDIT=YES',
+              'RESULT=READONLY_POST_FAILURE_CLASSIFICATION_COMPLETE'
+            )){
+              if($localized -cnotcontains $expect){throw ('R19_LOCALIZED_CLASSIFICATION_MISSING '+$expect)}
+            }
+            if(($localized -join '|') -match '(?i)PRIVATE_SCRATCH_PATH|20261108-131500-cafefeed|Self-update failed'){
+              throw 'R19_LOCALIZED_PRIVATE_TEXT_EXPORTED'
+            }
+            Write-Host 'R19_ENGLISH_KOREAN_WINDOWS_MOVE_IN_USE_ERROR_CLASSIFICATION_PASS'
+          }finally{
+            [IO.File]::WriteAllBytes($reportPath,$originalReport)
+          }
       - name: Prove no fixture mutation and clean disposable scratch
         if: always()
         shell: powershell
