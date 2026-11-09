@@ -54,6 +54,12 @@ jobs:
             same_dir_old=str(root/('bin.spotifycontrol-old-'+txnid)))
           (root/'self-update-last-transaction.json').write_bytes(
             b'\xef\xbb\xbf'+json.dumps(record,separators=(',',':')).encode('utf-8'))
+          reports=root/'reports'
+          reports.mkdir()
+          private_error='Self-update failed and rollback also failed. update_error=Live bin changed before self-update swap.; rollback_error=Candidate main SelfTest failed: PRIVATE_SCRATCH_PATH'
+          (reports/'self-update-latest.json').write_text(json.dumps(dict(
+              schema=1,action='Update',success=False,transaction_status='prepared',
+              transaction_id=txnid,result=None,error=private_error),separators=(',',':')),encoding='utf-8')
           def snapshot():
               return {str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest()
                       for p in root.rglob('*') if p.is_file()}
@@ -93,6 +99,45 @@ jobs:
           if(($output -join '|') -match $privatePattern){throw 'R17_PRIVATE_CONTENT_EXPORTED'}
           Write-Host 'R17_WINDOWS_PS51_ALL_FOUR_ROOTS_CORRECTLY_CLASSIFIED_PASS'
           Write-Host 'R17_BOM_TRANSACTION_AND_READONLY_POLICY_PASS'
+      - name: Confirm R19 split error taxonomy and transaction root preservation
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/inspect-bootstrap-update-failure-R19-READONLY.ps1'
+          $tok=$null;$parse=$null
+          [void][Management.Automation.Language.Parser]::ParseFile(
+             (Resolve-Path $script),[ref]$tok,[ref]$parse)
+          if(@($parse).Count -ne 0){throw 'R19_PS51_PARSE_FAILED'}
+          $fixture=Join-Path $env:RUNNER_TEMP 'spotify-r17-fixture'
+          $output=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $fixture)
+          if($LASTEXITCODE -ne 0){throw 'R19_SCRIPT_PROCESS_FAILED'}
+          foreach($expected in @(
+            'TRANSACTION_STATUS=PREPARED;LINEAGE=EXACT',
+            'REPORT_ACTION=UPDATE',
+            'REPORT_SUCCESS=FALSE',
+            'REPORT_TRANSACTION_STATUS=PREPARED',
+            'REPORT_TRANSACTION_MATCH=YES',
+            'REPORT_ERROR_TEMPLATE=UPDATE_AND_ROLLBACK_FAILED',
+            'UPDATE_ERROR_CLASS=LIVE_BIN_CHANGED_PRE_SWAP',
+            'ROLLBACK_ERROR_CLASS=CANDIDATE_MAIN_SELFTEST',
+            'LIVE=EXACT_TRANSACTION_BEFORE_TREE',
+            'BACKUP=EXACT_TRANSACTION_BEFORE_TREE',
+            'NEW=EMPTY_PLAIN_DIRECTORY_PRESERVE',
+            'OLD=ABSENT',
+            'RESTORE=EXACT_TRANSACTION_BEFORE_TREE',
+            'FAILED=NONEMPTY_UNMATCHED_TREE_PRESERVE',
+            'TRANSACTION_STABLE_DURING_AUDIT=YES',
+            'RESULT=READONLY_POST_FAILURE_CLASSIFICATION_COMPLETE'
+          )){
+            if($output -cnotcontains $expected){
+              throw ('R19_EXPECTED_CLASSIFICATION_ABSENT '+$expected)
+            }
+          }
+          if(($output -join '|') -match '(?i)PRIVATE_SCRATCH_PATH|20261108-131500-cafefeed|Self-update failed|C:\\\\Users\\'){
+            throw 'R19_PRIVATE_ERROR_OR_PATH_EXPORTED'
+          }
+          Write-Host 'R19_WINDOWS_GENUINE_BOOTSTRAP_COMPOUND_ERROR_SPLIT_PASS'
+          Write-Host 'R19_SIX_PROTECTED_TREES_AND_TRANSACTION_READONLY_PASS'
       - name: Prove no fixture mutation and clean disposable scratch
         if: always()
         shell: powershell
