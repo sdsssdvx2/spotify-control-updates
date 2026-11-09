@@ -155,8 +155,16 @@ jobs:
                 # This fixture contains ONLY generated public code and scratch
                 # data, never a real user path, account or secret.
                 foreach($line in @($output|Select-Object -Last 3)){
-                  Write-Host ('HOSTED_SYNTHETIC_ERROR_DETAIL='+
-                    ([string]$line).Substring(0,[Math]::Min(800,([string]$line).Length)))
+                  try {
+                    $bad=[string](($line|ConvertFrom-Json -ErrorAction Stop).error)
+                    if(-not [string]::IsNullOrWhiteSpace($bad)){
+                      $tail=$bad.Substring([Math]::Max(0,$bad.Length-1800))
+                      Write-Host ('HOSTED_SYNTHETIC_ERROR_TAIL='+$tail)
+                    }
+                  }catch{
+                    Write-Host ('HOSTED_SYNTHETIC_ERROR_DETAIL='+
+                      ([string]$line).Substring(0,[Math]::Min(650,([string]$line).Length)))
+                  }
                 }
                 throw ('HOSTED_BOOTSTRAP_ACTION_FAILED_'+$Action)
               }
