@@ -5,6 +5,7 @@ on:
     paths:
       - .github/workflows/validate-final-single-discovery-release-R50-HOLD.yml
       - validation/spotify-exit-immediate-maintenance-HOLD/accept-single-discovery-release-R50-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/prepare-real-main-bridge-R48-HOLD.py
 permissions:
   contents: read
   actions: read
