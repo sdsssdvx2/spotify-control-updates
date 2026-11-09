@@ -62,6 +62,17 @@ jobs:
                   ('path' in line.lower() or 'encoding' in line.lower())):
                   print(f'PINNED_BOOTSTRAP_CONTRACT_LINE_{i}={line.strip()[:280]}')
           print('PINNED_BOOTSTRAP_V106_SOURCE_SHA256_AND_SIZE_PASS')
+          lines=src.splitlines()
+          for n,line in enumerate(lines,1):
+              if n<=35 or 'raw.githubusercontent' in line or
+                  'ManifestUrl' in line or 'BaseUri' in line or
+                  'function Apply-FullFilePatch' in line:
+                  print(f'PINNED_BOOTSTRAP_ENTRY_{n}={line.strip()[:240]}')
+          for i,line in enumerate(lines):
+              if line.lstrip().startswith('function Apply-FullFilePatch'):
+                  for j in range(i,min(i+19,len(lines))):
+                      print(f'PINNED_BOOTSTRAP_REAL_PATCH_{j+1}={lines[j].strip()[:240]}')
+                  break
           '@ | python -
           if($LASTEXITCODE -ne 0){throw 'PINNED_BOOTSTRAP_CONTRACT_AUDIT_FAILED'}
           Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'spotify-pinned-bootstrap-inspect.zip') -Force -ErrorAction SilentlyContinue
