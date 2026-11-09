@@ -10,6 +10,7 @@ on:
       - validation/spotify-exit-immediate-maintenance-HOLD/stage-future-official-release-HOLD.py
       - validation/spotify-exit-immediate-maintenance-HOLD/verify-two-commit-future-release-HOLD.py
       - validation/spotify-exit-immediate-maintenance-HOLD/prepare-offline-promotion-bundle-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/persist-review-ref-HOLD.py
       - validation/spotify-exit-immediate-maintenance-HOLD/guarded-first-update-resident-entry-R27-HOLD.ps1
       - validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-next-stable-upgrade-R28-HOLD.ps1
       - validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-public-release-onepass-R32-HOLD.ps1
@@ -692,3 +693,32 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
+
+  review-custody:
+    # This job alone can write a brand-new HOLD review ref. The native
+    # Windows acceptance job stays contents:read and cannot push anything.
+    needs: native-shortcut
+    if: github.ref == 'refs/heads/validate/spotify-exit-immediate-maintenance-HOLD'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Retrieve only the SHA-pinned post-Windows-acceptance Git bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: Spotify-v0630-source-and-manifest-REVIEW-ONLY-NOT-PUBLISHED
+          path: review-artifact
+      - name: Verify source parent, both immutable commits, all 20 chunks and custody in review ref only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 validation/spotify-exit-immediate-maintenance-HOLD/persist-review-ref-HOLD.py
+          test "$(git rev-parse origin/main)" = 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          echo 'R35_OFFICIAL_MAIN_STILL_STABLE_V0628_AND_REVIEW_REF_ONLY_PASS'
+
