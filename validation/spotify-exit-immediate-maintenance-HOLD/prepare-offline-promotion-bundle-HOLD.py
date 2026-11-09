@@ -147,6 +147,7 @@ def run():
         # Reuse exact verified attestation against this isolated worktree.
         # git() binds its default cwd at function definition, so update both.
         checker.SCRATCH=SCRATCH
+        checker.STAGED=STAGE
         # git(*args, cwd=...) declares cwd as KEYWORD-only. Updating
         # __defaults__ has no effect; use __kwdefaults__ for the real cwd.
         checker.git.__kwdefaults__["cwd"]=SCRATCH
