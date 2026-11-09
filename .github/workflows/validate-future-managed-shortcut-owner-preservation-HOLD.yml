@@ -9,6 +9,7 @@ on:
       - validation/spotify-exit-immediate-maintenance-HOLD/rehearse-localhost-bootstrap-future.py
       - validation/spotify-exit-immediate-maintenance-HOLD/stage-future-official-release-HOLD.py
       - validation/spotify-exit-immediate-maintenance-HOLD/verify-two-commit-future-release-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/prepare-offline-promotion-bundle-HOLD.py
       - validation/spotify-exit-immediate-maintenance-HOLD/guarded-first-update-resident-entry-R27-HOLD.ps1
       - validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-next-stable-upgrade-R28-HOLD.ps1
       - validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-public-release-onepass-R32-HOLD.ps1
@@ -661,3 +662,33 @@ jobs:
             Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction SilentlyContinue
           }
           Write-Host 'FUTURE_SHORTCUT_NATIVE_WINDOWS_FIXTURE_CLEANUP_PASS'
+      - name: Prepare real-main-ancestry release review bundle only after every native check
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/prepare-offline-promotion-bundle-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'OFFLINE_PROMOTION_BUNDLE_BUILD_FAILED'}
+          $path='validation/spotify-exit-immediate-maintenance-HOLD/out/promotion-review-HOLD'
+          $receipt=Get-Content -LiteralPath (Join-Path $path 'promotion-receipt-HOLD.json') -Raw | ConvertFrom-Json
+          $bundle=Join-Path $path 'v0630-two-commit-publication-NOT-AUTHORIZED.bundle'
+          if($receipt.status -cne 'REVIEW_CANDIDATE_ONLY_NOT_AUTHORIZED_NOT_PUBLISHED' -or
+             $receipt.base_public_main_commit -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2' -or
+             [int]$receipt.git_commits_to_fast_forward -ne 2 -or
+             [int]$receipt.source_package_chunks -ne 20 -or
+             [bool]$receipt.release_published -or
+             [bool]$receipt.github_ref_updated -or
+             [bool]$receipt.operating_windows_modified -or
+             [bool]$receipt.owner_approval_granted -or
+             (Get-FileHash -LiteralPath $bundle -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+             [string]$receipt.bundle_sha256){
+            throw 'PROMOTION_BUNDLE_RECEIPT_OR_BYTES_NOT_COHERENT'
+          }
+          Write-Host 'R34_ACTUAL_MAIN_PARENT_TWO_COMMIT_OFFLINE_REVIEW_BUNDLE_PROVEN_NOT_PUBLISHED_PASS'
+      - name: Preserve one bounded non-deployed promotion bundle for later owner review
+        uses: actions/upload-artifact@v4
+        with:
+          name: Spotify-v0630-source-and-manifest-REVIEW-ONLY-NOT-PUBLISHED
+          path: validation/spotify-exit-immediate-maintenance-HOLD/out/promotion-review-HOLD/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
