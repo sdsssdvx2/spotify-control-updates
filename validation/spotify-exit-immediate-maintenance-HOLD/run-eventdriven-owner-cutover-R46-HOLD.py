@@ -30,6 +30,20 @@ def main():
     r43.COMBINED=STAGE.relative_to(HERE.parents[1]).as_posix()
     r43.AGENT_SHA=EXPECTED
     r43.run()
+    # The R43 fixture preparer embeds its former stage path as a string
+    # independent of R43.COMBINED. Move ONLY this read-side locator; the
+    # actual R28 owner-cutover PowerShell, Bootstrap and rollback are intact.
+    prepare=Path(os.environ["RUNNER_TEMP"]).resolve()/(
+        "spotify-r43-integrated-prepare.py")
+    text=prepare.read_text("utf-8")
+    former='out/release-staging-combined'
+    updated='out/release-staging-eventdriven-R46'
+    if text.count(former)!=1 or updated in text:
+        raise RuntimeError("R46_ORIGINAL_R43_PREPARER_STAGE_PATH_DRIFT")
+    prepare.write_text(text.replace(former,updated,1),encoding="utf-8",newline="\\n")
+    if former in prepare.read_text("utf-8"):
+        raise RuntimeError("R46_WRONG_FUTURE_RELEASE_STILL_REFERENCED")
+    print("R46_FIXTURE_PREPARE_READ_SOURCE_EXACT_FAST_VBS_STAGE=PASS")
     print("R46_REUSED_EXACT_R43_NATIVE_OWNER_CUTOVER_FOR_FAST_WMI_RESIDENT=PASS")
 
 if __name__=="__main__":
