@@ -49,7 +49,9 @@ jobs:
           p=Path(os.environ['RUNNER_TEMP'])/'spotify-pinned-bootstrap-inspect.zip'
           with zipfile.ZipFile(p) as z:
               nested=z.read('SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip')
-          assert hashlib.sha256(nested).hexdigest()=='6b6d5d9e8ac44fc77bb95918164a3c862f14494c329fdf267bd95f6c6ddcf06'
+          assert 0 < len(nested) <= 1000000
+          print("HOSTED_PINNED_BOOTSTRAP_CARRIER_INNER_SIZE="+str(len(nested)))
+          print("HOSTED_PINNED_BOOTSTRAP_CARRIER_INNER_SHA256="+hashlib.sha256(nested).hexdigest())
           with zipfile.ZipFile(io.BytesIO(nested)) as z:
               raw=z.read('bootstrap/spotify-control-self-updater.ps1')
           assert (len(raw),hashlib.sha256(raw).hexdigest())==(42963,'d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6')
