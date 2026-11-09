@@ -69,6 +69,7 @@ def change_tick(chunk:str)->str:
             Maintain -FromResidentAgent -VerifiedAgentCheck $freshCheck
             $State = Ensure-StateShape (Load-State)
             $mutationRan = [bool]$script:LastResidentMutationPhaseEntered
+            $checkRan = $checkRan -or [bool]$script:LastResidentDiscoveryRan
             $decision = $(if($mutationRan){"maintenance-phase-entered"}else{"maintenance-deferred-or-lease-busy"})""",
         "TICK_AMBIGUOUS_MUTATION_REPORT")
     return chunk
@@ -80,6 +81,7 @@ def change_maintain(chunk:str)->str:
     # This flag records *admission* to the real mutation phase, not whether
     # an update actually changed files or committed. Both are distinct.
     $script:LastResidentMutationPhaseEntered = $false
+    $script:LastResidentDiscoveryRan = $false
 ""","MAINTAIN_OPTIONAL_AGENT_ARG")
     chunk=one(chunk,
         """    Save-State $State
@@ -123,6 +125,7 @@ def change_maintain(chunk:str)->str:
     }
     if ($null -eq $check) {
         $check = Invoke-MaintenanceCheckPhase -State $State
+        if ($FromResidentAgent) { $script:LastResidentDiscoveryRan = $true }
     }
     $State = Ensure-StateShape $check.State
 
