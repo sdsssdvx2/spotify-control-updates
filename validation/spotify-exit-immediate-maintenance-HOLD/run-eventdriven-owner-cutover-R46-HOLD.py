@@ -40,7 +40,7 @@ def main():
     updated='out/release-staging-eventdriven-R46'
     if text.count(former)!=1 or updated in text:
         raise RuntimeError("R46_ORIGINAL_R43_PREPARER_STAGE_PATH_DRIFT")
-    prepare.write_text(text.replace(former,updated,1),encoding="utf-8",newline="\\n")
+    prepare.write_text(text.replace(former,updated,1),encoding="utf-8")
     if former in prepare.read_text("utf-8"):
         raise RuntimeError("R46_WRONG_FUTURE_RELEASE_STILL_REFERENCED")
     print("R46_FIXTURE_PREPARE_READ_SOURCE_EXACT_FAST_VBS_STAGE=PASS")
