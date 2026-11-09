@@ -42,7 +42,7 @@ jobs:
           if(@($errors).Count -ne 0){throw ('FUTURE_SAFE_PS51_PARSE_ERROR '+$errors[0].Message)}
           $normalized=$src.Replace(([string][char]13+[string][char]10),[string][char]10)
           $begin=$normalized.IndexOf('# Future managed-shortcut safety:',[StringComparison]::Ordinal)
-          $end=$normalized.IndexOf(([string][char]10+'if (-not [string]::IsNullOrWhiteSpace($startMenu))'),$begin,[StringComparison]::Ordinal)
+          $end=$normalized.IndexOf(([string][char]10+'    if (-not [string]::IsNullOrWhiteSpace($startMenu))'),$begin,[StringComparison]::Ordinal)
           if($begin -lt 0 -or $end -le $begin){throw 'FUTURE_SAFE_LOOP_EXTRACTION_FAILED'}
           $block=[ScriptBlock]::Create($normalized.Substring($begin,$end-$begin))
           $sandbox=Join-Path $env:RUNNER_TEMP 'spotify-shortcut-safe-fixture'
