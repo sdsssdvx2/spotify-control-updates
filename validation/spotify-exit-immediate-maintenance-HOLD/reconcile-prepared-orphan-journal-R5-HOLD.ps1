@@ -21,11 +21,12 @@ function IsPlainDirectory([string]$Path){
     return ($f.PSIsContainer -and ($f.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0)}
   catch{return $false}
 }
-function FileInfo([string]$Path,[int64]$Max=2097152) {
+function FileInfo([string]$Path,[int64]$Max=2097152,[switch]$AllowEmpty) {
   try{
     $f=Get-Item -LiteralPath $Path -Force -ErrorAction Stop
     if($f.PSIsContainer -or ($f.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
-       [int64]$f.Length -lt 1 -or [int64]$f.Length -gt $Max){return $null}
+       [int64]$f.Length -lt $(if($AllowEmpty){0}else{1}) -or
+       [int64]$f.Length -gt $Max){return $null}
     return $f
   }catch{return $null}
 }
@@ -89,7 +90,9 @@ function ExactTree([string]$Root) {
         $total+=$size
         if($size -lt 0 -or $total -gt 4294967296){return ''}
         $digest=HashFile $full
-        $again=FileInfo $full 4294967296
+        # Empty regular files are valid bin entries and must hash identically
+        # to original Bootstrap/R4; transaction JSON still rejects emptiness.
+        $again=FileInfo $full 4294967296 -AllowEmpty
         if($null -eq $again -or [int64]$again.Length -ne $size){return ''}
         $entries.Add(('F|{0}|{1}|{2}' -f $rel,$size,$digest))
       }
