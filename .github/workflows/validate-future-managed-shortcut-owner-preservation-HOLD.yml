@@ -251,6 +251,9 @@ jobs:
               throw 'HOSTED_CORRUPTED_CHUNK_CHANGED_ORIGINAL_OR_OWNER_DATA'
             }
             Write-Host 'FUTURE_OFFICIAL_BOOTSTRAP_CORRUPT_CHUNK_REJECTED_ORIGINAL_AND_OWNER_DATA_UNCHANGED_PASS'
+            # The nonzero code above is EXPECTED and verified. Do not let
+            # the Actions PowerShell wrapper mistake it for job failure.
+            $global:LASTEXITCODE=0
           } finally {
             $env:LOCALAPPDATA=$localBefore
             $env:APPDATA=$roamingBefore
