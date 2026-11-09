@@ -79,17 +79,24 @@ foreach ($target in $managedTargets) {
     $temp = Join-Path (Split-Path -Parent $target) (
         ".spotify-control-managed-cwd-" + [guid]::NewGuid().ToString("N") + ".lnk")
     try {
+        $sourceHash = $null
         if ($ownedOldBin) {
+            $sourceHash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
             [IO.File]::Copy($target,$temp,$false)
+            # Do not change the owner's description, icon, hotkeys or other
+            # metadata on an already-owned official launcher. Only its CWD.
+            $candidate = $shell.CreateShortcut($temp)
+            $candidate.WorkingDirectory = $Root
+        } else {
+            $candidate = $shell.CreateShortcut($temp)
+            $candidate.TargetPath = $wscript
+            $candidate.Arguments = $expectedManagedArgs
+            $candidate.WorkingDirectory = $Root
+            if (Test-UsablePath -Path $spotifyExe -PathType "Leaf") {
+                $candidate.IconLocation = "$spotifyExe,0"
+            }
+            $candidate.Description = "Launch Spotify through Spotify Control without a console window"
         }
-        $candidate = $shell.CreateShortcut($temp)
-        $candidate.TargetPath = $wscript
-        $candidate.Arguments = $expectedManagedArgs
-        $candidate.WorkingDirectory = $Root
-        if (Test-UsablePath -Path $spotifyExe -PathType "Leaf") {
-            $candidate.IconLocation = "$spotifyExe,0"
-        }
-        $candidate.Description = "Launch Spotify through Spotify Control without a console window"
         $candidate.Save()
 
         $check = $shell.CreateShortcut($temp)
@@ -108,6 +115,9 @@ foreach ($target in $managedTargets) {
                 -not [string]::Equals([string]$again.WorkingDirectory,
                     [string]$installedBin,[StringComparison]::OrdinalIgnoreCase)) {
                 throw "Original managed link changed while staging"
+            }
+            if ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -cne $sourceHash) {
+                throw "Original managed link bytes changed during staging"
             }
             # Adjacent immutable original backup: same-volume atomic replace.
             $saved = Join-Path (Split-Path -Parent $target) (
