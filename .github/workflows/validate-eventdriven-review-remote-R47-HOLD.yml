@@ -1,0 +1,21 @@
+name: HOLD R47 actual GitHub SHA+full payload check of 4-second SpotifyExit resident
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-eventdriven-review-remote-R47-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/verify-eventdriven-review-remote-R47-HOLD.py
+permissions: {contents: read}
+jobs:
+  real-github-remote-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 1, persist-credentials: false}
+      - name: Attest 20 remote immutable chunks and event-driven main/VBS against official public GitHub
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 validation/spotify-exit-immediate-maintenance-HOLD/verify-eventdriven-review-remote-R47-HOLD.py
+          echo 'R47_REAL_REMOTE_FAST_EVENT_CANDIDATE_NO_PUBLIC_RELEASE_PASS'
