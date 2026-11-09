@@ -140,8 +140,8 @@ def main():
         not HEX64.fullmatch(rec.get("bundle_sha256","")) or
         sha(bundle_bytes)!=rec["bundle_sha256"]):
         deny("R34_ORIGINAL_GIT_BUNDLE_SHA256_CHANGED")
-    if git("rev-parse","origin/main")!=BASE or
-        git("rev-parse","HEAD")==BASE:
+    if (git("rev-parse","origin/main")!=BASE or
+        git("rev-parse","HEAD")==BASE):
         deny("PUBLIC_MAIN_PROVENANCE_CHANGED")
     public=metadata(object_at(BASE,"manifest.json"))
     if public.get("latest_version")!="0.6.28":
@@ -158,9 +158,9 @@ def main():
     git("bundle","verify",str(BUNDLE))
     git("fetch","--no-tags","--no-write-fetch-head",str(BUNDLE),SOURCE_REF)
     expected_manifest=metadata(object_at(manifest_sha,"manifest.json"))
-    if sha(object_at(manifest_sha,"manifest.json"))!=rec.get("manifest_sha256") or
+    if (sha(object_at(manifest_sha,"manifest.json"))!=rec.get("manifest_sha256") or
         expected_manifest.get("source_commit")!=source_sha or
-        expected_manifest.get("payload_set_sha256")!=rec.get("payload_set_sha256"):
+        expected_manifest.get("payload_set_sha256")!=rec.get("payload_set_sha256")):
         deny("R34_MANIFEST_SHA_OR_CANDIDATE_CONTENT_DRIFT")
     inspect_commit(source_sha,manifest_sha,expected_manifest,public)
 
