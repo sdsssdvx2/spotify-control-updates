@@ -8,6 +8,7 @@ on:
       - validation/spotify-exit-immediate-maintenance-HOLD/validate-future-offline-transport.py
       - validation/spotify-exit-immediate-maintenance-HOLD/rehearse-localhost-bootstrap-future.py
       - validation/spotify-exit-immediate-maintenance-HOLD/stage-future-official-release-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/verify-two-commit-future-release-HOLD.py
 permissions: {contents: read, actions: read}
 jobs:
   native-shortcut:
@@ -125,6 +126,13 @@ jobs:
           $status=@(git status --porcelain -- manifest.json packages/)
           if($status.Count -ne 0){throw 'PUBLISHED_PACKAGES_CHANGED'}
           Write-Host 'FUTURE_STABLE_RELEASE_STAGE_20_CHUNKS_SHA_PINNED_AND_UNPUBLISHABLE_PASS'
+      - name: Real Git two-commit staging (20 immutable chunks then later manifest), synthetic-only
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/verify-two-commit-future-release-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'IMMUTABLE_FUTURE_RELEASE_GIT_PROVENANCE_FAILED'}
+          Write-Host 'FUTURE_REAL_IMMUTABLE_SOURCE_COMMIT_AND_LATER_MANIFEST_REHEARSAL_PASS'
       - name: Real Bootstrap v1.0.6 Check Update Check Rollback in disposable localhost mirror
         shell: powershell
         run: |
