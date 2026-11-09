@@ -154,6 +154,12 @@ jobs:
             $bootstrap=Join-Path $app 'bootstrap/spotify-control-self-updater.ps1'
             $output=Join-Path $fixture 'rehearsal-report.json'
             $expect=Get-Content -LiteralPath $output -Raw | ConvertFrom-Json
+            $stagedReport=Get-Content -LiteralPath 'validation/spotify-exit-immediate-maintenance-HOLD/out/release-staging/stage-receipt.json' -Raw|ConvertFrom-Json
+            if([string]$expect.future_payload_set_sha256 -cne [string]$stagedReport.payload_sha256 -or
+               [string]$expect.staged_manifest_sha256 -cne [string]$stagedReport.manifest_sha256){
+              throw 'HOSTED_BOOTSTRAP_NOT_SOURCED_FROM_STAGED_RELEASE'
+            }
+            Write-Host 'FUTURE_BOOTSTRAP_CONSUMED_IDENTICAL_STAGED_MANIFEST_AND_CHUNKS_PASS'
             $sourceHash=(Get-FileHash -LiteralPath $bootstrap -Algorithm SHA256).Hash.ToLowerInvariant()
             if($sourceHash -cne $expect.bootstrap_locator_only_copy_sha256){throw 'HOSTED_BOOTSTRAP_TRUST_PIN_DRIFT'}
             $main=Join-Path $bin 'spotify-control.ps1'
@@ -259,7 +265,7 @@ jobs:
             $mainPatch=@($lastEdge.patches | Where-Object { $_.path -ceq 'bin/spotify-control.ps1' })
             if($mainPatch.Count -ne 1){throw 'HOSTED_CORRUPT_CHUNK_MAIN_PATCH_NOT_UNIQUE'}
             $chunkRel=[string]$mainPatch[0].chunks[0].path
-            $mirror=Join-Path $fixture ('loopback-source/sdsssdvx2/spotify-control-updates/'+('e'*40))
+            $mirror=Join-Path $fixture ('loopback-source/sdsssdvx2/spotify-control-updates/'+('f'*40))
             $chunkFile=Join-Path $mirror $chunkRel.Replace('/','\')
             [byte[]]$chunkBytes=[IO.File]::ReadAllBytes($chunkFile)
             if($chunkBytes.Length -lt 8){throw 'HOSTED_CORRUPT_CHUNK_UNEXPECTED_SIZE'}
