@@ -317,11 +317,82 @@ function ProbeCommittedStable([string]$Root) {
   if($null -eq $prior){Fail 'COMMITTED_STABLE_MISSING_PREPARED_ESCROW'}
   return [pscustomobject]@{stableCommitted=$true;status='committed'}
 }
+# R14: When CIM suppresses another same-user PowerShell command line, try
+# an additional bounded read-only OS query. This is NOT a whitelist: if
+# native observation, ownership, or process identity cannot be proved,
+# the original opaque-process admission denial remains unchanged.
+function RecoverOpaquePowerShellCommandLine($Observed) {
+  try {
+    $processId=[int]$Observed.ProcessId
+    if($processId -le 0 -or $processId -eq $PID -or
+       $null -eq $Observed.CreationDate){return ''}
+    $owner=Invoke-CimMethod -InputObject $Observed -MethodName GetOwnerSid -ErrorAction Stop
+    $ownSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    if([int]$owner.ReturnValue -ne 0 -or
+       [string]$owner.Sid -cne $ownSid){return ''}
+    if(-not ('SpotifyR14NativeCommandLine' -as [type])){
+      Add-Type -ErrorAction Stop -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class SpotifyR14NativeCommandLine {
+  [DllImport("kernel32.dll", SetLastError=true)]
+  private static extern IntPtr OpenProcess(uint access, bool inherit, int processId);
+  [DllImport("kernel32.dll", SetLastError=true)]
+  private static extern bool CloseHandle(IntPtr handle);
+  [DllImport("ntdll.dll", ExactSpelling=true)]
+  private static extern int NtQueryInformationProcess(
+    IntPtr handle, int informationClass, IntPtr info,
+    int infoSize, out int returned);
+  public static string Read(int processId) {
+    if(processId <= 0) return null;
+    IntPtr handle=OpenProcess(0x1000u, false, processId);
+    if(handle==IntPtr.Zero) return null;
+    IntPtr buffer=IntPtr.Zero;
+    try {
+      const int cap=65536;
+      buffer=Marshal.AllocHGlobal(cap);
+      int written=0;
+      // Windows ProcessCommandLineInformation = 60. No memory writes to
+      // the observed process and no PROCESS_VM_READ privilege requested.
+      int status=NtQueryInformationProcess(handle,60,buffer,cap,out written);
+      if(status!=0 || written<0 || written>cap) return null;
+      int header=(IntPtr.Size==8)?16:8;
+      int bytes=(ushort)Marshal.ReadInt16(buffer,0);
+      int maximum=(ushort)Marshal.ReadInt16(buffer,2);
+      if(bytes<2 || bytes>maximum || bytes>32768 || (bytes&1)!=0) return null;
+      IntPtr ptr=Marshal.ReadIntPtr(buffer,(IntPtr.Size==8)?8:4);
+      long offset=ptr.ToInt64()-buffer.ToInt64();
+      if(offset<header || offset>cap-bytes) return null;
+      if(written!=0 && (written<header || offset>written-bytes)) return null;
+      string value=Marshal.PtrToStringUni(ptr,bytes/2);
+      if(String.IsNullOrWhiteSpace(value) || value.IndexOf('\0')>=0) return null;
+      return value;
+    } catch { return null; }
+    finally {
+      if(buffer!=IntPtr.Zero) Marshal.FreeHGlobal(buffer);
+      CloseHandle(handle);
+    }
+  }
+}
+'@
+    }
+    $command=[SpotifyR14NativeCommandLine]::Read($processId)
+    if([string]::IsNullOrWhiteSpace($command)){return ''}
+    # Recheck PID, creation time and executable after the native read;
+    # PID reuse or a changed/opaque identity is not a safe observation.
+    $now=@(Get-CimInstance -ClassName Win32_Process -Filter ("ProcessId="+$processId) -ErrorAction Stop)
+    if($now.Count -ne 1 -or
+       [int]$now[0].ProcessId -ne $processId -or
+       [datetime]$now[0].CreationDate -ne [datetime]$Observed.CreationDate -or
+       [string]$now[0].Name -cne [string]$Observed.Name){return ''}
+    return $command
+  }catch{return ''}
+}
 function WriterAdmission([string]$Root,[bool]$LegacyMutexesHeld=$false) {
   $powershell=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe' OR Name='powershell_ise.exe'" -ErrorAction Stop)
   $scriptHosts=@(Get-CimInstance -ClassName Win32_Process -Filter "Name='wscript.exe' OR Name='cscript.exe'" -ErrorAction Stop)
   if(($powershell.Count+$scriptHosts.Count) -gt 4096){Fail 'PROCESS_INVENTORY_TOO_LARGE'}
-  $active=0;$opaque=0;$resident=0
+  $active=0;$opaque=0;$resident=0;$nativeRecovered=0
   $agentPath=[IO.Path]::GetFullPath((Join-Path $Root 'bin\spotify-control-agent.vbs'))
   $systemHosts=@(
     [IO.Path]::GetFullPath((Join-Path $env:WINDIR 'System32\wscript.exe')),
@@ -331,7 +402,11 @@ function WriterAdmission([string]$Root,[bool]$LegacyMutexesHeld=$false) {
   )
   foreach($p in $powershell){
     $cmd=[string]$p.CommandLine
-    if([string]::IsNullOrWhiteSpace($cmd)){$opaque++;continue}
+    if([string]::IsNullOrWhiteSpace($cmd)){
+      $cmd=RecoverOpaquePowerShellCommandLine $p
+      if([string]::IsNullOrWhiteSpace($cmd)){$opaque++;continue}
+      $nativeRecovered++
+    }
     if($cmd -match '(?i)spotify-control-self-updater\.ps1|spotify-control\.ps1\s+.*-Action\s+(Maintain|AgentTick)|addon-manager\.ps1\s+.*-Action'){
       $active++
     }
@@ -367,7 +442,7 @@ function WriterAdmission([string]$Root,[bool]$LegacyMutexesHeld=$false) {
   # doing any state work. A LIVE resident may be left running ONLY with
   # both exact named legacy mutexes held by THIS thread.
   return [pscustomobject]@{
-    active=$active;opaque=$opaque;resident=$resident
+    active=$active;opaque=$opaque;resident=$resident;nativeRecovered=$nativeRecovered
     safe=($active -eq 0 -and $opaque -eq 0 -and $resident -le 1 -and
       ($resident -eq 0 -or $LegacyMutexesHeld))
   }
@@ -597,6 +672,7 @@ try{
   }
   $obs=WriterAdmission $root ([bool]($null -ne $legacyMutexes))
   $messages.Add('POSSIBLE_CONCURRENT_WRITERS='+$(if($obs.active -gt 0){'DETECTED'}elseif($obs.opaque -gt 0){'UNKNOWN'}else{'NONE_OBSERVED'}))
+  $messages.Add('NATIVE_POWERSHELL_COMMANDLINE_RECOVERED='+[string]$obs.nativeRecovered)
   $messages.Add('RESIDENT_AGENT='+$(if($obs.resident -gt 1){'MULTIPLE_BLOCKED'}elseif($obs.resident -eq 1 -and $Commit){'RUNNING_TICKS_MUTEX_FENCED'}elseif($obs.resident -eq 1){'RUNNING_DRYRUN_ONLY'}elseif($obs.opaque -gt 0){'UNKNOWN'}else{'NOT_OBSERVED'}))
   if($Commit -and -not $obs.safe){Fail 'ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE'}
   $stage='FIRST_SOURCE_PROOF'
