@@ -1,0 +1,57 @@
+name: HOLD R49 one real maintenance check per SpotifyExit and truthful phase admission
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-single-discovery-maintenance-R49-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/build-single-discovery-maintenance-R49-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/test-single-discovery-maintenance-R49-HOLD.ps1
+permissions:
+  contents: read
+jobs:
+  real-functions-and-fullfile-stage:
+    runs-on: windows-2025
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Reconstruct actual pinned R46 base and candidate with no public/main write
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R49_OFFICIAL_MAIN_NO_LONGER_THE_VERIFIED_STABLE_BASE'
+          }
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-combined-exit-and-shortcut-R37-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R49_EXACT_R37_PARENT_UNAVAILABLE'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-eventdriven-vbs-R45-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R49_EXACT_R45_WMI_AGENT_UNAVAILABLE'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-single-discovery-maintenance-R49-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R49_REAL_MAIN_FUNCTIONS_NOT_INTEGRATED'}
+          $root='validation/spotify-exit-immediate-maintenance-HOLD/out/single-discovery-R49'
+          $report=Get-Content -LiteralPath (Join-Path $root 'attestation.json') -Raw | ConvertFrom-Json
+          $candidate='validation/spotify-exit-immediate-maintenance-HOLD/out/release-staging-single-discovery-R49/bin/spotify-control.ps1'
+          if($report.mode -cne 'R49_SINGLE_DISCOVERY_AND_MUTATION_ADMISSION_HOLD' -or
+             [bool]$report.production_changed -or
+             [bool]$report.user_windows_changed -or
+             [bool]$report.release_authorized -or
+             (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$report.main_published_candidate_sha256){
+            throw 'R49_VERIFIED_FULL_FILE_CANDIDATE_RELEASE_SCOPE_DRIFT'
+          }
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile(
+             (Join-Path (Get-Location) $candidate),[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R49_COMPLETE_CANDIDATE_PS51_PARSE_FAILED'}
+          Write-Host 'R49_UNPUBLISHED_FULL_FILE_SHA256_AND_REAL_MAIN_SYNTAX=PASS'
+      - name: Exercise exact optimized real functions with all IO and mutations replaced by isolated in-memory test doubles
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/test-single-discovery-maintenance-R49-HOLD.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path (Get-Location) $script),[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R49_TEST_CODE_PS51_PARSE_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script
+          if($LASTEXITCODE -ne 0){throw 'R49_REAL_FUNCTIONAL_ONE_DISCOVERY_OR_OWNER_AUTHORITY_FAILED'}
+          Write-Host 'R49_USER_APPROVAL_AND_HEALTH_ENFORCED_NO_DUPLICATE_READ_SCAN=PASS'
