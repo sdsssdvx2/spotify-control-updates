@@ -1,0 +1,129 @@
+name: HOLD R27 exact resident pre-update entry (Windows native)
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-legacy-resident-first-update-entry-R27-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/guarded-first-update-resident-entry-R27-HOLD.ps1
+permissions: {contents: read}
+jobs:
+  owner-entry:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Reconstruct exact official stable source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $main=(git rev-parse origin/main).Trim()
+          if($main -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'PUBLISHED_STABLE_SHA_CHANGED'}
+          python validation/v0.6.28/build_v0628.py --build
+          if($LASTEXITCODE -ne 0){throw 'CANONICAL_STABLE_REBUILD_FAILED'}
+          Write-Host 'R27_PINNED_V0628_R17_STABLE_REBUILD_PASS'
+      - name: Exact original WScript bin lock and new owner cutover, owner link preserved
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $source='validation/spotify-exit-immediate-maintenance-HOLD/guarded-first-update-resident-entry-R27-HOLD.ps1'
+          $raw=[IO.File]::ReadAllBytes((Resolve-Path $source))
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseInput([Text.Encoding]::ASCII.GetString($raw),[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw ('R27_PS51_PARSE_FAILED '+$errors[0].Message)}
+          $test=[ScriptBlock]::Create([Text.Encoding]::ASCII.GetString($raw))
+          $fixture=Join-Path $env:RUNNER_TEMP 'spotify-r27-native'
+          if(Test-Path -LiteralPath $fixture){throw 'R27_FIXTURE_ALREADY_EXISTS'}
+          $root=Join-Path $fixture 'LocalAppData/SpotifyControl'
+          $bin=Join-Path $root 'bin'
+          $desktop=Join-Path $fixture 'Desktop'
+          $start=Join-Path $fixture 'StartMenu'
+          $foreign=Join-Path $fixture 'OtherVBS'
+          foreach($dir in @($bin,$desktop,$start,$foreign)){[void][IO.Directory]::CreateDirectory($dir)}
+          $main=Join-Path $bin 'spotify-control.ps1'
+          $addon=Join-Path $bin 'addon-manager.ps1'
+          $agent=Join-Path $bin 'spotify-control-agent.vbs'
+          $wscript=Join-Path $env:WINDIR 'System32/wscript.exe'
+          Copy-Item -LiteralPath 'validation/v0.6.28/out/bin/spotify-control.ps1' -Destination $main
+          Copy-Item -LiteralPath 'validation/v0.6.28/out/bin/addon-manager.ps1' -Destination $addon
+          $agentSource=Join-Path $fixture 'historical-agent-source'
+          $env:R27_TEST_AGENT_OUT=$agentSource
+          @'
+          import os,runpy,hashlib
+          data=runpy.run_path('validation/normal-engine-shared-turnstile/audit-pinned-stable-entrypoints-v059.py')['extract_verified_agent']()
+          assert (len(data),hashlib.sha256(data).hexdigest())==(4855,'2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278')
+          with open(os.environ['R27_TEST_AGENT_OUT'],'xb') as f: f.write(data)
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'R27_PINNED_VBS_EXTRACTION_FAILED'}
+          Copy-Item -LiteralPath $agentSource -Destination $agent
+          $userVbs=Join-Path $foreign 'owner-custom.vbs'
+          [IO.File]::WriteAllText($userVbs,"' owner fixture never executed",[Text.Encoding]::ASCII)
+          $lnk=Join-Path $start 'Spotify (Managed).lnk'
+          $shell=New-Object -ComObject WScript.Shell
+          $item=$shell.CreateShortcut($lnk)
+          $item.TargetPath=$wscript
+          $item.Arguments='"'+$userVbs+'"'
+          $item.WorkingDirectory=$foreign
+          $item.Description='OriginalOwnerCustomDescription'
+          $item.Save()
+          $linkSHA=(Get-FileHash -LiteralPath $lnk -Algorithm SHA256).Hash
+          $vbsSHA=(Get-FileHash -LiteralPath $userVbs -Algorithm SHA256).Hash
+          $state=Join-Path $root 'state.json'
+          [IO.File]::WriteAllText($state,'{"settings":"preserve"}',[Text.Encoding]::ASCII)
+          $stateSHA=(Get-FileHash -LiteralPath $state -Algorithm SHA256).Hash
+          $old=$null;$replacement=$null
+          try {
+            $old=Start-Process -FilePath $wscript -WorkingDirectory $bin -ArgumentList ('//B //NoLogo "'+$agent+'"') -PassThru
+            Start-Sleep -Seconds 2
+            if($old.HasExited){throw 'R27_OLD_SCRIPT_DID_NOT_STAY_RUNNING'}
+            $locked=$false
+            try{[IO.Directory]::Move($bin,(Join-Path $root 'bin-move-test'))}
+            catch [IO.IOException]{$locked=$true}
+            if(-not $locked){throw 'R27_LEGACY_RESIDENT_DID_NOT_LOCK_BIN'}
+            Write-Host 'R27_ACTUAL_OLD_WSCRIPT_BIN_MOVE_BLOCKED_PASS'
+            $dry=@(& $test -HostedFixtureRoot $fixture)
+            if($dry -cnotcontains 'RESULT=READY_FOR_EXACT_CUTOVER_NO_CHANGES' -or $old.HasExited){
+              throw ('R27_READONLY_PREVIEW_FAILED '+($dry -join '|'))
+            }
+            Write-Host 'R27_READONLY_NO_MUTATION_PASS'
+            $deny=@(& $test -HostedFixtureRoot $fixture -Commit)
+            if($deny -cnotcontains 'HOLD_REASON=EXACT_OWNER_CUTOVER_APPROVAL_REQUIRED' -or $old.HasExited){
+              throw ('R27_APPROVAL_NOT_ENFORCED '+($deny -join '|'))
+            }
+            Write-Host 'R27_NO_APPROVAL_NO_PROCESS_TERMINATION_PASS'
+            $receipt=@(& $test -HostedFixtureRoot $fixture -Commit -ApprovalPhrase 'APPROVE_ONLY_EXACT_OWNER_RESIDENT_NEUTRAL_CWD')
+            if($receipt -cnotcontains 'RESULT=EXACT_RESIDENT_CUTOVER_COMPLETED_OTHER_HANDLES_NOT_CERTIFIED' -or
+               $receipt -cnotcontains 'EXACT_OLD_RESIDENT_TERMINATED=YES' -or
+               $receipt -cnotcontains 'MAINTENANCE_AND_AGENTTICK_MUTEXES=HELD'){
+              throw ('R27_OWNER_CUTOVER_FAILED '+($receipt -join '|'))
+            }
+            if(-not $old.HasExited){throw 'R27_ORIGINAL_AGENT_NOT_TERMINATED'}
+            $matching=@(Get-CimInstance Win32_Process -Filter "Name='wscript.exe'" | Where-Object {
+              [string]$_.CommandLine -like ('*"'+$agent+'"*')
+            })
+            if($matching.Count -ne 1){throw 'R27_REPLACEMENT_COUNT_NOT_ONE'}
+            $replacement=Get-Process -Id ([int]$matching[0].ProcessId) -ErrorAction Stop
+            if($replacement.HasExited){throw 'R27_NEW_RESIDENT_ALREADY_EXITED'}
+            [IO.Directory]::Move($bin,(Join-Path $root 'bin-after-corrected'))
+            [IO.Directory]::Move((Join-Path $root 'bin-after-corrected'),$bin)
+            if($replacement.HasExited){throw 'R27_REPLACEMENT_DIED_AFTER_BIN_RENAME'}
+            if((Get-FileHash $lnk -Algorithm SHA256).Hash -cne $linkSHA -or
+               (Get-FileHash $userVbs -Algorithm SHA256).Hash -cne $vbsSHA -or
+               (Get-FileHash $state -Algorithm SHA256).Hash -cne $stateSHA -or
+               (Test-Path (Join-Path $desktop 'Spotify (Managed).lnk'))){
+              throw 'R27_USER_STATE_OR_CUSTOM_SHORTCUT_MUTATED'
+            }
+            Write-Host 'R27_OWNER_CUTOVER_NEUTRAL_BIN_RENAME_AND_USER_STATE_PRESERVED_PASS'
+          }finally{
+            foreach($p in @($old,$replacement)){
+              if($null -ne $p){
+                try {
+                  $p.Refresh()
+                  if(-not $p.HasExited){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue}
+                  [void]$p.WaitForExit(5000)
+                }catch{}
+              }
+            }
+            Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          Write-Host 'R27_HOSTED_ONLY_PROCESSES_AND_FILES_CLEANED_PASS'
