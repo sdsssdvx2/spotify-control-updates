@@ -5,7 +5,8 @@
 [CmdletBinding()]
 param(
   [switch]$AcceptMicrosoftHandleEula,
-  [string]$HostedFixtureRoot=''
+  [string]$HostedFixtureRoot='',
+  [string]$HostedExactHandleZipPath=''
 )
 Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
@@ -108,9 +109,19 @@ try{
   $extract=Join-Path $scratch 'extracted'
   [void][IO.Directory]::CreateDirectory($extract)
   $phase='DOWNLOAD_OFFICIAL_MICROSOFT_HANDLE'
-  $wc=New-Object Net.WebClient
-  try{[byte[]]$zipRaw=$wc.DownloadData('https://download.sysinternals.com/files/Handle.zip')}
-  finally{$wc.Dispose()}
+  if($HostedExactHandleZipPath.Length -gt 0){
+    if($HostedFixtureRoot.Length -eq 0 -or
+       $env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows' -or
+       [IO.Path]::GetFullPath($HostedExactHandleZipPath) -cne
+       [IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP 'r20-microsoft-Handle.zip'))){
+      throw 'HOSTED_ZIP_PATH_NOT_PERMITTED'
+    }
+    [byte[]]$zipRaw=[IO.File]::ReadAllBytes($HostedExactHandleZipPath)
+  }else{
+    $wc=New-Object Net.WebClient
+    try{[byte[]]$zipRaw=$wc.DownloadData('https://download.sysinternals.com/files/Handle.zip')}
+    finally{$wc.Dispose()}
+  }
   if($zipRaw.Length -gt 3000000 -or
      (HashBytes $zipRaw) -cne '279aaf8eccb6f79147f4dcc6ba091fb895c4cb8b199a0dd186a4c76bc519d2cd'){
     throw 'OFFICIAL_HANDLE_ZIP_PIN_FAILED'
@@ -193,9 +204,27 @@ try{
     $messages.Add('TRANSACTION_STABLE_DURING_AUDIT=YES')
   }
   $messages.Add('RESULT=READONLY_BIN_HANDLE_INVENTORY_COMPLETE')
-}catch{
-  # Do not export raw exception messages, file paths, PIDs, source or usernames.
+ }catch{
+  # Only exact script-authored categorical errors, never OS exception text.
+  $kind=[string]$_.Exception.Message
+  $allowed=@(
+    'WINDOWS_REQUIRED','X64_POWERSHELL_REQUIRED',
+    'EXPLICIT_MICROSOFT_EULA_ACCEPTANCE_REQUIRED',
+    'HOSTED_FIXTURE_OVERRIDE_DENIED','HOSTED_FIXTURE_OUTSIDE_RUNNER',
+    'ROOT_OR_BIN_UNSAFE','TRANSACTION_NOT_SAFE_TO_INSPECT',
+    'SCRATCH_COLLISION','HOSTED_ZIP_PATH_NOT_PERMITTED',
+    'OFFICIAL_HANDLE_ZIP_PIN_FAILED','HANDLE64_NOT_PRESENT',
+    'HANDLE64_EXE_HASH_CHANGED','MICROSOFT_SIGNATURE_INVALID',
+    'HANDLE_QUERY_DEADLINE_EXCEEDED','HANDLE_OUTPUT_OVERSIZED',
+    'HANDLE_QUERY_NONZERO_OR_PERMISSION',
+    'TRANSACTION_CHANGED_DURING_DIAGNOSIS'
+  )
+  if($kind -cnotin $allowed){$kind='UNVERIFIED_EXTERNAL_OR_WINDOWS_EXCEPTION'}
   $messages.Add('FAILED_PHASE='+$phase)
+  $messages.Add('HOLD_REASON='+$kind)
+  if($env:GITHUB_ACTIONS -ceq 'true'){
+    $messages.Add('HOSTED_EXCEPTION_TYPE='+$_.Exception.GetType().Name)
+  }
   $messages.Add('RESULT=HOLD_DIAGNOSTIC_INCOMPLETE')
 }finally{
   if($null -ne $scratch -and (Test-Path -LiteralPath $scratch)){
