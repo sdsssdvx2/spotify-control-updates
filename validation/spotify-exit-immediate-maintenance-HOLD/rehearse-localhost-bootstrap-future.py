@@ -12,6 +12,7 @@ no edits outside RUNNER_TEMP, no user profile or production stable updates.
 from __future__ import annotations
 
 import base64
+import copy
 import gzip
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -29,7 +30,7 @@ BIN = REHEARSAL / "LocalAppData" / "SpotifyControl" / "bin"
 APP = BIN.parent
 SERVE = REHEARSAL / "loopback-source"
 BOOTSTRAP_INPUT = Path(os.environ["RUNNER_TEMP"]).resolve() / "spotify-verified-bootstrap-v106.ps1"
-FUTURE = ROOT / "validation/spotify-exit-immediate-maintenance-HOLD/out/future-safe"
+STAGED = ROOT / "validation/spotify-exit-immediate-maintenance-HOLD/out/release-staging"
 CANONICAL = ROOT / "validation/v0.6.28/out/bin"
 PIN = {
     "main": (284321, "af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0"),
@@ -38,7 +39,7 @@ PIN = {
     "bootstrap": (42963, "d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6"),
 }
 VERSION = "0.6.30"  # NON-PUBLISHED, future scratch version; 0.6.29 preview is forbidden
-COMMIT = "e" * 40  # deliberately INVALID published commit, usable only by localhost mirror
+COMMIT = "f" * 40  # deliberately INVALID published commit, usable only by localhost mirror
 REPOSITORY = "sdsssdvx2/spotify-control-updates"
 
 def digest(b: bytes) -> str:
@@ -50,13 +51,6 @@ def assert_pin(data: bytes, key: str) -> None:
         raise RuntimeError("OFFICIAL_SOURCE_IDENTITY_DRIFT_" + key.upper())
 
 
-def paths_for_patches():
-    return (
-        ("bin/spotify-control.ps1", "main-v0628-to-v0630"),
-        ("bin/spotify-control-agent.vbs", "resident-v011-to-v012"),
-    )
-
-
 def checked_write(path: Path, data: bytes) -> None:
     if not path.resolve().is_relative_to(REHEARSAL):
         raise RuntimeError("STAGING_PATH_ESCAPED_HOSTED_SCRATCH")
@@ -65,36 +59,6 @@ def checked_write(path: Path, data: bytes) -> None:
         f.write(data)
         f.flush()
         os.fsync(f.fileno())
-
-
-def make_patch(path: str, before: bytes, after: bytes, directory: str) -> dict:
-    if digest(before) == digest(after):
-        raise RuntimeError("UNCHANGED_FULL_FILE_PATCH")
-    gz = gzip.compress(after, mtime=0)
-    enc = base64.b64encode(gz)
-    chunks = [enc[i:i+4096] for i in range(0, len(enc), 4096)]
-    if not 1 <= len(chunks) <= 32:
-        raise RuntimeError("BOOTSTRAP_EXACT_CHUNK_LIMIT")
-    items = []
-    for i, raw in enumerate(chunks):
-        rel = f"packages/v{VERSION}/{directory}/chunk-{i:03}.txt"
-        mirror = SERVE / REPOSITORY / COMMIT / rel
-        checked_write(mirror, raw)
-        items.append({"path": rel, "sha256": digest(raw), "size": len(raw)})
-    if gzip.decompress(base64.b64decode(b"".join(chunks), validate=True)) != after:
-        raise RuntimeError("CHUNK_ROUNDTRIP_INVALID")
-    return {
-        "path": path,
-        "from_sha256": digest(before),
-        "to_sha256": digest(after),
-        "encoding": "gzip-base64-full-file",
-        "encoded_sha256": digest(enc),
-        "encoded_size": len(enc),
-        "compressed_sha256": digest(gz),
-        "compressed_size": len(gz),
-        "target_size": len(after),
-        "chunks": items,
-    }
 
 
 class LimitedMirror(BaseHTTPRequestHandler):
@@ -158,17 +122,28 @@ def prepare() -> None:
     assert_pin(old_addon, "addon")
     assert_pin(old_agent, "agent")
 
-    future_main = (FUTURE / "spotify-control.ps1").read_bytes()
-    future_agent = (FUTURE / "spotify-control-agent.vbs").read_bytes()
-    marker = b'$ScriptVersion = "0.6.28"'
-    if future_main.count(marker) != 1:
-        raise RuntimeError("RELEASE_VERSION_MARKER_NOT_EXACT")
-    future_main = future_main.replace(marker, b'$ScriptVersion = "0.6.30"', 1)
+    future_main = (STAGED / "bin/spotify-control.ps1").read_bytes()
+    future_agent = (STAGED / "bin/spotify-control-agent.vbs").read_bytes()
     if future_main.count(b'$ScriptVersion = "0.6.30"') != 1:
-        raise RuntimeError("REHEARSAL_VERSION_NOT_SET")
-    if digest(future_main) == digest(old_main) or digest(future_agent) == digest(old_agent):
-        raise RuntimeError("RELEASE_CANDIDATE_NOT_CHANGED")
-
+        raise RuntimeError("STAGED_FUTURE_MAIN_VERSION_NOT_EXACT")
+    if (digest(future_main)==digest(old_main) or
+        digest(future_agent)==digest(old_agent)):
+        raise RuntimeError("STAGED_RELEASE_TARGET_UNCHANGED")
+    staged_bytes=(STAGED/"manifest-UNPUBLISHABLE.json").read_bytes()
+    staged=json.loads(staged_bytes.decode("ascii"))
+    receipt=json.loads((STAGED/"stage-receipt.json").read_text(encoding="ascii"))
+    if (receipt["status"]!="STAGED_HOLD_NOT_PUBLISHABLE" or
+        receipt["publishable"] is not False or
+        receipt["source_commit"]!=COMMIT or
+        receipt["manifest_sha256"]!=digest(staged_bytes)):
+        raise RuntimeError("STAGED_RELEASE_RECEIPT_OR_IMMUTABLE_MANIFEST_DRIFT")
+    if (staged.get("source_commit") != COMMIT or
+        staged.get("latest_version") != VERSION or
+        len(staged.get("updates",[])) != 19 or
+        staged["bootstrap"] != {
+          "version":"1.0.6","sha256":PIN["bootstrap"][1],"size":PIN["bootstrap"][0]
+        }):
+        raise RuntimeError("UNPUBLISHABLE_RELEASE_STAGING_INVALID")
     boot = BOOTSTRAP_INPUT.read_bytes()
     assert_pin(boot, "bootstrap")
     script = boot.decode("ascii")
@@ -184,46 +159,74 @@ def prepare() -> None:
     # transaction/rollback logic, candidate tests or patch decoding.
     disposable_boot = script.encode("ascii")
 
-    manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8-sig"))
-    if manifest["latest_version"] != "0.6.28" or manifest["bootstrap"] != {
-        "version": "1.0.6", "sha256": PIN["bootstrap"][1], "size": PIN["bootstrap"][0]
+    published = json.loads((ROOT/"manifest.json").read_text(encoding="utf-8-sig"))
+    if published["latest_version"]!="0.6.28" or published["bootstrap"] != {
+        "version":"1.0.6","sha256":PIN["bootstrap"][1],"size":PIN["bootstrap"][0]
     }:
         raise RuntimeError("PUBLISHED_STABLE_SOURCE_MANIFEST_DRIFT")
-    rows = {
-        "bin/spotify-control.ps1": old_main,
-        "bin/addon-manager.ps1": old_addon,
-        "bin/spotify-control-agent.vbs": old_agent,
+    rows={
+        "bin/spotify-control.ps1":old_main,
+        "bin/addon-manager.ps1":old_addon,
+        "bin/spotify-control-agent.vbs":old_agent,
     }
-    patches = []
-    new_rows = dict(rows)
-    for path, directory in paths_for_patches():
-        before = rows[path]
-        after = future_main if path.endswith(".ps1") else future_agent
-        patches.append(make_patch(path, before, after, directory))
-        new_rows[path] = after
-
-    manifest["latest_version"] = VERSION
-    manifest["source_commit"] = COMMIT
-    manifest["bootstrap"] = {
-        "version": "1.0.6", "size": len(disposable_boot), "sha256": digest(disposable_boot)
-    }
-    manifest["latest_files"] = [
-        {"path": path, "size": len(data), "sha256": digest(data)}
-        for path, data in sorted(new_rows.items())
-    ]
-    canonical = "".join(
-        path + "|" + str(len(data)) + "|" + digest(data) + "\n"
-        for path, data in sorted(new_rows.items())
+    if staged["updates"][:-1] != published["updates"]:
+        raise RuntimeError("UNPUBLISHABLE_RELEASE_CHANGED_PUBLIC_EDGES")
+    if (staged["updates"][-1]["from_version"] != "0.6.28" or
+        staged["updates"][-1]["to_version"] != VERSION):
+        raise RuntimeError("STAGED_NEW_EDGE_DRIFT")
+    new_rows=dict(rows)
+    new_rows["bin/spotify-control.ps1"]=future_main
+    new_rows["bin/spotify-control-agent.vbs"]=future_agent
+    latest=sorted(
+        ({"path":path,"size":len(data),"sha256":digest(data)}
+         for path,data in new_rows.items()),key=lambda x:x["path"]
     )
-    manifest["payload_set_sha256"] = digest(canonical.encode("utf-8"))
-    manifest["updates"].append({
-        "from_version": "0.6.28",
-        "to_version": VERSION,
-        "patches": patches
-    })
-    if len(manifest["updates"]) != 19:
-        raise RuntimeError("UPDATE_EDGE_COUNT_UNEXPECTED")
-    checked_write(SERVE / "manifest.json", json.dumps(manifest,separators=(",",":")).encode("ascii"))
+    if staged["latest_files"] != latest:
+        raise RuntimeError("STAGED_LATEST_FILES_NOT_EXACT")
+    if receipt["payload_sha256"]!=staged["payload_set_sha256"]:
+        raise RuntimeError("STAGED_PAYLOAD_SET_RECEIPT_MISMATCH")
+    patches=staged["updates"][-1]["patches"]
+    if [p["path"] for p in patches] != [
+        "bin/spotify-control.ps1","bin/spotify-control-agent.vbs"
+    ]:
+        raise RuntimeError("STAGED_PATCH_PATHS_DRIFT")
+    for p in patches:
+        path=p["path"]
+        before=rows[path]
+        after=new_rows[path]
+        if (p["from_sha256"]!=digest(before) or
+            p["to_sha256"]!=digest(after) or
+            p["target_size"]!=len(after) or
+            p["encoding"]!="gzip-base64-full-file" or
+            not 1 <= len(p["chunks"]) <=32):
+            raise RuntimeError("STAGED_FULL_FILE_PATCH_INVALID")
+        all_encoded=[]
+        for i,ch in enumerate(p["chunks"]):
+            rel=ch["path"]
+            if (not rel.startswith("packages/v0.6.30/") or
+                ".." in rel or "\\" in rel or ":" in rel or
+                not rel.endswith("/chunk-%03d.txt"%i)):
+                raise RuntimeError("STAGED_CHUNK_PATH_NOT_SAFE_OR_ORDERED")
+            raw=(STAGED/rel).read_bytes()
+            if (len(raw),digest(raw))!=(ch["size"],ch["sha256"]):
+                raise RuntimeError("STAGED_CHUNK_PIN_MISMATCH")
+            checked_write(SERVE/REPOSITORY/COMMIT/rel,raw)
+            all_encoded.append(raw)
+        encoded=b"".join(all_encoded)
+        compressed=base64.b64decode(encoded,validate=True)
+        if (len(encoded)!=p["encoded_size"] or digest(encoded)!=p["encoded_sha256"] or
+            len(compressed)!=p["compressed_size"] or
+            digest(compressed)!=p["compressed_sha256"] or
+            gzip.decompress(compressed)!=after):
+            raise RuntimeError("STAGED_REAL_BOOTSTRAP_CHUNK_ROUNDTRIP_FAILED")
+    manifest=copy.deepcopy(staged)
+    # Exact release staging manifest with ONLY one trust difference:
+    # the hosted bootstrap has two redirected network URI literals.
+    manifest["bootstrap"]={
+        "version":"1.0.6","size":len(disposable_boot),"sha256":digest(disposable_boot)
+    }
+    checked_write(SERVE/"manifest.json",
+                  json.dumps(manifest,separators=(",",":")).encode("ascii"))
     checked_write(APP / "bootstrap" / "spotify-control-self-updater.ps1", disposable_boot)
     for path, data in rows.items():
         checked_write(APP / path, data)
@@ -285,6 +288,8 @@ def prepare() -> None:
     print("REAL_BOOTSTRAP_REHEARSAL_FIXTURE=PREPARED")
     print("REAL_BOOTSTRAP_REHEARSAL_LOCALHOST_ONLY=YES")
     print("REAL_BOOTSTRAP_REHEARSAL_TWO_URL_LOCATOR_CHANGES=YES")
+    print("REAL_BOOTSTRAP_REHEARSAL_STAGED_RELEASE_CHUNKS_EXACT=YES")
+    print("REAL_BOOTSTRAP_REHEARSAL_STAGED_MANIFEST_SHA256="+digest(staged_bytes))
     print("REAL_BOOTSTRAP_REHEARSAL_MAIN_PATCH_CHUNKS="+str(len(patches[0]["chunks"])))
     print("REAL_BOOTSTRAP_REHEARSAL_AGENT_PATCH_CHUNKS="+str(len(patches[1]["chunks"])))
     print("REAL_BOOTSTRAP_REHEARSAL_UNPUBLISHED=YES")
