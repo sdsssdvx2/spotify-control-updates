@@ -6,6 +6,8 @@ on:
       - '.github/workflows/validate-integrated-spotifyexit-and-shortcuts-R37-HOLD.yml'
       - 'validation/spotify-exit-immediate-maintenance-HOLD/build-combined-exit-and-shortcut-R37-HOLD.py'
       - 'validation/spotify-exit-immediate-maintenance-HOLD/stage-combined-official-transport-R38-HOLD.py'
+      - 'validation/spotify-exit-immediate-maintenance-HOLD/build-integrated-review-git-bundle-R39-HOLD.py'
+      - 'validation/spotify-exit-immediate-maintenance-HOLD/persist-integrated-review-ref-R39-HOLD.py'
 permissions:
   contents: read
 jobs:
@@ -89,3 +91,58 @@ jobs:
           if(@($errors).Count -ne 0){throw 'R38_FINAL_FULL_FILE_MAIN_WINDOWS_PS51_PARSE_FAILED'}
           Write-Host 'R38_TARGETED_BOOTSTRAP_FULL_FILE_STAGE_AND_UNPUBLISHED_MANIFEST_PASS'
           Write-Host 'R38_SINGLE_FUTURE_VERSION_HAS_BOTH_USER_FACING_FEATURES_PASS'
+      - name: Build SHA-pinned two-commit Git bundle from R38 integrated candidate, NO publication
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-integrated-review-git-bundle-R39-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R39_GIT_REVIEW_BUNDLE_PREPARATION_FAILED'}
+          $path='validation/spotify-exit-immediate-maintenance-HOLD/out/promotion-review-integrated-HOLD'
+          $receipt=Get-Content -LiteralPath (Join-Path $path 'promotion-receipt-HOLD.json') -Raw | ConvertFrom-Json
+          $bundle=Join-Path $path 'v0630-two-commit-publication-NOT-AUTHORIZED.bundle'
+          if($receipt.status -cne 'REVIEW_CANDIDATE_ONLY_NOT_AUTHORIZED_NOT_PUBLISHED' -or
+             [int]$receipt.source_package_chunks -ne 20 -or
+             [int]$receipt.git_commits_to_fast_forward -ne 2 -or
+             [bool]$receipt.github_ref_updated -or
+             [bool]$receipt.release_published -or
+             [bool]$receipt.owner_approval_granted -or
+             (Get-FileHash -LiteralPath $bundle -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+             [string]$receipt.bundle_sha256){
+            throw 'R39_GIT_BUNDLE_SHA_OR_PROVENANCE_DRIFT'
+          }
+          Write-Host 'R39_R38_COMBINED_VERSION_REAL_MAIN_PARENT_TWO_GIT_COMMITS_VERIFIED_PASS'
+      - name: Store only the user-functional R38 integration candidate as non-deployable review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Spotify-v0630-integrated-exit-shortcuts-REVIEW-NOT-PUBLISHED
+          path: validation/spotify-exit-immediate-maintenance-HOLD/out/promotion-review-integrated-HOLD/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  integrated-review-custody:
+    needs: combined-source-behavior
+    if: github.ref == 'refs/heads/validate/spotify-exit-immediate-maintenance-HOLD'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Retrieve exactly the integrated candidate which passed R37 and R38
+        uses: actions/download-artifact@v4
+        with:
+          name: Spotify-v0630-integrated-exit-shortcuts-REVIEW-NOT-PUBLISHED
+          path: review-artifact
+      - name: Verify complete Git ancestry and immutable chunks, create only isolated integrated review ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 validation/spotify-exit-immediate-maintenance-HOLD/persist-integrated-review-ref-R39-HOLD.py
+          test "$(git rev-parse origin/main)" = 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          echo 'R39_OWNER_WINDOWS_AND_STABLE_MAIN_NOT_MODIFIED_PASS'
+
