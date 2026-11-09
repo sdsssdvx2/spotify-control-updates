@@ -63,6 +63,8 @@ jobs:
             })
             if($selected.Count -lt 1){throw ('R20_CWD_DIRECTORY_HANDLE_NOT_OBSERVED lineCount='+$raw.Count)}
             Write-Host 'R20_PROCESS_CWD_DIRECTORY_FILE_HANDLE_DETECTED_PASS'
+            $sample=([string]$selected[0]).Replace($bin,'<BIN>').Replace([string]$hold.Id,'<PID>')
+            Write-Host ('R20_SYNTHETIC_CSV_EXAMPLE='+$sample)
             $script='validation/spotify-exit-immediate-maintenance-HOLD/identify-bin-handle-owners-R20-READONLY.ps1'
             $tokens=$null;$errors=$null
             [void][Management.Automation.Language.Parser]::ParseFile(
