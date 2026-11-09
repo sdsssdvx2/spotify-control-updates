@@ -58,7 +58,7 @@ jobs:
             if($exit -ne 0){throw ('R20_HANDLE_QUERY_FAILED_'+$exit)}
             $selected=@($raw|Where-Object{
               $_ -match ('(?i)cmd(?:\.exe)?,\s*'+$hold.Id+',') -and
-              $_ -match '(?i)r20-synthetic-lock[\\/]bin'
+              $_ -match '(?i)SpotifyControl[\\/]bin'
             })
             if($selected.Count -lt 1){throw ('R20_CWD_DIRECTORY_HANDLE_NOT_OBSERVED lineCount='+$raw.Count)}
             Write-Host 'R20_PROCESS_CWD_DIRECTORY_FILE_HANDLE_DETECTED_PASS'
@@ -81,24 +81,7 @@ jobs:
                 throw ('R20_WITNESS_EXPECTED_RESULT_MISSING_'+$required+' '+($out -join '|'))
               }
             }
-            $count=@($out | Where-Object {$_ -match '^BIN_DIRECTORY_EXACT_HANDLE_OWNER_COUNT=[1-9][0-9]*
-          }finally{
-            if($null -ne $hold -and -not $hold.HasExited){Stop-Process -Id $hold.Id -Force -ErrorAction SilentlyContinue}
-            try{Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction Stop}catch{}
-          }
-      - name: Clean only disposable hosted utility and verify no production mutation
-        if: always()
-        shell: powershell
-        run: |
-          $ErrorActionPreference='Stop'
-          foreach($p in @(
-            (Join-Path $env:RUNNER_TEMP 'r20-microsoft-Handle.zip'),
-            (Join-Path $env:RUNNER_TEMP 'r20-sysinternals-handle')
-          )){
-            if(Test-Path -LiteralPath $p){Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop}
-          }
-          Write-Host 'R20_ONLY_GITHUB_RUNNER_SCRATCH_CHANGED_PASS'
-})
+            $count=@($out | Where-Object { $_ -match '^BIN_DIRECTORY_EXACT_HANDLE_OWNER_COUNT=[1-9][0-9]*$' })
             if($count.Count -ne 1){throw ('R20_WITNESS_EXACT_BIN_NOT_FOUND '+($out -join '|'))}
             if(($out -join '|') -match '(?i)r20-synthetic-lock|[A-Z]:\\|cmd\.exe,|2026[0-9]'){
               throw 'R20_WITNESS_PRIVATE_PATH_OR_PID_EXPORTED'
