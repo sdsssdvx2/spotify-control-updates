@@ -1,0 +1,86 @@
+name: HOLD R20 Microsoft Sysinternals Handle directory lock witness
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-official-handle-directory-lock-R20-HOLD.yml
+permissions: {contents: read}
+jobs:
+  synthetic-handle:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Obtain official signed portable Microsoft Handle and verify exact binary
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+          $url='https://download.sysinternals.com/files/Handle.zip'
+          $zip=Join-Path $env:RUNNER_TEMP 'r20-microsoft-Handle.zip'
+          $temp=Join-Path $env:RUNNER_TEMP 'r20-sysinternals-handle'
+          [void][IO.Directory]::CreateDirectory($temp)
+          (New-Object Net.WebClient).DownloadFile($url,$zip)
+          $ziphash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expected='279aaf8eccb6f79147f4dcc6ba091fb895c4cb8b199a0dd186a4c76bc519d2cd'
+          if($ziphash -cne $expected){throw ('R20_OFFICIAL_HANDLE_ZIP_SHA_CHANGED_'+$ziphash)}
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [IO.Compression.ZipFile]::ExtractToDirectory($zip,$temp)
+          $exe=Join-Path $temp 'handle64.exe'
+          if(-not(Test-Path $exe)){throw 'R20_OFFICIAL_HANDLE_X64_MISSING'}
+          $sig=Get-AuthenticodeSignature -FilePath $exe -ErrorAction Stop
+          if([string]$sig.Status -cne 'Valid' -or
+             [string]$sig.SignerCertificate.Subject -notmatch 'Microsoft'){
+            throw 'R20_OFFICIAL_HANDLE_SIGNATURE_INVALID'
+          }
+          Write-Host 'R20_OFFICIAL_HANDLE_SHA_AND_AUTHENTICODE_PASS'
+          Write-Host ('R20_HANDLE64_EXE_SHA256='+((Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()))
+      - name: Prove portable utility identifies directory held as other process working directory
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $scratch=Join-Path $env:RUNNER_TEMP 'r20-synthetic-lock'
+          $bin=Join-Path $scratch 'bin'
+          [void][IO.Directory]::CreateDirectory($bin)
+          $ready=Join-Path $scratch 'ready.txt'
+          $script=Join-Path $scratch 'hold-cwd.ps1'
+          $literal=$bin.Replace("'","''")
+          $readyQuoted=$ready.Replace("'","''")
+          $body=(@(
+            "Set-Location -LiteralPath '"+$literal+"'",
+            "[IO.File]::WriteAllText('"+$readyQuoted+"','READY')",
+            "Start-Sleep -Seconds 40"
+          ) -join [Environment]::NewLine)
+          [IO.File]::WriteAllText($script,$body,[Text.Encoding]::ASCII)
+          $hold=$null
+          try{
+            $hold=Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList @('-NoProfile','-NonInteractive','-File',('"' + $script + '"')) -PassThru
+            $readyAt=(Get-Date).AddSeconds(10)
+            while((Get-Date) -lt $readyAt -and -not(Test-Path -LiteralPath $ready)){Start-Sleep -Milliseconds 200}
+            if(-not(Test-Path -LiteralPath $ready)){throw 'R20_HOLDER_CHILD_NOT_READY'}
+            $exe=Join-Path $env:RUNNER_TEMP 'r20-sysinternals-handle/handle64.exe'
+            $raw=@(& $exe -nobanner -accepteula -v $bin 2>&1 | ForEach-Object{[string]$_})
+            $exit=$LASTEXITCODE
+            if($exit -ne 0){throw ('R20_HANDLE_QUERY_FAILED_'+$exit)}
+            $selected=@($raw|Where-Object{
+              $_ -match ('(?i)powershell(?:\.exe)?,\s*'+$hold.Id+',') -and
+              $_ -match '(?i)r20-synthetic-lock[\\/]bin'
+            })
+            if($selected.Count -lt 1){throw ('R20_CWD_DIRECTORY_HANDLE_NOT_OBSERVED lineCount='+$raw.Count)}
+            Write-Host 'R20_PROCESS_CWD_DIRECTORY_FILE_HANDLE_DETECTED_PASS'
+          }finally{
+            if($null -ne $hold -and -not $hold.HasExited){Stop-Process -Id $hold.Id -Force -ErrorAction SilentlyContinue}
+            try{Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction Stop}catch{}
+          }
+      - name: Clean only disposable hosted utility and verify no production mutation
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($p in @(
+            (Join-Path $env:RUNNER_TEMP 'r20-microsoft-Handle.zip'),
+            (Join-Path $env:RUNNER_TEMP 'r20-sysinternals-handle')
+          )){
+            if(Test-Path -LiteralPath $p){Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop}
+          }
+          Write-Host 'R20_ONLY_GITHUB_RUNNER_SCRATCH_CHANGED_PASS'
