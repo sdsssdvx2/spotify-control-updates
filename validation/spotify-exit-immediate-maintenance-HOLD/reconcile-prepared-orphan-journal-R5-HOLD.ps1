@@ -784,16 +784,20 @@ try{
     }
     if($pre.restorePresent){
       $stage='RESTORE_ORIGINAL_PRESERVE_PRECHECK'
+      $stage='RESTORE_PRESERVE_WRITER_READMISSION'
       if(-not (WriterAdmission $root $true).safe){
         Fail 'ACTIVE_OR_OPAQUE_PROCESS_REQUIRES_QUIESCENCE'
       }
       # Fence genuine Bootstrap launches before the new directory move.
+      $stage='RESTORE_PRESERVE_BOOTSTRAP_EXCLUSIVE_FENCE'
       $exclusiveBootstrap=HoldExactBootstrapFile $root
+      $stage='RESTORE_PRESERVE_FENCED_REPROBE'
       $fenced=Probe $root $pre.id -AcceptExactRestore
       if($fenced.digest -cne $pre.digest -or
          -not $fenced.restorePresent -or $fenced.preservedPresent){
         Fail 'RESTORE_CHANGED_BEFORE_ARCHIVE_MOVE'
       }
+      $stage='RESTORE_PRESERVE_VOLUME_ADMISSION'
       if(-not ([IO.Path]::GetPathRoot($fenced.restorePath).Equals(
           [IO.Path]::GetPathRoot($fenced.preservedRestorePath),
           [StringComparison]::OrdinalIgnoreCase))){
