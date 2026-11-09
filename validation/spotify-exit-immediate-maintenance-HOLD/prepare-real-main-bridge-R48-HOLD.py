@@ -40,7 +40,9 @@ def main():
        cwd=ROOT,stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=False,timeout=20)
     if rev.returncode or rev.stdout.decode("ascii").strip()!=R44_PIN:
         raise RuntimeError("R48_PROVEN_REAL_WSCRIPT_TEST_BLOB_DRIFT")
-    target=HERE/"out"/"release-staging-eventdriven-R46"/"bin"/"spotify-control.ps1"
+    # Use the selected exact source stage for both SHA preflight and the
+    # generated real-WScript fixture; they must not silently disagree.
+    target=ROOT/SOURCE/"bin"/"spotify-control.ps1"
     if hashlib.sha256(target.read_bytes()).hexdigest()!=MAIN_PIN:
         raise RuntimeError("R48_REAL_MAIN_TARGET_SOURCE_BYTES_DRIFT")
     text=R44.read_text("utf-8")
