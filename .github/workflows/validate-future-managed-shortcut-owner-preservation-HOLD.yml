@@ -11,6 +11,7 @@ on:
       - validation/spotify-exit-immediate-maintenance-HOLD/verify-two-commit-future-release-HOLD.py
       - validation/spotify-exit-immediate-maintenance-HOLD/guarded-first-update-resident-entry-R27-HOLD.ps1
       - validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-next-stable-upgrade-R28-HOLD.ps1
+      - validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-public-release-onepass-R32-HOLD.ps1
       - validation/spotify-exit-immediate-maintenance-HOLD/verify-r30-future-facts-offline-HOLD.py
       - validation/spotify-exit-immediate-maintenance-HOLD/verify-public-release-transport-R29-HOLD.py
 permissions: {contents: read, actions: read}
@@ -21,6 +22,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
+      - name: R32 one-shot public controller is syntactically valid, source-frozen and inactive without release
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $name='validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-public-release-onepass-R32-HOLD.ps1'
+          $source=[IO.File]::ReadAllText((Resolve-Path $name))
+          $tokens=$null; $errors=$null
+          [void][Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw ('R32_WINDOWS_PS51_PARSE_FAILED '+$errors[0].Message)}
+          $frozen='aedd8219391574e910c1fae4198cff7b7db31884'
+          $expect=@{
+            'guarded-first-update-resident-entry-R27-HOLD.ps1'='98df17ed1c4d81445bbf34cf4bfa3b2889bc2cc0'
+            'owner-approved-next-stable-upgrade-R28-HOLD.ps1'='6a9a5bfbeb9a357b14345037bbf1419fade8304d'
+            'verify-public-release-transport-R29-HOLD.py'='558f1f54a6c04afa72d013cef02b807fb3a148fd'
+          }
+          foreach($name in @($expect.Keys)){
+            $rel='validation/spotify-exit-immediate-maintenance-HOLD/'+$name
+            $blob=(git rev-parse ($frozen+':'+$rel)).Trim()
+            if($LASTEXITCODE -ne 0 -or $blob -cne $expect[$name]){
+              throw 'R32_FROZEN_SOURCE_GIT_BLOB_PIN_MISMATCH'
+            }
+          }
+          Write-Host 'R32_ALL_THREE_IMMUTABLE_GITHUB_TOOL_BLOBS_PINNED_PASS'
+          $r32=[ScriptBlock]::Create($source)
+          $denied=@(& $r32 -Commit -ApprovalPhrase 'APPROVE_EXACT_OWNER_CUTOVER_AND_ONE_STABLE_UPDATE')
+          if($denied -cnotcontains 'HOLD_REASON=UNPUBLISHED_OR_UNAPPROVED_PUBLIC_RELEASE' -or
+             $denied -cnotcontains 'RESULT=HOLD_NO_AUTOMATIC_RETRY' -or
+             $denied -cnotcontains 'R28_OWNER_CUTOVER_OBSERVED=NO' -or
+             $denied -cnotcontains 'OFFICIAL_UPDATE_SUCCESS_OBSERVED=NO' -or
+             $denied -cnotcontains 'NETWORK=NONE'){
+            throw ('R32_UNPUBLISHED_SINGLE_APPROVAL_DID_NOT_FAIL_CLOSED '+($denied -join '|'))
+          }
+          Write-Host 'R32_UNPUBLISHED_PUBLIC_RELEASE_NO_NETWORK_NO_OWNER_PROCESS_CHANGE_PASS'
       - name: Rebuild canonical stable and create scoped future candidate (not published)
         shell: pwsh
         run: |
