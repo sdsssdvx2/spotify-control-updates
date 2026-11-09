@@ -127,7 +127,7 @@ def build():
     end = normalized.find("\n    }\n",start)
     if end < start:
         raise RuntimeError("ORIGINAL_SHORTCUT_LOOP_NOT_CLOSED")
-    end += 2
+    end += len("\n    }")
     old = normalized[start:end]
     anchors = [
         "$shortcut = $shell.CreateShortcut($target)",
