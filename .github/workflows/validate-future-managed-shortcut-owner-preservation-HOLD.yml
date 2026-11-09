@@ -49,12 +49,25 @@ jobs:
           $denied=@(& $r32 -Commit -ApprovalPhrase 'APPROVE_EXACT_OWNER_CUTOVER_AND_ONE_STABLE_UPDATE')
           if($denied -cnotcontains 'HOLD_REASON=UNPUBLISHED_OR_UNAPPROVED_PUBLIC_RELEASE' -or
              $denied -cnotcontains 'RESULT=HOLD_NO_AUTOMATIC_RETRY' -or
-             $denied -cnotcontains 'R28_OWNER_CUTOVER_OBSERVED=NO' -or
-             $denied -cnotcontains 'OFFICIAL_UPDATE_SUCCESS_OBSERVED=NO' -or
+             $denied -cnotcontains 'R28_OWNER_CUTOVER_OBSERVED=NOT_STARTED' -or
+             $denied -cnotcontains 'OFFICIAL_UPDATE_SUCCESS_OBSERVED=NOT_STARTED' -or
              $denied -cnotcontains 'NETWORK=NONE'){
             throw ('R32_UNPUBLISHED_SINGLE_APPROVAL_DID_NOT_FAIL_CLOSED '+($denied -join '|'))
           }
           Write-Host 'R32_UNPUBLISHED_PUBLIC_RELEASE_NO_NETWORK_NO_OWNER_PROCESS_CHANGE_PASS'
+          # Unlike the previous no-pin fast gate, this exercises the actual
+          # immutable source fetch and R29 standard-library Python stdin
+          # verifier. It still cannot trigger R28 because public SHA is false.
+          $fake=@(& $r32 -Commit -ApprovalPhrase 'APPROVE_EXACT_OWNER_CUTOVER_AND_ONE_STABLE_UPDATE' -ApprovedPublicManifestSHA256 ('0'*64) -ApprovedPublicSourceCommit ('1'*40))
+          if($fake -cnotcontains 'IMMUTABLE_R27_R28_R29_TOOL_BYTES=PINNED' -or
+             $fake -cnotcontains 'HOLD_STAGE=R29_REAL_PUBLIC_RELEASE_VERIFY' -or
+             $fake -cnotcontains 'HOLD_REASON=REAL_PUBLIC_RELEASE_R29_FAILED' -or
+             $fake -cnotcontains 'R28_OWNER_CUTOVER_OBSERVED=NOT_STARTED' -or
+             $fake -cnotcontains 'OFFICIAL_UPDATE_SUCCESS_OBSERVED=NOT_STARTED' -or
+             $fake -cnotcontains 'NETWORK=PINNED_PUBLIC_GITHUB_READONLY'){
+            throw ('R32_PUBLIC_MANIFEST_WRONG_PIN_DID_NOT_STOP_BEFORE_R28 '+($fake -join '|'))
+          }
+          Write-Host 'R32_REAL_PUBLIC_GITHUB_SOURCE_PINS_AND_R29_WRONG_MANIFEST_REJECTED_BEFORE_R28_PASS'
       - name: Rebuild canonical stable and create scoped future candidate (not published)
         shell: pwsh
         run: |
