@@ -68,6 +68,9 @@ jobs:
                   'ManifestUrl' in line or 'BaseUri' in line or
                   'function Apply-FullFilePatch' in line):
                   print(f'PINNED_BOOTSTRAP_ENTRY_{n}={line.strip()[:240]}')
+          for n,line in enumerate(lines,1):
+              if (130<=n<=240 or 265<=n<=305 or 470<=n<=560):
+                  print(f'PINNED_BOOTSTRAP_FLOW_{n}={line.strip()[:240]}')
           for i,line in enumerate(lines):
               if line.lstrip().startswith('function Apply-FullFilePatch'):
                   for j in range(i,min(i+19,len(lines))):
