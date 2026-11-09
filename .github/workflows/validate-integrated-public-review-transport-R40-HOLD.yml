@@ -1,0 +1,22 @@
+name: HOLD R40 real GitHub transport of integrated SpotifyExit+shortcut v0630 candidate
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-integrated-public-review-transport-R40-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/verify-integrated-public-transport-R40-HOLD.py
+permissions:
+  contents: read
+jobs:
+  readonly-real-github:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 1, persist-credentials: false}
+      - name: Verify actual remote stable and integrated review source bytes with original R29
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 validation/spotify-exit-immediate-maintenance-HOLD/verify-integrated-public-transport-R40-HOLD.py
+          echo 'R40_REAL_PUBLIC_GITHUB_NETWORK_WITHOUT_RELEASE_OR_PC_MUTATION_PASS'
