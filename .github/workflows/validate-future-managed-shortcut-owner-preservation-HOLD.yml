@@ -10,6 +10,7 @@ on:
       - validation/spotify-exit-immediate-maintenance-HOLD/stage-future-official-release-HOLD.py
       - validation/spotify-exit-immediate-maintenance-HOLD/verify-two-commit-future-release-HOLD.py
       - validation/spotify-exit-immediate-maintenance-HOLD/guarded-first-update-resident-entry-R27-HOLD.ps1
+      - validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-next-stable-upgrade-R28-HOLD.ps1
 permissions: {contents: read, actions: read}
 jobs:
   native-shortcut:
@@ -134,7 +135,7 @@ jobs:
           python validation/spotify-exit-immediate-maintenance-HOLD/verify-two-commit-future-release-HOLD.py
           if($LASTEXITCODE -ne 0){throw 'IMMUTABLE_FUTURE_RELEASE_GIT_PROVENANCE_FAILED'}
           Write-Host 'FUTURE_REAL_IMMUTABLE_SOURCE_COMMIT_AND_LATER_MANIFEST_REHEARSAL_PASS'
-      - name: R27 verified old resident cutover then real Bootstrap Check Update Check Rollback in disposable localhost mirror
+      - name: R28 one-approval exact resident upgrade, true Bootstrap then hosted-only rollback and tamper rejection
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -199,112 +200,93 @@ jobs:
             $item.Save()
             $linkHash=(Get-FileHash -LiteralPath $link -Algorithm SHA256).Hash
             $vbsHash=(Get-FileHash -LiteralPath $otherVbs -Algorithm SHA256).Hash
-            # The initial legacy agent is launched with installed-bin CWD;
-            # its live handle blocks the exact Bootstrap bin directory swap.
-            # Keep both SAME-USER maintenance/tick locks across the COMPLETE
-            # R27 cutover and official Bootstrap action sequence. The R27
-            # helper recursively acquires/releases those same named mutexes
-            # on this PowerShell thread, so no writer interleaving is possible.
-            $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-            $safeSid=$sid -replace '[^A-Za-z0-9]','_'
-            foreach($purpose in @('Maintenance','AgentTick')){
-              $m=New-Object System.Threading.Mutex(
-                $false,('Local\SpotifyControl-'+$purpose+'-'+$safeSid))
-              if(-not $m.WaitOne(0,$false)){
-                $m.Dispose()
-                throw 'R27_OUTER_MAINTENANCE_MUTEX_BUSY'
-              }
-              $legacyLocks.Add($m)
-            }
-            if($legacyLocks.Count -ne 2){throw 'R27_OUTER_MUTEX_PAIR_NOT_HELD'}
             $wscript=Join-Path $env:WINDIR 'System32/wscript.exe'
             $oldResident=Start-Process -FilePath $wscript -WorkingDirectory $bin -ArgumentList ('//B //NoLogo "'+$agent+'"') -PassThru
             Start-Sleep -Seconds 2
-            if($oldResident.HasExited){throw 'R27_OLD_RESIDENT_EXITED_PREMATURELY'}
+            if($oldResident.HasExited){throw 'R28_OLD_RESIDENT_EXITED_EARLY'}
             $wasLocked=$false
             try{[IO.Directory]::Move($bin,(Join-Path $app 'bin-locked-test'))}
             catch [IO.IOException]{$wasLocked=$true}
-            if(-not $wasLocked){throw 'R27_OLD_RESIDENT_BIN_LOCK_NOT_REPRODUCED'}
-            Write-Host 'R27_INTEGRATED_PREUPDATE_LEGACY_WSCRIPT_BIN_LOCK_REPRODUCED_PASS'
+            if(-not $wasLocked){throw 'R28_OLD_WSCRIPT_BIN_CWD_LOCK_NOT_REPRODUCED'}
+            Write-Host 'R28_OLD_WSCRIPT_REAL_BIN_LOCK_REPRODUCED_PASS'
+            $env:LOCALAPPDATA=Join-Path $fixture 'LocalAppData'
+            $env:APPDATA=Join-Path $fixture 'Roaming'
             $r27Source='validation/spotify-exit-immediate-maintenance-HOLD/guarded-first-update-resident-entry-R27-HOLD.ps1'
+            $r28Source='validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-next-stable-upgrade-R28-HOLD.ps1'
             [byte[]]$r27Bytes=[IO.File]::ReadAllBytes((Resolve-Path $r27Source))
-            $r27=[ScriptBlock]::Create([Text.Encoding]::ASCII.GetString($r27Bytes))
-            $dry=@(& $r27 -HostedFixtureRoot $fixture)
-            if($dry -cnotcontains 'RESULT=READY_FOR_EXACT_CUTOVER_NO_CHANGES'){
-              throw ('R27_INTEGRATED_DRYRUN_FAILED '+($dry -join '|'))
+            [byte[]]$r28Bytes=[IO.File]::ReadAllBytes((Resolve-Path $r28Source))
+            $parseTokens=$null;$parseErrors=$null
+            [void][Management.Automation.Language.Parser]::ParseInput(
+              [Text.Encoding]::ASCII.GetString($r28Bytes),[ref]$parseTokens,[ref]$parseErrors)
+            if(@($parseErrors).Count -ne 0){throw ('R28_POWERSHELL_PARSE_FAILED '+$parseErrors[0].Message)}
+            $driver=[ScriptBlock]::Create([Text.Encoding]::ASCII.GetString($r28Bytes))
+            $manifestFile=Join-Path $fixture 'loopback-source/manifest.json'
+            $manifestSha=(Get-FileHash -LiteralPath $manifestFile -Algorithm SHA256).Hash.ToLowerInvariant()
+            $r28Args=@{
+              HostedFixtureRoot=$fixture
+              PinnedR27Source=$r27Bytes
+              HostedExpectedManifestSHA256=$manifestSha
+              HostedExpectedBootstrapSHA256=[string]$expect.bootstrap_locator_only_copy_sha256
+              HostedExpectedMainSHA256=[string]$expect.future_main_sha256
+              HostedExpectedAgentSHA256=[string]$expect.future_agent_sha256
             }
-            $converted=@(& $r27 -HostedFixtureRoot $fixture -Commit -ApprovalPhrase 'APPROVE_ONLY_EXACT_OWNER_RESIDENT_NEUTRAL_CWD')
-            if($converted -cnotcontains 'RESULT=EXACT_RESIDENT_CUTOVER_COMPLETED_OTHER_HANDLES_NOT_CERTIFIED' -or
-               $converted -cnotcontains 'EXACT_OLD_RESIDENT_TERMINATED=YES' -or
-               $converted -cnotcontains 'MAINTENANCE_AND_AGENTTICK_MUTEXES=HELD' -or
-               -not $oldResident.HasExited){
-              throw ('R27_INTEGRATED_APPROVED_CUTOVER_FAILED '+($converted -join '|'))
+            $plan=@(& $driver @r28Args)
+            if($plan -cnotcontains 'RESULT=READY_FOR_ONE_SHOT_APPROVED_STABLE_NO_MUTATION' -or
+               $plan -cnotcontains 'EXACT_INITIAL_CUTOVER_DONE=NO' -or
+               $oldResident.HasExited){
+              throw ('R28_ONE_SHOT_READONLY_PLAN_FAILED '+($plan -join '|'))
             }
+            Write-Host 'R28_SINGLE_DRIVER_READONLY_NO_PROCESS_MUTATION_PASS'
+            $denied=@(& $driver @r28Args -Commit)
+            if($denied -cnotcontains 'HOLD_REASON=OWNER_ONE_SHOT_APPROVAL_REQUIRED' -or
+               $oldResident.HasExited){
+              throw ('R28_ONE_SHOT_APPROVAL_NOT_ENFORCED '+($denied -join '|'))
+            }
+            Write-Host 'R28_SINGLE_DRIVER_WITHOUT_EXACT_APPROVAL_DENIED_PASS'
+            $receipt=@(& $driver @r28Args -Commit -ApprovalPhrase 'APPROVE_EXACT_OWNER_CUTOVER_AND_ONE_STABLE_UPDATE')
+            if($receipt -cnotcontains 'RESULT=HOSTED_FUTURE_STABLE_ONESHOT_COMMITTED' -or
+               $receipt -cnotcontains 'OUTER_MAINTENANCE_AND_AGENTTICK_MUTEXES=HELD' -or
+               $receipt -cnotcontains 'NEW_RELEASE_VBS=ONE_EXACT_OWNER_RESIDENT_RUNNING' -or
+               $receipt -cnotcontains 'OFFICIAL_MAIN_AND_RESIDENT_VBS=STABLE_COMMITTED_PINNED' -or
+               $receipt -cnotcontains 'OFFICIAL_POSTCHECK=PASS' -or
+               $receipt -cnotcontains 'USER_SHORTCUTS_AND_STATE=BYTE_IDENTICAL'){
+              throw ('R28_SINGLE_APPROVED_DRIVER_NOT_COMMITTED '+($receipt -join '|'))
+            }
+            if(-not $oldResident.HasExited){throw 'R28_OLD_AGENT_NOT_TERMINATED'}
             $living=@(Get-CimInstance Win32_Process -Filter "Name='wscript.exe'" | Where-Object {
               [string]$_.CommandLine -like ('*"'+$agent+'"*')
             })
-            if($living.Count -ne 1){throw 'R27_INTEGRATED_REPLACEMENT_COUNT_NOT_ONE'}
+            if($living.Count -ne 1){throw 'R28_FINAL_NEW_AGENT_NOT_SINGLE'}
             $newResident=Get-Process -Id ([int]$living[0].ProcessId) -ErrorAction Stop
-            [IO.Directory]::Move($bin,(Join-Path $app 'bin-neutral-test'))
-            [IO.Directory]::Move((Join-Path $app 'bin-neutral-test'),$bin)
-            if($newResident.HasExited){throw 'R27_NEUTRAL_RESIDENT_DIED_DURING_BIN_RENAME'}
-            if((Get-FileHash -LiteralPath $link -Algorithm SHA256).Hash -cne $linkHash){
-              throw 'R27_INTEGRATED_CUSTOM_SHORTCUT_CHANGED'
-            }
-            Write-Host 'R27_INTEGRATED_OWNER_ONLY_BIN_CWD_CUTOVER_AND_OUTER_MUTEXES_HELD_PASS'
-            $env:LOCALAPPDATA=Join-Path $fixture 'LocalAppData'
-            $env:APPDATA=Join-Path $fixture 'Roaming'
-            function Invoke-HostedBootstrap {
-              param([string]$Action)
-              $extra=@()
-              if($Action -ceq 'Rollback'){
-                # Deliberate rollback authorization ONLY for this disposable
-                # hosted synthetic transaction after COMMITTED verification.
-                $extra=@('-Force')
-              }
-              $output=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $bootstrap -Action $Action -Json @extra 2>&1)
-              $code=$LASTEXITCODE
-              if($code -ne 0){
-                Write-Host ('HOSTED_BOOTSTRAP_'+$Action+'_RESULT=FAILED_EXIT_'+$code)
-                # This fixture contains ONLY generated public code and scratch
-                # data, never a real user path, account or secret.
-                foreach($line in @($output|Select-Object -Last 3)){
-                  try {
-                    $bad=[string](($line|ConvertFrom-Json -ErrorAction Stop).error)
-                    if(-not [string]::IsNullOrWhiteSpace($bad)){
-                      $tail=$bad.Substring([Math]::Max(0,$bad.Length-1800))
-                      Write-Host ('HOSTED_SYNTHETIC_ERROR_TAIL='+$tail)
-                    }
-                  }catch{
-                    Write-Host ('HOSTED_SYNTHETIC_ERROR_DETAIL='+
-                      ([string]$line).Substring(0,[Math]::Min(650,([string]$line).Length)))
-                  }
-                }
-                throw ('HOSTED_BOOTSTRAP_ACTION_FAILED_'+$Action)
-              }
-              if($output.Count -lt 1){throw ('HOSTED_BOOTSTRAP_EMPTY_RESULT_'+$Action)}
-              try{$obj=$output[-1]|ConvertFrom-Json -ErrorAction Stop}
-              catch{throw ('HOSTED_BOOTSTRAP_INVALID_RESULT_'+$Action)}
-              if($obj.success -ne $true -or [string]$obj.action -cne $Action){
-                throw ('HOSTED_BOOTSTRAP_NOT_SUCCESS_'+$Action)
-              }
-              return $obj
-            }
-            [void](Invoke-HostedBootstrap -Action 'Check')
-            Write-Host 'FUTURE_OFFICIAL_BOOTSTRAP_LOCALHOST_INITIAL_CHECK_PASS'
-            [void](Invoke-HostedBootstrap -Action 'Update')
+            if($newResident.HasExited){throw 'R28_FINAL_NEW_AGENT_NOT_RUNNING'}
+            [IO.Directory]::Move($bin,(Join-Path $app 'bin-new-release'))
+            [IO.Directory]::Move((Join-Path $app 'bin-new-release'),$bin)
+            if($newResident.HasExited){throw 'R28_FINAL_AGENT_FAILED_BIN_RENAME'}
             $txnPath=Join-Path $app 'self-update-last-transaction.json'
             $transaction=Get-Content -LiteralPath $txnPath -Raw|ConvertFrom-Json
-            if([string]$transaction.status -cne 'committed'){throw 'HOSTED_BOOTSTRAP_UPDATE_NOT_COMMITTED'}
+            if([string]$transaction.status -cne 'committed'){throw 'R28_OFFICIAL_JOURNAL_NOT_COMMITTED'}
             if((Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expect.future_main_sha256 -or
                (Get-FileHash $agent -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expect.future_agent_sha256 -or
                (Get-FileHash $addon -Algorithm SHA256).Hash -cne $addonBefore){
-              throw 'HOSTED_BOOTSTRAP_REAL_UPDATE_PAYLOAD_MISMATCH'
+              throw 'R28_POST_UPDATE_SHA_DRIFT'
             }
-            Write-Host 'FUTURE_OFFICIAL_BOOTSTRAP_LOCALHOST_MAIN_AND_AGENT_COMMITTED_PASS'
-            [void](Invoke-HostedBootstrap -Action 'Check')
-            Write-Host 'FUTURE_OFFICIAL_BOOTSTRAP_LOCALHOST_POSTCHECK_PASS'
-            [void](Invoke-HostedBootstrap -Action 'Rollback')
+            Write-Host 'R28_ONE_OWNER_APPROVAL_THROUGH_BOOTSTRAP_AND_NEW_VBS_COMPLETE_PASS'
+            # The following rollback is a DIFFERENT, destructive hosted-only
+            # compatibility test. Stop the exact test-owned process first.
+            $newResident.Refresh()
+            if(-not $newResident.HasExited){
+              Stop-Process -Id $newResident.Id -Force -ErrorAction Stop
+              [void]$newResident.WaitForExit(5000)
+            }
+            $rollbackResult=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $bootstrap -Action Rollback -Json -Force 2>&1)
+            if($LASTEXITCODE -ne 0 -or $rollbackResult.Count -eq 0){
+              throw 'R28_HOSTED_EXPLICIT_ROLLBACK_FAILED'
+            }
+            try{$rollbackObject=$rollbackResult[-1]|ConvertFrom-Json -ErrorAction Stop}
+            catch{throw 'R28_HOSTED_ROLLBACK_UNVERIFIED_JSON'}
+            if($rollbackObject.success -ne $true -or $rollbackObject.action -cne 'Rollback'){
+              throw 'R28_HOSTED_EXPLICIT_ROLLBACK_NOT_SUCCESS'
+            }
             $rolled=Get-Content -LiteralPath $txnPath -Raw|ConvertFrom-Json
             if([string]$rolled.status -cne 'rolled-back'){
               throw 'HOSTED_BOOTSTRAP_ROLLBACK_NOT_COMMITTED'
