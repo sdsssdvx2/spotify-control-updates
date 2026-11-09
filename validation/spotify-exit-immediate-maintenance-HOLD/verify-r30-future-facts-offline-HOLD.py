@@ -51,6 +51,7 @@ def main():
     # The real R29 public admission now correctly targets the integrated R38.
     namespace["FUTURE"]=dict(namespace["FUTURE"])
     namespace["FUTURE"]["bin/spotify-control.ps1"]="37eda0638c428ed3474a06812c067ca10f5771216ae509d3cd4ce10fdafbd3ec"
+    namespace["FUTURE"]["bin/spotify-control-agent.vbs"]="da054351cae6927504e735426d35f6d5e7edafcac7e06881f1adf1c20cecab9d"
     raw_url=namespace["RAW"]
     allowed={}
     patches=future["updates"][-1]["patches"]

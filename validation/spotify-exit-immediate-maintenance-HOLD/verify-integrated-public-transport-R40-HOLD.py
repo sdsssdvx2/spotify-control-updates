@@ -50,6 +50,7 @@ def main():
     # the real public release's expected SHA in R28.
     auditor.FUTURE=dict(auditor.FUTURE)
     auditor.FUTURE["bin/spotify-control.ps1"]=TARGET_MAIN
+    auditor.FUTURE["bin/spotify-control-agent.vbs"]=TARGET_AGENT
     review_raw=auditor.download(auditor.RAW+BRANCH+"/manifest.json",200_000)
     if auditor.hash_bytes(review_raw)!=MANIFEST_SHA:
         raise RuntimeError("R40_IMMUTABLE_REVIEW_MANIFEST_SHA_CHANGED")

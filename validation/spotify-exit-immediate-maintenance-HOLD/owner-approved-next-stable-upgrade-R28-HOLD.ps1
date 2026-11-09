@@ -184,7 +184,7 @@ try{
     $expectedSource=$ApprovedPublicSourceCommit
     $expectedBootstrap='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
     $expectedMain='7caf4afe19c283aef3b5bebb30e0e598b10de147d3ab1ddd9724bf90594c59fe'
-    $expectedAgent='da054351cae6927504e735426d35f6d5e7edafcac7e06881f1adf1c20cecab9d'
+    $expectedAgent='1c1563bff9b9a87ae851b4ca555429b5451ce67c6d225a148b5252256d71cdf7'
     $manifestURL='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/main/manifest.json'
     $fixture=''
   }
