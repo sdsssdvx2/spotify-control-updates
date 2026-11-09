@@ -140,10 +140,19 @@ jobs:
             $d.TargetPath=$wscript
             $d.Arguments='"'+$installedVbs+'"'
             $d.WorkingDirectory=$installedBin
+            $d.Description='OWNER_CUSTOM_DESCRIPTION_MUST_SURVIVE_CWD_FIX'
+            $d.IconLocation=(Join-Path $env:WINDIR 'System32/shell32.dll')+',42'
             $d.Save()
+            $originalOfficialMetadata=$shell.CreateShortcut($deskLink)
+            $oldDescription=[string]$originalOfficialMetadata.Description
+            $oldIcon=[string]$originalOfficialMetadata.IconLocation
             $previousOfficial=(Get-FileHash $deskLink -Algorithm SHA256).Hash
             & $block
             $migrated=$shell.CreateShortcut($deskLink)
+            if([string]$migrated.Description -cne $oldDescription -or
+               [string]$migrated.IconLocation -cne $oldIcon){
+              throw 'FUTURE_SHORTCUT_OWNER_METADATA_NOT_PRESERVED'
+            }
             if(-not [string]::Equals([string]$migrated.WorkingDirectory,$Root,[StringComparison]::OrdinalIgnoreCase)){
               throw 'FUTURE_SHORTCUT_OLD_OFFICIAL_BIN_CWD_NOT_NORMALIZED'
             }
@@ -160,6 +169,7 @@ jobs:
               throw 'FUTURE_SHORTCUT_IDEMPOTENCE_OR_CUSTOM_PRESERVATION_FAILED'
             }
             Write-Host 'FUTURE_SAFE_OLD_OFFICIAL_MIGRATION_ORIGINAL_BACKUP_AND_IDEMPOTENCE_PASS'
+            Write-Host 'FUTURE_SAFE_OFFICIAL_OWNER_ICON_AND_DESCRIPTION_PRESERVED_PASS'
             $customOfficial=$shell.CreateShortcut($deskLink)
             $customOfficial.WorkingDirectory=$other
             $customOfficial.Save()
