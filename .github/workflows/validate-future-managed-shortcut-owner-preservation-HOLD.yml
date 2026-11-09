@@ -6,6 +6,7 @@ on:
       - .github/workflows/validate-future-managed-shortcut-owner-preservation-HOLD.yml
       - validation/spotify-exit-immediate-maintenance-HOLD/build-managed-shortcut-future-safe-candidate.py
       - validation/spotify-exit-immediate-maintenance-HOLD/validate-future-offline-transport.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/rehearse-localhost-bootstrap-future.py
 permissions: {contents: read, actions: read}
 jobs:
   native-shortcut:
@@ -61,6 +62,7 @@ jobs:
                   'patch' in line.lower() and
                   ('path' in line.lower() or 'encoding' in line.lower())):
                   print(f'PINNED_BOOTSTRAP_CONTRACT_LINE_{i}={line.strip()[:280]}')
+          (Path(os.environ['RUNNER_TEMP'])/'spotify-verified-bootstrap-v106.ps1').write_bytes(raw)
           print('PINNED_BOOTSTRAP_V106_SOURCE_SHA256_AND_SIZE_PASS')
           lines=src.splitlines()
           for n,line in enumerate(lines,1):
@@ -86,6 +88,122 @@ jobs:
           python validation/spotify-exit-immediate-maintenance-HOLD/validate-future-offline-transport.py
           if($LASTEXITCODE -ne 0){throw 'FUTURE_OFFLINE_TWO_FILE_TRANSPORT_FAILED'}
           Write-Host 'FUTURE_STABLE_TRANSPORT_ADMISSION_ONLY_NO_MANIFEST_PUBLISH_PASS'
+      - name: Real Bootstrap v1.0.6 Check Update Check Rollback in disposable localhost mirror
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/rehearse-localhost-bootstrap-future.py'
+          $scriptAbs=(Resolve-Path $script).Path
+          $fixture=Join-Path $env:RUNNER_TEMP 'spotify-future-bootstrap-rehearsal'
+          if(Test-Path -LiteralPath $fixture){throw 'BOOTSTRAP_REHEARSAL_ALREADY_EXISTS'}
+          $server=$null
+          $localBefore=$env:LOCALAPPDATA
+          $roamingBefore=$env:APPDATA
+          try {
+            $python=(Get-Command python).Source
+            $server=Start-Process -FilePath $python -ArgumentList ('"'+$scriptAbs+'" serve') -PassThru -WindowStyle Hidden
+            $ready=Join-Path $fixture 'server-port'
+            for($i=0;$i -lt 100 -and -not(Test-Path -LiteralPath $ready);$i++){
+              Start-Sleep -Milliseconds 100
+              if($server.HasExited){throw 'HOSTED_LOOPBACK_SERVER_EXITED'}
+            }
+            if(-not(Test-Path -LiteralPath $ready)){throw 'HOSTED_LOOPBACK_SERVER_NOT_READY'}
+            $port=[int][IO.File]::ReadAllText($ready)
+            if($port -lt 1 -or $port -gt 65535){throw 'HOSTED_LOOPBACK_PORT_OUT_OF_RANGE'}
+            python $script prepare
+            if($LASTEXITCODE -ne 0){throw 'HOSTED_BOOTSTRAP_REHEARSAL_PREPARE_FAILED'}
+            $app=Join-Path $fixture 'LocalAppData/SpotifyControl'
+            $bin=Join-Path $app 'bin'
+            $bootstrap=Join-Path $app 'bootstrap/spotify-control-self-updater.ps1'
+            $output=Join-Path $fixture 'rehearsal-report.json'
+            $expect=Get-Content -LiteralPath $output -Raw | ConvertFrom-Json
+            $sourceHash=(Get-FileHash -LiteralPath $bootstrap -Algorithm SHA256).Hash.ToLowerInvariant()
+            if($sourceHash -cne $expect.bootstrap_locator_only_copy_sha256){throw 'HOSTED_BOOTSTRAP_TRUST_PIN_DRIFT'}
+            $main=Join-Path $bin 'spotify-control.ps1'
+            $agent=Join-Path $bin 'spotify-control-agent.vbs'
+            $addon=Join-Path $bin 'addon-manager.ps1'
+            $state=Join-Path $app 'state.json'
+            $sentinel=Join-Path $app 'unrelated-user-preserve.txt'
+            $beforeState=(Get-FileHash -LiteralPath $state -Algorithm SHA256).Hash
+            $beforeSentinel=(Get-FileHash -LiteralPath $sentinel -Algorithm SHA256).Hash
+            $addonBefore=(Get-FileHash -LiteralPath $addon -Algorithm SHA256).Hash
+            # This is NOT the operating Windows user's Start Menu. Guard
+            # a synthetic owner-custom OTHER_VBS launcher through both actions.
+            $menu=Join-Path $fixture 'SyntheticStartMenu'
+            [void][IO.Directory]::CreateDirectory($menu)
+            $otherDir=Join-Path $fixture 'CustomLauncher'
+            [void][IO.Directory]::CreateDirectory($otherDir)
+            $otherVbs=Join-Path $otherDir 'owner-custom.vbs'
+            [IO.File]::WriteAllText($otherVbs,"' owner simulated wrapper, never execute",[Text.Encoding]::ASCII)
+            $shell=New-Object -ComObject WScript.Shell
+            $link=Join-Path $menu 'Spotify (Managed).lnk'
+            $item=$shell.CreateShortcut($link)
+            $item.TargetPath=Join-Path $env:WINDIR 'System32/wscript.exe'
+            $item.Arguments='"'+$otherVbs+'"'
+            $item.WorkingDirectory=$otherDir
+            $item.Save()
+            $linkHash=(Get-FileHash -LiteralPath $link -Algorithm SHA256).Hash
+            $vbsHash=(Get-FileHash -LiteralPath $otherVbs -Algorithm SHA256).Hash
+            $env:LOCALAPPDATA=Join-Path $fixture 'LocalAppData'
+            $env:APPDATA=Join-Path $fixture 'Roaming'
+            function Invoke-HostedBootstrap {
+              param([string]$Action)
+              $output=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $bootstrap -Action $Action -Json 2>&1)
+              $code=$LASTEXITCODE
+              if($code -ne 0){
+                Write-Host ('HOSTED_BOOTSTRAP_'+$Action+'_RESULT=FAILED_EXIT_'+$code)
+                throw ('HOSTED_BOOTSTRAP_ACTION_FAILED_'+$Action)
+              }
+              if($output.Count -lt 1){throw ('HOSTED_BOOTSTRAP_EMPTY_RESULT_'+$Action)}
+              try{$obj=$output[-1]|ConvertFrom-Json -ErrorAction Stop}
+              catch{throw ('HOSTED_BOOTSTRAP_INVALID_RESULT_'+$Action)}
+              if($obj.success -ne $true -or [string]$obj.action -cne $Action){
+                throw ('HOSTED_BOOTSTRAP_NOT_SUCCESS_'+$Action)
+              }
+              return $obj
+            }
+            [void](Invoke-HostedBootstrap -Action 'Check')
+            Write-Host 'FUTURE_OFFICIAL_BOOTSTRAP_LOCALHOST_INITIAL_CHECK_PASS'
+            [void](Invoke-HostedBootstrap -Action 'Update')
+            $txnPath=Join-Path $app 'self-update-last-transaction.json'
+            $transaction=Get-Content -LiteralPath $txnPath -Raw|ConvertFrom-Json
+            if([string]$transaction.status -cne 'committed'){throw 'HOSTED_BOOTSTRAP_UPDATE_NOT_COMMITTED'}
+            if((Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expect.future_main_sha256 -or
+               (Get-FileHash $agent -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expect.future_agent_sha256 -or
+               (Get-FileHash $addon -Algorithm SHA256).Hash -cne $addonBefore){
+              throw 'HOSTED_BOOTSTRAP_REAL_UPDATE_PAYLOAD_MISMATCH'
+            }
+            Write-Host 'FUTURE_OFFICIAL_BOOTSTRAP_LOCALHOST_MAIN_AND_AGENT_COMMITTED_PASS'
+            [void](Invoke-HostedBootstrap -Action 'Check')
+            Write-Host 'FUTURE_OFFICIAL_BOOTSTRAP_LOCALHOST_POSTCHECK_PASS'
+            [void](Invoke-HostedBootstrap -Action 'Rollback')
+            $rolled=Get-Content -LiteralPath $txnPath -Raw|ConvertFrom-Json
+            if([string]$rolled.status -cne 'rolled-back'){
+              throw 'HOSTED_BOOTSTRAP_ROLLBACK_NOT_COMMITTED'
+            }
+            if((Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expect.original_main_sha256 -or
+               (Get-FileHash $agent -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expect.original_agent_sha256 -or
+               (Get-FileHash $addon -Algorithm SHA256).Hash -cne $addonBefore){
+              throw 'HOSTED_BOOTSTRAP_ROLLBACK_NOT_EXACT'
+            }
+            if((Get-FileHash $state -Algorithm SHA256).Hash -cne $beforeState -or
+               (Get-FileHash $sentinel -Algorithm SHA256).Hash -cne $beforeSentinel -or
+               (Get-FileHash $link -Algorithm SHA256).Hash -cne $linkHash -or
+               (Get-FileHash $otherVbs -Algorithm SHA256).Hash -cne $vbsHash){
+              throw 'HOSTED_BOOTSTRAP_USER_DATA_OR_CUSTOM_SHORTCUT_MODIFIED'
+            }
+            Write-Host 'FUTURE_OFFICIAL_BOOTSTRAP_LOCALHOST_EXACT_ROLLBACK_AND_USER_DATA_PRESERVATION_PASS'
+          } finally {
+            $env:LOCALAPPDATA=$localBefore
+            $env:APPDATA=$roamingBefore
+            if($null -ne $server -and -not $server.HasExited){
+              Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+              [void]$server.WaitForExit(5000)
+            }
+            Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'spotify-verified-bootstrap-v106.ps1') -Force -ErrorAction SilentlyContinue
+          }
+          Write-Host 'FUTURE_OFFICIAL_BOOTSTRAP_HOSTED_SCRATCH_ONLY_CLEANUP_PASS'
       - name: Actual resident candidate launched from BIN releases process CWD lock
         shell: powershell
         run: |
