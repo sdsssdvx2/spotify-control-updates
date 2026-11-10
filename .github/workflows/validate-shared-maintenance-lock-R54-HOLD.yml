@@ -1,0 +1,58 @@
+name: HOLD R54 real Windows manual-maintenance and resident discovery mutex serialization
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-shared-maintenance-lock-R54-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/build-shared-maintenance-lock-R54-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/test-shared-maintenance-lock-R54-HOLD.ps1
+permissions: {contents: read}
+jobs:
+  real-cross-process-windows-mutex:
+    runs-on: windows-2025
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Reconstruct exact approved-for-review R50 source and new one-function mutex boundary
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R54_MAIN_STABLE_PARENT_SHA_CHANGED'
+          }
+          $prefix='validation/spotify-exit-immediate-maintenance-HOLD/'
+          foreach($builder in @('build-combined-exit-and-shortcut-R37-HOLD.py',
+             'build-eventdriven-vbs-R45-HOLD.py',
+             'build-single-discovery-maintenance-R49-HOLD.py',
+             'build-shared-maintenance-lock-R54-HOLD.py')){
+            python ($prefix+$builder)
+            if($LASTEXITCODE -ne 0){throw ('R54_TRUSTED_CANDIDATE_BUILD_FAILED_'+$builder)}
+          }
+          $receipt=Get-Content -LiteralPath ($prefix+'out/shared-maintenance-R54/attestation.json') -Raw | ConvertFrom-Json
+          $main=$prefix+'out/release-staging-shared-maintenance-R54/bin/spotify-control.ps1'
+          $agent=$prefix+'out/release-staging-shared-maintenance-R54/bin/spotify-control-agent.vbs'
+          if($receipt.mode -cne 'R54_SERIALIZED_AGENT_AND_MANUAL_MAINTENANCE_HOLD' -or
+             [bool]$receipt.production_main_changed -or [bool]$receipt.user_pc_changed -or
+             [bool]$receipt.release_owner_approval -or
+             (Get-FileHash -LiteralPath $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$receipt.main_release_sha256 -or
+             (Get-FileHash -LiteralPath $agent -Algorithm SHA256).Hash.ToLowerInvariant() -cne '1c1563bff9b9a87ae851b4ca555429b5451ce67c6d225a148b5252256d71cdf7'){
+             throw 'R54_VERIFIED_FULLFILE_RELEASE_OR_HOLD_BOUNDARY_FAILED'
+          }
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path (Get-Location) $main),[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R54_FULL_MAIN_POWERSHELL_51_PARSE_FAILED'}
+          Write-Host 'R54_EVENT_DRIVEN_UNPUBLISHED_RELEASE_READY_FOR_REAL_LOCK_ACCEPTANCE=PASS'
+      - name: Prove same-thread native Windows mutex nesting and cross-process exclusive manual mode
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/test-shared-maintenance-lock-R54-HOLD.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path (Get-Location) $script),[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R54_NATIVE_WINDOWS_MUTEX_TEST_SOURCE_SYNTAX_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script
+          if($LASTEXITCODE -ne 0){throw 'R54_REAL_WIN32_MUTEX_SERIALIZATION_FAILED'}
+          Write-Host 'R54_REAL_SOURCE_MANUAL_AND_AGENT_AUTOMATION_NEVER_OVERLAP=PASS'
