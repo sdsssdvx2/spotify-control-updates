@@ -1,0 +1,21 @@
+name: HOLD R52 read-only real public GitHub final single-discovery full-file admission
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/verify-singlecheck-public-remote-R52-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/verify-singlecheck-public-review-R52-HOLD.py
+permissions: {contents: read}
+jobs:
+  final-singlecheck-remote-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 1, persist-credentials: false}
+      - name: Actual public RAW GitHub and real immutable 20 chunks reconstructed through existing R40
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 validation/spotify-exit-immediate-maintenance-HOLD/verify-singlecheck-public-review-R52-HOLD.py
+          echo 'R52_FINAL_APPROVAL_NOT_GRANTED_NO_PUBLIC_DEPLOYMENT_PASS'
