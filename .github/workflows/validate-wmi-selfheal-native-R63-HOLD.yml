@@ -1,0 +1,46 @@
+name: HOLD R63 self-healing WMI subscriptions and real rapid Spotify exit
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-wmi-selfheal-native-R63-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/build-wmi-selfheal-R63-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/accept-wmi-selfheal-real-R63-HOLD.py
+permissions: {contents: read}
+jobs:
+  recover-notification-then-two-real-fast-stops:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Rebuild R58 from exact original and add nonpublished R63 self heal
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R63_OFFICIAL_STABLE_MAIN_CHANGED'
+          }
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          foreach($file in @('build-combined-exit-and-shortcut-R37-HOLD.py',
+                             'build-eventdriven-vbs-R45-HOLD.py',
+                             'build-rapid-restart-vbs-R58-HOLD.py',
+                             'build-wmi-selfheal-R63-HOLD.py',
+                             'accept-wmi-selfheal-real-R63-HOLD.py')){
+            & python ($base+$file)
+            if($LASTEXITCODE -ne 0){throw ('R63_SOURCE_STAGE_FAILED_'+$file)}
+          }
+          $test=Join-Path $env:RUNNER_TEMP 'spotify-r63-selfheal-real-wmi.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($test,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R63_ORIGINAL_NATIVE_TEST_PS51_PARSE_FAILED'}
+          Write-Host 'R63_PINNED_PARENT_VBS_AND_TESTS_PREPARED=PASS'
+      - name: Real WScript re-subscribes after injected WMI loss then observes two Spotify exits under 60s
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $test=Join-Path $env:RUNNER_TEMP 'spotify-r63-selfheal-real-wmi.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test
+          if($LASTEXITCODE -ne 0){throw 'R63_SELF_HEAL_NATIVE_WMI_RAPID_RESTART_NOT_PROVEN'}
+          Write-Host 'R63_TWO_REAL_SYNTHETIC_SPOTIFY_EXITS_AFTER_WMI_RESUBSCRIBE=PASS'
+          Write-Host 'R63_REAL_SERVICE_RESTART_AND_OWNER_WINDOWS=NOT_TESTED'
