@@ -1,0 +1,21 @@
+name: HOLD R57 actual public raw GitHub final shared-maintenance SpotifyExit transport
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/verify-shared-mutex-public-remote-R57-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/verify-shared-mutex-public-review-R57-HOLD.py
+permissions: {contents: read}
+jobs:
+  real-public-singlecheck-sharedmutex:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 1, persist-credentials: false}
+      - name: Fetch real public main and R55 review and decode every immutable main/VBS chunk using original R40
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 validation/spotify-exit-immediate-maintenance-HOLD/verify-shared-mutex-public-review-R57-HOLD.py
+          echo 'R57_FINAL_GITHUB_HTTPS_SOURCE_REVIEW_ONLY_NOT_DEPLOYED_PASS'
