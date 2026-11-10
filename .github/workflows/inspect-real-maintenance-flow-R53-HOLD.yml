@@ -1,0 +1,58 @@
+name: HOLD R53 static real-maintenance flow audit (no user code execution)
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/inspect-real-maintenance-flow-R53-HOLD.yml
+permissions: {contents: read}
+jobs:
+  actual-release-source-audit:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Reassemble exactly pinned latest R50 code under temporary CI only
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R53_PRODUCTION_PARENT_CHANGED'
+          }
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-combined-exit-and-shortcut-R37-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R53_PINNED_R37_REBUILD_FAILED'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-eventdriven-vbs-R45-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R53_PINNED_R45_REBUILD_FAILED'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-single-discovery-maintenance-R49-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R53_PINNED_R49_REBUILD_FAILED'}
+      - name: Show only source-level mutation gates and actual work order (do not invoke PowerShell code)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib,re
+          from pathlib import Path
+          p=Path("validation/spotify-exit-immediate-maintenance-HOLD/out/release-staging-single-discovery-R49/bin/spotify-control.ps1")
+          b=p.read_bytes()
+          assert hashlib.sha256(b).hexdigest()=="4ec5bc6c6612ab15fc297d474b193d228b9dab8eb5b79cd7b14042af5b72c93c"
+          s=b.decode("utf-8-sig").replace("\r\n","\n")
+          lines=s.splitlines()
+          funcs={}
+          for i,line in enumerate(lines):
+              match=re.match(r"function ([\w-]+)\s*{\s*$",line)
+              if match:
+                  funcs[match.group(1)]=i
+          targets=["Invoke-MaintenanceMutationPhase","Invoke-MaintenanceCheckPhase","Maintain","Invoke-ResidentAgentTick"]
+          offsets=sorted(funcs.values())
+          for name in targets:
+              start=funcs.get(name)
+              assert start is not None, f"R53_MISSING_REAL_{name}"
+              end=next((i for i in offsets if i>start),len(lines))
+              length=end-start
+              print(f"R53_FUNC={name};START={start+1};LENGTH={length}")
+              for j in range(start,min(end,start+215)):
+                  print(f"R53_SOURCE_{j+1}={lines[j][:250]}")
+              if length>215:
+                  print(f"R53_{name}_TRUNCATED={length-215}")
+          print("R53_AUTHENTIC_MAIN_SHA256=PASS;SOURCE_READ_ONLY_NO_MUTATION=YES")
+          PY
