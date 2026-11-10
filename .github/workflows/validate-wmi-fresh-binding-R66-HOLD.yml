@@ -1,0 +1,48 @@
+name: HOLD R66 fresh WMI service rebind prevents false exits and retains rapid events
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-wmi-fresh-binding-R66-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/build-wmi-rebind-R66-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/accept-wmi-rebind-real-R66-HOLD.py
+permissions: {contents: read}
+jobs:
+  recover-fresh-wmi-with-real-wscript:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Verify exact stable parent R63 and produce new R66 resident
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R66_REAL_STABLE_MAIN_CHANGED_NO_ACCEPTANCE'
+          }
+          $dir='validation/spotify-exit-immediate-maintenance-HOLD/'
+          foreach($name in @('build-combined-exit-and-shortcut-R37-HOLD.py',
+                              'build-eventdriven-vbs-R45-HOLD.py',
+                              'build-rapid-restart-vbs-R58-HOLD.py',
+                              'build-wmi-selfheal-R63-HOLD.py',
+                              'build-wmi-rebind-R66-HOLD.py',
+                              'accept-wmi-rebind-real-R66-HOLD.py')){
+            & python ($dir+$name)
+            if($LASTEXITCODE -ne 0){throw ('R66_EXACT_SOURCE_BUILD_FAILED_'+$name)}
+          }
+          $native=Join-Path $env:RUNNER_TEMP 'spotify-r66-rebind-real-wmi.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($native,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R66_TEST_NATIVE_PS51_PARSE_FAILED'}
+          Write-Host 'R66_NEW_AGENT_AND_NATIVE_FIXTURE_EXACT_PINS=PASS'
+      - name: Genuine Windows WScript reacquires stale WMI service before two rapid exits
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $native=Join-Path $env:RUNNER_TEMP 'spotify-r66-rebind-real-wmi.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $native
+          if($LASTEXITCODE -ne 0){throw 'R66_NATIVE_WMI_REBIND_AND_FALSE_EXIT_GUARD_UNPROVEN'}
+          Write-Host 'R66_REAL_FRESH_BINDING_AND_TWO_RAPID_SPOTIFY_EXITS=PASS'
+          Write-Host 'R66_FULL_WINDOWS_WMI_SERVICE_RESTART_NOT_EXERCISED'
+          Write-Host 'R66_USER_PC_AND_PUBLIC_RELEASE=UNTOUCHED_HOLD'
