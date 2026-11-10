@@ -42,7 +42,7 @@ jobs:
               match=re.match(r"function ([\w-]+)\s*{\s*$",line)
               if match:
                   funcs[match.group(1)]=i
-          targets=["Invoke-MaintenanceMutationPhase","Invoke-MaintenanceCheckPhase","Maintain","Invoke-ResidentAgentTick"]
+          targets=["Invoke-SelfUpdateMutation","Invoke-MaintenanceMutationPhase","Enter-SpotifyControlMutex","Exit-SpotifyControlMutex"]
           offsets=sorted(funcs.values())
           for name in targets:
               start=funcs.get(name)
