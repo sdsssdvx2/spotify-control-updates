@@ -89,7 +89,24 @@ def main():
     if($resident.HasExited){throw 'R63_WSCRIPT_EXITED_BEFORE_WMI_RECOVERY'}
     Start-Sleep -Milliseconds 250
   }
-  if(-not $recovered){throw 'R63_BOTH_REAL_WMI_EVENT_SOURCES_NOT_RECOVERED_IN_110S'}
+  if(-not $recovered){
+    $resident.Refresh()
+    Write-Host ('R63_RESIDENT_STILL_ALIVE='+[string](-not $resident.HasExited))
+    if(Test-Path -LiteralPath $hostLog -PathType Leaf){
+      $trace=@(Get-Content -LiteralPath $hostLog -ErrorAction SilentlyContinue)
+      foreach($entry in @($trace | Where-Object {
+        $_ -like '*WMI*' -or $_ -like '*R63*' -or $_ -like '*TICK*'
+      } | Select-Object -Last 22)){
+        # No private data: all paths and events belong to the hosted scratch.
+        $line=[string]$entry
+        $line=$line -replace '[A-Za-z]:\\[^ ]+','[HOSTED_SCRATCH]'
+        Write-Host ('R63_HOSTED_SCRIPT_TRACE='+$line)
+      }
+    }else{
+      Write-Host 'R63_HOSTED_SCRIPT_TRACE=HOST_LOG_ABSENT'
+    }
+    throw 'R63_BOTH_REAL_WMI_EVENT_SOURCES_NOT_RECOVERED_IN_110S'
+  }
   if((EventCount 'SpotifyExit') -ne 0){throw 'R63_FALSE_SPOTIFY_EXIT_DURING_WMI_RECOVERY'}
   Write-Host 'R63_BOTH_WMI_SUBSCRIPTIONS_SELF_HEALED_ON_LIVE_WSCRIPT=PASS'
 """
