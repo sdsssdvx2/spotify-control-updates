@@ -156,6 +156,14 @@ nextSafetyProbe =""",
       "If Not IsSpotifyRunning() Then","run"):
         if required not in text and required!="run":
             raise RuntimeError("R58_ORIGINAL_WMI_FAIL_CLOSED_CONTRACT_CHANGED")
+    # Keep documentation in this pinned builder. It need not inflate
+    # the official full-file WScript transfer with comment-only lines.
+    # All executable statements and event names remain byte-preserved.
+    docs=[line for line in text.split("\n") if line.lstrip().startswith("'")]
+    if len(docs)<8:
+        raise RuntimeError("R58_ANNOTATED_SOURCE_UNEXPECTEDLY_EMPTY")
+    text="\n".join(line for line in text.split("\n")
+                   if not line.lstrip().startswith("'"))
     target=bom+text.replace("\n",newline).encode("utf-8")
     OUTPUT.mkdir(parents=True,exist_ok=False)
     with (OUTPUT/"spotify-control-agent.vbs").open("xb") as f:f.write(target)
