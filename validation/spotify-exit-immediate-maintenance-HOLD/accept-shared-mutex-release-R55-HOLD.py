@@ -54,6 +54,22 @@ def run():
             raise RuntimeError("R55_OFFICIAL_REVIEW_ONLY_STAGE_INVALID")
         if mode=="prepare-win":
             r.prepare_win()
+            # R50's otherwise unchanged source-pinned R43 test-preparer
+            # embeds the historical R49 stage path. It is a read-side
+            # localhost-fixture selector, NOT a release or owner mutation.
+            # Select exactly the new R54 stage without touching R28's
+            # actual owner-cutover, Bootstrap or rollback semantics.
+            preparer=Path(os.environ["RUNNER_TEMP"]).resolve()/(
+                "spotify-r43-integrated-prepare.py")
+            source=preparer.read_text("utf-8")
+            old="out/release-staging-single-discovery-R49"
+            new="out/release-staging-shared-maintenance-R54"
+            if source.count(old)!=1 or new in source:
+                raise RuntimeError("R55_LAST_TEST_FIXTURE_STAGE_POINTER_NOT_UNIQUE")
+            preparer.write_text(source.replace(old,new,1),encoding="utf-8")
+            if old in preparer.read_text("utf-8"):
+                raise RuntimeError("R55_PREVIOUS_RELEASE_TARGET_STILL_ACTIVE")
+            print("R55_EXACT_NEW_R54_STAGE_SELECTED_FOR_BOOTSTRAP_FIXTURE=PASS")
             print("R55_EXISTING_R28_OWNER_CUTOVER_PREPARED_EXACT_SHARED_MUTEX_SOURCE=PASS")
         else:
             r.bundle_win()
