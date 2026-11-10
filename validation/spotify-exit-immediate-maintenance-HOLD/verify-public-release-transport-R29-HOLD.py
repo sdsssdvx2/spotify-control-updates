@@ -45,7 +45,7 @@ ORIGINAL = {
     "bin/spotify-control-agent.vbs": (4855, "2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278"),
 }
 FUTURE = {
-    "bin/spotify-control.ps1": "4ec5bc6c6612ab15fc297d474b193d228b9dab8eb5b79cd7b14042af5b72c93c",
+    "bin/spotify-control.ps1": "b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92232d",
     "bin/addon-manager.ps1": ORIGINAL["bin/addon-manager.ps1"][1],
     "bin/spotify-control-agent.vbs": "1c1563bff9b9a87ae851b4ca555429b5451ce67c6d225a148b5252256d71cdf7",
 }
