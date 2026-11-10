@@ -47,9 +47,11 @@ def main():
     s=s.replace("\r\n","\n")
     # Injection occurs after both genuine subscriptions, but before
     # the resident's first process snapshot / main loop.
-    anchor='nextSubscriptionRecovery = DateAdd("s", 60, Now)'
-    s=one(s,anchor,anchor+'\nSet exitSource = Nothing\nSet startSource = Nothing\n'+
-          'LogLine "R63 HOSTED INITIAL EVENT SOURCES LOST"',"INJECT_ONCE")
+    anchor='nextSubscriptionRecovery = DateAdd("s", 60, Now)\nlastExitStamp = CDbl(0)'
+    replacement='nextSubscriptionRecovery = DateAdd("s", 60, Now)\n'+\
+        'Set exitSource = Nothing\nSet startSource = Nothing\n'+\
+        'LogLine "R63 HOSTED INITIAL EVENT SOURCES LOST"\nlastExitStamp = CDbl(0)'
+    s=one(s,anchor,replacement,"INJECT_ONCE_AFTER_REAL_SUBSCRIPTIONS")
     altered=bom+s.replace("\n",nl).encode("utf-8")
     SCRATCH.mkdir(parents=True,exist_ok=False)
     (SCRATCH/"spotify-control-agent.vbs").write_bytes(altered)
