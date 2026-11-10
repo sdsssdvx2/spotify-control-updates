@@ -1,0 +1,45 @@
+name: HOLD R62 real WScript fallback after injected WMI notification loss
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-rapid-restart-wmi-loss-fallback-R62-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/accept-wmi-event-loss-fallback-R62-HOLD.py
+permissions: {contents: read}
+jobs:
+  injected-wmi-loss-poll-fallback:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Rebuild exact verified R58 candidate with unchanged public main
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R62_STABLE_MAIN_CHANGED'
+          }
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          foreach($script in @('build-combined-exit-and-shortcut-R37-HOLD.py',
+                                'build-eventdriven-vbs-R45-HOLD.py',
+                                'build-rapid-restart-vbs-R58-HOLD.py')){
+            & python ($base+$script)
+            if($LASTEXITCODE -ne 0){throw 'R62_FROZEN_R58_VBS_BUILD_FAILED'}
+          }
+          & python ($base+'accept-wmi-event-loss-fallback-R62-HOLD.py')
+          if($LASTEXITCODE -ne 0){throw 'R62_WMI_DISCONNECT_FIXTURE_NOT_PREPARED'}
+          $test=Join-Path $env:RUNNER_TEMP 'spotify-r62-wmi-loss-polling.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($test,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R62_HOSTED_POWERSHELL51_PARSE_FAILED'}
+          Write-Host 'R62_SCRIPT_AND_EXACT_R58_SOURCE_PINS=PASS'
+      - name: Run real synthetic Spotify stop through genuine 60s polling after isolated WMI event loss
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $test=Join-Path $env:RUNNER_TEMP 'spotify-r62-wmi-loss-polling.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test
+          if($LASTEXITCODE -ne 0){throw 'R62_REAL_WSCRIPT_POLL_FALLBACK_NOT_PROVEN'}
+          Write-Host 'R62_FALLBACK_BOUNDED_REAL_WSCRIPT_TO_POWERSHELL=PASS'
+          Write-Host 'R62_MAIN_BRANCH_AND_OWNER_WINDOWS_ORIGINALS=UNTOUCHED_HOLD'
