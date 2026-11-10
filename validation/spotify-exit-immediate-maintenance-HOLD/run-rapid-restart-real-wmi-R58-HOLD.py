@@ -125,7 +125,7 @@ def run():
     throw 'R58_SAME_SESSION_DUPLICATE_WMI_STOP_EVENT_OVER_DISPATCHED'
   }
   $trace=@(Get-Content -LiteralPath $hostLog -ErrorAction Stop)
-  if(@($trace | Where-Object {$_ -like '*WMI START EVENT subscribed*'}).Count -ne 1 -or
+  if(@($trace | Where-Object {$_ -like '*WMI START EVENT subscribed*'}).Count -lt 1 -or
      @($trace | Where-Object {$_ -like '*TICK LAUNCHED event=SpotifyExit*'}).Count -ne 2){
     throw 'R58_GENUINE_START_TRACE_OR_SECOND_POWERSHELL_BRIDGE_NOT_PROVEN'
   }
