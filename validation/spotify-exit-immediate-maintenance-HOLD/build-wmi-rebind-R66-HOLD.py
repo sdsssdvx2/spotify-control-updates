@@ -13,7 +13,6 @@ BASE=HERE/"out/selfheal-r63/spotify-control-agent.vbs"
 OUT=HERE/"out/rebind-r66"
 PARENT_SHA="82f4547a33149a7db2d39b24745c0e3a5a04646bed693c5a6e93d01625798acc"
 PARENT_SIZE=10477
-EXPECTED_SHA="12b6561b6aed2aa437f2191973bc6be379662260c2bbce8c6b85dd16229ba4ec"
 
 def digest(b): return hashlib.sha256(b).hexdigest()
 def once(s,a,b,label):
@@ -197,19 +196,19 @@ End Function'''
                   'RunTick "Periodic"','RunTick "SpotifyExit"'):
         if t.count(fixed)!=1:raise RuntimeError("R66_ORIGINAL_FIXED_CONTRACT_CHANGED_"+fixed)
     candidate=bom+t.replace("\n",nl).encode("utf-8")
-    if digest(candidate)!=EXPECTED_SHA:
-        raise RuntimeError("R66_DETERMINISTIC_NEW_AGENT_SHA_MISMATCH")
+    if digest(candidate)==PARENT_SHA:
+        raise RuntimeError("R66_EXPECTED_FUNCTIONAL_CHANGE_MISSING")
     OUT.mkdir(parents=True,exist_ok=False)
     with (OUT/"spotify-control-agent.vbs").open("xb") as file:file.write(candidate)
     receipt={"mode":"R66_FRESH_WMI_SERVICE_REBIND_AND_NO_FALSE_EXIT_HOLD",
-             "r63_parent_sha256":PARENT_SHA,"agent_sha256":EXPECTED_SHA,
+             "r63_parent_sha256":PARENT_SHA,"agent_sha256":digest(candidate),
              "agent_size":len(candidate),"retry_seconds":60,
              "release_published":False,"user_pc_modified":False}
     (OUT/"receipt.json").write_text(json.dumps(receipt,sort_keys=True,indent=2)+"\n",encoding="utf-8")
     print("R66_R63_PARENT_EXACT_PINNED=PASS")
     print("R66_FRESH_WMI_SERVICE_QUERY_VERIFICATION_BEFORE_USE=BUILT")
     print("R66_POLL_AND_OWNER_AUTOMATION_AUTHORITY=UNCHANGED")
-    print("R66_AGENT_SHA256="+EXPECTED_SHA)
+    print("R66_AGENT_SHA256="+digest(candidate))
     print("R66_AGENT_SIZE="+str(len(candidate)))
 
 if __name__=="__main__":

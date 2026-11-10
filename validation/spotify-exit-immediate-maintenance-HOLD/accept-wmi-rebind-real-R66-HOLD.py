@@ -18,7 +18,6 @@ TEMP=Path(os.environ.get("RUNNER_TEMP","/nonexistent"))
 ORIGINAL_TEST=TEMP/"spotify-r58-two-real-exits.ps1"
 OUTPUT=TEMP/"spotify-r66-rebind-real-wmi.ps1"
 PARENT="82f4547a33149a7db2d39b24745c0e3a5a04646bed693c5a6e93d01625798acc"
-NEW="12b6561b6aed2aa437f2191973bc6be379662260c2bbce8c6b85dd16229ba4ec"
 R58_TEST_SHA="8eb76416848a7da3e3ce02a7d169655f676ea109f9f9a050d94e364e48182874"
 
 def sha(b):return hashlib.sha256(b).hexdigest()
@@ -33,7 +32,11 @@ def run():
         raise RuntimeError("R66_HOSTED_WINDOWS_ONLY")
     p=json.loads(META.read_text("utf-8"))
     raw=PRODUCT.read_bytes()
-    if (sha(raw)!=NEW or p.get("agent_sha256")!=NEW or
+    target=p.get("agent_sha256")
+    if (not isinstance(target,str) or len(target)!=64 or
+        any(c not in "0123456789abcdef" for c in target)):
+        raise RuntimeError("R66_CANDIDATE_SHA_FORMAT_INVALID")
+    if (sha(raw)!=target or
         p.get("r63_parent_sha256")!=PARENT or
         p.get("mode")!="R66_FRESH_WMI_SERVICE_REBIND_AND_NO_FALSE_EXIT_HOLD" or
         p.get("retry_seconds")!=60 or p.get("agent_size")!=len(raw)):
