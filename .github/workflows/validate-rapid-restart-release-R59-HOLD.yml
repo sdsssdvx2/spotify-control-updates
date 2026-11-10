@@ -1,0 +1,159 @@
+name: HOLD R59 two-rapid-restart WMI resident + R54 shared mutex full native owner upgrade and Git review
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-rapid-restart-release-R59-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/accept-rapid-restart-release-R59-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/build-shared-maintenance-lock-R54-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/build-rapid-restart-vbs-R58-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/build-rapid-restart-release-R59-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/prepare-real-main-bridge-R48-HOLD.py
+permissions:
+  contents: read
+  actions: read
+jobs:
+  rapid-restart-real-owner-cutover:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Rebuild previously verified exact single-discovery main and event-driven resident
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R59_PUBLIC_STABLE_MAIN_UNEXPECTED'
+          }
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-combined-exit-and-shortcut-R37-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R59_PINNED_R37_REBUILD_FAILED'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-eventdriven-vbs-R45-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R59_PINNED_R45_VBS_REBUILD_FAILED'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-single-discovery-maintenance-R49-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R59_PINNED_R49_OPTIMIZED_RELEASE_REBUILD_FAILED'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-shared-maintenance-lock-R54-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R59_PINNED_R54_MANUAL_MUTEX_RELEASE_REBUILD_FAILED'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-rapid-restart-vbs-R58-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R59_ACTUAL_TWO_START_STOP_RESIDENT_NOT_BUILT'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-rapid-restart-release-R59-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R59_FULLFILE_NEW_RESIDENT_STAGING_FAILED'}
+          $root='validation/spotify-exit-immediate-maintenance-HOLD/out/release-staging-rapid-restart-R59'
+          $manifest=Get-Content (Join-Path $root 'manifest-UNPUBLISHABLE.json') -Raw | ConvertFrom-Json
+          if($manifest.source_commit -cne ('f'*40) -or $manifest.latest_version -cne '0.6.30' -or
+             @($manifest.updates[-1].patches).Count -ne 2){
+            throw 'R59_UNPUBLISHABLE_STAGED_RELEASE_SCOPE_DRIFT'
+          }
+          Write-Host 'R59_NEW_REAL_MAIN_AND_FAST_EVENT_VBS_STAGED_PUBLISHED_VERSION_0630_HOLD=PASS'
+      - name: Get actual original Bootstrap v106 with immutable official hash
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' \
+            'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' \
+            > "$RUNNER_TEMP/spotify-r50-bootstrap-inspect.zip"
+          python - <<'PY'
+          import zipfile,hashlib,io,os
+          from pathlib import Path
+          root=Path(os.environ["RUNNER_TEMP"])
+          with zipfile.ZipFile(root/"spotify-r50-bootstrap-inspect.zip") as outer:
+              inner=outer.read("SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip")
+          with zipfile.ZipFile(io.BytesIO(inner)) as nested:
+              data=nested.read("bootstrap/spotify-control-self-updater.ps1")
+          assert (len(data),hashlib.sha256(data).hexdigest())==(
+              42963,"d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6")
+          (root/"spotify-verified-bootstrap-v106.ps1").write_bytes(data)
+          print("R59_ORIGINAL_BOOTSTRAP_106_EXACT_SHA256=PASS")
+          PY
+          rm -f "$RUNNER_TEMP/spotify-r50-bootstrap-inspect.zip"
+      - name: Run original R28 immutable user-owner single cutover + official Bootstrap + rollback against optimized release
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/accept-rapid-restart-release-R59-HOLD.py prepare-win
+          if($LASTEXITCODE -ne 0){throw 'R59_EXACT_R28_NATIVE_OWNER_CUTOVER_NOT_PREPARED'}
+          $native=Join-Path $env:RUNNER_TEMP 'spotify-r43-integrated-real-owner-cutover.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($native,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R59_REUSED_R28_OWNER_CUTOVER_PS51_PARSE_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $native
+          if($LASTEXITCODE -ne 0){throw 'R59_REAL_OPTIMIZED_BOOTSTRAP_OWNER_UPGRADE_FAILED'}
+          Write-Host 'R59_EXACT_NEW_MAIN_AND_FAST_EVENT_VBS_OWNER_CUTOVER_BOOTSTRAP_ROLLBACK_PASS'
+      - name: Real WScript SpotifyExit to complete optimized main with owner mutation disarmed
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          @'
+          from importlib import util
+          from pathlib import Path
+          root=Path.cwd()
+          src=root/"validation/spotify-exit-immediate-maintenance-HOLD/prepare-real-main-bridge-R48-HOLD.py"
+          spec=util.spec_from_file_location("spotify_r50_reuse_real_r48_wscript",src)
+          assert spec and spec.loader
+          mod=util.module_from_spec(spec)
+          spec.loader.exec_module(mod)
+          mod.MAIN_PIN="b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92232d"
+          mod.VBS_PIN="925542aa4eeff3a566d527bdd2439f5864a8dce0e524c59b402ec2ef7afc9e0f"
+          mod.SOURCE="validation/spotify-exit-immediate-maintenance-HOLD/out/release-staging-rapid-restart-R59"
+          mod.NEW_SCRATCH="Spotify Control R59 Real Main Exit"
+          mod.main()
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'R59_EXACT_REAL_MAIN_WSCRIPT_SOURCE_TEST_NOT_PREPARED'}
+          $test=Join-Path $env:RUNNER_TEMP 'spotify-r48-real-full-main-spotifyexit.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($test,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R59_REAL_FULLMAIN_POWERSHELL_PARSE_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test
+          if($LASTEXITCODE -ne 0){throw 'R59_REAL_FAST_WMI_TO_OPTIMIZED_FULL_MAIN_NOT_ADMITTED'}
+          Write-Host 'R59_FAST_WMI_EVENT_TO_REAL_OPTIMIZED_MAIN_UNARMED_NO_MUTATION=PASS'
+      - name: Generate immutable 20-source-chunk and manifest Git review from precisely the accepted build
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/accept-rapid-restart-release-R59-HOLD.py bundle-win
+          if($LASTEXITCODE -ne 0){throw 'R59_TWO_COMMIT_GIT_REVIEW_BUNDLE_FAILED'}
+          $root='validation/spotify-exit-immediate-maintenance-HOLD/out/promotion-review-rapid-restart-R59'
+          $r=Get-Content (Join-Path $root 'promotion-receipt-HOLD.json') -Raw | ConvertFrom-Json
+          $b=Join-Path $root 'v0630-two-commit-publication-NOT-AUTHORIZED.bundle'
+          if([int]$r.git_commits_to_fast_forward -ne 2 -or [int]$r.source_package_chunks -ne 20 -or
+             [bool]$r.release_published -or [bool]$r.github_ref_updated -or
+             (Get-FileHash -LiteralPath $b -Algorithm SHA256).Hash.ToLowerInvariant() -cne $r.bundle_sha256){
+            throw 'R59_GIT_REVIEW_RECEIPT_SCOPE_DRIFT'
+          }
+          Write-Host 'R59_SOURCE_REVIEW_ONLY_NO_PUBLIC_RELEASE=PASS'
+      - name: Keep temporary post-Windows proven Git review bundle (not a release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Spotify-v0630-rapid-restart-final-REVIEW-NOT-PUBLISHED
+          path: validation/spotify-exit-immediate-maintenance-HOLD/out/promotion-review-rapid-restart-R59/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  rapid-restart-review-custody:
+    needs: rapid-restart-real-owner-cutover
+    if: github.ref == 'refs/heads/validate/spotify-exit-immediate-maintenance-HOLD'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Use original R35 invariant Git bundle source attestor to create only the new held review ref
+        uses: actions/download-artifact@v4
+        with:
+          name: Spotify-v0630-rapid-restart-final-REVIEW-NOT-PUBLISHED
+          path: review-artifact
+      - name: Read back all immutable chunks and preserve the last R59 candidate only on hold branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 validation/spotify-exit-immediate-maintenance-HOLD/accept-rapid-restart-release-R59-HOLD.py custody-linux
+          test "$(git rev-parse origin/main)" = 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          echo 'R59_SINGLE_DISCOVERY_FAST_WMI_CANDIDATE_PERSISTED_NO_RELEASE=PASS'
