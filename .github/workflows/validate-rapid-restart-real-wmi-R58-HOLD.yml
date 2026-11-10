@@ -1,0 +1,51 @@
+name: HOLD R58 two real Spotify.exe start-stop cycles within legacy 60s WMI debounce
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-rapid-restart-real-wmi-R58-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/build-rapid-restart-vbs-R58-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/run-rapid-restart-real-wmi-R58-HOLD.py
+permissions: {contents: read}
+jobs:
+  two-genuine-rapid-sessions:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Build byte-pinned R45 baseline and the new R58 session-aware VBS under hosted scratch
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R58_OFFICIAL_MAIN_CHANGED'
+          }
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-combined-exit-and-shortcut-R37-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R58_PINNED_R37_PARENT_FAILED'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-eventdriven-vbs-R45-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R58_PINNED_R45_WMI_PARENT_FAILED'}
+          python validation/spotify-exit-immediate-maintenance-HOLD/build-rapid-restart-vbs-R58-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R58_REAL_VBS_SESSION_RELAY_BUILD_FAILED'}
+          $out='validation/spotify-exit-immediate-maintenance-HOLD/out/rapid-restart-r58'
+          $receipt=Get-Content -LiteralPath (Join-Path $out 'receipt.json') -Raw | ConvertFrom-Json
+          if($receipt.mode -cne 'R58_RAPID_RESTART_DISTINCT_WMI_SESSION_HOLD' -or
+             [bool]$receipt.release_published -or [bool]$receipt.owner_approval -or
+             (Get-FileHash -LiteralPath (Join-Path $out 'spotify-control-agent.vbs') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $receipt.new_sha256){
+            throw 'R58_VERSIONED_SOURCE_SHA_OR_NO_PUBLISH_CONSTRAINT_DRIFT'
+          }
+          Write-Host 'R58_NEW_WMI_SESSION_TRACKED_VBS_PINNED_AND_HOLD=PASS'
+      - name: Run two genuine owned process stop cycles less than 60 seconds apart through real WScript and PowerShell receiver
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/run-rapid-restart-real-wmi-R58-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R58_SOURCE_PINNED_REAL_DOUBLE_EXIT_TEST_NOT_PREPARED'}
+          $test=Join-Path $env:RUNNER_TEMP 'spotify-r58-two-real-exits.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($test,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R58_TEST_POWERSHELL51_PARSE_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test
+          if($LASTEXITCODE -ne 0){throw 'R58_REAL_DISTINCT_PROCESS_START_STOP_EVENT_SESSION_NOT_PROVEN'}
+          Remove-Item -LiteralPath $test -Force -ErrorAction SilentlyContinue
+          Write-Host 'R58_REAL_WMI_STARTTRACE_DISTINCT_SESSION_FAST_STOP_2_OF_2_PASS'
