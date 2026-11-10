@@ -1,0 +1,21 @@
+name: HOLD R61 real GitHub SHA and source 20-chunk verification for rapid restart SpotifyExit
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/verify-rapid-restart-public-remote-R61-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/verify-rapid-restart-public-review-R61-HOLD.py
+permissions: {contents: read}
+jobs:
+  final-two-session-public-remote:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 1, persist-credentials: false}
+      - name: Fetch actual GitHub RAW stable and final R59 two-session WMI v0630 candidate and verify all 20 immutable chunks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 validation/spotify-exit-immediate-maintenance-HOLD/verify-rapid-restart-public-review-R61-HOLD.py
+          echo 'R61_FINAL_TWO_SESSION_WMI_CANDIDATE_REMOTE_READONLY_NO_DEPLOY=PASS'
