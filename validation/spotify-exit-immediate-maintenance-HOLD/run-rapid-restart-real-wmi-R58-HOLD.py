@@ -48,6 +48,35 @@ def run():
         "  if(-not(WaitEvent 'SpotifyExit' 18)){","FAST_FIRST_EXIT_WAIT")
     test=one(test,"$fake=$null\n$resident=$null","$fake=$null\n$second=$null\n$resident=$null",
       "SECOND_EXACT_TEST_OWNED_PROCESS")
+    # Diagnose real WMI subscription initialization with console CScript
+    # before launching the tested WScript resident. Valid 'probe' exits
+    # before subscribing; this test-owned child dies before startup tick.
+    preflight_anchor='  Add-Type -TypeDefinition @' + chr(39)
+    preflight_test=r"""  $cscript=Join-Path $env:WINDIR 'System32/cscript.exe'
+  $cscriptError=Join-Path $root 'r58-scratch-console-error.txt'
+  $cscriptRun=Start-Process -FilePath $cscript -WorkingDirectory $bin -ArgumentList ('//NoLogo "'+$agent+'"') -RedirectStandardError $cscriptError -WindowStyle Hidden -PassThru -ErrorAction Stop
+  try {
+    Start-Sleep -Milliseconds 1200
+    $cscriptRun.Refresh()
+    if($cscriptRun.HasExited){
+      if(Test-Path -LiteralPath $cscriptError){
+        foreach($line in (Get-Content -LiteralPath $cscriptError -ErrorAction SilentlyContinue | Select-Object -Last 8)){
+          Write-Host ('R58_REAL_CONSOLE_SCRIPT_ERROR='+[string]$line)
+        }
+      }
+      throw 'R58_REAL_WMI_START_EVENT_CONSOLE_HOST_EXITED_DURING_INIT'
+    }
+  } finally {
+    $cscriptRun.Refresh()
+    if(-not $cscriptRun.HasExited){
+      Stop-Process -Id $cscriptRun.Id -Force -ErrorAction Stop
+      [void]$cscriptRun.WaitForExit(5000)
+    }
+  }
+  Write-Host 'R58_REAL_VBS_START_STOP_SUBSCRIPTION_CONSOLE_INIT_SURVIVED=PASS'
+"""
+    test=one(test,preflight_anchor,preflight_test+preflight_anchor,
+             "REAL_CONSOLE_RUNTIME_WMI_SUBSCRIPTION_INITIALIZATION")
     marker="  Write-Host 'R44_AUTHENTIC_WSCRIPT_TO_POWERSHELL_AGENTTICK_SPOTIFYEXIT=PASS'"
     injected=r"""  # Do not relax or disable legacy 60s debounce. Exactly one genuine
   # Spotify.exe restart and stop within 60 seconds after the first stop
