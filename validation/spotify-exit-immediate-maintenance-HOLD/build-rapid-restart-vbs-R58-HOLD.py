@@ -61,7 +61,7 @@ End If
 Err.Clear
 On Error GoTo 0
 If Not startSource Is Nothing Then LogLine "WMI START EVENT subscribed"
-lastExitStamp = CDec(0)
+lastExitStamp = CDbl(0)
 newerSessionObserved = False
 nextSafetyProbe =""",
       "START_EVENT_SUBSCRIPTION_BEFORE_COLD_SNAPSHOT")
@@ -69,7 +69,7 @@ nextSafetyProbe =""",
       """    gotStopEvent = False
     If exitSource Is Nothing Then""",
       """    gotStopEvent = False
-    stopStamp = CDec(0)
+    stopStamp = CDbl(0)
     If exitSource Is Nothing Then""",
       "STOP_TIMESTAMP_DEFAULT")
     text=one(text,
@@ -79,11 +79,11 @@ nextSafetyProbe =""",
       """                If LCase(CStr(exitEvent.ProcessName)) = "spotify.exe" Then
                     gotStopEvent = True
                     ' WMI __Event TIME_CREATED is UTC 100ns FILETIME.
-                    ' Decimal preserves all 64-bit units (Double cannot).
+                    ' VBScript CDbl preserves microsecond-scale ordering here, not 100ns precision.
                     On Error Resume Next
                     Err.Clear
-                    stopStamp = CDec(exitEvent.TIME_CREATED)
-                    If Err.Number <> 0 Then stopStamp = CDec(0)
+                    stopStamp = CDbl(exitEvent.TIME_CREATED)
+                    If Err.Number <> 0 Then stopStamp = CDbl(0)
                     Err.Clear
                     On Error GoTo 0
                 End If""",
@@ -113,14 +113,14 @@ nextSafetyProbe =""",
             End If
             If startEvent Is Nothing Then Exit For
             If LCase(CStr(startEvent.ProcessName)) = "spotify.exe" Then
-                startStamp = CDec(0)
+                startStamp = CDbl(0)
                 On Error Resume Next
                 Err.Clear
-                startStamp = CDec(startEvent.TIME_CREATED)
-                If Err.Number <> 0 Then startStamp = CDec(0)
+                startStamp = CDbl(startEvent.TIME_CREATED)
+                If Err.Number <> 0 Then startStamp = CDbl(0)
                 Err.Clear
                 On Error GoTo 0
-                If lastExitStamp > CDec(0) And startStamp > lastExitStamp Then
+                If lastExitStamp > CDbl(0) And startStamp > lastExitStamp Then
                     newerSessionObserved = True
                 End If
             End If
@@ -137,7 +137,7 @@ nextSafetyProbe =""",
             ' start evidence, retain original safe debounce.
             If DateDiff("s", lastExitTick, Now) >= EXIT_DEBOUNCE_SECONDS Or _
                (gotStopEvent And newerSessionObserved And _
-                stopStamp > CDec(0) And lastExitStamp > CDec(0) And _
+                stopStamp > CDbl(0) And lastExitStamp > CDbl(0) And _
                 stopStamp > lastExitStamp) Then
                 WScript.Sleep EXIT_SETTLE_MS""",
       "SESSION_BOUND_DEBOUNCE")
