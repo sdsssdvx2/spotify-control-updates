@@ -107,7 +107,7 @@ jobs:
           $ErrorActionPreference='Stop'
           python validation/spotify-exit-immediate-maintenance-HOLD/accept-shared-mutex-release-R55-HOLD.py bundle-win
           if($LASTEXITCODE -ne 0){throw 'R55_TWO_COMMIT_GIT_REVIEW_BUNDLE_FAILED'}
-          $root='validation/spotify-exit-immediate-maintenance-HOLD/out/promotion-review-single-discovery-R55'
+          $root='validation/spotify-exit-immediate-maintenance-HOLD/out/promotion-review-shared-maintenance-R55'
           $r=Get-Content (Join-Path $root 'promotion-receipt-HOLD.json') -Raw | ConvertFrom-Json
           $b=Join-Path $root 'v0630-two-commit-publication-NOT-AUTHORIZED.bundle'
           if([int]$r.git_commits_to_fast_forward -ne 2 -or [int]$r.source_package_chunks -ne 20 -or
@@ -120,7 +120,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Spotify-v0630-shared-maintenance-final-REVIEW-NOT-PUBLISHED
-          path: validation/spotify-exit-immediate-maintenance-HOLD/out/promotion-review-single-discovery-R55/
+          path: validation/spotify-exit-immediate-maintenance-HOLD/out/promotion-review-shared-maintenance-R55/
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
