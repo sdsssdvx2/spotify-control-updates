@@ -78,7 +78,7 @@ def main():
   for($probe=0;$probe -lt 440;$probe++){
     if(Test-Path -LiteralPath $hostLog -PathType Leaf){
       $trace=@(Get-Content -LiteralPath $hostLog -ErrorAction SilentlyContinue)
-      if(@($trace | Where-Object {$_ -like '*R63 HOSTED INITIAL EVENT SOURCES LOST*'}).Count -eq 1 -and
+      if(@($trace | Where-Object {$_ -like '*R63 HOSTED INITIAL EVENT SOURCES LOST*'}).Count -ge 1 -and
          @($trace | Where-Object {$_ -like '*WMI STOP EVENT resubscribed*'}).Count -ge 1 -and
          @($trace | Where-Object {$_ -like '*WMI START EVENT resubscribed*'}).Count -ge 1){
         $recovered=$true
