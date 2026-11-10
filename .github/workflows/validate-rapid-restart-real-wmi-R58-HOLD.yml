@@ -38,7 +38,7 @@ jobs:
           # before starting the separate real WScript resident process.
           $candidate=Join-Path $out 'spotify-control-agent.vbs'
           $runner=Join-Path $env:WINDIR 'System32/cscript.exe'
-          $result=@(& $runner //NoLogo //B $candidate probe 2>&1)
+          $result=@(& $runner //NoLogo $candidate probe 2>&1)
           if($LASTEXITCODE -ne 0){
             foreach($item in $result){Write-Host ('R58_REAL_CSCRIPT_DIAGNOSTIC='+[string]$item)}
             throw 'R58_NEW_REAL_VBS_PARSER_OR_WMI_PROBE_FAILED'
