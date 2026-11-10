@@ -16,7 +16,7 @@ HERE=Path(__file__).resolve().parent
 STAGE=HERE/"out"/"release-staging-rapid-restart-R59"
 REVIEW=HERE/"out"/"promotion-review-rapid-restart-R59"
 MAIN="b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92232d"
-AGENT="925542aa4eeff3a566d527bdd2439f5864a8dce0e524c59b402ec2ef7afc9e0f"
+AGENT="8eb76416848a7da3e3ce02a7d169655f676ea109f9f9a050d94e364e48182874"
 REF="refs/heads/hold/spotify-v0630-rapid-restart-review-only"
 
 def run():
