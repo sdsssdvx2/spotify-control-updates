@@ -38,7 +38,16 @@ jobs:
           # before starting the separate real WScript resident process.
           $candidate=Join-Path $out 'spotify-control-agent.vbs'
           $runner=Join-Path $env:WINDIR 'System32/cscript.exe'
-          $result=@(& $runner //NoLogo $candidate probe 2>&1)
+          # This is ONLY the short-lived parser/WMI probe. The VBS requires
+          # its main entrypoint to exist even in read-only probe mode.
+          $testMain=Join-Path $out 'spotify-control.ps1'
+          if(Test-Path -LiteralPath $testMain){throw 'R58_CSCRIPT_PROBE_OWNER_MAIN_ALREADY_EXISTS'}
+          [IO.File]::WriteAllText($testMain,'# isolated cscript probe only')
+          try {
+            $result=@(& $runner //NoLogo $candidate probe 2>&1)
+          } finally {
+            Remove-Item -LiteralPath $testMain -Force -ErrorAction SilentlyContinue
+          }
           if($LASTEXITCODE -ne 0){
             foreach($item in $result){Write-Host ('R58_REAL_CSCRIPT_DIAGNOSTIC='+[string]$item)}
             throw 'R58_NEW_REAL_VBS_PARSER_OR_WMI_PROBE_FAILED'
