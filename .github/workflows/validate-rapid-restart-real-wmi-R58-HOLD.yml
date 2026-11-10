@@ -34,6 +34,19 @@ jobs:
              (Get-FileHash -LiteralPath (Join-Path $out 'spotify-control-agent.vbs') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $receipt.new_sha256){
             throw 'R58_VERSIONED_SOURCE_SHA_OR_NO_PUBLISH_CONSTRAINT_DRIFT'
           }
+          # VBScript must parse and perform its genuine read-only WMI probe
+          # before starting the separate real WScript resident process.
+          $candidate=Join-Path $out 'spotify-control-agent.vbs'
+          $runner=Join-Path $env:WINDIR 'System32/cscript.exe'
+          $result=@(& $runner //NoLogo //B $candidate probe 2>&1)
+          if($LASTEXITCODE -ne 0){
+            foreach($item in $result){Write-Host ('R58_REAL_CSCRIPT_DIAGNOSTIC='+[string]$item)}
+            throw 'R58_NEW_REAL_VBS_PARSER_OR_WMI_PROBE_FAILED'
+          }
+          if(-not ($result -match '^PROBE PASS spotify_running=')){
+            throw 'R58_CSCRIPT_PROBE_UNEXPECTED'
+          }
+          Write-Host 'R58_REAL_CSCRIPT_PARSE_AND_READONLY_WMI_PROBE=PASS'
           Write-Host 'R58_NEW_WMI_SESSION_TRACKED_VBS_PINNED_AND_HOLD=PASS'
       - name: Run two genuine owned process stop cycles less than 60 seconds apart through real WScript and PowerShell receiver
         shell: powershell
