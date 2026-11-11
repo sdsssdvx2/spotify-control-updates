@@ -34,8 +34,8 @@ def run():
         os.environ.get("RUNNER_ENVIRONMENT")!="github-hosted" or
         not TEMP.is_dir() or TEMP.is_symlink()):
         raise RuntimeError("R87_GITHUB_HOSTED_WINDOWS_ONLY")
-    if POWER.exists() or PREP.exists():
-        raise RuntimeError("R87_PREVIOUS_DRIVER_ALREADY_GENERATED")
+    if not POWER.is_file() or not PREP.is_file():
+        raise RuntimeError("R87_FROZEN_R70_OWNER_DRIVER_NOT_YET_GENERATED")
     spec=importlib.util.spec_from_file_location("r87_reuse_actual_r82_native",R82)
     if spec is None or spec.loader is None:
         raise RuntimeError("R87_FROZEN_R82_ADAPTER_UNAVAILABLE")
@@ -128,7 +128,7 @@ def run():
   # R28 HOSTED TEST ONLY: point the existing true native transaction driver
   # to the already-verified owner-private R85 bootstrap, never modifying
   # the installed original in the isolated fixture or the production R28.
-  $r87OldBoot='$boot=Join-Path $root ' + [char]39 + 'bootstrap\spotify-control-self-updater.ps1' + [char]39
+  $r87OldBoot='$boot=Join-Path $root ' + [char]39 + 'bootstrap\\spotify-control-self-updater.ps1' + [char]39
   $r87PrivateBoot='$boot=Join-Path $env:R87_OFFLINE_STAGE ' + [char]39 + 'bootstrap-verified-locator-copy.ps1' + [char]39
   if(([regex]::Matches($r28Text,[regex]::Escape($r87OldBoot))).Count -ne 1){
     throw 'R87_R28_HOSTED_INSTALLED_BOOTSTRAP_SOURCE_ANCHOR_CHANGED'
