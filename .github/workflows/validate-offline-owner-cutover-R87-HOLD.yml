@@ -90,7 +90,7 @@ jobs:
           $ErrorActionPreference='Stop'
           & python validation/spotify-exit-immediate-maintenance-HOLD/accept-boot-wmi-release-R70-HOLD.py prepare-win
           if($LASTEXITCODE -ne 0){throw 'R82_PREVIOUS_PINNED_R28_OWNER_TEST_NOT_BUILT'}
-          & python validation/spotify-exit-immediate-maintenance-HOLD/accept-immutable-review-owned-cutover-R82-HOLD.py
+          & python validation/spotify-exit-immediate-maintenance-HOLD/accept-offline-owned-cutover-R87-HOLD.py
           if($LASTEXITCODE -ne 0){throw 'R82_IMMUTABLE_REVIEW_NATIVE_OWNER_TEST_NOT_PREPARED'}
           $test=Join-Path $env:RUNNER_TEMP 'spotify-r43-integrated-real-owner-cutover.ps1'
           $tokens=$null;$errors=$null
@@ -102,8 +102,20 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $test=Join-Path $env:RUNNER_TEMP 'spotify-r43-integrated-real-owner-cutover.ps1'
-          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test
-          if($LASTEXITCODE -ne 0){throw 'R82_REAL_OWNER_CUTOVER_REVIEW_SOURCE_OR_ROLLBACK_FAILED'}
-          Write-Host 'R87_GENUINE_R84_R85_LOCAL_SOURCE_OWNER_R28_PROCESS_HANDOFF_AND_BOOTSTRAP_TRANSACTION=PASS'
-          Write-Host 'R82_ONLY_HOSTED_DERIVED_R28_AND_BOOTSTRAP_COPY_NOT_OWNER_INSTALLER'
-          Write-Host 'R82_PRODUCTION_MAIN_OWNER_PC_ALLOWS_NO_CHANGE=YES'
+          $outputs=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test 2>&1)
+          $exitCode=$LASTEXITCODE
+          $outputs | ForEach-Object {Write-Output $_}
+          if($exitCode -ne 0){throw 'R87_NATIVE_OWNER_AND_PRIVATE_BOOTSTRAP_EXIT_NONZERO'}
+          foreach($required in @(
+            'R87_NO_HTTP_SERVER_OFFLINE_FILE_URI_ONLY=PASS',
+            'R87_REAL_R85_IMMUTABLE_OFFLINE_MANIFEST_AND_BOOTSTRAP_BOUND=PASS',
+            'R87_REAL_LOCAL_REVIEW_21_CHUNKS_OWNER_CUTOVER=PASS',
+            'R28_ONE_OWNER_APPROVAL_THROUGH_BOOTSTRAP_AND_NEW_VBS_COMPLETE_PASS',
+            'R28_SUCCESSFUL_UPDATE_NO_SECOND_ATTEMPT_AND_RESIDENT_PRESERVED_PASS',
+            'R87_INSTALLED_OFFICIAL_BOOTSTRAP_SHA256_UNCHANGED_AFTER_OWNER_CUTOVER_AND_ROLLBACK=PASS',
+            'FUTURE_OFFICIAL_BOOTSTRAP_LOCALHOST_EXACT_ROLLBACK_AND_USER_DATA_PRESERVATION_PASS',
+            'FUTURE_OFFICIAL_BOOTSTRAP_CORRUPT_CHUNK_REJECTED_ORIGINAL_AND_OWNER_DATA_UNCHANGED_PASS')){
+            if($outputs -cnotcontains $required){throw ('R87_ACTUAL_EXECUTION_PROOF_MISSING_'+$required)}
+          }
+          Write-Host 'R87_VERIFIED_REAL_OFFLINE_NATIVE_OWNER_PRIVATE_BOOTSTRAP_AND_ROLLBACK=PASS'
+          Write-Host 'R87_PRODUCTION_MAIN_AND_OWNER_PC=UNMODIFIED'
