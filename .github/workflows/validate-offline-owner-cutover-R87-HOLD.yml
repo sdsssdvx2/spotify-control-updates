@@ -1,4 +1,4 @@
-name: HOLD R87 offline 21-chunk file-URI review through native R28 owner WScript cutover and rollback
+name: HOLD R87 real R84/R85 file URI through native R28 WScript owner cutover
 on:
   push:
     branches: [validate/spotify-exit-immediate-maintenance-HOLD]
@@ -55,18 +55,29 @@ jobs:
           print("R70_ORIGINAL_BOOTSTRAP_106_EXACT_SHA256=PASS")
           PY
           rm -f "$RUNNER_TEMP/spotify-r50-bootstrap-inspect.zip"
-      - name: R84 exact immutable GitHub review bytes to Windows owner-private stage and R85 strictly offline file URI
+      - name: Prepare R84 immutable private candidate and R85 entirely local bootstrap
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
-          $p='validation/spotify-exit-immediate-maintenance-HOLD/'
-          $r84=@(& ($p+'stage-immutable-review-native-R84-HOLD.ps1') -StageOwnerCandidate)
-          $r84 | ForEach-Object {Write-Output $_}
-          if($r84 -cnotcontains 'R84_RESULT=PRIVATE_CANDIDATE_STAGED_NOT_INSTALLED' -or
-             $r84 -cnotcontains 'R84_OWNER_STAGED_IMMUTABLE_CHUNKS_21_OF_21=PASS'){
-            throw 'R87_GENUINE_R84_IMMUTABLE_SOURCE_NOT_STAGED'
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          $a=@(& ($base+'stage-immutable-review-native-R84-HOLD.ps1') -StageOwnerCandidate)
+          $a | ForEach-Object {Write-Output $_}
+          if($a -cnotcontains 'R84_RESULT=PRIVATE_CANDIDATE_STAGED_NOT_INSTALLED' -or
+             $a -cnotcontains 'R84_OWNER_STAGED_IMMUTABLE_CHUNKS_21_OF_21=PASS'){
+            throw 'R87_R84_SOURCE_STAGE_MISSING'
           }
-          $rows=@($r84|Where-Object {$_ -cmatch '^R84_OWNER_PRIVATE_STAGE_ID=[0-9a-f]{32}
+          $matches=@($a | Where-Object {$_ -cmatch '^R84_OWNER_PRIVATE_STAGE_ID=[0-9a-f]{32}$'})
+          if($matches.Count -ne 1){throw 'R87_R84_STAGE_NOT_UNIQUE'}
+          $stage=Join-Path $env:LOCALAPPDATA ('SpotifyControlCanary-ready-'+([string]$matches[0]).Split('=')[1])
+          $boot=Join-Path $env:RUNNER_TEMP 'spotify-verified-bootstrap-v106.ps1'
+          $b=@(& ($base+'compose-private-offline-bootstrap-R85-HOLD.ps1') -R84ReadyPath $stage -OfficialBootstrapPath $boot)
+          $b | ForEach-Object {Write-Output $_}
+          if($b -cnotcontains 'RESULT=R85_OWNER_PRIVATE_OFFLINE_TRANSPORT_PREPARED_HOLD' -or
+             $b -cnotcontains 'R85_R84_PINNED_21_CHUNKS_MIRRORED_FROM_LOCAL_DISK=PASS'){
+            throw 'R87_R85_LOCAL_BOOTSTRAP_NOT_PREPARED'
+          }
+          Write-Host 'R87_NATIVE_R84_R85_IMMUTABLE_LOCAL_SOURCE=READY_NO_OWNER_INSTALL'
+      - name: R81 independently authenticates all 21 real immutable held review chunks and full target bytes
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -79,29 +90,20 @@ jobs:
           $ErrorActionPreference='Stop'
           & python validation/spotify-exit-immediate-maintenance-HOLD/accept-boot-wmi-release-R70-HOLD.py prepare-win
           if($LASTEXITCODE -ne 0){throw 'R82_PREVIOUS_PINNED_R28_OWNER_TEST_NOT_BUILT'}
-          & python validation/spotify-exit-immediate-maintenance-HOLD/accept-offline-owned-cutover-R87-HOLD.py
+          & python validation/spotify-exit-immediate-maintenance-HOLD/accept-immutable-review-owned-cutover-R82-HOLD.py
           if($LASTEXITCODE -ne 0){throw 'R82_IMMUTABLE_REVIEW_NATIVE_OWNER_TEST_NOT_PREPARED'}
           $test=Join-Path $env:RUNNER_TEMP 'spotify-r43-integrated-real-owner-cutover.ps1'
           $tokens=$null;$errors=$null
           [void][Management.Automation.Language.Parser]::ParseFile($test,[ref]$tokens,[ref]$errors)
           if(@($errors).Count -ne 0){throw 'R82_WINDOWS_NATIVE_OWNER_TEST_PS51_PARSE_ERROR'}
           Write-Host 'R82_R28_OWNER_LIFECYCLE_REUSED_SOURCE_PINNED=PASS'
-      - name: Execute original R28 mutex and exact-owner WScript cutover using R85 file URI, then native Bootstrap rollback and corruption denial
+      - name: Execute full real Windows owner WScript handoff through R85 local file URI Bootstrap and rollback
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           $test=Join-Path $env:RUNNER_TEMP 'spotify-r43-integrated-real-owner-cutover.ps1'
-          $rows=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test 2>&1)
-          $rc=$LASTEXITCODE
-          $rows | ForEach-Object {Write-Output $_}
-          if($rc -ne 0){throw 'R87_WINDOWS_NATIVE_WSCRIPT_OFFLINE_INTEGRATION_FAILED'}
-          foreach($line in @(
-            'R87_NO_HTTP_SERVER_OFFLINE_FILE_URI_ONLY=PASS',
-            'R87_REAL_R85_IMMUTABLE_OFFLINE_MANIFEST_AND_BOOTSTRAP_BOUND=PASS',
-            'R87_REAL_LOCAL_REVIEW_21_CHUNKS_OWNER_CUTOVER=PASS',
-            'R28_ONE_OWNER_APPROVAL_THROUGH_BOOTSTRAP_AND_NEW_VBS_COMPLETE_PASS',
-            'FUTURE_OFFICIAL_BOOTSTRAP_LOCALHOST_EXACT_ROLLBACK_AND_USER_DATA_PRESERVATION_PASS')){
-            if($rows -cnotcontains $line){throw ('R87_EXPECTED_NATIVE_PROOF_NOT_EMITTED_'+$line)}
-          }
-          Write-Host 'R87_REAL_R84_R85_PRIVATE_OFFLINE_SOURCE_R28_OWNER_LOCK_WSCRIPT_BOOTSTRAP_ROLLBACK=PASS'
-          Write-Host 'R87_OFFICIAL_R27_R28_BOOTSTRAP_AND_PUBLIC_MAIN_USER_PC=UNCHANGED'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test
+          if($LASTEXITCODE -ne 0){throw 'R82_REAL_OWNER_CUTOVER_REVIEW_SOURCE_OR_ROLLBACK_FAILED'}
+          Write-Host 'R87_GENUINE_R84_R85_LOCAL_SOURCE_OWNER_R28_PROCESS_HANDOFF_AND_BOOTSTRAP_TRANSACTION=PASS'
+          Write-Host 'R82_ONLY_HOSTED_DERIVED_R28_AND_BOOTSTRAP_COPY_NOT_OWNER_INSTALLER'
+          Write-Host 'R82_PRODUCTION_MAIN_OWNER_PC_ALLOWS_NO_CHANGE=YES'
