@@ -66,7 +66,26 @@ def run()->None:
     if s.count(needle)!=1:
         raise RuntimeError("R69_ORIGINAL_FATAL_NO_SERVICE_MESSAGE_NOT_UNIQUE")
     old_guard=re.search(
-        r'(?im)^[ \t]*If[ \t]+wmi[ \t]+Is[ \t]+Nothing[ \t]+Then[ \t]*
+        r'(?im)^[ \t]*If[ \t]+wmi[ \t]+Is[ \t]+Nothing[ \t]+Then\b', s)
+    if old_guard:
+        begin=old_guard.start()
+        stop=re.search(r'(?m)^End If[ \t]*',s[old_guard.end():])
+        if stop is None:
+            raise RuntimeError("R69_ORIGINAL_WMI_NULL_BLOCK_MISSING_END")
+        end=old_guard.end()+stop.end()
+        original_block=s[begin:end]
+        if needle not in original_block:
+            raise RuntimeError("R69_ORIGINAL_NULL_WMI_GATE_NOT_FATAL_GATE")
+        if original_block.count("If ")!=1 or original_block.count("End If")!=1:
+            raise RuntimeError("R69_ORIGINAL_NULL_WMI_GATE_NESTED_UNEXPECTED")
+        s=s[:begin] + ('If wmi Is Nothing Then\n'
+             '    LogLine "WMI BOOTSTRAP missing service; existing 60s reconnect active"\n'
+             'End If') + s[end:]
+    else:
+        idx=s.index(needle)
+        print("R69_ORIGINAL_ONLY_BOOT_WMI_FATAL_CONTEXT="+
+              repr(s[max(0,idx-240):idx+240]))
+        raise RuntimeError("R69_ORIGINAL_WMI_FATAL_GATE_SHAPE_UNKNOWN")
     s=replace_once(s,
         'wmiNeedsReconnect = False\nwmiLastQueryValid = False\nsessionWitness = False',
         'wmiNeedsReconnect = (wmi Is Nothing)\n'
