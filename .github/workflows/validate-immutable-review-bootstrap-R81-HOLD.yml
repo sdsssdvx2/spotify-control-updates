@@ -1,0 +1,79 @@
+name: HOLD R81 real GitHub review bits through actual Bootstrap 106 Check RollbackTest Update on isolated Windows
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - validation/spotify-exit-immediate-maintenance-HOLD/accept-immutable-review-bootstrap-R81-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/accept-immutable-review-bootstrap-R81-HOLD.ps1
+      - .github/workflows/validate-immutable-review-bootstrap-R81-HOLD.yml
+permissions: {contents: read, actions: read}
+jobs:
+  real-remote-immutable-review-bootstrap:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Build exact source from stable and R70 without modifying public main
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'R81_MAIN_PUBLIC_UNEXPECTED'}
+          $d='validation/spotify-exit-immediate-maintenance-HOLD/'
+          foreach($b in @(
+            'build-combined-exit-and-shortcut-R37-HOLD.py',
+            'build-eventdriven-vbs-R45-HOLD.py',
+            'build-single-discovery-maintenance-R49-HOLD.py',
+            'build-shared-maintenance-lock-R54-HOLD.py',
+            'build-rapid-restart-vbs-R58-HOLD.py',
+            'build-wmi-selfheal-R63-HOLD.py',
+            'build-wmi-rebind-R66-HOLD.py',
+            'build-wmi-logon-recovery-R69-HOLD.py',
+            'build-boot-wmi-release-R70-HOLD.py'
+          )){
+            & python ($d+$b)
+            if($LASTEXITCODE -ne 0){throw ('R81_STAGE_REBUILD_FAILED_'+$b)}
+          }
+          Write-Host 'R81_PUBLIC_V0628_AND_HELD_R70_BITS_PRECISELY_REBUILT=PASS'
+      - name: Get actual original Bootstrap v106 with immutable official hash
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' \
+            'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' \
+            > "$RUNNER_TEMP/spotify-r50-bootstrap-inspect.zip"
+          python - <<'PY'
+          import zipfile,hashlib,io,os
+          from pathlib import Path
+          root=Path(os.environ["RUNNER_TEMP"])
+          with zipfile.ZipFile(root/"spotify-r50-bootstrap-inspect.zip") as outer:
+              inner=outer.read("SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip")
+          with zipfile.ZipFile(io.BytesIO(inner)) as nested:
+              data=nested.read("bootstrap/spotify-control-self-updater.ps1")
+          assert (len(data),hashlib.sha256(data).hexdigest())==(
+              42963,"d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6")
+          (root/"spotify-verified-bootstrap-v106.ps1").write_bytes(data)
+          print("R70_ORIGINAL_BOOTSTRAP_106_EXACT_SHA256=PASS")
+          PY
+          rm -f "$RUNNER_TEMP/spotify-r50-bootstrap-inspect.zip"
+      - name: Independently attest actual immutable review manifest and all 21 remote source chunks
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & python validation/spotify-exit-immediate-maintenance-HOLD/accept-immutable-review-bootstrap-R81-HOLD.py stage
+          if($LASTEXITCODE -ne 0){throw 'R81_REMOTE_HELD_REVIEW_SOURCE_STAGING_FAILED'}
+          Write-Host 'R81_PREPUBLIC_REMOTE_REAL_REVIEW_NOT_SYNTHETIC_STAGING=PASS'
+      - name: Native original Bootstrap 1.0.6 Check RollbackTest Update Check from verified prepublication remote review
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $file='validation/spotify-exit-immediate-maintenance-HOLD/accept-immutable-review-bootstrap-R81-HOLD.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R81_REAL_BOOTSTRAP_NATIVE_PS51_PARSE_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $file
+          if($LASTEXITCODE -ne 0){throw 'R81_REAL_REMOTE_REVIEW_BOOTSTRAP_ACCEPTANCE_FAILED'}
+          Write-Host 'R81_REAL_SOURCE_REAL_BOOTSTRAP_TRANSACTION_ROLLBACK_AND_UPDATE=PASS'
+          Write-Host 'R81_OWNER_PC_RELEASE_AND_UPDATER_UNMODIFIED=YES'
