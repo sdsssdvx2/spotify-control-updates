@@ -87,6 +87,16 @@ def run():
           Write-Host ('R69_TEST_OWNED_CSCRIPT_STDOUT='+$safe)
         }
       }
+      if(Test-Path -LiteralPath $hostLog -PathType Leaf){
+        foreach($line in @(Get-Content -LiteralPath $hostLog -ErrorAction SilentlyContinue | Select-Object -Last 18)){
+          $safe=[string]$line
+          $safe=$safe -replace '[A-Za-z]:\\[^ ]+','[HOSTED_SCRATCH]'
+          if($safe.Length -gt 240){$safe=$safe.Substring(0,240)}
+          Write-Host ('R69_TEST_OWNED_HOST_LOG='+$safe)
+        }
+      }else{
+        Write-Host 'R69_TEST_OWNED_HOST_LOG=NO_ENTRIES'
+      }
       throw 'R69_BOOT_WMI_CSCRIPT_INIT_FAILED'""",
        "R69_TRACE_REAL_CSCRIPT_START_FAILURE")
 
