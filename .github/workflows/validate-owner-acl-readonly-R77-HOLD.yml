@@ -1,0 +1,84 @@
+name: HOLD R77 live owner-SID Spotify Update ACL read-only evidence
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-owner-acl-readonly-R77-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/owner-acl-readonly-R77-HOLD.ps1
+permissions: {contents: read}
+jobs:
+  native-windows-acl-readonly:
+    runs-on: windows-2025
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Run real Windows ACL offline inspection on isolated profile, unchanged SDDL and owner-state SHA
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/owner-acl-readonly-R77-HOLD.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script),[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R77_PS51_SOURCE_PARSE_FAILED'}
+          $root=Join-Path $env:RUNNER_TEMP 'Spotify-R77-ACL-Test-Owned'
+          $local=Join-Path $root 'LocalAppData'
+          $roam=Join-Path $root 'Roaming'
+          $app=Join-Path $local 'SpotifyControl'
+          $update=Join-Path $local 'Spotify\Update'
+          foreach($d in @($root,$local,$roam,$app)){
+            [void][IO.Directory]::CreateDirectory($d)
+          }
+          $state=Join-Path $app 'state.json'
+          [IO.File]::WriteAllText($state,'{"agent_mutation_enabled":true,"guard_enforced":"blocked","unrelated":{"secret":"PRIVATE_DO_NOT_PRINT"}}',[Text.Encoding]::UTF8)
+          $oldStateHash=(Get-FileHash -LiteralPath $state -Algorithm SHA256).Hash
+          $env:LOCALAPPDATA=$local;$env:APPDATA=$roam
+          $result1=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script 2>&1)
+          if($LASTEXITCODE -ne 0){throw 'R77_MISSING_DIRECTORY_READONLY_RUN_FAILED'}
+          foreach($need in @(
+            'UPDATE_FOLDER_ACL_NOW=UPDATE_DIR_ABSENT',
+            'SAVED_GUARD_VS_ACL=SAVED_BLOCKED_ACL_MISMATCH',
+            'OWNER_ENVIRONMENT_PRECHECK=HOLD_REVIEW_ONLY',
+            'OWNER_ROLLOUT_ADMISSION=HOLD_REVIEW_ONLY',
+            'RESULT=READONLY_SNAPSHOT_COMPLETE')){
+            if($result1 -cnotcontains $need){throw ('R77_MISSING_DIRECTORY_EXPECTATION_'+$need.Split('=')[0])}
+          }
+          if(Test-Path -LiteralPath $update){
+            throw 'R77_READONLY_SCRIPT_CREATED_UPDATE_DIRECTORY'
+          }
+          [void][IO.Directory]::CreateDirectory($update)
+          $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $ace='*'+$sid+':(OI)(CI)(W,D)'
+          $icacls=Join-Path $env:WINDIR 'System32\icacls.exe'
+          & $icacls $update '/deny' $ace | Out-Null
+          if($LASTEXITCODE -ne 0){throw 'R77_TEST_OWNED_DENY_ACE_FIXTURE_FAILED'}
+          $before=(Get-Acl -LiteralPath $update -ErrorAction Stop).Sddl
+          $result2=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script 2>&1)
+          if($LASTEXITCODE -ne 0){throw 'R77_DENIED_DIRECTORY_READONLY_RUN_FAILED'}
+          foreach($need in @(
+            'UPDATE_FOLDER_ACL_NOW=OWNER_WRITE_DELETE_DENY_ACE_PRESENT',
+            'SAVED_GUARD_VS_ACL=SAVED_BLOCKED_MATCHES_LIVE_ACL',
+            'AGENT_MUTATION_SAVED=ARMED_SAVED',
+            'OWNER_ENVIRONMENT_PRECHECK=HOLD_REVIEW_ONLY',
+            'RESULT=READONLY_SNAPSHOT_COMPLETE',
+            'ACL_PROOF_LEVEL=OWNER_DENY_ACES_ONLY_NOT_ACCESS_CHECK',
+            'NETWORK=NO;INSTALL=NO;UPDATE=NO;APPLY=NO;REGISTRY_WRITE=NO;ACL_WRITE=NO')){
+            if($result2 -cnotcontains $need){throw ('R77_DENIED_DIRECTORY_EXPECTATION_'+$need.Split('=')[0])}
+          }
+          $after=(Get-Acl -LiteralPath $update -ErrorAction Stop).Sddl
+          if($before -cne $after -or
+             (Get-FileHash -LiteralPath $state -Algorithm SHA256).Hash -cne $oldStateHash){
+            throw 'R77_READONLY_USER_STATE_OR_ACL_CHANGED'
+          }
+          foreach($line in @($result1)+@($result2)){
+            if(([string]$line).Contains('PRIVATE_DO_NOT_PRINT') -or
+               ([string]$line).Contains($root) -or
+               [string]$line -match 'S-1-5-\d+-\d+'){
+              throw 'R77_PERSONAL_SCRATCH_INFORMATION_EXPORTED'
+            }
+          }
+          Write-Host 'R77_WINDOWS_NATIVE_MISSING_UPDATE_DIRECTORY_FAILCLOSED=PASS'
+          Write-Host 'R77_REAL_OWNER_SID_DENY_WRITE_DELETE_ACL_READONLY=PASS'
+          Write-Host 'R77_FOLLOWING_PRODUCT_MAIN_DACL_DETECTION_WITHOUT_APPLY=PASS'
+          Write-Host 'R77_ACL_SDDL_AND_SAVED_STATE_BYTE_UNCHANGED=PASS'
+          Write-Host 'R77_NO_OWNER_PC_NO_PUBLIC_RELEASE_NO_PAID_TOOLS=PASS'
