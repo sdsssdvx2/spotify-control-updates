@@ -1,0 +1,120 @@
+name: HOLD R78 public one-shot demands real live ACL and compatibility before R28 cutover
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-live-owner-public-gate-R78-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-live-guard-public-onepass-R78-HOLD.ps1
+permissions: {contents: read}
+jobs:
+  native-r78-gated-owner-release:
+    runs-on: windows-2025
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Check immutable baseline and R77 owner ACL provenance, parse exact R78 Windows PS 5.1 controller
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $src='validation/spotify-exit-immediate-maintenance-HOLD/'
+          $oldRef='38bb7c2c1aa90f02d920dcd23a026f64c23ef844'
+          $original=(git rev-parse ($oldRef+':'+$src+'owner-approved-public-release-onepass-R32-HOLD.ps1')).Trim()
+          $acl=(git rev-parse ($oldRef+':'+$src+'owner-acl-readonly-R77-HOLD.ps1')).Trim()
+          if($LASTEXITCODE -ne 0 -or $original -cne '9675b18307ff5cc4815f5a42c6a1bca8b1ae67b9' -or
+             $acl -cne 'edfdce9429d4a74612b2e6b1d6996ea6bb6fd50e'){
+            throw 'R78_APPROVED_PRIOR_IMMUTABLE_SOURCE_BLOBS_DRIFT'
+          }
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R78_USER_PUBLIC_V0628_MAIN_CHANGED'
+          }
+          $file=$src+'owner-approved-live-guard-public-onepass-R78-HOLD.ps1'
+          $tokens=$null;$errors=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R78_PS51_PARSE_FAILED'}
+          $fn=@($ast.FindAll({
+            param($node)
+            ($node -is [Management.Automation.Language.FunctionDefinitionAst]) -and
+            ($node.Name -ceq 'AssertR77Receipt')
+          },$true))
+          if($fn.Count -ne 1){throw 'R78_LIVE_ADMISSION_PREDICATE_MISSING'}
+          $text=[IO.File]::ReadAllText((Resolve-Path $file))
+          foreach($needle in @(
+            'R77_LIVE_OWNER_ACL_AND_VERSION_ADMISSION',
+            'R77_ACTUAL_OWNER_COMPAT_AND_LIVE_ACL=PASS_READONLY',
+            'R77_SAVED_AGENT_ARMING=LEFT_UNCHANGED',
+            'OWNER_WRITE_DELETE_DENY_ACE_PRESENT',
+            '38bb7c2c1aa90f02d920dcd23a026f64c23ef844',
+            '9d64817f67bef0768aded4b7b8b4669d137aee1f3a16a741d00eaa446ac4a6b9')){
+            if(-not $text.Contains($needle)){throw 'R78_REQUIRED_EXACT_OWNER_ACL_GATE_DRIFT'}
+          }
+          function Deny([string]$why){throw [InvalidOperationException]::new($why)}
+          . ([ScriptBlock]::Create($fn[0].Extent.Text))
+          $positive=@(
+            'DIAGNOSTIC=SPOTIFY_R77_OWNER_ACL_READONLY',
+            'OWNER_TOKEN=STANDARD_USER',
+            'STABLE_MAIN_V0628=EXACT',
+            'ADDON_MANAGER_R17=EXACT',
+            'RESIDENT_VBS=EXACT',
+            'OFFICIAL_BOOTSTRAP=EXACT',
+            'EXACT_INSTALLED_STACK=PASS',
+            'SPOTIFY_SIGNATURE=VALID_SPOTIFY_AB',
+            'SPICETIFY_CLI_SOURCE_PIN=OFFICIAL_2464',
+            'CURRENT_COMPATIBILITY=OFFICIALLY_SUPPORTED_RANGE',
+            'SPOTIFY_PROCESS=CLOSED',
+            'RESIDENT_PROCESS_PATH_MATCH=ONE_MATCH',
+            'STATE_FILE=PARSED_NOT_AUTHORITY',
+            'AGENT_MUTATION_SAVED=ARMED_SAVED',
+            'SPOTIFY_UPDATE_GUARD_SAVED=BLOCKED_REPORTED_ONLY',
+            'UPDATE_FOLDER_ACL_NOW=OWNER_WRITE_DELETE_DENY_ACE_PRESENT',
+            'SAVED_GUARD_VS_ACL=SAVED_BLOCKED_MATCHES_LIVE_ACL',
+            'ACL_PROOF_LEVEL=OWNER_DENY_ACES_ONLY_NOT_ACCESS_CHECK',
+            'OWNER_ENVIRONMENT_PRECHECK=READONLY_CONSISTENT_NOT_DEPLOY_AUTHORITY',
+            'RESULT=READONLY_SNAPSHOT_COMPLETE',
+            'AUTHORIZE_DEPLOY=NO;AUTOMATIC_RETRY=NO;OWNER_SOURCE_CHANGE=NO'
+          )
+          if(-not (AssertR77Receipt $positive)){throw 'R78_VALID_OWNER_READONLY_REPORT_NOT_ACCEPTED'}
+          $off=@($positive | ForEach-Object {
+            if($_ -ceq 'AGENT_MUTATION_SAVED=ARMED_SAVED'){'AGENT_MUTATION_SAVED=OFF_SAVED'}else{$_}
+          })
+          if(-not (AssertR77Receipt $off)){throw 'R78_LEGITIMATE_OWNER_DISABLED_SETTING_NOT_ACCEPTED'}
+          $broken=@($positive | ForEach-Object {
+            if($_ -ceq 'SAVED_GUARD_VS_ACL=SAVED_BLOCKED_MATCHES_LIVE_ACL'){
+              'SAVED_GUARD_VS_ACL=SAVED_BLOCKED_ACL_MISMATCH'
+            }else{$_}
+          })
+          try{[void](AssertR77Receipt $broken);throw 'R78_UNSAFE_ACL_ACCEPTED'}catch{
+            if($_.Exception.Message -cne 'R77_LIVE_OWNER_ENVIRONMENT_UNVERIFIED'){throw}
+          }
+          $dupe=@($positive)+@('EXACT_INSTALLED_STACK=PASS')
+          try{[void](AssertR77Receipt $dupe);throw 'R78_DUPLICATE_OWNER_REPORT_ACCEPTED'}catch{
+            if($_.Exception.Message -cne 'R77_LIVE_OWNER_ENVIRONMENT_UNVERIFIED'){throw}
+          }
+          $unknown=@($positive | Where-Object { $_ -cne 'SPICETIFY_CLI_SOURCE_PIN=OFFICIAL_2464'})
+          $unknown+=,'SPICETIFY_CLI_SOURCE_PIN=VERSION_RANGE_ONLY_CLI_UNPINNED'
+          try{[void](AssertR77Receipt $unknown);throw 'R78_UNSIGNED_CLI_REPORT_ACCEPTED'}catch{
+            if($_.Exception.Message -cne 'R77_LIVE_OWNER_ENVIRONMENT_UNVERIFIED'){throw}
+          }
+          Write-Host 'R78_NATIVE_WINDOWS_PREDICATE_PINNED_OFFICIAL_VERSIONS_AND_ACL=PASS'
+          Write-Host 'R78_PRESERVES_BOTH_ORIGINAL_AGENT_ARMING_STATES=PASS'
+          Write-Host 'R78_ACL_MISMATCH_UNPINNED_CLI_DUPLICATED_RECEIPT_FAILCLOSED=PASS'
+      - name: Unpublished or unapproved public release cannot enter R77 nor R28 nor contact network
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $file='validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-live-guard-public-onepass-R78-HOLD.ps1'
+          $r=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $file -Commit -ApprovalPhrase 'APPROVE_EXACT_OWNER_CUTOVER_AND_ONE_STABLE_UPDATE' 2>&1)
+          if($LASTEXITCODE -ne 0 -or $r -cnotcontains 'HOLD_REASON=UNPUBLISHED_OR_UNAPPROVED_PUBLIC_RELEASE' -or
+             $r -cnotcontains 'RESULT=HOLD_NO_AUTOMATIC_RETRY' -or
+             $r -cnotcontains 'R28_OWNER_CUTOVER_OBSERVED=NOT_STARTED' -or
+             $r -cnotcontains 'NETWORK=NONE' -or
+             $r -match 'R77_ACTUAL_OWNER_COMPAT_AND_LIVE_ACL=PASS_READONLY'){
+            throw 'R78_UNPUBLISHED_RELEASE_GATE_NOT_FAILCLOSED'
+          }
+          $bad=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $file -Commit -ApprovalPhrase 'NOT_OWNER_APPROVAL' -ApprovedPublicManifestSHA256 ('0'*64) -ApprovedPublicSourceCommit ('1'*40) 2>&1)
+          if($LASTEXITCODE -ne 0 -or $bad -cnotcontains 'HOLD_REASON=ONE_SHOT_OWNER_APPROVAL_REQUIRED' -or
+             $bad -cnotcontains 'NETWORK=NONE'){
+            throw 'R78_MISSING_APPROVAL_DID_NOT_BLOCK_NETWORK'
+          }
+          Write-Host 'R78_NO_PUBLIC_MANIFEST_NO_APPROVAL_NO_NETWORK_NO_PROCESSES=PASS'
+          Write-Host 'R78_PUBLIC_RELEASE_REAL_INSTALL_AND_OWNER_PC=NOT_TESTED_HOLD'
