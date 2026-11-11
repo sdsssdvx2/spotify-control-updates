@@ -88,9 +88,19 @@ def run():
        -not $bootText.Contains("'file:///")){
       throw 'R87_PRIVATE_BOOTSTRAP_STILL_NETWORK_BOUND'
     }
-    # The HTTP bootstrap is an isolated fixture derivative; replace only
-    # its scratch copy with the R85 protected FILE-URI derivative.
-    [IO.File]::WriteAllBytes($bootstrap,[IO.File]::ReadAllBytes($r87Boot))
+    # Preserve the real official installed Bootstrap 1.0.6 source exactly.
+    # Execute only the R85 disposable script from its owner-private path.
+    $frozenBoot=Join-Path $env:RUNNER_TEMP 'spotify-verified-bootstrap-v106.ps1'
+    if((Get-FileHash -LiteralPath $frozenBoot -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+         'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'){
+      throw 'R87_PINNED_ORIGINAL_OFFICIAL_BOOTSTRAP_INVALID'
+    }
+    [IO.File]::WriteAllBytes($bootstrap,[IO.File]::ReadAllBytes($frozenBoot))
+    if((Get-FileHash -LiteralPath $bootstrap -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+         'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'){
+      throw 'R87_INSTALLED_ORIGINAL_BOOTSTRAP_NOT_EXACT'
+    }
+    $bootstrap=$r87Boot
     $expect.bootstrap_locator_only_copy_sha256=[string]$r87Receipt.disposable_bootstrap_sha256
     Write-Host 'R87_REAL_R85_IMMUTABLE_OFFLINE_MANIFEST_AND_BOOTSTRAP_BOUND=PASS'""",
         "OFFLINE_RECEIPT_BINDING")
@@ -115,8 +125,26 @@ def run():
     throw 'R87_R28_HOSTED_HTTP_MANIFEST_LOCATOR_UNEXPECTED'
   }
   $r28Text=$r28Text.Replace($r87Old,$r87New)
+  # R28 HOSTED TEST ONLY: point the existing true native transaction driver
+  # to the already-verified owner-private R85 bootstrap, never modifying
+  # the installed original in the isolated fixture or the production R28.
+  $r87OldBoot='$boot=Join-Path $root ' + [char]39 + 'bootstrap\spotify-control-self-updater.ps1' + [char]39
+  $r87PrivateBoot='$boot=Join-Path $env:R87_OFFLINE_STAGE ' + [char]39 + 'bootstrap-verified-locator-copy.ps1' + [char]39
+  if(([regex]::Matches($r28Text,[regex]::Escape($r87OldBoot))).Count -ne 1){
+    throw 'R87_R28_HOSTED_INSTALLED_BOOTSTRAP_SOURCE_ANCHOR_CHANGED'
+  }
+  $r28Text=$r28Text.Replace($r87OldBoot,$r87PrivateBoot)
   $driver=[ScriptBlock]::Create($r28Text)""",
         "HOSTED_R28_ONLY_MANIFEST_LOCATOR")
+    src=once(src,
+        "Write-Host 'FUTURE_OFFICIAL_BOOTSTRAP_LOCALHOST_EXACT_ROLLBACK_AND_USER_DATA_PRESERVATION_PASS'",
+        """if((Get-FileHash -LiteralPath (Join-Path $app 'bootstrap/spotify-control-self-updater.ps1') -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+         'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'){
+      throw 'R87_INSTALLED_ORIGINAL_BOOTSTRAP_CHANGED_AFTER_UPDATE_AND_ROLLBACK'
+    }
+    Write-Host 'R87_INSTALLED_OFFICIAL_BOOTSTRAP_SHA256_UNCHANGED_AFTER_OWNER_CUTOVER_AND_ROLLBACK=PASS'
+    Write-Host 'FUTURE_OFFICIAL_BOOTSTRAP_LOCALHOST_EXACT_ROLLBACK_AND_USER_DATA_PRESERVATION_PASS'""",
+        "UNMODIFIED_INSTALLED_OFFICIAL_BOOTSTRAP")
     src=once(src,
         "R82_EXACT_REAL_REVIEW_SHA_INTEGRATED_OWNER_CUTOVER=PASS",
         "R87_REAL_LOCAL_REVIEW_21_CHUNKS_OWNER_CUTOVER=PASS",
