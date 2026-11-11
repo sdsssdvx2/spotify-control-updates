@@ -1,0 +1,98 @@
+name: HOLD R72 real Spotify AB signed Windows app exit, not a synthetic Spotify.exe
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-real-signed-spotify-exit-R72-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/accept-real-signed-spotify-exit-R72-HOLD.py
+permissions: {contents: read}
+jobs:
+  official-spotify-app-wscript-exit:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Verify original stable and rebuild SHA-pinned R69 real resident, not a new updater
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R72_PRODUCTION_MAIN_STABLE_SHA_CHANGED'
+          }
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          foreach($py in @('build-combined-exit-and-shortcut-R37-HOLD.py',
+                           'build-eventdriven-vbs-R45-HOLD.py',
+                           'build-rapid-restart-vbs-R58-HOLD.py',
+                           'build-wmi-selfheal-R63-HOLD.py',
+                           'build-wmi-rebind-R66-HOLD.py',
+                           'build-wmi-logon-recovery-R69-HOLD.py',
+                           'accept-real-signed-spotify-exit-R72-HOLD.py')){
+            & python ($base+$py)
+            if($LASTEXITCODE -ne 0){throw ('R72_VERIFIED_SOURCE_STAGE_FAILED_'+$py)}
+          }
+          $test=Join-Path $env:RUNNER_TEMP 'spotify-r72-real-signed-exit.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($test,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R72_REAL_SPOTIFY_NATIVE_TEST_PS51_PARSE_FAILED'}
+          Write-Host 'R72_EXACT_R69_AGENT_AND_WSCRIPT_TEST_PROVENANCE=PASS'
+      - name: Download and authenticate Spotify official current signed x64 full installer on disposable runner only
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if(@(Get-CimInstance Win32_Process -Filter "Name='Spotify.exe'" -ErrorAction Stop).Count -ne 0){
+            throw 'R72_FOREIGN_SPOTIFY_PROCESS_PRESENT_BEFORE_INSTALL'
+          }
+          $app=Join-Path $env:APPDATA 'Spotify\Spotify.exe'
+          if(Test-Path -LiteralPath $app){throw 'R72_EXISTING_SPOTIFY_INSTALL_PRESENT'}
+          $installer=Join-Path $env:RUNNER_TEMP 'R72-SpotifyFullSetupX64.exe'
+          if(Test-Path -LiteralPath $installer){throw 'R72_INSTALLER_PREEXISTED'}
+          & curl.exe --fail --location --silent --show-error --connect-timeout 20 --max-time 180 --output $installer 'https://download.scdn.co/SpotifyFullSetupX64.exe'
+          if($LASTEXITCODE -ne 0){throw 'R72_OFFICIAL_INSTALLER_TLS_FETCH_UNAVAILABLE'}
+          $stat=Get-Item -LiteralPath $installer -ErrorAction Stop
+          if($stat.Length -lt 20000000 -or $stat.Length -gt 250000000){
+            throw 'R72_OFFICIAL_INSTALLER_UNEXPECTED_SIZE'
+          }
+          $signature=Get-AuthenticodeSignature -LiteralPath $installer -ErrorAction Stop
+          if([string]$signature.Status -cne 'Valid' -or
+             $null -eq $signature.SignerCertificate -or
+             [string]$signature.SignerCertificate.Subject -cnotmatch '(?i)(^|,)\s*O=Spotify AB(,|$)'){
+             throw 'R72_OFFICIAL_INSTALLER_AUTHENTICODE_NOT_VERIFIED'
+          }
+          Write-Host 'R72_SPOTIFY_VENDOR_AB_SIGNATURE_AND_TLS=PASS'
+          Write-Host ('R72_OFFICIAL_CURRENT_INSTALLER_SHA256='+((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()))
+          Write-Host ('R72_OFFICIAL_CURRENT_INSTALLER_BYTES='+$stat.Length)
+          $proc=Start-Process -FilePath $installer -ArgumentList @('/silent','/skip-app-launch') -PassThru -ErrorAction Stop
+          if(-not $proc.WaitForExit(140000)){
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            throw 'R72_OFFICIAL_CURRENT_INSTALLER_DEADLINE_EXCEEDED'
+          }
+          if($proc.ExitCode -ne 0){throw 'R72_OFFICIAL_CURRENT_INSTALLER_NONZERO_EXIT'}
+          $appeared=$false
+          for($i=0;$i -lt 160;$i++){
+            if(Test-Path -LiteralPath $app -PathType Leaf){$appeared=$true;break}
+            Start-Sleep -Milliseconds 500
+          }
+          if(-not $appeared){throw 'R72_SPOTIFY_EXE_NOT_PRODUCED_BY_OFFICIAL_INSTALLER'}
+          $sig=Get-AuthenticodeSignature -LiteralPath $app -ErrorAction Stop
+          if([string]$sig.Status -cne 'Valid' -or
+             $null -eq $sig.SignerCertificate -or
+             [string]$sig.SignerCertificate.Subject -cnotmatch '(?i)(^|,)\s*O=Spotify AB(,|$)'){
+            throw 'R72_INSTALLED_REAL_SPOTIFY_EXE_NOT_SIGNED_BY_SPOTIFY_AB'
+          }
+          if(@(Get-CimInstance Win32_Process -Filter "Name='Spotify.exe'" -ErrorAction Stop).Count -ne 0){
+            throw 'R72_SPOTIFY_AUTOSTARTED_DESPITE_SKIP_APP_LAUNCH'
+          }
+          Remove-Item -LiteralPath $installer -Force -ErrorAction Stop
+          Write-Host 'R72_REAL_SIGNED_SPOTIFY_X64_INSTALLED_IN_EPHEMERAL_RUNNER=PASS'
+          Write-Host 'R72_USER_ACCOUNT_SIGNIN=NO;OWNER_PC_MODIFIED=NO;RELEASE_PUBLISHED=NO'
+      - name: Actual signed Spotify.exe from vendor installer causes exactly one real WScript SpotifyExit
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $native=Join-Path $env:RUNNER_TEMP 'spotify-r72-real-signed-exit.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $native
+          if($LASTEXITCODE -ne 0){throw 'R72_REAL_SIGNED_SPOTIFY_EXIT_PROOF_NOT_PASSED'}
+          Write-Host 'R72_REAL_SPOTIFY_AB_SIGNED_EXE_WMI_EXIT_TO_AGENTTICK=PASS'
+          Write-Host 'R72_REAL_MUSIC_SIGNIN_AND_SPICETIFY=NOT_TESTED'
+          Write-Host 'R72_OPERATING_USER_WINDOWS_AND_PUBLIC_MAIN=UNCHANGED_HOLD'
