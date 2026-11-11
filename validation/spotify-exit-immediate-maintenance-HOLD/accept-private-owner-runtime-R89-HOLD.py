@@ -44,20 +44,17 @@ def main():
   $driver=[ScriptBlock]::Create($r88Text)
   Write-Host 'R89_NATIVE_PRODUCTION_CANDIDATE_R88_DRIVER_ACTUALLY_SELECTED=PASS'""",
       "REAL_R88_DRIVER")
-    oldArgs="""$r28Args=@{
-      PinnedReleaseFactsJson=$syntheticFacts
-      HostedFixtureRoot=$fixture
-      PinnedR27Source=$r27Bytes
-      HostedExpectedManifestSHA256=$manifestSha
-      HostedExpectedBootstrapSHA256=[string]$expect.bootstrap_locator_only_copy_sha256
-      HostedExpectedMainSHA256=[string]$expect.future_main_sha256
-      HostedExpectedAgentSHA256=[string]$expect.future_agent_sha256
-    }"""
-    newArgs="""$r28Args=@{
-      PrivateOfflineReadyPath=$env:R87_OFFLINE_STAGE
-      HostedFixtureRoot=$fixture
-    }"""
-    src=one(src,oldArgs,newArgs,"INDEPENDENT_PRIVATE_R88_ARGS")
+    import re
+    pattern=r"(?m)^(?P<pad>[ \t]*)\$r28Args=@\{\n(?:[ \t]+[A-Za-z][^\n]*\n){7}(?P=pad)\}"
+    matches=list(re.finditer(pattern,src))
+    require(len(matches)==1,"NATIVE_R87_ARGS_BLOCK_NOT_UNIQUE")
+    indent=matches[0].group("pad")
+    src=src[:matches[0].start()]+(
+        indent+"$r28Args=@{\n"+
+        indent+"  PrivateOfflineReadyPath=$env:R87_OFFLINE_STAGE\n"+
+        indent+"  HostedFixtureRoot=$fixture\n"+
+        indent+"}")+src[matches[0].end():]
+
     src=one(src,
       "$publicNoPhrase=@(& $driver -PinnedR27Source $r27Bytes -Commit -ApprovedPublicManifestSHA256 ('0'*64) -ApprovedPublicSourceCommit ('1'*40))",
       "$publicNoPhrase=@(& $driver @r28Args -Commit)",
