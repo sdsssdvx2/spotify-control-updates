@@ -45,10 +45,8 @@ def main():
          "ORIGINAL_R86_GIT_BLOB_CHANGED")
     r86=b.decode("utf-8")
     r86=once(r86,
-      """  if(([Security.Principal.WindowsPrincipal]::new($id)).IsInRole(
-      [Security.Principal.WindowsBuiltInRole]::Administrator)){""",
-      """  if($false -and ([Security.Principal.WindowsPrincipal]::new($id)).IsInRole(
-      [Security.Principal.WindowsBuiltInRole]::Administrator)){""",
+      "if(([Security.Principal.WindowsPrincipal]::new($id)).IsInRole(",
+      "if($false -and ([Security.Principal.WindowsPrincipal]::new($id)).IsInRole(",
       "HOSTED_RUNNER_ACCOUNT_ONLY")
 
     # Fetch R77 exact immutable original as usual, but produce synthetic
