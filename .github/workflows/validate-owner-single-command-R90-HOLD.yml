@@ -1,0 +1,49 @@
+name: HOLD R90 native single owner command inert default and no-approval/unsafe owner refusal
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-owner-single-command-R90-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/owner-single-command-offline-R90-HOLD.ps1
+permissions: {contents: read}
+jobs:
+  exact-source-no-op-refusal:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native PS5.1 syntax and refusal before network, files and user process actions
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/owner-single-command-offline-R90-HOLD.ps1'
+          $tokens=$null;$issues=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$issues)
+          if(@($issues).Count -ne 0){
+            $issues|ForEach-Object {Write-Output $_.Message}
+            throw 'R90_SOURCE_PS51_SYNTAX_ERROR'
+          }
+          $before=@(Get-ChildItem -LiteralPath $env:LOCALAPPDATA -Directory -Filter 'SpotifyControlCanary-*'|Select-Object -ExpandProperty Name)
+          $default=@(& $p)
+          $default|ForEach-Object {Write-Output $_}
+          if($default -cnotcontains 'RESULT=R90_INERT_DEFAULT_REQUIRES_APPROVED_MODE' -or
+             $default -cnotcontains 'NETWORK=NO;FILES_CHANGED=NO;PROCESSES_CHANGED=NO'){
+            throw 'R90_DEFAULT_NOT_INERT'
+          }
+          $denied=@(& $p -Commit)
+          $denied|ForEach-Object {Write-Output $_}
+          if($denied -cnotcontains 'RESULT=R90_HOLD_NO_AUTO_RETRY' -or
+             $denied -cnotcontains 'HOLD_REASON=R90_EXACT_OWNER_APPROVAL_REQUIRED'){
+            throw 'R90_UNAPPROVED_COMMIT_WAS_NOT_BLOCKED'
+          }
+          $unsafe=@(& $p -Prepare)
+          $unsafe|ForEach-Object {Write-Output $_}
+          if($unsafe -cnotcontains 'HOLD_REASON=R90_NON_ELEVATED_OWNER_REQUIRED' -or
+             $unsafe -cnotcontains 'RESULT=R90_HOLD_NO_AUTO_RETRY'){
+            throw 'R90_ELEVATED_OR_NONOWNER_ENVIRONMENT_NOT_BLOCKED'
+          }
+          $after=@(Get-ChildItem -LiteralPath $env:LOCALAPPDATA -Directory -Filter 'SpotifyControlCanary-*'|Select-Object -ExpandProperty Name)
+          if(@(Compare-Object $before $after).Count -gt 0){throw 'R90_UNAPPROVED_STAGE_CREATED'}
+          Write-Output 'R90_NATIVE_PS51_AND_INERT_DEFAULT=PASS'
+          Write-Output 'R90_NO_APPROVAL_AND_WRONG_OWNER_BLOCKED=PASS'
+          Write-Output 'R90_ACTUAL_OWNER_COMMIT_WITH_USER_APPROVAL=NOT_EXECUTED'
