@@ -1,0 +1,42 @@
+name: HOLD R76 official Spicetify 2.46.2 executable SHA from independently pinned release asset
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/observe-spicetify-2462-official-pin-R76-HOLD.yml
+permissions: {contents: read}
+jobs:
+  extract-real-official-cli-hash-without-owner-data:
+    runs-on: windows-2025
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 1, persist-credentials: false}
+      - name: Read official immutable 2.46.2 Windows x64 archive and identify exact exe SHA only
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:RUNNER_TEMP 'R76-Spicetify2462-ReadOnly'
+          [void][IO.Directory]::CreateDirectory($dir)
+          $zip=Join-Path $dir 'spicetify.zip'
+          & curl.exe --fail --location --silent --show-error --connect-timeout 20 --max-time 80 --output $zip 'https://github.com/spicetify/cli/releases/download/v2.46.2/spicetify-2.46.2-windows-x64.zip'
+          if($LASTEXITCODE -ne 0){throw 'R76_OFFICIAL_2462_RELEASE_UNAVAILABLE'}
+          $file=Get-Item -LiteralPath $zip -ErrorAction Stop
+          if([long]$file.Length -ne 7785414){throw 'R76_OFFICIAL_2462_ZIP_SIZE_CHANGED'}
+          $digest=(Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($digest -cne '9c579fc0020b692d98d4a90b9ddc7ecbbce667a12d6990c57eebbeb361538ceb'){
+            throw 'R76_OFFICIAL_2462_ZIP_SHA_CHANGED'
+          }
+          $dst=Join-Path $dir 'unpack'
+          Expand-Archive -LiteralPath $zip -DestinationPath $dst -ErrorAction Stop
+          $candidates=@(Get-ChildItem -LiteralPath $dst -Recurse -File -Filter 'spicetify.exe' -ErrorAction Stop)
+          if($candidates.Count -ne 1){throw 'R76_OFFICIAL_2462_EXE_CARDINALITY_UNEXPECTED'}
+          $exe=$candidates[0].FullName
+          $hash=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $response=@(& $exe -v 2>&1)
+          if($LASTEXITCODE -ne 0 -or [string]($response -join ' ') -notmatch '\b2\.46\.2\b'){
+            throw 'R76_OFFICIAL_2462_EXE_NOT_VERSION_2462'
+          }
+          Write-Host 'R76_UPSTREAM_SPICETIFY_V2462_ASSET_SHA256=PASS'
+          Write-Host ('R76_AUTHENTIC_SPICETIFY_V2462_EXE_SHA256='+$hash)
+          Write-Host 'R76_HOSTED_ISOLATED_ONLY_NO_USER_PC_NO_APPLY_NO_MUTATION=PASS'
