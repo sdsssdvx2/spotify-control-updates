@@ -101,7 +101,7 @@ jobs:
           }
           $unpack=Join-Path $env:RUNNER_TEMP 'r75-extract'
           $dest=Join-Path $env:RUNNER_TEMP 'r75-official-spicetify'
-          if(Test-Path -LiteralPath $unpack -or Test-Path -LiteralPath $dest){
+          if((Test-Path -LiteralPath $unpack) -or (Test-Path -LiteralPath $dest)){
             throw 'R75_SPICETIFY_TEMP_PREEXISTED'
           }
           Expand-Archive -LiteralPath $asset -DestinationPath $unpack -ErrorAction Stop
