@@ -47,7 +47,7 @@ ORIGINAL = {
 FUTURE = {
     "bin/spotify-control.ps1": "b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92232d",
     "bin/addon-manager.ps1": ORIGINAL["bin/addon-manager.ps1"][1],
-    "bin/spotify-control-agent.vbs": "4eb5940bd68bfbde412db5deba3e9c37cecb19632c66d6ec61dc0791bf838eab",
+    "bin/spotify-control-agent.vbs": "e56609ed8927512595f55c01ea50dbb9c8c59e4a2c86dcb3d16195a565c604d5",
 }
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
