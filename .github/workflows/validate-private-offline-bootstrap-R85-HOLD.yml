@@ -161,7 +161,7 @@ jobs:
           Write-Output ('R85_PRIVATE_PATH_DIRECT_BOOTSTRAP_CHECK='+$class)
           Write-Output 'R85_DIRECT_BOOTSTRAP_PROBE_CHECK_ONLY_WITHOUT_INSTALLED_BOOTSTRAP_SWAP=YES'
           Write-Output 'R85_DIRECT_BOOTSTRAP_PROBE_OWNER_PC=NO'
-      - name: Real original Bootstrap transaction and rollback from R85 private file URI stage
+      - name: Execute R85 original Bootstrap directly from private path with installed original 1.0.6 unchanged, Check RollbackTest Update Check
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -178,10 +178,16 @@ jobs:
           $fixture=Join-Path $env:RUNNER_TEMP 'spotify-future-bootstrap-rehearsal'
           $app=Join-Path $fixture 'LocalAppData/SpotifyControl'
           $boot=Join-Path $app 'bootstrap/spotify-control-self-updater.ps1'
-          [IO.File]::WriteAllBytes($boot,[IO.File]::ReadAllBytes($source))
+          # The pinned official operating Bootstrap remains exact; execute the
+          # disposable R85 copy from its separately protected private stage.
+          $original=Join-Path $env:RUNNER_TEMP 'spotify-verified-bootstrap-v106.ps1'
+          [IO.File]::WriteAllBytes($boot,[IO.File]::ReadAllBytes($original))
+          if((GetShaHex $boot) -cne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'){
+            throw 'R85_OFFICIAL_INSTALLED_BOOTSTRAP_NOT_EXACT_BEFORE_PRIVATE_UPDATE'
+          }
           $oldL=$env:LOCALAPPDATA;$oldR=$env:APPDATA
           function Official([string]$action){
-            $result=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $boot -Action $action -Json 2>&1)
+            $result=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $source -Action $action -Json 2>&1)
             if($LASTEXITCODE -ne 0 -or $result.Count -eq 0){
               $result | ForEach-Object {Write-Output $_}
               throw ('R85_FILE_URI_BOOTSTRAP_'+$action+'_FAILED')
@@ -215,6 +221,10 @@ jobs:
                throw 'R85_FILE_BOOTSTRAP_UPDATED_STATE_INCORRECT'
             }
             Official 'Check'
+            if((GetShaHex $boot) -cne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'){
+              throw 'R85_INSTALLED_ORIGINAL_BOOTSTRAP_CHANGED_DURING_DIRECT_UPDATE'
+            }
             Write-Output 'R85_REAL_R84_PRIVATE_21_CHUNKS_NATIVE_BOOTSTRAP_UPDATE_AND_POSTCHECK=PASS'
+            Write-Output 'R85_OWNER_INSTALLED_OFFICIAL_BOOTSTRAP_UNMODIFIED_AFTER_PRIVATE_UPDATE=PASS'
             Write-Output 'R85_USER_PC_AND_MAIN_GITHUB_PUBLICATION=UNCHANGED'
           }finally{$env:LOCALAPPDATA=$oldL;$env:APPDATA=$oldR}
