@@ -1,0 +1,51 @@
+name: HOLD R69 survive WMI unavailable at Windows startup, recover without false exit
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-wmi-logon-recovery-R69-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/build-wmi-logon-recovery-R69-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/accept-wmi-logon-recovery-R69-HOLD.py
+permissions: {contents: read}
+jobs:
+  real-wscript-boot-wmi-failure-then-recover:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Exact original v0.6.28 source then R58, R63, R66 and boot-WMI R69
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R69_UNEXPECTED_REAL_PRODUCTION_MAIN_HEAD'
+          }
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          foreach($script in @(
+             'build-combined-exit-and-shortcut-R37-HOLD.py',
+             'build-eventdriven-vbs-R45-HOLD.py',
+             'build-rapid-restart-vbs-R58-HOLD.py',
+             'build-wmi-selfheal-R63-HOLD.py',
+             'build-wmi-rebind-R66-HOLD.py',
+             'build-wmi-logon-recovery-R69-HOLD.py',
+             'accept-wmi-logon-recovery-R69-HOLD.py'
+          )){
+            & python ($base+$script)
+            if($LASTEXITCODE -ne 0){throw ('R69_PINNED_SOURCE_OR_FIXTURE_FAILED_'+$script)}
+          }
+          $test=Join-Path $env:RUNNER_TEMP 'spotify-r69-boot-wmi-real.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($test,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R69_NATIVE_WINDOWS_POWERSHELL_51_PARSE_FAILED'}
+          Write-Host 'R69_EXACT_ANCESTRY_AND_BOOT_FAULT_NATIVE_FIXTURE_PREPARED=PASS'
+      - name: Real WScript survives initial WMI GetObject error and later observes two rapid Spotify exits
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $test=Join-Path $env:RUNNER_TEMP 'spotify-r69-boot-wmi-real.ps1'
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test
+          if($LASTEXITCODE -ne 0){throw 'R69_REAL_WSCRIPT_BOOT_RECOVERY_AND_FALSE_EXIT_GUARD_NOT_PROVEN'}
+          Write-Host 'R69_BOOT_NO_WMI_THEN_REAL_SUBSCRIPTIONS_AND_TWO_EXITS=PASS'
+          Write-Host 'R69_FULL_WMI_SERVICE_RESTART_AND_OWNER_PC=NOT_TESTED'
+          Write-Host 'R69_USER_WINDOWS_PUBLIC_RELEASE=UNCHANGED_HOLD'
