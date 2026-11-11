@@ -85,6 +85,22 @@ function CleanOwnIncompleteStage([string]$path){
       }
     }catch{}
   }
+  # Remove only exact known layout, never recursive deletion of an untrusted path.
+  foreach($spec in @(@{dir='main-v0628-to-v0630';count=19},
+                      @{dir='resident-v011-to-v012';count=2})){
+    $sub=Join-Path $path ('packages\v0.6.30\'+$spec.dir)
+    for($i=0;$i -lt $spec.count;$i++){
+      $f=Join-Path $sub ('chunk-'+$i.ToString('000')+'.txt')
+      try{
+        $item=Get-Item -LiteralPath $f -Force -ErrorAction Stop
+        if(-not $item.PSIsContainer -and
+           ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0){[IO.File]::Delete($f)}
+      }catch{}
+    }
+    try{[IO.Directory]::Delete($sub,$false)}catch{}
+  }
+  try{[IO.Directory]::Delete((Join-Path $path 'packages\v0.6.30'),$false)}catch{}
+  try{[IO.Directory]::Delete((Join-Path $path 'packages'),$false)}catch{}
   try{[IO.Directory]::Delete($path,$false)}catch{}
 }
 function GitBlobHash([byte[]]$data) {
@@ -165,6 +181,7 @@ try {
   }
   $phase='REMOTE_IMMUTABLE_CHUNKS'
   $decoded=@{}
+  $chunkData=@{}
   $chunks=0
   $targets=@(
     @{path='bin/spotify-control.ps1';dir='main-v0628-to-v0630';count=19;old='af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0';target=$mainTarget;size=294101},
@@ -197,6 +214,8 @@ try {
           Fail 'R83_REMOTE_GIT_CHUNK_SHA256_MISMATCH'
         }
         $encoded.Write($bytes,0,$bytes.Length)
+        if($chunkData.ContainsKey($rel)){Fail 'R84_DUPLICATE_CHUNK_PATH_IN_RELEASE'}
+        $chunkData[$rel]=$bytes
         $chunks++
       }
       [byte[]]$encodedBytes=$encoded.ToArray()
@@ -217,7 +236,7 @@ try {
     }
     $decoded[$spec.path]=$plain
   }
-  if($chunks -ne 21 -or $decoded.Count -ne 2){
+  if($chunks -ne 21 -or $decoded.Count -ne 2 -or $chunkData.Count -ne 21){
     Fail 'R83_FINAL_REMOTE_IMMUTABLE_CHUNK_COUNT_UNEXPECTED'
   }
 
@@ -262,6 +281,26 @@ try {
     WriteNewStageFile (Join-Path $stageScratch 'manifest.json') $raw
     WriteNewStageFile (Join-Path $stageScratch 'spotify-control.ps1') $decoded['bin/spotify-control.ps1']
     WriteNewStageFile (Join-Path $stageScratch 'spotify-control-agent.vbs') $decoded['bin/spotify-control-agent.vbs']
+    # Keep the exact already-verified immutable chunk bytes for the subsequent
+    # owner-approved offline/loopback transport. Never download them twice.
+    [void][IO.Directory]::CreateDirectory((Join-Path $stageScratch 'packages'),$acl)
+    [void][IO.Directory]::CreateDirectory((Join-Path $stageScratch 'packages\v0.6.30'),$acl)
+    foreach($dir in @('main-v0628-to-v0630','resident-v011-to-v012')){
+      [void][IO.Directory]::CreateDirectory((Join-Path $stageScratch ('packages\v0.6.30\'+$dir)),$acl)
+    }
+    foreach($rel in @($chunkData.Keys)){
+      if($rel -cnotmatch '^packages/v0[.]6[.]30/(main-v0628-to-v0630|resident-v011-to-v012)/chunk-[0-9]{3}[.]txt$'){
+        Fail 'R84_STAGE_CHUNK_PATH_NOT_ALLOWLISTED'
+      }
+      $chunkPath=Join-Path $stageScratch ($rel.Replace('/','\'))
+      WriteNewStageFile $chunkPath $chunkData[$rel]
+      $chunkFile=Get-Item -LiteralPath $chunkPath -Force -ErrorAction Stop
+      if($chunkFile.PSIsContainer -or
+         ($chunkFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+         (HashBytes ([IO.File]::ReadAllBytes($chunkPath))) -cne (HashBytes $chunkData[$rel])){
+        Fail 'R84_STAGE_CHUNK_READBACK_SHA256_MISMATCH'
+      }
+    }
     $expected=@{
       'manifest.json'=$manifestHash;
       'spotify-control.ps1'=$mainTarget;
@@ -275,6 +314,7 @@ try {
         Fail 'R84_STAGE_READBACK_SHA256_MISMATCH'
       }
     }
+    if($chunkData.Count -ne $chunks){Fail 'R84_STAGE_CHUNK_COUNT_NOT_EXACT'}
     $receipt=[ordered]@{
       schema='SPOTIFY_R84_OWNER_FIRST_STAGED_CANDIDATE_V1'
       state='UNAPPROVED_UNINSTALLED_NO_DEPLOY_AUTHORITY'
@@ -299,6 +339,7 @@ try {
     $stageScratch=''
     $log.Add('R84_OWNER_PRIVATE_STAGE_ID='+$id)
     $log.Add('R84_OWNER_PRIVATE_STAGE=SHA256_READBACK_AND_PROTECTED_DACL_PASS')
+    $log.Add('R84_OWNER_STAGED_IMMUTABLE_CHUNKS_21_OF_21=PASS')
     $log.Add('R84_STAGE_CONSUMPTION=NOT_AUTHORIZED_NO_INSTALLER')
   }
   $log.Add('R83_GENUINE_GITHUB_REVIEW_MANIFEST_GIT_BLOB_AND_SHA256=PASS')
