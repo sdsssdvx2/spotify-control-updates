@@ -26,6 +26,7 @@ jobs:
           if ($results -cnotcontains 'R84_RESULT=PRIVATE_CANDIDATE_STAGED_NOT_INSTALLED' -or
               $results -cnotcontains 'R84_OWNER_PRIVATE_STAGE=SHA256_READBACK_AND_PROTECTED_DACL_PASS' -or
               $results -cnotcontains 'R83_REMOTE_IMMUTABLE_21_OF_21_CHUNKS=PASS' -or
+              $results -cnotcontains 'R84_OWNER_STAGED_IMMUTABLE_CHUNKS_21_OF_21=PASS' -or
               $results -cnotcontains 'OPERATING_SPOTIFY_SPICETIFY_USER_STATE=UNCHANGED'){
             throw 'R84_STAGE_NOT_SUCCESSFUL'
           }
@@ -58,7 +59,30 @@ jobs:
             throw 'R84_STAGED_RECEIPT_NOT_HELD'
           }
           $names=@(Get-ChildItem -LiteralPath $stage -Force | Select-Object -ExpandProperty Name | Sort-Object)
-          $must=@($expected.Keys)+@('stage-attestation.json')
+          $must=@($expected.Keys)+@('stage-attestation.json','packages')
+          $manifest=Get-Content -LiteralPath (Join-Path $stage 'manifest.json') -Raw | ConvertFrom-Json
+          $edge=@($manifest.updates)[18]
+          $count=0
+          foreach($patch in @($edge.patches)){
+            foreach($ch in @($patch.chunks)){
+              $rel=[string]$ch.path
+              if($rel -cnotmatch '^packages/v0[.]6[.]30/(main-v0628-to-v0630|resident-v011-to-v012)/chunk-[0-9]{3}[.]txt$') {
+                throw 'R84_CHUNK_PATH_NOT_PINNED'
+              }
+              $p=Join-Path $stage ($rel.Replace('/','\'))
+              $f=Get-Item -LiteralPath $p -Force -ErrorAction Stop
+              if($f.PSIsContainer -or ($f.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                  $f.Length -ne [long]$ch.size -or
+                  (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$ch.sha256){
+                throw 'R84_CHUNK_MIRROR_NOT_VERIFIED'
+              }
+              $count++
+            }
+          }
+          if($count -ne 21 -or
+              @(Get-ChildItem -LiteralPath (Join-Path $stage 'packages') -File -Recurse).Count -ne 21){
+            throw 'R84_CHUNK_MIRROR_COUNT_UNEXPECTED'
+          }
           if (@(Compare-Object $names $must).Count -ne 0){throw 'R84_STAGE_EXTRA_OR_MISSING_FILES'}
           Write-Output 'R84_REAL_WINDOWS_OWNER_PRIVATE_STAGING=PASS'
           Write-Output 'R84_USER_ORIGINAL_DATA_INSTALL_PROCESS_CHANGE=NO'
