@@ -50,6 +50,29 @@ def log(name:str,raw:bytes):
     for n,func,short in found[:95]:
         print(f"R79_{name}_REF_{n}={func}|{short}")
     print(f"R79_{name}_END_REFERENCES")
+    # Limited authoritative function excerpts establish the exact action
+    # relationship, not only whether a keyword appeared somewhere.
+    wanted={
+        "Invoke-SelfUpdaterJsonAction":65,
+        "Get-SelfUpdateCheckResult":47,
+        "Invoke-SelfUpdateMutation":38,
+        "Invoke-MaintenanceCheckPhase":33,
+        "Invoke-MaintenanceMutationPhase":76,
+        "Invoke-ResidentAgentTick":98,
+        "Maintain":67,
+    }
+    spans=[]
+    for i,(line,fn) in enumerate(starts):
+        if fn in wanted:
+            stop=starts[i+1][0] if i+1<len(starts) else len(lines)+1
+            spans.append((fn,line,stop))
+    for fn,first,stop in spans:
+        cap=wanted[fn]
+        print(f"R79_{name}_FUNCTION_{fn}_TOTAL={stop-first}")
+        for j in range(first,min(stop,first+cap)):
+            print(f"R79_{name}_BODY_{fn}_{j}={lines[j-1].strip()[:230]}")
+        print(f"R79_{name}_FUNCTION_{fn}_END")
+
     # Read-only source review is not live deployment authority.
 def main():
     base=runpy.run_path(str(HERE/"stage-candidate.py"))["source_from_stable"]()[0]
