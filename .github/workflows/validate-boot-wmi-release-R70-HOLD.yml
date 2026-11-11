@@ -5,6 +5,8 @@ on:
     paths:
       - .github/workflows/validate-boot-wmi-release-R70-HOLD.yml
       - validation/spotify-exit-immediate-maintenance-HOLD/accept-boot-wmi-release-R70-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/prepare-offline-promotion-bundle-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/verify-two-commit-future-release-HOLD.py
       - validation/spotify-exit-immediate-maintenance-HOLD/build-shared-maintenance-lock-R54-HOLD.py
       - validation/spotify-exit-immediate-maintenance-HOLD/build-rapid-restart-vbs-R58-HOLD.py
       - validation/spotify-exit-immediate-maintenance-HOLD/build-wmi-selfheal-R63-HOLD.py
