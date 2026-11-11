@@ -89,30 +89,53 @@ try{
     if(@(Get-Process -Name Spotify -ErrorAction SilentlyContinue).Count -ne 0){
       Fail 'R90_SPOTIFY_MUST_BE_CLOSED'
     }
+    # Reuse one private stage instead of accumulating fresh GUID folders.
+    $phase='PRIVATE_STAGE_DISCOVERY'
+    $existing=@(Get-ChildItem -LiteralPath $local -Directory -Filter 'SpotifyControlCanary-offline-ready-*' -Force -ErrorAction Stop)
+    if($existing.Count -gt 1){Fail 'R90_MULTIPLE_PRIVATE_READY_CANDIDATES_HOLD'}
+    $reuse=($existing.Count -eq 1)
     $phase='PINNED_SOURCE_RETRIEVAL'
     [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
-    [byte[]]$r86=FrozenSource '9c98e6a59619b3fa02cbdc61edc0276d733f8598' 'owner-onepass-offline-stage-R86-HOLD.ps1' '698019f4fbce9a9bf0bd838dfb69539e737e0dc5' 20000
     [byte[]]$r88=$null
-    if($Commit){
+    if($Commit -or $reuse){
       $r88=FrozenSource '4e8a4d7b0d85d43de373baddb3fbb9495d26a534' 'owner-approved-private-offline-R88-HOLD.ps1' '761dcd5a94c70af7b9defe5051df7ecfcd00fde9' 90000
     }
-    $out.Add('R90_OFFICIAL_PINNED_SOURCE_R86_R88=VERIFIED')
-    $phase='R86_VERIFIED_STAGE'
-    $r86Result=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r86))))
-    if($r86Result -cnotcontains 'RESULT=R86_ONEPASS_STAGED_NOT_OWNER_DEPLOYED' -or
-       $r86Result -cnotcontains 'R86_R85_DISPOSABLE_BOOTSTRAP_AND_LOCAL_CHUNKS=READY_NO_INSTALL'){
-      Fail 'R90_R86_OWNER_PREPARATION_HOLD'
+    if($reuse){
+      $stage=$existing[0].FullName
+      if($existing[0].Name -cnotmatch '^SpotifyControlCanary-offline-ready-[0-9a-f]{32}$'){
+        Fail 'R90_EXISTING_PRIVATE_STAGE_NAME_UNVERIFIED'
+      }
+      $stageId=$existing[0].Name.Substring('SpotifyControlCanary-offline-ready-'.Length)
+      $out.Add('R90_EXISTING_PRIVATE_STAGE=ONE_EXACT_CANDIDATE_REUSED')
+      if($Prepare){
+        $phase='R88_REUSED_STAGE_READONLY_VERIFICATION'
+        $plan=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r88))) -PrivateOfflineReadyPath $stage)
+        if($plan -cnotcontains 'RESULT=READY_FOR_PRIVATE_OFFLINE_ONESHOT_NO_MUTATION' -or
+           $plan -cnotcontains 'R88_IMMUTABLE_PRIVATE_LOCAL_21_CHUNKS_AND_BOOTSTRAP=VERIFIED'){
+          Fail 'R90_REUSED_PRIVATE_STAGE_NOT_ADMITTED'
+        }
+        $out.Add('R90_REUSED_STAGE_R88_READONLY_ADMISSION=PASS')
+      }
+    }else{
+      [byte[]]$r86=FrozenSource '9c98e6a59619b3fa02cbdc61edc0276d733f8598' 'owner-onepass-offline-stage-R86-HOLD.ps1' '698019f4fbce9a9bf0bd838dfb69539e737e0dc5' 20000
+      $phase='R86_VERIFIED_STAGE'
+      $r86Result=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r86))))
+      if($r86Result -cnotcontains 'RESULT=R86_ONEPASS_STAGED_NOT_OWNER_DEPLOYED' -or
+         $r86Result -cnotcontains 'R86_R85_DISPOSABLE_BOOTSTRAP_AND_LOCAL_CHUNKS=READY_NO_INSTALL'){
+        Fail 'R90_R86_OWNER_PREPARATION_HOLD'
+      }
+      $ids=@($r86Result|Where-Object {$_ -cmatch '^R86_OFFLINE_PRIVATE_STAGE_ID=[0-9a-f]{32}$'})
+      if($ids.Count -ne 1){Fail 'R90_OWNER_OFFLINE_STAGE_ID_NOT_UNIQUE'}
+      $stageId=([string]$ids[0]).Split('=')[1]
+      $stage=Join-Path $local ('SpotifyControlCanary-offline-ready-'+$stageId)
+      $out.Add('R90_R86_NEW_PRIVATE_STAGE=VERIFIED')
     }
-    $ids=@($r86Result|Where-Object {$_ -cmatch '^R86_OFFLINE_PRIVATE_STAGE_ID=[0-9a-f]{32}$'})
-    if($ids.Count -ne 1){Fail 'R90_OWNER_OFFLINE_STAGE_ID_NOT_UNIQUE'}
-    $stageId=([string]$ids[0]).Split('=')[1]
-    $stage=Join-Path $local ('SpotifyControlCanary-offline-ready-'+$stageId)
     $stageInfo=Get-Item -LiteralPath $stage -Force -ErrorAction Stop
     if(-not $stageInfo.PSIsContainer -or
        ($stageInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){
       Fail 'R90_STAGE_NOT_OWNED_DIRECTORY'
     }
-    $out.Add('R90_REAL_R86_OWNER_PINNED_STAGE=READY')
+    $out.Add('R90_IMMUTABLE_PRIVATE_STAGE_SELECTED=ONE')
     if($Prepare){
       $out.Add('R90_PRIVATE_STAGE_ID='+$stageId)
       $out.Add('RESULT=R90_PREPARED_WITHOUT_OPERATING_UPDATE')
