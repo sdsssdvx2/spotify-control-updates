@@ -13,7 +13,7 @@ $out.Add('PROCESS_KILL=NO;SOURCE_WRITE=NO;CONFIG_WRITE=NO;USER_ORIGINAL_DELETE=N
 $phase='ENVIRONMENT'
 $errors=New-Object 'System.Collections.Generic.List[string]'
 function Add([string]$key,[string]$value) {
-  if($key -notmatch '^[A-Z_]{2,48}$' -or $value -notmatch '^[A-Za-z0-9_.-]{1,110}$') {
+  if($key -notmatch '^[A-Z0-9_]{2,48}$' -or $value -notmatch '^[A-Za-z0-9_.-]{1,110}$') {
     throw 'OUTPUT_ALLOWLIST_VIOLATION'
   }
   $out.Add(($key+'='+$value))
