@@ -64,6 +64,14 @@ def run():
       """      $r88Result=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r88))) -PrivateOfflineReadyPath $stage -Commit -ApprovalPhrase 'APPROVE_EXACT_PRIVATE_V0630_OWNER_CUTOVER_ONCE')""",
       """      $r88Result=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r88))) -PrivateOfflineReadyPath $stage -HostedFixtureRoot $fixture -Commit -ApprovalPhrase 'APPROVE_EXACT_PRIVATE_V0630_OWNER_CUTOVER_ONCE')""",
       "R88_ORIGINAL_GITHUB_HOSTED_OWNER_PROCESS_SCRATCH")
+    # Production R88 returns OWNER_APPROVED_*; the exact same engine returns
+    # HOSTED_PRIVATE_* when its original verified GitHub runner mode is used.
+    # Only adapt the EXPECTED receipt in this hosted derivative, never R90
+    # production code or the native R88 transaction.
+    r90=once(r90,
+      "$r88Result -cnotcontains 'RESULT=OWNER_APPROVED_PRIVATE_OFFLINE_ONESHOT_COMMITTED'",
+      "$r88Result -cnotcontains 'RESULT=HOSTED_PRIVATE_OFFLINE_ONESHOT_COMMITTED'",
+      "ORIGINAL_R88_HOSTED_RECEIPT_LABEL")
     insist("R90_EXACT_PRIVATE_OWNER_CUTOVER_COMMITTED" in r90 and
            r90.count("-HostedFixtureRoot $fixture -Commit")==1 and
            "R90_EXACT_OWNER_APPROVAL_REQUIRED" in r90,
