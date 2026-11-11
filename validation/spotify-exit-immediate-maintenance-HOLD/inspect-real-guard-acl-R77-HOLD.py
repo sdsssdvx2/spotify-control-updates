@@ -27,6 +27,11 @@ def main():
         if (("Guard" in name or "UpdateBlock" in name or "Acl" in name or "ACL" in name) and
              any(k in body.lower() for k in ("get-acl","set-acl","accessrule","updateguard","icacls","accesscontrol","updater","guard_enforced"))):
             relevant.append((name,body))
+    for i,f in enumerate(fns):
+        if f.group(1)=="Get-SpotifyUpdateDirectory":
+            j=fns[i+1].start() if i+1<len(fns) else len(s)
+            for row in s[f.start():j].splitlines()[:80]:
+                print("R77_EXACT_UPDATE_DIR_FUNC="+row[:260])
     print("R77_ACTUAL_MAIN_SHA256=PASS")
     print("R77_RELEVANT_GUARD_FUNCTIONS="+",".join(x[0] for x in relevant)[:1200])
     for name,body in relevant:
