@@ -108,6 +108,12 @@ def run():
        "USE_TEST_OWNED_STALE_WMI_COPY")
     text=once(text,"'"+R58_TEST_SHA+"'","'"+sha(altered)+"'",
               "STABLE_NEW_TEST_VBS_SHA")
+    # The R58 native template expects an initial successful WMI START subscription.
+    # In this boot-failure test it must instead be a recovered subscription.
+    # All real SpotifyExit and rapid-session assertions remain intact.
+    text=once(text,"'*WMI START EVENT subscribed*'",
+                   "'*WMI START EVENT resubscribed*'",
+                   "RECOVERED_NOT_INITIAL_START_SUBSCRIPTION_PROOF")
     wait=r"""  # Require a real WScript resident (not the brief CScript preflight)
   # to survive an injected unavailable startup WMI COM binding, acquire a fresh service
   # object, validate an enumerable Win32_Process query, and subscribe
