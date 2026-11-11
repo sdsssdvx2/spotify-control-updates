@@ -35,6 +35,37 @@ jobs:
           $env:APPDATA=$roam
           $output=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script 2>&1)
           if($LASTEXITCODE -ne 0){throw 'R76_NATIVE_READONLY_EXECUTION_RETURNED_FAILURE'}
+          foreach($line in $output){
+            if([string]$line -cmatch '^[A-Z_]{2,48}=[A-Za-z0-9_.-]{1,110}
+          foreach($required in @(
+            'RESULT=READONLY_SNAPSHOT_COMPLETE',
+            'EXACT_INSTALLED_STACK=HOLD_NOT_EXACT',
+            'SPOTIFY_VERSION=NOT_AT_STANDARD_PATH',
+            'SPICETIFY_CLI_SOURCE_PIN=NOT_AT_STANDARD_PATH',
+            'AGENT_MUTATION_SAVED=OFF_SAVED',
+            'SPOTIFY_UPDATE_GUARD_SAVED=BLOCKED_REPORTED_ONLY',
+            'OWNER_ROLLOUT_ADMISSION=HOLD_REVIEW_ONLY',
+            'AUTHORIZE_DEPLOY=NO;AUTOMATIC_RETRY=NO;OWNER_SOURCE_CHANGE=NO',
+            'NETWORK=NO;INSTALL=NO;UPDATE=NO;APPLY=NO;REGISTRY_WRITE=NO;ACL_WRITE=NO'
+          )){
+            if($output -cnotcontains $required){throw ('R76_MISSING_READONLY_RECEIPT_'+$required.Split('=')[0])}
+          }
+          if(($output -join [Environment]::NewLine) -match 'do-not-print' -or
+             ($output -join [Environment]::NewLine).Contains($root) -or
+             (Get-FileHash -LiteralPath $state -Algorithm SHA256).Hash -cne $prior){
+            throw 'R76_UNAUTHORIZED_DATA_EXPOSURE_OR_STATE_MUTATION'
+          }
+          if(@(Get-ChildItem -LiteralPath $stateDir -Force -ErrorAction Stop).Count -ne 1){
+            throw 'R76_OWNER_PROFILE_SCRATCH_CONTENT_CHANGED'
+          }
+          Write-Host 'R76_NATIVE_PS51_PARSE_AND_ISOLATED_OFFLINE_READONLY_PROOF=PASS'
+          Write-Host 'R76_UNKNOWN_VERSION_AND_MISSING_PIN_FAIL_CLOSED=PASS'
+          Write-Host 'R76_USER_SOURCE_CONFIG_STATE_UNTOUCHED=PASS'
+          Write-Host 'R76_NO_RELEASE_NO_OWNER_PC_NO_PAID_TOOLS=PASS'
+){
+              Write-Host ('R76_SCRATCH_REPORT_'+[string]$line)
+            }
+          }
           foreach($required in @(
             'RESULT=READONLY_SNAPSHOT_COMPLETE',
             'EXACT_INSTALLED_STACK=HOLD_NOT_EXACT',
