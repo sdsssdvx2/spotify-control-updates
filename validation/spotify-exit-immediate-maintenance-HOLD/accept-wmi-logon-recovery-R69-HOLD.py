@@ -64,6 +64,32 @@ def run():
     spec.loader.exec_module(r58)
     r58.run()
     text=ORIGINAL_TEST.read_text("utf-8")
+    # The pinned R58 preflight intentionally runs CScript briefly before
+    # the real WScript host. On injected startup failure, capture only its
+    # scratch-local console error code and bounded output for diagnosis.
+    text=once(text,
+       "  $cscriptError=Join-Path $root 'r58-scratch-console-error.txt'",
+       "  $cscriptError=Join-Path $root 'r58-scratch-console-error.txt'\n"
+       "  $r69Stdout=Join-Path $root 'r69-scratch-console-stdout.txt'",
+       "SCRATCH_CONSOLE_STDOUT_PATH")
+    text=once(text,
+       "-RedirectStandardError $cscriptError -WindowStyle Hidden",
+       "-RedirectStandardError $cscriptError -RedirectStandardOutput $r69Stdout -WindowStyle Hidden",
+       "BOUNDED_SCRATCH_CONSOLE_REDIRECTION")
+    text=once(text,
+       "      throw 'R58_REAL_WMI_START_EVENT_CONSOLE_HOST_EXITED_DURING_INIT'",
+       """      Write-Host ('R69_CSCRIPT_PREFLIGHT_EXIT_CODE='+[string]$cscriptRun.ExitCode)
+      if(Test-Path -LiteralPath $r69Stdout -PathType Leaf){
+        foreach($line in @(Get-Content -LiteralPath $r69Stdout -ErrorAction SilentlyContinue | Select-Object -Last 8)){
+          $safe=[string]$line
+          $safe=$safe -replace '[A-Za-z]:\\[^ ]+','[HOSTED_SCRATCH]'
+          if($safe.Length -gt 250){$safe=$safe.Substring(0,250)}
+          Write-Host ('R69_TEST_OWNED_CSCRIPT_STDOUT='+$safe)
+        }
+      }
+      throw 'R69_BOOT_WMI_CSCRIPT_INIT_FAILED'""",
+       "R69_TRACE_REAL_CSCRIPT_START_FAILURE")
+
     text=once(text,"Spotify Control R58 Two Rapid Exits",
               "Spotify Control R69 Boot WMI Recovery","UNIQUE_SCRATCH_ROOT")
     text=once(text,
