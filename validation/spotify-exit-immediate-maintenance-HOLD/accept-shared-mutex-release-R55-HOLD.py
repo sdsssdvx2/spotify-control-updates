@@ -21,6 +21,7 @@ STAGE=HERE/"out"/"release-staging-shared-maintenance-R54"
 REVIEW=HERE/"out"/"promotion-review-shared-maintenance-R55"
 MAIN="b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92232d"
 VBS="1c1563bff9b9a87ae851b4ca555429b5451ce67c6d225a148b5252256d71cdf7"
+EXPECTED_CHUNKS=20
 REF="refs/heads/hold/spotify-v0630-shared-maintenance-review-only"
 
 def previous():
@@ -36,6 +37,7 @@ def previous():
     r.MAIN=MAIN
     r.AGENT=VBS
     r.REF=REF
+    r.EXPECTED_CHUNKS=EXPECTED_CHUNKS
     return r
 
 def run():

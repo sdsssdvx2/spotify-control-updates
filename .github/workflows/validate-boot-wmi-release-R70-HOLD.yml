@@ -117,7 +117,7 @@ jobs:
           & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test
           if($LASTEXITCODE -ne 0){throw 'R70_REAL_FAST_WMI_TO_OPTIMIZED_FULL_MAIN_NOT_ADMITTED'}
           Write-Host 'R70_FAST_WMI_EVENT_TO_REAL_OPTIMIZED_MAIN_UNARMED_NO_MUTATION=PASS'
-      - name: Generate immutable 20-source-chunk and manifest Git review from precisely the accepted build
+      - name: Generate immutable 21-source-chunk and manifest Git review from precisely the accepted build
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -126,7 +126,7 @@ jobs:
           $root='validation/spotify-exit-immediate-maintenance-HOLD/out/promotion-review-boot-wmi-R70'
           $r=Get-Content (Join-Path $root 'promotion-receipt-HOLD.json') -Raw | ConvertFrom-Json
           $b=Join-Path $root 'v0630-two-commit-publication-NOT-AUTHORIZED.bundle'
-          if([int]$r.git_commits_to_fast_forward -ne 2 -or [int]$r.source_package_chunks -ne 20 -or
+          if([int]$r.git_commits_to_fast_forward -ne 2 -or [int]$r.source_package_chunks -ne 21 -or
              [bool]$r.release_published -or [bool]$r.github_ref_updated -or
              (Get-FileHash -LiteralPath $b -Algorithm SHA256).Hash.ToLowerInvariant() -cne $r.bundle_sha256){
             throw 'R70_GIT_REVIEW_RECEIPT_SCOPE_DRIFT'

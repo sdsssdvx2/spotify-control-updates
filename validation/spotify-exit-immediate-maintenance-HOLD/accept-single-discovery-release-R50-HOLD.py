@@ -28,6 +28,7 @@ MAIN="4ec5bc6c6612ab15fc297d474b193d228b9dab8eb5b79cd7b14042af5b72c93c"
 AGENT="1c1563bff9b9a87ae851b4ca555429b5451ce67c6d225a148b5252256d71cdf7"
 ADDON="5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285"
 OLD_R28_WORKFLOW_BLOB="ab0488b61120431a9a9a3ee68a7228448c29d126"
+EXPECTED_CHUNKS=20
 REF="refs/heads/hold/spotify-v0630-singlecheck-review-only"
 
 def sha(b:bytes)->str:
@@ -50,7 +51,7 @@ def inspect_stage():
         manifest.get("latest_version")!="0.6.30" or
         manifest.get("source_commit")!="f"*40 or
         len(manifest.get("updates",[]))!=19 or
-        sum(len(p["chunks"]) for p in manifest["updates"][-1]["patches"])!=20):
+        sum(len(p["chunks"]) for p in manifest["updates"][-1]["patches"])!=EXPECTED_CHUNKS):
         raise RuntimeError("R50_R49_FULLFILE_INTEGRATION_SHA_OR_SCOPE_DRIFT")
     return manifest
 
@@ -107,10 +108,11 @@ def bundle_win():
     m.REVIEW=REVIEW
     m.PIN_NEW_MAIN=MAIN
     m.PIN_AGENT=AGENT
+    m.EXPECTED_CHUNKS=EXPECTED_CHUNKS
     m.main()
     record=json.loads((REVIEW/"promotion-receipt-HOLD.json").read_text("utf-8"))
     if (record.get("status")!="REVIEW_CANDIDATE_ONLY_NOT_AUTHORIZED_NOT_PUBLISHED" or
-        record.get("source_package_chunks")!=20 or
+        record.get("source_package_chunks")!=EXPECTED_CHUNKS or
         record.get("payload_set_sha256")!=manifest["payload_set_sha256"] or
         record.get("git_commits_to_fast_forward")!=2 or
         record.get("release_published") is not False or
@@ -128,6 +130,7 @@ def custody_linux():
     c=module("spotify_r50_reuse_r35_real_git_custody",
              "persist-review-ref-HOLD.py")
     c.REVIEW_REF=REF
+    c.EXPECTED_CHUNKS=EXPECTED_CHUNKS
     c.PREVIEW_TARGETS=dict(c.PREVIEW_TARGETS)
     c.PREVIEW_TARGETS["bin/spotify-control.ps1"]=MAIN
     c.PREVIEW_TARGETS["bin/spotify-control-agent.vbs"]=AGENT

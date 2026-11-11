@@ -21,6 +21,7 @@ REVIEW=HERE/"out"/"promotion-review-integrated-HOLD"
 PIN_NEW_MAIN="7caf4afe19c283aef3b5bebb30e0e598b10de147d3ab1ddd9724bf90594c59fe"
 PIN_AGENT="da054351cae6927504e735426d35f6d5e7edafcac7e06881f1adf1c20cecab9d"
 PIN_ADDON="5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285"
+EXPECTED_CHUNKS=20
 
 def sha(b):
     return hashlib.sha256(b).hexdigest()
@@ -49,6 +50,7 @@ def main():
     # shortcut-only HOLD candidate. Never overwrite that review.
     mod.STAGE=STAGE
     mod.OUTPUT=REVIEW
+    mod.CHUNKS=EXPECTED_CHUNKS
     mod.SCRATCH=Path(os.environ["RUNNER_TEMP"]).resolve()/(
         "spotify-v0630-integrated-two-commit-review")
     mod.run()
@@ -56,14 +58,14 @@ def main():
     manifest_sha=sha((STAGE/"manifest-UNPUBLISHABLE.json").read_bytes())
     if (rec["status"]!="REVIEW_CANDIDATE_ONLY_NOT_AUTHORIZED_NOT_PUBLISHED" or
         rec["payload_set_sha256"]!=doc["payload_set_sha256"] or
-        rec["source_package_chunks"]!=20 or
+        rec["source_package_chunks"]!=EXPECTED_CHUNKS or
         rec["git_commits_to_fast_forward"]!=2 or
         not all(rec[k] is False for k in (
            "release_published","github_ref_updated","operating_windows_modified",
            "owner_approval_granted","public_manifest_changed"))):
         raise RuntimeError("R39_REVIEW_BUNDLE_RECEIPT_SCOPE_DRIFT")
     print("R39_INTEGRATED_MANIFEST_UNPUBLISHABLE_SHA256="+manifest_sha)
-    print("R39_SOURCE_CHUNKS_20_AND_BOTH_COMBINED_TARGETS_BUNDLE=PASS")
+    print("R39_SOURCE_CHUNKS_"+str(EXPECTED_CHUNKS)+"_AND_BOTH_COMBINED_TARGETS_BUNDLE=PASS")
     print("R39_REVIEW_ONLY_NO_PRODUCTION_UPDATE_OR_OWNER_APPROVAL=YES")
 
 if __name__=="__main__":

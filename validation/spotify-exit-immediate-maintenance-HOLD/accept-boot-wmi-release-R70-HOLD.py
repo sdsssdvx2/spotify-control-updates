@@ -34,6 +34,7 @@ def run():
     old.MAIN=MAIN
     old.VBS=AGENT
     old.REF=REF
+    old.EXPECTED_CHUNKS=21
     old.run()
     if mode=="prepare-win":
         preparer=Path(os.environ["RUNNER_TEMP"]).resolve()/(
@@ -47,12 +48,12 @@ def run():
         print("R70_NATIVE_OWNER_UPGRADE_TARGET_NEW_R58_WMI_VBS=EXACT")
     elif mode=="bundle-win":
         receipt=json.loads((REVIEW/"promotion-receipt-HOLD.json").read_text("utf-8"))
-        if (receipt["source_package_chunks"]!=20 or
+        if (receipt["source_package_chunks"]!=21 or
             receipt["git_commits_to_fast_forward"]!=2 or
             receipt["release_published"] is not False or
             receipt["owner_approval_granted"] is not False):
             raise RuntimeError("R70_REVIEW_BUNDLE_OR_RELEASE_SCOPE_DRIFT")
-        print("R70_VERIFIED_MAIN_PARENT_20_CHUNKS_EVENT_VBS_REVIEW_ONLY=PASS")
+        print("R70_VERIFIED_MAIN_PARENT_21_CHUNKS_EVENT_VBS_REVIEW_ONLY=PASS")
     else:
         print("R70_EXACT_NEW_R58_VBS_REVIEW_GIT_REF_PRESERVED=PASS")
         print("R70_PUBLIC_MAIN_AND_ALL_PREVIOUS_REVIEW_REFS=UNMODIFIED")

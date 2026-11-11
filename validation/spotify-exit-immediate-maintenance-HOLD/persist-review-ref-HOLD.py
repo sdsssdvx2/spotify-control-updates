@@ -23,6 +23,7 @@ SOURCE_REF="refs/heads/hold-v0630-promotion"
 REVIEW_REF="refs/heads/hold/spotify-v0630-review-only"
 REPO="sdsssdvx2/spotify-control-updates"
 CI_REF="refs/heads/validate/spotify-exit-immediate-maintenance-HOLD"
+EXPECTED_CHUNKS=20
 PREVIEW_TARGETS={
  "bin/spotify-control.ps1":"37eda0638c428ed3474a06812c067ca10f5771216ae509d3cd4ce10fdafbd3ec",
  "bin/spotify-control-agent.vbs":"da054351cae6927504e735426d35f6d5e7edafcac7e06881f1adf1c20cecab9d",
@@ -103,7 +104,7 @@ def inspect_commit(source_sha:str,manifest_sha:str,expected_manifest:dict,
     chunks=[c for p in patches for c in p.get("chunks",[])]
     paths=[x.get("path") for x in chunks]
     changed=git("diff","--name-only",BASE,source_sha).splitlines()
-    if (len(paths)!=20 or len(set(paths))!=20 or
+    if (len(paths)!=EXPECTED_CHUNKS or len(set(paths))!=EXPECTED_CHUNKS or
         sorted(changed)!=sorted(paths) or
         any(not isinstance(p,str) or not p.startswith("packages/v0.6.30/")
             or p.endswith("/") or ".." in p for p in paths)):
@@ -112,7 +113,7 @@ def inspect_commit(source_sha:str,manifest_sha:str,expected_manifest:dict,
         raw=object_at(source_sha,row["path"])
         if len(raw)!=row["size"] or sha(raw)!=row["sha256"]:
             deny("REVIEW_COMMITTED_CHUNK_BYTES_MISMATCH")
-    print("REVIEW_REF_2_COMMITS_20_CHUNKS_AND_MANIFEST=VERIFIED")
+    print("REVIEW_REF_2_COMMITS_"+str(EXPECTED_CHUNKS)+"_CHUNKS_AND_MANIFEST=VERIFIED")
 
 def main():
     if (os.getenv("GITHUB_ACTIONS")!="true" or
@@ -128,7 +129,7 @@ def main():
         rec.get("status")!="REVIEW_CANDIDATE_ONLY_NOT_AUTHORIZED_NOT_PUBLISHED" or
         rec.get("base_public_main_commit")!=BASE or
         rec.get("bundle_name")!=BUNDLE.name or
-        rec.get("source_package_chunks")!=20 or
+        rec.get("source_package_chunks")!=EXPECTED_CHUNKS or
         rec.get("git_commits_to_fast_forward")!=2 or
         any(rec.get(k) is not False for k in (
           "github_ref_updated","release_published","owner_approval_granted",

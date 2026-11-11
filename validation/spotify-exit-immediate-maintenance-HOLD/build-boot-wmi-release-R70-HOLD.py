@@ -72,12 +72,12 @@ def main():
                   "bin/spotify-control-agent.vbs":EXPECTED_AGENT,
                   "bin/addon-manager.ps1":EXPECTED_ADDON} or
         doc["source_commit"]!="f"*40 or doc["latest_version"]!="0.6.30" or
-        sum(len(p["chunks"]) for p in doc["updates"][-1]["patches"])!=20):
+        sum(len(p["chunks"]) for p in doc["updates"][-1]["patches"])!=21):
         raise RuntimeError("R70_FULL_FILE_UPDATE_OR_HISTORY_NOT_EXACTLY_PINNED")
     print("R70_SINGLE_REVIEW_MAIN_SHARED_MUTEX_SHA256="+EXPECTED_MAIN)
     print("R70_RAPID_START_STOP_WMI_RESIDENT_SHA256="+EXPECTED_AGENT)
     print("R70_ADDON_R17_UNCHANGED_SHA256="+EXPECTED_ADDON)
-    print("R70_OFFICIAL_BOOTSTRAP_TWO_FULL_FILE_PATCHES_20_CHUNKS=VERIFIED")
+    print("R70_OFFICIAL_BOOTSTRAP_TWO_FULL_FILE_PATCHES_21_CHUNKS=VERIFIED")
     print("R70_MAIN_CODE_EXACT_R55_BYTES;ONLY_VBS_SESSION_BEHAVIOR_CHANGED=PASS")
     print("R70_PUBLICATION_AND_USER_PC=UNCHANGED_HOLD")
 
