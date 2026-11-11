@@ -33,11 +33,11 @@ jobs:
           $tokens=$null; $errors=$null
           [void][Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
           if(@($errors).Count -ne 0){throw ('R32_WINDOWS_PS51_PARSE_FAILED '+$errors[0].Message)}
-          $frozen='1ff0f112b4429678d65cf51382b52ee0acee8048'
+          $frozen='023fd86d10d404374d8f72641a3dd2fa6c1fcd8c'
           $expect=@{
             'guarded-first-update-resident-entry-R27-HOLD.ps1'='98df17ed1c4d81445bbf34cf4bfa3b2889bc2cc0'
-            'owner-approved-next-stable-upgrade-R28-HOLD.ps1'='4d7f3a8b25bd4183a0735a25a2e7a7f824663b5e'
-            'verify-public-release-transport-R29-HOLD.py'='783dbef96cdd68922ca7ccc82825fa2f7e8d4b3e'
+            'owner-approved-next-stable-upgrade-R28-HOLD.ps1'='a6af79eb2a9a38cc1f7bf8c7f84585f75a79ffaf'
+            'verify-public-release-transport-R29-HOLD.py'='c257dd86c9fda219d7392560aef1ce1be43a4e0f'
           }
           foreach($name in @($expect.Keys)){
             $rel='validation/spotify-exit-immediate-maintenance-HOLD/'+$name
