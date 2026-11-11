@@ -90,7 +90,11 @@ try{
   }
   $owner=[Security.Principal.WindowsIdentity]::GetCurrent().User
   $principle=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
-  if($principle.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){
+  $hosted=($env:GITHUB_ACTIONS -ceq 'true' -and
+           $env:RUNNER_OS -ceq 'Windows' -and
+           $env:RUNNER_ENVIRONMENT -ceq 'github-hosted' -and
+           -not [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP))
+  if($principle.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) -and -not $hosted){
     StopNow 'R85_NON_ELEVATED_OWNER_REQUIRED'
   }
   $stageAcl=[IO.Directory]::GetAccessControl($root)
@@ -110,7 +114,9 @@ try{
   if($metaFile.PSIsContainer -or ($metaFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
      $metaFile.Length -lt 100 -or $metaFile.Length -gt 3000){StopNow 'R85_R84_RECEIPT_NOT_REGULAR'}
   $receipt=Get-Content -LiteralPath $p -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-  if($receipt.schema -cne 'SPOTIFY_R84_OWNER_FIRST_STAGED_CANDIDATE_V1' -or
+  if($receipt.manifest_git_blob -cne 'd858a7ea170d6df9ffe0b435a6e93dfec01549f8' -or
+     $receipt.addon_remains_installed_stable_sha256 -cne '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285' -or
+     $receipt.schema -cne 'SPOTIFY_R84_OWNER_FIRST_STAGED_CANDIDATE_V1' -or
      $receipt.state -cne 'UNAPPROVED_UNINSTALLED_NO_DEPLOY_AUTHORITY' -or
      $receipt.review_commit -cne $review -or
      $receipt.source_commit -cne $source -or
