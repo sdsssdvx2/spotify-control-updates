@@ -114,7 +114,7 @@ def run():
         git("add","--","packages/v0.6.30",cwd=SCRATCH)
         source_changes=git("diff","--cached","--name-only",cwd=SCRATCH).splitlines()
         if sorted(source_changes)!=sorted(paths):
-            fail("SOURCE_COMMIT_FILES_NOT_EXACT_20")
+            fail("SOURCE_COMMIT_FILES_NOT_EXACT_EXPECTED")
         git("commit","-m","HOLD immutable v0.6.30 candidate payload (no public manifest)",cwd=SCRATCH)
         source_commit=git("rev-parse","HEAD",cwd=SCRATCH)
         if git("rev-parse","HEAD^",cwd=SCRATCH)!=BASE_MAIN:
@@ -148,6 +148,7 @@ def run():
         # git() binds its default cwd at function definition, so update both.
         checker.SCRATCH=SCRATCH
         checker.STAGED=STAGE
+        checker.EXPECTED_CHUNKS=CHUNKS
         # git(*args, cwd=...) declares cwd as KEYWORD-only. Updating
         # __defaults__ has no effect; use __kwdefaults__ for the real cwd.
         checker.git.__kwdefaults__["cwd"]=SCRATCH
@@ -195,7 +196,7 @@ def run():
         print("PROMOTION_HOLD_MANIFEST_SHA256="+manifest_sha)
         print("PROMOTION_HOLD_BUNDLE_SHA256="+report["bundle_sha256"])
         print("PROMOTION_HOLD_TWO_COMMIT_REAL_MAIN_ANCESTRY=PASS")
-        print("PROMOTION_HOLD_IMMUTABLE_20_CHUNKS_AT_SOURCE_COMMIT=PASS")
+        print("PROMOTION_HOLD_IMMUTABLE_"+str(CHUNKS)+"_CHUNKS_AT_SOURCE_COMMIT=PASS")
         print("RELEASE_PUBLISHED=NO;REPOSITORY_REF_UPDATED=NO;USER_PC_CHANGES=NO")
     except:
         if output_created:

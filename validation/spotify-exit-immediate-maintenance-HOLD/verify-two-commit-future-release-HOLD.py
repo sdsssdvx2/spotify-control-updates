@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 STAGED = ROOT / "validation/spotify-exit-immediate-maintenance-HOLD/out/release-staging"
 SCRATCH = Path(os.environ["RUNNER_TEMP"]).resolve() / "spotify-future-two-commit-provenance"
 PUBLIC = ROOT / "manifest.json"
+EXPECTED_CHUNKS=20
 REQUIRED = (
     "bin/spotify-control.ps1",
     "bin/spotify-control-agent.vbs",
@@ -112,7 +113,7 @@ def attest(manifest: dict, source: str, committed_manifest: str|None=None) -> No
             raise RuntimeError("IMMUTABLE_SOURCE_CONTENT_NOT_TARGET_MATCH")
         if full!=(STAGED/patch["path"]).read_bytes():
             raise RuntimeError("SOURCE_COMMIT_DIFFERS_FROM_PREVIOUSLY_TESTED_RELEASE")
-    if len(source_paths)!=20:
+    if len(source_paths)!=EXPECTED_CHUNKS:
         raise RuntimeError("IMMUTABLE_PAYLOAD_CHUNK_COUNT_MISMATCH")
     if committed_manifest:
         # The manifest commit must be a DISTINCT successor; otherwise Git
@@ -128,7 +129,7 @@ def attest(manifest: dict, source: str, committed_manifest: str|None=None) -> No
         if git_raw(committed_manifest,"manifest.json")!=(
             SCRATCH/"manifest.json").read_bytes():
             raise RuntimeError("IMMUTABLE_MANIFEST_BYTES_DIFF")
-    print("IMMUTABLE_GIT_SOURCE_CHUNKS_20_AND_PAYLOAD_SET=PASS")
+    print("IMMUTABLE_GIT_SOURCE_CHUNKS_"+str(EXPECTED_CHUNKS)+"_AND_PAYLOAD_SET=PASS")
 
 
 def run():
@@ -148,7 +149,7 @@ def run():
         git("config","user.name","SpotifyControl Synthetic Release Tester")
         git("config","user.email","synthetic-release@example.invalid")
         chunks=[ch["path"] for p in stage["updates"][-1]["patches"] for ch in p["chunks"]]
-        if len(chunks)!=20 or len(chunks)!=len(set(chunks)):
+        if len(chunks)!=EXPECTED_CHUNKS or len(chunks)!=len(set(chunks)):
             raise RuntimeError("STAGED_CHUNKS_NOT_20_UNIQUE")
         for rel in chunks:
             src=STAGED/rel
