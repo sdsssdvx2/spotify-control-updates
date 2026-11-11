@@ -25,7 +25,7 @@ CHECK_TERMS=(
     r"(?i)auto.update",
 )
 FUNC=re.compile(r'(?im)^function\s+([A-Za-z0-9_-]+)\s*(?:\([^)]*\))?\s*\{')
-CALL=re.compile("|".join("(?:%s)"%x for x in CHECK_TERMS))
+CALL=re.compile("|".join("(?:%s)"%x.replace("(?i)","") for x in CHECK_TERMS), re.IGNORECASE)
 def log(name:str,raw:bytes):
     length,digest=PINS[name]
     if (len(raw),hashlib.sha256(raw).hexdigest())!=(length,digest):
