@@ -35,8 +35,11 @@ jobs:
           $env:APPDATA=$roam
           $output=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script 2>&1)
           if($LASTEXITCODE -ne 0){throw 'R76_NATIVE_READONLY_EXECUTION_RETURNED_FAILURE'}
-          foreach($line in $output){
-            if([string]$line -cmatch '^[A-Z_]{2,48}=[A-Za-z0-9_.-]{1,110}
+          foreach($prefix in @('RESULT=','HOLD_REASON=','FAILED_PHASE=','STATE_FILE=','OWNER_TOKEN=')){
+            foreach($line in @($output | Where-Object {([string]$_).StartsWith($prefix,[StringComparison]::Ordinal)})){
+              Write-Host ('R76_CI_SCRATCH_'+[string]$line)
+            }
+          }
           foreach($required in @(
             'RESULT=READONLY_SNAPSHOT_COMPLETE',
             'EXACT_INSTALLED_STACK=HOLD_NOT_EXACT',
