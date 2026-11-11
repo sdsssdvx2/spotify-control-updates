@@ -20,7 +20,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api -GetShaHex 'Accept: application/vnd.github+json' \
+          gh api -H 'Accept: application/vnd.github+json' \
             'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' \
             > "$RUNNER_TEMP/r85-official-bootstrap-artifact.zip"
           python - <<'PY'
