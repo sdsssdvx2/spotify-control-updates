@@ -1,0 +1,37 @@
+name: HOLD R86 Windows owner onepass preflight unsafe-machine denial, no mutation
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-owner-onepass-offline-stage-R86-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/owner-onepass-offline-stage-R86-HOLD.ps1
+permissions: {contents: read}
+jobs:
+  native-r86-no-owner-state-failclosed:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test actual Windows PowerShell AST and fail-closed without installed owner environment
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $path='validation/spotify-exit-immediate-maintenance-HOLD/owner-onepass-offline-stage-R86-HOLD.ps1'
+          $tokens=$null;$issues=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path),[ref]$tokens,[ref]$issues)
+          if(@($issues).Count -ne 0){$issues|ForEach-Object{Write-Output $_};throw 'R86_NATIVE_WINDOWS_PS51_PARSE_FAILED'}
+          $before=@(Get-ChildItem -LiteralPath $env:LOCALAPPDATA -Directory -Filter 'SpotifyControlCanary-*' -ErrorAction Stop|Select-Object -ExpandProperty Name)
+          $rows=@(& $path)
+          $rows|ForEach-Object {Write-Output $_}
+          if($rows -cnotcontains 'RESULT=R86_HOLD_NO_INSTALL_NO_AUTO_RETRY' -or
+             $rows -cnotcontains 'OPERATING_SPOTIFY_SPICETIFY_USER_STATE=UNCHANGED' -or
+             $rows -cnotcontains 'OPERATING_BOOTSTRAP_AND_RESIDENT=UNCHANGED' -or
+             $rows -cnotcontains 'PUBLIC_MAIN_VERSION_AND_GITHUB_RELEASE=UNCHANGED' -or
+             @($rows|Where-Object {$_ -cmatch '^R86_OFFLINE_PRIVATE_STAGE_ID='}).Count -ne 0){
+            throw 'R86_UNAPPROVED_OWNER_MACHINE_MUST_FAIL_CLOSED'
+          }
+          $after=@(Get-ChildItem -LiteralPath $env:LOCALAPPDATA -Directory -Filter 'SpotifyControlCanary-*' -ErrorAction Stop|Select-Object -ExpandProperty Name)
+          if(@(Compare-Object $before $after).Count -ne 0){throw 'R86_FAILCLOSED_CREATED_OWNER_STAGE'}
+          Write-Output 'R86_NATIVE_WINDOWS_PS51_PARSE_AND_UNAPPROVED_OWNER_REFUSAL=PASS'
+          Write-Output 'R86_REMOTE_DOWNLOAD_AFTER_FAILED_OWNER_ADMISSION=NO'
+          Write-Output 'R86_ACTUAL_USER_OWNER_POSITIVE_ADMISSION=NOT_RUN'
