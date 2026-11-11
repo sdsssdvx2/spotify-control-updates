@@ -29,7 +29,7 @@ function GitBlob([byte[]]$data){
 }
 function FetchFrozen([string]$ref,[string]$filename,[string]$blob,[int]$limit){
   if($ref -cnotmatch '^[0-9a-f]{40}$' -or
-     $filename -cnotmatch '^[a-z0-9-]+[.]ps1$' -or
+     $filename -cnotmatch '^[a-z0-9-]+-R(?:27|77|84|85)-HOLD[.]ps1$' -or
      $blob -cnotmatch '^[0-9a-f]{40}$' -or $limit -lt 1000 -or $limit -gt 80000){
     StopNow 'R86_FROZEN_SOURCE_IDENTITY_NOT_PINNED'
   }
