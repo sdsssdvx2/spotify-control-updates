@@ -1,0 +1,130 @@
+name: HOLD R75 genuine Spotify 1.3.8 + official Spicetify 2.46.4 compatibility fail-closed
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-real-cli-compatibility-R75-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/accept-real-cli-compatibility-R75-HOLD.py
+permissions: {contents: read}
+jobs:
+  real-signed-spotify-and-spicetify-cli:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Rebuild exact R70 main and WScript, prepare R72 vendor app fixture
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R73_PUBLIC_MAIN_STABLE_SOURCE_CHANGED'
+          }
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          foreach($py in @(
+            'build-combined-exit-and-shortcut-R37-HOLD.py',
+            'build-eventdriven-vbs-R45-HOLD.py',
+            'build-single-discovery-maintenance-R49-HOLD.py',
+            'build-shared-maintenance-lock-R54-HOLD.py',
+            'build-rapid-restart-vbs-R58-HOLD.py',
+            'build-wmi-selfheal-R63-HOLD.py',
+            'build-wmi-rebind-R66-HOLD.py',
+            'build-wmi-logon-recovery-R69-HOLD.py',
+            'build-boot-wmi-release-R70-HOLD.py',
+            'accept-real-signed-spotify-exit-R72-HOLD.py'
+          )){
+            & python ($base+$py)
+            if($LASTEXITCODE -ne 0){throw ('R73_VERIFIED_PRODUCT_BUILD_OR_COMPOSITE_FAILED_'+$py)}
+          }
+          Write-Host 'R75_R70_SHA_PINNED_MAIN_AND_VENDOR_FIXTURE_BUILT=PASS'
+      - name: Download and authenticate Spotify official current signed x64 full installer on disposable runner only
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if(@(Get-CimInstance Win32_Process -Filter "Name='Spotify.exe'" -ErrorAction Stop).Count -ne 0){
+            throw 'R72_FOREIGN_SPOTIFY_PROCESS_PRESENT_BEFORE_INSTALL'
+          }
+          $app=Join-Path $env:APPDATA 'Spotify\Spotify.exe'
+          if(Test-Path -LiteralPath $app){throw 'R72_EXISTING_SPOTIFY_INSTALL_PRESENT'}
+          $installer=Join-Path $env:RUNNER_TEMP 'R72-SpotifyFullSetupX64.exe'
+          if(Test-Path -LiteralPath $installer){throw 'R72_INSTALLER_PREEXISTED'}
+          & curl.exe --fail --location --silent --show-error --connect-timeout 20 --max-time 180 --output $installer 'https://download.scdn.co/SpotifyFullSetupX64.exe'
+          if($LASTEXITCODE -ne 0){throw 'R72_OFFICIAL_INSTALLER_TLS_FETCH_UNAVAILABLE'}
+          $stat=Get-Item -LiteralPath $installer -ErrorAction Stop
+          if($stat.Length -lt 20000000 -or $stat.Length -gt 250000000){
+            throw 'R72_OFFICIAL_INSTALLER_UNEXPECTED_SIZE'
+          }
+          $signature=Get-AuthenticodeSignature -LiteralPath $installer -ErrorAction Stop
+          if([string]$signature.Status -cne 'Valid' -or
+             $null -eq $signature.SignerCertificate -or
+             [string]$signature.SignerCertificate.Subject -cnotmatch '(?i)(^|,)\s*O=Spotify AB(,|$)'){
+             throw 'R72_OFFICIAL_INSTALLER_AUTHENTICODE_NOT_VERIFIED'
+          }
+          Write-Host 'R72_SPOTIFY_VENDOR_AB_SIGNATURE_AND_TLS=PASS'
+          Write-Host ('R72_OFFICIAL_CURRENT_INSTALLER_SHA256='+((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()))
+          Write-Host ('R72_OFFICIAL_CURRENT_INSTALLER_BYTES='+$stat.Length)
+          $proc=Start-Process -FilePath $installer -ArgumentList @('/silent','/skip-app-launch') -PassThru -ErrorAction Stop
+          if(-not $proc.WaitForExit(140000)){
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            throw 'R72_OFFICIAL_CURRENT_INSTALLER_DEADLINE_EXCEEDED'
+          }
+          if($proc.ExitCode -ne 0){throw 'R72_OFFICIAL_CURRENT_INSTALLER_NONZERO_EXIT'}
+          $appeared=$false
+          for($i=0;$i -lt 160;$i++){
+            if(Test-Path -LiteralPath $app -PathType Leaf){$appeared=$true;break}
+            Start-Sleep -Milliseconds 500
+          }
+          if(-not $appeared){throw 'R72_SPOTIFY_EXE_NOT_PRODUCED_BY_OFFICIAL_INSTALLER'}
+          $sig=Get-AuthenticodeSignature -LiteralPath $app -ErrorAction Stop
+          if([string]$sig.Status -cne 'Valid' -or
+             $null -eq $sig.SignerCertificate -or
+             [string]$sig.SignerCertificate.Subject -cnotmatch '(?i)(^|,)\s*O=Spotify AB(,|$)'){
+            throw 'R72_INSTALLED_REAL_SPOTIFY_EXE_NOT_SIGNED_BY_SPOTIFY_AB'
+          }
+          if(@(Get-CimInstance Win32_Process -Filter "Name='Spotify.exe'" -ErrorAction Stop).Count -ne 0){
+            throw 'R72_SPOTIFY_AUTOSTARTED_DESPITE_SKIP_APP_LAUNCH'
+          }
+          Remove-Item -LiteralPath $installer -Force -ErrorAction Stop
+          Write-Host 'R72_REAL_SIGNED_SPOTIFY_X64_INSTALLED_IN_EPHEMERAL_RUNNER=PASS'
+          Write-Host 'R72_USER_ACCOUNT_SIGNIN=NO;OWNER_PC_MODIFIED=NO;RELEASE_PUBLISHED=NO'
+      - name: Acquire exact official Spicetify 2.46.4 binary in hosted scratch only, never apply
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $asset=Join-Path $env:RUNNER_TEMP 'r75-official-spicetify-v2464.zip'
+          if(Test-Path -LiteralPath $asset){throw 'R75_OFFICIAL_ARCHIVE_PREEXISTED'}
+          & curl.exe --fail --location --silent --show-error --connect-timeout 20 --max-time 100 --output $asset 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip'
+          if($LASTEXITCODE -ne 0){throw 'R75_CLI_UPSTREAM_RELEASE_FETCH_FAILED'}
+          $sourceSha=(Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sourceSha -cne '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f'){
+            throw 'R75_UPSTREAM_OFFICIAL_RELEASE_ASSET_SHA_CHANGED'
+          }
+          $unpack=Join-Path $env:RUNNER_TEMP 'r75-extract'
+          $dest=Join-Path $env:RUNNER_TEMP 'r75-official-spicetify'
+          if(Test-Path -LiteralPath $unpack -or Test-Path -LiteralPath $dest){
+            throw 'R75_SPICETIFY_TEMP_PREEXISTED'
+          }
+          Expand-Archive -LiteralPath $asset -DestinationPath $unpack -ErrorAction Stop
+          $matches=@(Get-ChildItem -LiteralPath $unpack -File -Filter 'spicetify.exe' -Recurse -ErrorAction Stop)
+          if($matches.Count -ne 1){throw 'R75_REAL_CLI_ARCHIVE_EXE_CARDINALITY_INVALID'}
+          if((Get-FileHash -LiteralPath $matches[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+            throw 'R75_REAL_CLI_EXE_SHA_PIN_MISMATCH'
+          }
+          [void][IO.Directory]::CreateDirectory($dest)
+          [IO.File]::Copy($matches[0].FullName,(Join-Path $dest 'spicetify.exe'),$false)
+          Remove-Item -LiteralPath $asset -Force -ErrorAction Stop
+          Write-Host 'R75_OFFICIAL_RELEASE_2464_ZIP_AND_REAL_CLI_EXE_PINNED=PASS'
+      - name: Compose and run actual Windows signed Spotify plus official Spicetify through full main read-only guard
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/spotify-exit-immediate-maintenance-HOLD/accept-real-cli-compatibility-R75-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R75_NATIVE_REAL_VENDOR_STACK_NOT_PREPARED'}
+          $native=Join-Path $env:RUNNER_TEMP 'spotify-r75-real-spicetify-compatibility.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($native,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R75_NATIVE_REAL_VENDOR_STACK_PS51_PARSE_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $native
+          if($LASTEXITCODE -ne 0){throw 'R75_REAL_OFFICIAL_SPICETIFY_COMPATIBILITY_FAILCLOSED_UNPROVEN'}
+          Write-Host 'R75_REAL_SIGNED_SPOTIFY_AND_PINNED_REAL_SPICETIFY_COMPATIBILITY_GUARD=PASS'
+          Write-Host 'R75_OWNER_PC_AND_PUBLISHED_RELEASE=UNCHANGED_HOLD'
