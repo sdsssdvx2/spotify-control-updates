@@ -263,7 +263,7 @@ def attest_future_release(
     before={p:ORIGINAL[p][1] for p in
             ["bin/spotify-control.ps1","bin/spotify-control-agent.vbs"]}
     chunk_count,decoded=attest_downloaded(live,FUTURE,before,FUTURE_LATEST,patches,approved_source_sha)
-    if chunk_count != 20 or len(decoded)!=2:
+    if chunk_count != 21 or len(decoded)!=2:
         raise RuntimeError("NEXT_STABLE_EXPECTED_FULL_CHUNK_SET_NOT_PRESENT")
     return {
         "schema":"SPOTIFY_R30_PUBLIC_RELEASE_FACTS_V1",
@@ -316,7 +316,7 @@ def run(mode: str, approved_manifest_sha: str | None, approved_source_sha: str |
     elif mode=="next-stable":
         receipt=attest_future_release(live_raw,baseline,approved_manifest_sha,approved_source_sha)
         print("PUBLIC_NEXT_STABLE_MANIFEST_INDEPENDENT_SHA_APPROVED=PASS")
-        print("PUBLIC_NEXT_STABLE_IMMUTABLE_SOURCE_20_CHUNKS=PASS")
+        print("PUBLIC_NEXT_STABLE_IMMUTABLE_SOURCE_21_CHUNKS=PASS")
         print("PUBLIC_NEXT_STABLE_V0628_TO_V0630_MAIN_AND_VBS_SHA=PASS")
         print("PUBLIC_NEXT_STABLE_MANIFEST=READONLY_ADMITTED_NO_UPDATE_OR_PROCESS_CHANGE")
         return receipt

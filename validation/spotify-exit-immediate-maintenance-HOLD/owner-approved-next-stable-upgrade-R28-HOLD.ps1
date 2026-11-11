@@ -275,6 +275,19 @@ try{
   try{$facts=$PinnedReleaseFactsJson | ConvertFrom-Json -ErrorAction Stop}
   catch{StopNow 'RELEASE_SOURCE_FACTS_JSON_INVALID'}
   $expectedFactStatus=if($hosted){'HOSTED_SYNTHETIC_SOURCE_ONLY_NOT_PUBLIC_VERIFIED'}else{'PUBLIC_SOURCE_AND_PAYLOAD_READONLY_VERIFIED_NOT_OWNER_AUTHORIZED'}
+  # A public R70 release has 21 exact source chunks. Preserve historical
+  # hosted proof for the older 20-chunk fixtures while binding every hosted
+  # receipt to its own SHA-pinned staged manifest's actual chunk count.
+  $expectedSourceChunks=21
+  if($hosted){
+    $expectedSourceChunks=0
+    foreach($patch in @($manifest.updates[18].patches)){
+      $expectedSourceChunks+=@($patch.chunks).Count
+    }
+    if($expectedSourceChunks -notin @(20,21)){
+      StopNow 'HOSTED_SOURCE_CHUNK_SET_NOT_RECOGNIZED'
+    }
+  }
   if($facts.schema -cne 'SPOTIFY_R30_PUBLIC_RELEASE_FACTS_V1' -or
      $facts.status -cne $expectedFactStatus -or
      $facts.from_version -cne '0.6.28' -or
@@ -286,7 +299,7 @@ try{
      [string]$facts.main_sha256 -cne $expectedMain -or
      [string]$facts.agent_sha256 -cne $expectedAgent -or
      [string]$facts.addon_sha256 -cne $new['bin/addon-manager.ps1'] -or
-     [int]$facts.chunk_count -ne 20){
+     [int]$facts.chunk_count -ne $expectedSourceChunks){
     StopNow 'RELEASE_SOURCE_FACTS_NOT_BOUND_TO_MANIFEST_AND_PAYLOAD'
   }
   if($hosted){
