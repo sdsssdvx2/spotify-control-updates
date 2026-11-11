@@ -20,7 +20,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api -H 'Accept: application/vnd.github+json' \
+          gh api -GetShaHex 'Accept: application/vnd.github+json' \
             'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' \
             > "$RUNNER_TEMP/r85-official-bootstrap-artifact.zip"
           python - <<'PY'
@@ -128,7 +128,7 @@ jobs:
           $source=Join-Path $offline 'bootstrap-verified-locator-copy.ps1'
           $receipt=Get-Content -LiteralPath (Join-Path $offline 'offline-receipt.json') -Raw|ConvertFrom-Json
           function H([string]$p){return (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()}
-          if((H $source) -cne [string]$receipt.disposable_bootstrap_sha256 -or
+          if((GetShaHex $source) -cne [string]$receipt.disposable_bootstrap_sha256 -or
              $receipt.result -cne 'HOLD_ONLY_NOT_DEPLOYABLE'){throw 'R85_DISPOSABLE_BOOTSTRAP_NOT_VERIFIED'}
           $fixture=Join-Path $env:RUNNER_TEMP 'spotify-future-bootstrap-rehearsal'
           $app=Join-Path $fixture 'LocalAppData/SpotifyControl'
@@ -153,20 +153,20 @@ jobs:
             $env:APPDATA=Join-Path $fixture 'Roaming'
             $state=Join-Path $app 'state.json'
             $sentinel=Join-Path $app 'unrelated-user-preserve.txt'
-            $a=H $state;$b=H $sentinel
+            $a=GetShaHex $state;$b=GetShaHex $sentinel
             Official 'Check'
             Write-Output 'R85_FILE_BOOTSTRAP_CHECK=PASS'
             Official 'RollbackTest'
-            if((H (Join-Path $app 'bin/spotify-control.ps1')) -cne 'af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0' -or
-               (H (Join-Path $app 'bin/spotify-control-agent.vbs')) -cne '2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278'){
+            if((GetShaHex (Join-Path $app 'bin/spotify-control.ps1')) -cne 'af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0' -or
+               (GetShaHex (Join-Path $app 'bin/spotify-control-agent.vbs')) -cne '2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278'){
                throw 'R85_FILE_BOOTSTRAP_ROLLBACK_INCORRECT'
             }
             Write-Output 'R85_FILE_BOOTSTRAP_ROLLBACK=PASS'
             Official 'Update'
-            if((H (Join-Path $app 'bin/spotify-control.ps1')) -cne 'b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92232d' -or
-               (H (Join-Path $app 'bin/spotify-control-agent.vbs')) -cne 'e56609ed8927512595f55c01ea50dbb9c8c59e4a2c86dcb3d16195a565c604d5' -or
-               (H (Join-Path $app 'bin/addon-manager.ps1')) -cne '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285' -or
-               (H $state) -cne $a -or (H $sentinel) -cne $b){
+            if((GetShaHex (Join-Path $app 'bin/spotify-control.ps1')) -cne 'b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92232d' -or
+               (GetShaHex (Join-Path $app 'bin/spotify-control-agent.vbs')) -cne 'e56609ed8927512595f55c01ea50dbb9c8c59e4a2c86dcb3d16195a565c604d5' -or
+               (GetShaHex (Join-Path $app 'bin/addon-manager.ps1')) -cne '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285' -or
+               (GetShaHex $state) -cne $a -or (GetShaHex $sentinel) -cne $b){
                throw 'R85_FILE_BOOTSTRAP_UPDATED_STATE_INCORRECT'
             }
             Official 'Check'
