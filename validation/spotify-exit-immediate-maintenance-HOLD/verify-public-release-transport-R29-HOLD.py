@@ -34,6 +34,9 @@ BASE_MAIN_COMMIT = "d38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2"
 BASE_PAYLOAD_COMMIT = "bb6d90146f20b73d36fbf8cb813f1b190f403c48"
 BASE_LATEST = "0.6.28"
 FUTURE_LATEST = "0.6.30"
+# Exact approved public R70 transport count; offline historic R30 fixture
+# may override this constant only within an isolated Python module.
+EXPECTED_NEXT_CHUNKS = 21
 BOOTSTRAP = {
     "version": "1.0.6",
     "size": 42963,
@@ -263,7 +266,7 @@ def attest_future_release(
     before={p:ORIGINAL[p][1] for p in
             ["bin/spotify-control.ps1","bin/spotify-control-agent.vbs"]}
     chunk_count,decoded=attest_downloaded(live,FUTURE,before,FUTURE_LATEST,patches,approved_source_sha)
-    if chunk_count != 21 or len(decoded)!=2:
+    if chunk_count != EXPECTED_NEXT_CHUNKS or len(decoded)!=2:
         raise RuntimeError("NEXT_STABLE_EXPECTED_FULL_CHUNK_SET_NOT_PRESENT")
     return {
         "schema":"SPOTIFY_R30_PUBLIC_RELEASE_FACTS_V1",
