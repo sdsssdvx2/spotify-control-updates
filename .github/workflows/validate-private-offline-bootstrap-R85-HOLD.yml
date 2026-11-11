@@ -116,6 +116,51 @@ jobs:
           & python ($p+'accept-immutable-review-bootstrap-R81-HOLD.py') mirror
           if($LASTEXITCODE -ne 0){throw 'R85_R81_HOSTED_FIXTURE_NOT_PREPARED'}
           Write-Output 'R85_R81_FULL_STABLE_OWNER_SCRATCH_NO_SERVER=PASS'
+      - name: Probe original Bootstrap executed directly from private candidate path without touching installed bootstrap
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $stages=@(Get-ChildItem -LiteralPath $env:LOCALAPPDATA -Directory -Filter 'SpotifyControlCanary-offline-ready-*' -ErrorAction Stop)
+          if($stages.Count -ne 1){throw 'R85_DIRECT_PRIVATE_STAGE_NOT_UNIQUE'}
+          $boot=Join-Path $stages[0].FullName 'bootstrap-verified-locator-copy.ps1'
+          $original=Join-Path $env:RUNNER_TEMP 'spotify-verified-bootstrap-v106.ps1'
+          $fixture=Join-Path $env:RUNNER_TEMP 'spotify-future-bootstrap-rehearsal'
+          $app=Join-Path $fixture 'LocalAppData/SpotifyControl'
+          $officialInstalled=Join-Path $app 'bootstrap/spotify-control-self-updater.ps1'
+          $before=(Get-FileHash -LiteralPath $officialInstalled -Algorithm SHA256).Hash
+          $originalHash=(Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($originalHash -cne 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'){
+            throw 'R85_DIRECT_PROBE_OFFICIAL_BOOTSTRAP_NOT_PINNED'
+          }
+          $beforeMain=(Get-FileHash -LiteralPath (Join-Path $app 'bin/spotify-control.ps1') -Algorithm SHA256).Hash
+          $beforeAgent=(Get-FileHash -LiteralPath (Join-Path $app 'bin/spotify-control-agent.vbs') -Algorithm SHA256).Hash
+          $sourceText=[IO.File]::ReadAllText($original,[Text.Encoding]::ASCII)
+          Write-Output ('R85_ORIGINAL_BOOTSTRAP_USES_PSSCRIPTROOT='+[string]$sourceText.Contains('$PSScriptRoot'))
+          Write-Output ('R85_ORIGINAL_BOOTSTRAP_USES_LOCALAPPDATA='+[string]$sourceText.Contains('$env:LOCALAPPDATA'))
+          $oldL=$env:LOCALAPPDATA;$oldR=$env:APPDATA
+          try{
+            $env:LOCALAPPDATA=Join-Path $fixture 'LocalAppData'
+            $env:APPDATA=Join-Path $fixture 'Roaming'
+            $rows=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $boot -Action Check -Json 2>&1)
+            $code=$LASTEXITCODE
+          }finally{
+            $env:LOCALAPPDATA=$oldL;$env:APPDATA=$oldR
+          }
+          if((Get-FileHash -LiteralPath $officialInstalled -Algorithm SHA256).Hash -cne $before -or
+             (Get-FileHash -LiteralPath (Join-Path $app 'bin/spotify-control.ps1') -Algorithm SHA256).Hash -cne $beforeMain -or
+             (Get-FileHash -LiteralPath (Join-Path $app 'bin/spotify-control-agent.vbs') -Algorithm SHA256).Hash -cne $beforeAgent){
+            throw 'R85_DIRECT_PRIVATE_BOOTSTRAP_CHECK_CHANGED_SCRATCH_ORIGINALS'
+          }
+          $class='NOT_CONFIRMED'
+          if($code -eq 0 -and $rows.Count -ge 1){
+            try{
+              $parsed=([string]$rows[-1])|ConvertFrom-Json
+              if($parsed.success -eq $true -and $parsed.action -ceq 'Check'){$class='PASS'}
+            }catch{}
+          }
+          Write-Output ('R85_PRIVATE_PATH_DIRECT_BOOTSTRAP_CHECK='+$class)
+          Write-Output 'R85_DIRECT_BOOTSTRAP_PROBE_CHECK_ONLY_WITHOUT_INSTALLED_BOOTSTRAP_SWAP=YES'
+          Write-Output 'R85_DIRECT_BOOTSTRAP_PROBE_OWNER_PC=NO'
       - name: Real original Bootstrap transaction and rollback from R85 private file URI stage
         shell: powershell
         run: |
