@@ -127,7 +127,7 @@ jobs:
           $offline=$stages[0].FullName
           $source=Join-Path $offline 'bootstrap-verified-locator-copy.ps1'
           $receipt=Get-Content -LiteralPath (Join-Path $offline 'offline-receipt.json') -Raw|ConvertFrom-Json
-          function H([string]$p){return (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()}
+          function GetShaHex([string]$p){return (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()}
           if((GetShaHex $source) -cne [string]$receipt.disposable_bootstrap_sha256 -or
              $receipt.result -cne 'HOLD_ONLY_NOT_DEPLOYABLE'){throw 'R85_DISPOSABLE_BOOTSTRAP_NOT_VERIFIED'}
           $fixture=Join-Path $env:RUNNER_TEMP 'spotify-future-bootstrap-rehearsal'
