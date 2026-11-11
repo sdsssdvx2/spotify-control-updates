@@ -224,7 +224,7 @@ try {
   if($StageOwnerCandidate){
     $phase='OWNER_PRIVATE_STAGE'
     if([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)){Fail 'R84_LOCALAPPDATA_NOT_RESOLVED'}
-    $appData=[IO.Path]::GetFullPath($env:LOCALAPPDATA).TrimEnd('\\','/')
+    $appData=[IO.Path]::GetFullPath($env:LOCALAPPDATA).TrimEnd([char]92,[char]47)
     $parent=Get-Item -LiteralPath $appData -Force -ErrorAction Stop
     if(-not $parent.PSIsContainer -or
        ($parent.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){
@@ -232,7 +232,7 @@ try {
     }
     $user=[Security.Principal.WindowsIdentity]::GetCurrent().User
     if($null -eq $user){Fail 'R84_OWNER_SID_MISSING'}
-    $sys=New-Object Security.Principal.SecurityIdentifier([Security.Principal.WellKnownSidType]::LocalSystemSid,$null)
+    $sys=[Security.Principal.SecurityIdentifier]::new([Security.Principal.WellKnownSidType]::LocalSystemSid,$null)
     $acl=New-Object Security.AccessControl.DirectorySecurity
     $acl.SetOwner($user)
     $acl.SetAccessRuleProtection($true,$false)
