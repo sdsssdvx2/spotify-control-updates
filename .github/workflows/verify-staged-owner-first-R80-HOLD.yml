@@ -1,0 +1,33 @@
+name: HOLD R80 prepublication immutable source verification without user PC or public release
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/verify-staged-owner-first-R80-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/verify-prepublication-owner-first-R80-HOLD.py
+permissions: {contents: read}
+jobs:
+  readonly-prepublication-review-transport:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Exact official main, exact frozen R29 verifier, no write authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse origin/main)" = 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'
+          test "$(git rev-parse '38bb7c2c1aa90f02d920dcd23a026f64c23ef844:validation/spotify-exit-immediate-maintenance-HOLD/verify-public-release-transport-R29-HOLD.py')" = '6141ee890194af9a901ce1fc21b8ed95b02340b8'
+          echo 'R80_PUBLIC_STABLE_HEAD_AND_EXISTING_R29_AUDITOR_PINNED=PASS'
+      - name: Verify mutated review cannot enter immutable source audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -I validation/spotify-exit-immediate-maintenance-HOLD/verify-prepublication-owner-first-R80-HOLD.py --tamper-selftest
+      - name: Reuse real R29 manifest and all 21 immutable public GitHub raw chunks from held review
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -I validation/spotify-exit-immediate-maintenance-HOLD/verify-prepublication-owner-first-R80-HOLD.py
+          echo 'R80_NO_MAIN_PUBLICATION_NO_OWNER_UPDATE_NO_NEW_INSTALLER=PASS'
