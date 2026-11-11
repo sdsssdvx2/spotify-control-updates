@@ -15,6 +15,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0, persist-credentials: false}
+      - name: Check first-stage Python adapter source before substantial Windows fixtures
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/accept-first-owner-stage-R92-HOLD.py'
+          & python -B -c "import ast,pathlib,sys;ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))" $p
+          if($LASTEXITCODE -ne 0){throw 'R92_FIRST_STAGE_PYTHON_SOURCE_PARSE_FAILED'}
+          Write-Host 'R92_FIRST_STAGE_PYTHON_AST_PARSE=PASS'
       - name: Reconstruct full exact prepublication R70 main, WScript and Bootstrap base
         shell: powershell
         run: |
