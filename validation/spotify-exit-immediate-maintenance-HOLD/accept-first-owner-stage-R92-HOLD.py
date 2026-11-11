@@ -41,7 +41,7 @@ def main():
     # changing the canonical pinned Git blob. Restore only line endings.
     b=checkout_bytes.replace(b"\r\n",b"\n")
     safe(b"\r" not in b and 8000<=len(b)<=9000 and hashlib.sha1(b"blob "+str(len(b)).encode()+b"\x00"+b).hexdigest() ==
-         "698019f4fbce9a9bf0bd838dfb69539e737e0dc5",
+         "4b6f86bb85a6ce7e3cc1309e723b7a8edc21d078",
          "ORIGINAL_R86_GIT_BLOB_CHANGED")
     r86=b.decode("utf-8")
     r86=once(r86,
@@ -99,7 +99,7 @@ def main():
       """    $existing=@()""",
       "R90_FIRST_TIME_NO_PREEXISTING_STAGE")
     r90=once(r90,
-      """      [byte[]]$r86=FrozenSource '9c98e6a59619b3fa02cbdc61edc0276d733f8598' 'owner-onepass-offline-stage-R86-HOLD.ps1' '698019f4fbce9a9bf0bd838dfb69539e737e0dc5' 20000""",
+      """      [byte[]]$r86=FrozenSource '0285fdfd018d926d7cd8115b72767b384e17da9c' 'owner-onepass-offline-stage-R86-HOLD.ps1' '4b6f86bb85a6ce7e3cc1309e723b7a8edc21d078' 20000""",
       """      [byte[]]$r86=[IO.File]::ReadAllBytes((Join-Path $env:RUNNER_TEMP 'spotify-r92-hosted-r86-driver.ps1'))""",
       "EXACT_R86_TEST_DERIVATIVE_ONLY")
     r90=once(r90,
