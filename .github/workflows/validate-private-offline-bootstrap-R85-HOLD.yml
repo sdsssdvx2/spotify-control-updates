@@ -1,0 +1,101 @@
+name: HOLD R85 native Windows protected offline mirror from pinned R84 chunks
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-private-offline-bootstrap-R85-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/compose-private-offline-bootstrap-R85-HOLD.ps1
+  workflow_dispatch:
+permissions: {contents: read, actions: read}
+jobs:
+  real-windows-owner-private-file-mirror:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Restore immutable official Bootstrap 1.0.6 from previously verified artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' \
+            'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' \
+            > "$RUNNER_TEMP/r85-official-bootstrap-artifact.zip"
+          python - <<'PY'
+          from pathlib import Path
+          import os,zipfile,io,hashlib
+          t=Path(os.environ["RUNNER_TEMP"])
+          with zipfile.ZipFile(t/"r85-official-bootstrap-artifact.zip") as outer:
+              inner=outer.read("SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip")
+          with zipfile.ZipFile(io.BytesIO(inner)) as nested:
+              b=nested.read("bootstrap/spotify-control-self-updater.ps1")
+          assert (len(b),hashlib.sha256(b).hexdigest())==(42963,"d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6")
+          (t/"spotify-verified-bootstrap-v106.ps1").write_bytes(b)
+          print("R85_ORIGINAL_BOOTSTRAP_V106_SOURCE_PIN=PASS")
+          PY
+          rm "$RUNNER_TEMP/r85-official-bootstrap-artifact.zip"
+      - name: Real R84 stage then R85 offline composition, exact source and ACL receipt
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/'
+          $r84=@(& ($p+'stage-immutable-review-native-R84-HOLD.ps1') -StageOwnerCandidate)
+          $r84 | ForEach-Object {Write-Output $_}
+          if($r84 -cnotcontains 'R84_RESULT=PRIVATE_CANDIDATE_STAGED_NOT_INSTALLED' -or
+             $r84 -cnotcontains 'R84_OWNER_STAGED_IMMUTABLE_CHUNKS_21_OF_21=PASS'){
+             throw 'R85_REAL_R84_CANDIDATE_STAGE_NOT_ADMITTED'
+          }
+          $rows=@($r84|Where-Object {$_ -cmatch '^R84_OWNER_PRIVATE_STAGE_ID=[0-9a-f]{32}$'})
+          if($rows.Count -ne 1){throw 'R85_R84_ID_UNAVAILABLE'}
+          $id=([string]$rows[0]).Split('=')[1]
+          $stage=Join-Path $env:LOCALAPPDATA ('SpotifyControlCanary-ready-'+$id)
+          $official=Join-Path $env:RUNNER_TEMP 'spotify-verified-bootstrap-v106.ps1'
+          $r85=@(& ($p+'compose-private-offline-bootstrap-R85-HOLD.ps1') -R84ReadyPath $stage -OfficialBootstrapPath $official)
+          $r85 | ForEach-Object {Write-Output $_}
+          if($r85 -cnotcontains 'RESULT=R85_OWNER_PRIVATE_OFFLINE_TRANSPORT_PREPARED_HOLD' -or
+             $r85 -cnotcontains 'R85_R84_PINNED_21_CHUNKS_MIRRORED_FROM_LOCAL_DISK=PASS'){
+             throw 'R85_NATIVE_PRIVATE_OFFLINE_COMPOSER_FAILED'
+          }
+          $rows=@($r85|Where-Object {$_ -cmatch '^R85_OWNER_OFFLINE_STAGE_ID=[0-9a-f]{32}$'})
+          if($rows.Count -ne 1){throw 'R85_OFFLINE_READY_ID_UNAVAILABLE'}
+          $id=([string]$rows[0]).Split('=')[1]
+          $root=Join-Path $env:LOCALAPPDATA ('SpotifyControlCanary-offline-ready-'+$id)
+          $receipt=Get-Content -LiteralPath (Join-Path $root 'offline-receipt.json') -Raw|ConvertFrom-Json
+          $boot=Join-Path $root 'bootstrap-verified-locator-copy.ps1'
+          if($receipt.schema -cne 'SPOTIFY_R85_PRIVATE_OFFLINE_TRANSPORT_V1' -or
+             $receipt.result -cne 'HOLD_ONLY_NOT_DEPLOYABLE' -or
+             [int]$receipt.chunks -ne 21 -or
+             $receipt.installed_bootstrap_changed -ne $false -or
+             $receipt.owner_approved -ne $false -or
+             (Get-FileHash -LiteralPath $boot -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+              $receipt.disposable_bootstrap_sha256){
+            throw 'R85_PRIVATE_OFFLINE_RECEIPT_INVALID'
+          }
+          $code=[IO.File]::ReadAllText($boot,[Text.Encoding]::ASCII)
+          if($code.Contains('https://raw.githubusercontent.com/') -or
+             -not $code.Contains("'file:///")){throw 'R85_DERIVED_SOURCE_STILL_REMOTE'}
+          $manifest=Get-Content -LiteralPath (Join-Path $root 'manifest.json') -Raw|ConvertFrom-Json
+          if([string]$manifest.bootstrap.sha256 -cne $receipt.disposable_bootstrap_sha256 -or
+             [long]$manifest.bootstrap.size -ne ([IO.FileInfo]$boot).Length){
+            throw 'R85_DERIVED_MANIFEST_BOOTSTRAP_PIN_INVALID'
+          }
+          $count=0
+          foreach($patch in @($manifest.updates[18].patches)){
+            foreach($ch in @($patch.chunks)){
+              $rel='sdsssdvx2/spotify-control-updates/'+[string]$manifest.source_commit+'/'+[string]$ch.path
+              $file=Join-Path $root ($rel.Replace('/','\'))
+              if((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne [string]$ch.sha256){
+                throw 'R85_MIRRORED_CHUNK_READBACK_FAILED'
+              }
+              $count++
+            }
+          }
+          if($count -ne 21){throw 'R85_FINAL_MIRROR_CHUNK_COUNT_NOT_21'}
+          $acl=Get-Acl -LiteralPath $root
+          if(-not $acl.AreAccessRulesProtected){throw 'R85_FINAL_STAGE_NOT_PRIVATE'}
+          Write-Output 'R85_NATIVE_WINDOWS_PRIVATE_FILE_URI_SOURCE_COMPOSITION=PASS'
+          Write-Output 'R85_R84_TO_LOCAL_BOOTSTRAP_MIRROR_SHA256_ALL_21=PASS'
+          Write-Output 'R85_OFFLINE_BOOTSTRAP_EXECUTION=NOT_TESTED'
+          Write-Output 'R85_OWNER_PC_INSTALL_OR_PUBLICATION=NO'
