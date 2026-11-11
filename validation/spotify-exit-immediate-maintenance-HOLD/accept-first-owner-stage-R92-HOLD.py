@@ -37,7 +37,7 @@ def main():
          "PINNED_TEST_SOURCES_REQUIRED")
 
     b=R86_ORIGINAL.read_bytes()
-    safe(len(b)==8755 and hashlib.sha1(b"blob "+str(len(b)).encode()+b"\x00"+b).hexdigest() ==
+    safe(8000<=len(b)<=9000 and hashlib.sha1(b"blob "+str(len(b)).encode()+b"\x00"+b).hexdigest() ==
          "698019f4fbce9a9bf0bd838dfb69539e737e0dc5",
          "ORIGINAL_R86_GIT_BLOB_CHANGED")
     r86=b.decode("utf-8")
