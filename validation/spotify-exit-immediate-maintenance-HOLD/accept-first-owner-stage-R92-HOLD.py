@@ -106,42 +106,7 @@ def main():
       """      $r86Result=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r86))))""",
       """      $r86Result=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r86))))
       foreach($r92Line in @($r86Result)){
-        if([string]$r92Line -cmatch '^[A-Z0-9_]{2,64}=[A-Za-z0-9_.;-]{1,150}""",
-      "R86_OWNER_FIRST_STAGE_PROOF")
-    safe(r90.count("$existing=@()")==1 and
-         r90.count("spotify-r92-hosted-r86-driver.ps1")==1 and
-         "R90_R86_NEW_PRIVATE_STAGE=VERIFIED" in r90,
-         "R90_REAL_NEW_STAGE_PATH_NOT_RETAINED")
-
-    src=NATIVE.read_text("utf-8")
-    safe("R91_ACTUAL_R90_NATIVE_SINGLE_OWNER_ENTRY_WAS_INVOKED=PASS" in src and
-         "R91_REAL_R90_PINNED_OWNER_SINGLE_ENTRY_WITH_R88_WSCRIPT_TRANSACTION=PASS" in src,
-         "PREVIOUS_R91_NATIVE_RESULT_NOT_PRESENT")
-    src=once(src,
-      "$receipt -cnotcontains 'R90_EXISTING_PRIVATE_STAGE=ONE_EXACT_CANDIDATE_REUSED'",
-      "$receipt -cnotcontains 'R90_R86_NEW_PRIVATE_STAGE=VERIFIED'",
-      "R90_FIRST_STAGE_SUCCESS_REQUIRES_REAL_R86")
-    src=once(src,
-      "Write-Host 'R91_REAL_R90_PINNED_OWNER_SINGLE_ENTRY_WITH_R88_WSCRIPT_TRANSACTION=PASS'",
-      """Write-Host 'R91_REAL_R90_PINNED_OWNER_SINGLE_ENTRY_WITH_R88_WSCRIPT_TRANSACTION=PASS'
-    if(@($receipt|Where-Object {$_ -ceq 'R90_R86_NEW_PRIVATE_STAGE=VERIFIED'}).Count -ne 1){
-      throw 'R92_FIRST_TIME_R84_R85_OWNER_STAGE_NOT_PROVEN'
-    }
-    Write-Host 'R92_REAL_R86_R84_R85_FIRST_STAGE_TO_R90_R88_OWNER_WSCRIPT_COMMIT=PASS'""",
-      "NEW_SOURCE_FIRST_STAGE_ACTUAL_EXECUTION")
-
-    R86_HOST.write_text(r86,encoding="utf-8",newline="\n")
-    R90_TEST.write_text(r90,encoding="utf-8",newline="\n")
-    NATIVE.write_text(src,encoding="utf-8",newline="\n")
-    print("R92_R86_PINNED_ORIGINAL_SHA256="+hashlib.sha256(b).hexdigest())
-    print("R92_HOSTED_SYNTHETIC_R77_NOT_USER_ACL_OR_SIGNER=YES")
-    print("R92_REAL_R84_R85_FIRST_STAGE_FROM_NETWORK_TO_OWNER_PRIVACY=PREPARED")
-    print("R92_PUBLIC_RELEASE_AND_ACTUAL_USER_PC=UNCHANGED")
-
-if __name__=="__main__":
-    if len(sys.argv)!=1: raise SystemExit("No args")
-    main()
-){
+        if([string]$r92Line -cmatch '^[A-Z0-9_]{2,64}=[A-Za-z0-9_.;-]{1,150}$'){
           $out.Add(('R92_R86_SAFE_RECEIPT_'+[string]$r92Line))
         }
       }""",
