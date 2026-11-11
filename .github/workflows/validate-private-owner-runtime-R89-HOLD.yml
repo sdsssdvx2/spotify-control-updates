@@ -5,6 +5,7 @@ on:
     paths:
       - .github/workflows/validate-private-owner-runtime-R89-HOLD.yml
       - validation/spotify-exit-immediate-maintenance-HOLD/accept-offline-owned-cutover-R87-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/accept-private-owner-runtime-R89-HOLD.py
 permissions: {contents: read, actions: read}
 jobs:
   real-immutable-review-r28-owner-wscript-cutover:
