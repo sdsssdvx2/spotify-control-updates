@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
-        with: {persist-credentials: false}
+        with: {fetch-depth: 0, persist-credentials: false}
       - name: Restore immutable official Bootstrap 1.0.6 from previously verified artifact
         shell: bash
         env:
@@ -99,3 +99,77 @@ jobs:
           Write-Output 'R85_R84_TO_LOCAL_BOOTSTRAP_MIRROR_SHA256_ALL_21=PASS'
           Write-Output 'R85_OFFLINE_BOOTSTRAP_EXECUTION=NOT_TESTED'
           Write-Output 'R85_OWNER_PC_INSTALL_OR_PUBLICATION=NO'
+      - name: Recreate previous immutable real-app Bootstrap scratch without starting an HTTP server
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/'
+          foreach($n in @('build-combined-exit-and-shortcut-R37-HOLD.py','build-eventdriven-vbs-R45-HOLD.py','build-single-discovery-maintenance-R49-HOLD.py','build-shared-maintenance-lock-R54-HOLD.py','build-rapid-restart-vbs-R58-HOLD.py','build-wmi-selfheal-R63-HOLD.py','build-wmi-rebind-R66-HOLD.py','build-wmi-logon-recovery-R69-HOLD.py','build-boot-wmi-release-R70-HOLD.py')){
+            & python ($p+$n)
+            if($LASTEXITCODE -ne 0){throw ('R85_PREVIOUS_FIXTURE_BUILD_FAILED_'+$n)}
+          }
+          & python ($p+'accept-immutable-review-bootstrap-R81-HOLD.py') stage
+          if($LASTEXITCODE -ne 0){throw 'R85_R81_REAL_SOURCE_STAGE_FAILED'}
+          $fixture=Join-Path $env:RUNNER_TEMP 'spotify-future-bootstrap-rehearsal'
+          [void][IO.Directory]::CreateDirectory($fixture)
+          [IO.File]::WriteAllText((Join-Path $fixture 'server-port'),'17865',[Text.Encoding]::ASCII)
+          & python ($p+'accept-immutable-review-bootstrap-R81-HOLD.py') mirror
+          if($LASTEXITCODE -ne 0){throw 'R85_R81_HOSTED_FIXTURE_NOT_PREPARED'}
+          Write-Output 'R85_R81_FULL_STABLE_OWNER_SCRATCH_NO_SERVER=PASS'
+      - name: Real original Bootstrap transaction and rollback from R85 private file URI stage
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $stages=@(Get-ChildItem -LiteralPath $env:LOCALAPPDATA -Directory -Filter 'SpotifyControlCanary-offline-ready-*' -ErrorAction Stop)
+          if($stages.Count -ne 1 -or $stages[0].Name -cnotmatch '^SpotifyControlCanary-offline-ready-[0-9a-f]{32}$'){
+            throw 'R85_HOSTED_PRIVATE_READY_NOT_UNIQUE'
+          }
+          $offline=$stages[0].FullName
+          $source=Join-Path $offline 'bootstrap-verified-locator-copy.ps1'
+          $receipt=Get-Content -LiteralPath (Join-Path $offline 'offline-receipt.json') -Raw|ConvertFrom-Json
+          function H([string]$p){return (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()}
+          if((H $source) -cne [string]$receipt.disposable_bootstrap_sha256 -or
+             $receipt.result -cne 'HOLD_ONLY_NOT_DEPLOYABLE'){throw 'R85_DISPOSABLE_BOOTSTRAP_NOT_VERIFIED'}
+          $fixture=Join-Path $env:RUNNER_TEMP 'spotify-future-bootstrap-rehearsal'
+          $app=Join-Path $fixture 'LocalAppData/SpotifyControl'
+          $boot=Join-Path $app 'bootstrap/spotify-control-self-updater.ps1'
+          [IO.File]::WriteAllBytes($boot,[IO.File]::ReadAllBytes($source))
+          $oldL=$env:LOCALAPPDATA;$oldR=$env:APPDATA
+          function Official([string]$action){
+            $result=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $boot -Action $action -Json 2>&1)
+            if($LASTEXITCODE -ne 0 -or $result.Count -eq 0){
+              $result | ForEach-Object {Write-Output $_}
+              throw ('R85_FILE_URI_BOOTSTRAP_'+$action+'_FAILED')
+            }
+            try{$json=([string]$result[-1])|ConvertFrom-Json}
+            catch{$result|ForEach-Object{Write-Output $_};throw 'R85_BOOTSTRAP_NO_JSON'}
+            if($json.success -ne $true -or [string]$json.action -cne $action){
+              $result|ForEach-Object{Write-Output $_}
+              throw ('R85_BOOTSTRAP_'+$action+'_NOT_SUCCESS')
+            }
+          }
+          try{
+            $env:LOCALAPPDATA=Join-Path $fixture 'LocalAppData'
+            $env:APPDATA=Join-Path $fixture 'Roaming'
+            $state=Join-Path $app 'state.json'
+            $sentinel=Join-Path $app 'unrelated-user-preserve.txt'
+            $a=H $state;$b=H $sentinel
+            Official 'Check'
+            Write-Output 'R85_FILE_BOOTSTRAP_CHECK=PASS'
+            Official 'RollbackTest'
+            if((H (Join-Path $app 'bin/spotify-control.ps1')) -cne 'af1582ec335807f8f5daa9b3a65b13d567264f326d3c608c082ae02ff0a4cfc0' -or
+               (H (Join-Path $app 'bin/spotify-control-agent.vbs')) -cne '2a4f6f02103ef9d4594e9fe4ac23fd4d94d4553902d6ddaf5fc3e10bebd56278'){
+               throw 'R85_FILE_BOOTSTRAP_ROLLBACK_INCORRECT'
+            }
+            Write-Output 'R85_FILE_BOOTSTRAP_ROLLBACK=PASS'
+            Official 'Update'
+            if((H (Join-Path $app 'bin/spotify-control.ps1')) -cne 'b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92232d' -or
+               (H (Join-Path $app 'bin/spotify-control-agent.vbs')) -cne 'e56609ed8927512595f55c01ea50dbb9c8c59e4a2c86dcb3d16195a565c604d5' -or
+               (H (Join-Path $app 'bin/addon-manager.ps1')) -cne '5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285' -or
+               (H $state) -cne $a -or (H $sentinel) -cne $b){
+               throw 'R85_FILE_BOOTSTRAP_UPDATED_STATE_INCORRECT'
+            }
+            Official 'Check'
+            Write-Output 'R85_REAL_R84_PRIVATE_21_CHUNKS_NATIVE_BOOTSTRAP_UPDATE_AND_POSTCHECK=PASS'
+            Write-Output 'R85_USER_PC_AND_MAIN_GITHUB_PUBLICATION=UNCHANGED'
+          }finally{$env:LOCALAPPDATA=$oldL;$env:APPDATA=$oldR}
