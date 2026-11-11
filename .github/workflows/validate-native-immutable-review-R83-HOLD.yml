@@ -1,0 +1,49 @@
+name: HOLD R83 native Windows no-Python exact immutable review verifier for later owner canary
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-native-immutable-review-R83-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/attest-immutable-review-native-R83-HOLD.ps1
+permissions: {contents: read}
+jobs:
+  native-win51-reconstruct-real-review-no-install:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Require official unchanged main and exact prior immutable held review
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'R83_STABLE_BASELINE_NOT_IDENTICAL'}
+          if((git rev-parse 'origin/hold/spotify-v0630-boot-wmi-review-only').Trim() -cne '72f338297fe24ad47ae8315ce2c4bb70656f084c'){throw 'R83_HELD_REVIEW_REF_NOT_IDENTICAL'}
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/attest-immutable-review-native-R83-HOLD.ps1'
+          $tok=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script),[ref]$tok,[ref]$errors)
+          if(@($errors).Count -ne 0){throw ('R83_WINDOWS_NATIVE_PS51_PARSE_FAILED '+[string]$errors[0].Message)}
+          Write-Host 'R83_PINNED_PUBLIC_MAIN_AND_HOLD_REVIEW_AND_PS51_PARSE=PASS'
+      - name: Windows PowerShell 5.1 actual GitHub remote 21 chunks reassembly, SHA and no installation
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/attest-immutable-review-native-R83-HOLD.ps1'
+          $before=(git status --porcelain -uno)
+          $results=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script 2>&1)
+          foreach($line in $results){
+            $s=[string]$line
+            if($s -match '^(?:DIAGNOSTIC=|R83_|NETWORK=|LOCAL_FILE_WRITE=|OPERATING_|PUBLIC_|FAILED_PHASE=|HOLD_REASON=)'){
+              Write-Host $s
+            }
+          }
+          if($LASTEXITCODE -ne 0 -or
+             $results -cnotcontains 'R83_RESULT=READONLY_OWNER_FIRST_SOURCE_ADMITTED_NOT_INSTALLER' -or
+             $results -cnotcontains 'R83_REMOTE_IMMUTABLE_21_OF_21_CHUNKS=PASS' -or
+             $results -cnotcontains 'R83_REAL_MAIN_294101_AND_AGENT_13308_SHA256=PASS' -or
+             $results -cnotcontains 'R83_EXTERNAL_PYTHON_GIT_OR_INSTALLER_REQUIRED=NO' -or
+             $results -ccontains 'R83_RESULT=HOLD_NO_MUTATION_NO_AUTO_RETRY'){
+            throw 'R83_NATIVE_POWERSHELL_IMMUTABLE_REMOTE_SOURCE_NOT_VERIFIED'
+          }
+          if((git status --porcelain -uno) -cne $before){throw 'R83_TEST_CHANGED_TRACKED_SOURCE_FILES'}
+          Write-Host 'R83_WIN51_ONLY_SOURCE_ADMISSION_AND_USER_ORIGINALS_UNTOUCHED=PASS'
