@@ -103,14 +103,17 @@ try {
     $cliPin='OTHER_OR_UNVERIFIED'
     try {
       $cliDigest=(Get-FileHash -LiteralPath $cliPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
-      if($cliDigest -ceq '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+      if($cliDigest -ceq '85576d80b04ef8922a7f7fe3befbf9fcc56025dfb699b21339b546893742f0c1'){
+        $cliPin='OFFICIAL_2462'
+        $cliVer='2.46.2'
+      }elseif($cliDigest -ceq '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
         $cliPin='OFFICIAL_2464'
         $cliVer='2.46.4'
       }
       # Another CLI version can be reported by the installed binary, but
       # is never considered source-authenticated by this inspection.
     }catch{$cliPin='HASH_UNREADABLE'}
-    if($cliPin -ne 'OFFICIAL_2464'){
+    if($cliPin -cnotin @('OFFICIAL_2462','OFFICIAL_2464')){
       # Version probing executes the existing user's CLI -v (non-mutating
       # command); do not run unknown linked paths or elevated programs.
       try {
@@ -135,7 +138,7 @@ try {
     $max=Ver3 $upper
     if($spotifySigner -cne 'VALID_SPOTIFY_AB'){$supported='UNVERIFIED_SPOTIFY_SIGNER'}
     elseif($candidate -lt $min -or $candidate -gt $max){$supported='OUTSIDE_SUPPORTED_RANGE'}
-    elseif($cliPin -ne 'OFFICIAL_2464'){$supported='VERSION_RANGE_ONLY_CLI_UNPINNED'}
+    elseif($cliPin -cnotin @('OFFICIAL_2462','OFFICIAL_2464')){$supported='VERSION_RANGE_ONLY_CLI_UNPINNED'}
     else{$supported='OFFICIALLY_SUPPORTED_RANGE'}
   }
   Add 'KNOWN_WINDOWS_COMPAT_MAX' $upper
@@ -201,7 +204,7 @@ try {
 }finally{
   $out.Add('AUTHORIZE_DEPLOY=NO;AUTOMATIC_RETRY=NO;OWNER_SOURCE_CHANGE=NO')
   $out.Add('RAW_PATHS_SECRETS_PID_AND_PROCESS_ARGS_OUTPUT=NO')
-  $out.Add('CURRENT_STABLE_RELEASE=V0628;NEXT_RELEASE=NOT_PUBLISHED')
+  $out.Add('PUBLIC_BASELINE_RELEASE=V0628;NEXT_RELEASE=NOT_PUBLISHED')
   try{Set-Clipboard -Value ($out -join [Environment]::NewLine) -ErrorAction Stop}catch{}
   $out | ForEach-Object {Write-Output $_}
 }
