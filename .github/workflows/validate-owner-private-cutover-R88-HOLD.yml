@@ -1,0 +1,41 @@
+name: HOLD R88 native real-Windows owner private offline one-shot readiness and refusal
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-owner-private-cutover-R88-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-private-offline-R88-HOLD.ps1
+permissions: {contents: read}
+jobs:
+  r88-unapproved-windows-owner-refusal:
+    runs-on: windows-2025
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native PowerShell 5.1 syntax, frozen embedded R27/R77 identity and owner approval denial
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-private-offline-R88-HOLD.ps1'
+          $tokens=$null;$parseErrors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $p),[ref]$tokens,[ref]$parseErrors)
+          if(@($parseErrors).Count -gt 0){
+            $parseErrors|ForEach-Object{Write-Output ('R88_PS51_SYNTAX='+$_.Message)}
+            throw 'R88_NATIVE_PS51_PARSE_FAILED'
+          }
+          $stage=Join-Path $env:LOCALAPPDATA 'SpotifyControlCanary-offline-ready-00000000000000000000000000000000'
+          $rows=@(& $p -PrivateOfflineReadyPath $stage -Commit)
+          $rows|ForEach-Object{Write-Output $_}
+          if($rows -cnotcontains 'RESULT=HOLD_NO_AUTOMATIC_RETRY' -or
+             $rows -cnotcontains 'HOLD_REASON=OWNER_ONE_SHOT_APPROVAL_REQUIRED' -or
+             $rows -cnotcontains 'EXACT_INITIAL_CUTOVER_DONE=NO' -or
+             $rows -cnotcontains 'OFFICIAL_UPDATE_INVOKED_SUCCESS=NO' -or
+             $rows -cnotcontains 'PUBLIC_MAIN_RELEASE=UNCHANGED_BY_R88'){
+            throw 'R88_NO_APPROVAL_DID_NOT_FAIL_CLOSED'
+          }
+          if(@(Get-ChildItem -LiteralPath $env:LOCALAPPDATA -Directory -Filter 'SpotifyControlCanary-*' -ErrorAction Stop).Count -ne 0){
+            throw 'R88_UNAPPROVED_EXECUTION_STAGED_OR_MUTATED'
+          }
+          Write-Output 'R88_EMBEDDED_R27_R77_PINNED_AND_NATIVE_PS51_PARSE=PASS'
+          Write-Output 'R88_OWNER_NO_APPROVAL_PREMUTATION_BLOCK=PASS'
+          Write-Output 'R88_ACTUAL_OWNER_OPERATING_UPDATE=NOT_PERFORMED'
