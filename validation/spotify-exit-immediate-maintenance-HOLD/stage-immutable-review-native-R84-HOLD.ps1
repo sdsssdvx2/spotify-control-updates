@@ -314,8 +314,8 @@ try {
 }catch{
   CleanOwnIncompleteStage $stageScratch
   $reason=[string]$_.Exception.Message
-  if($reason -cnotmatch '^R8[34]_[A-Z0-9_]{5,95}
-    $reason='R83_NETWORK_OR_SOURCE_UNVERIFIED'
+  if($reason -cnotmatch '^R8[34]_[A-Z0-9_]{5,95}$'){
+    $reason='R84_NETWORK_OR_SOURCE_UNVERIFIED'
   }
   $log.Add('FAILED_PHASE='+$phase)
   $log.Add('HOLD_REASON='+$reason)
@@ -325,16 +325,5 @@ try {
   $log.Add('ORIGINAL_BOOTSTRAP_AND_RESIDENT_PROCESS=UNCHANGED')
   $log.Add('PUBLIC_MAIN_AND_HOLD_RELEASE=UNCHANGED')
   try{Set-Clipboard -Value ($log -join [Environment]::NewLine) -ErrorAction Stop}catch{}
-  $log|ForEach-Object{Write-Output $_}
-}
-){
-    $reason='R83_NETWORK_OR_SOURCE_UNVERIFIED'
-  }
-  $log.Add('FAILED_PHASE='+$phase)
-  $log.Add('HOLD_REASON='+$reason)
-  $log.Add('R83_RESULT=HOLD_NO_MUTATION_NO_AUTO_RETRY')
-}finally{
-  $log.Add('OPERATING_SPOTIFY_SPICETIFY_USER_STATE=UNCHANGED')
-  $log.Add('PUBLIC_MAIN_AND_HOLD_RELEASE=UNCHANGED')
   $log|ForEach-Object{Write-Output $_}
 }
