@@ -131,9 +131,16 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $test=Join-Path $env:RUNNER_TEMP 'spotify-r43-integrated-real-owner-cutover.ps1'
+          $ErrorActionPreference='Continue'
           $outputs=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test 2>&1)
           $exitCode=$LASTEXITCODE
-          $outputs | ForEach-Object {Write-Output $_}
+          $ErrorActionPreference='Stop'
+          $outputs | ForEach-Object {
+            $line=[string]$_
+            if($line -cmatch '^(R91_R90_SAFE_RECEIPT_|R91_|R89_|R87_|R28_|FUTURE_OFFICIAL_BOOTSTRAP_)'){
+              Write-Output $line
+            }
+          }
           if($exitCode -ne 0){throw 'R87_NATIVE_OWNER_AND_PRIVATE_BOOTSTRAP_EXIT_NONZERO'}
           foreach($required in @(
             'R87_NO_HTTP_SERVER_OFFLINE_FILE_URI_ONLY=PASS',
