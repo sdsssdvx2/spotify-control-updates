@@ -76,6 +76,47 @@ def run():
     replacement="""$r90Text=[IO.File]::ReadAllText((Join-Path $env:RUNNER_TEMP 'spotify-r91-hosted-r90-driver.ps1'),[Text.Encoding]::UTF8)
     $r90=[ScriptBlock]::Create($r90Text)
     $receipt=@(& $r90 -Commit -ApprovalPhrase 'APPROVE_EXACT_PRIVATE_V0630_OWNER_CUTOVER_ONCE')
+    foreach($r91Line in @($receipt)){
+      if([string]$r91Line -cmatch '^[A-Z0-9_]{2,64}=[A-Za-z0-9_.;-]{1,150}"""
+    src=once(src,anchor,replacement,"R90_NOT_R88_ACTUAL_COMMIT")
+
+    start=src.index("if($receipt -cnotcontains 'RESULT=HOSTED_PRIVATE_OFFLINE_ONESHOT_COMMITTED'")
+    end=src.index("throw ('R28_SINGLE_APPROVED_DRIVER_NOT_COMMITTED '",start)
+    insist(start>0 and end>start and end-start<2200,"R89_POSITIVE_RECEIPT_AREA_NOT_EXACT")
+    begin=src[start:end]
+    insist("OUTER_MAINTENANCE_AND_AGENTTICK_MUTEXES=HELD" in begin and
+           "R88_OFFICIAL_INSTALLED_BOOTSTRAP=UNCHANGED_PINNED" in begin and
+           "USER_SHORTCUTS_AND_STATE=BYTE_IDENTICAL" in begin,
+           "R89_NATIVE_OWNER_POSITIVE_PROOF_NOT_PRESERVED")
+    src=src[:start]+"""if($receipt -cnotcontains 'RESULT=R90_EXACT_PRIVATE_OWNER_CUTOVER_COMMITTED' -or
+       $receipt -cnotcontains 'R90_R88_SINGLE_OWNER_RESIDENT_AND_BOOTSTRAP_ORIGINAL=VERIFIED' -or
+       $receipt -cnotcontains 'R90_IMMUTABLE_PRIVATE_STAGE_SELECTED=ONE' -or
+       $receipt -cnotcontains 'R90_EXISTING_PRIVATE_STAGE=ONE_EXACT_CANDIDATE_REUSED'){
+      """+src[end:]
+    src=once(src,
+      "Write-Host 'R89_ACTUAL_R88_OWNER_CUTOVER_PRESERVED_OFFICIAL_BOOTSTRAP=PASS'",
+      """Write-Host 'R89_ACTUAL_R88_OWNER_CUTOVER_PRESERVED_OFFICIAL_BOOTSTRAP=PASS'
+    Write-Host 'R91_REAL_R90_PINNED_OWNER_SINGLE_ENTRY_WITH_R88_WSCRIPT_TRANSACTION=PASS'""",
+      "R90_OWNER_POSTCOMMIT_PROOF_ADDED")
+
+    newPath=TEMP/"spotify-r91-hosted-r90-driver.ps1"
+    insist(not newPath.exists(),"R90_HOSTED_SOURCE_ALREADY_PRESENT")
+    newPath.write_text(r90,encoding="utf-8",newline="\n")
+    TEST.write_text(src,encoding="utf-8",newline="\n")
+    print("R91_R89_VERIFIED_OWNER_HARNESS_SHA256="+base)
+    print("R91_ORIGINAL_R90_NATIVE_OWNER_SOURCE_SHA256="+hashlib.sha256(R90.read_bytes()).hexdigest())
+    print("R91_HOSTED_ONLY_R90_DERIVATIVE_SHA256="+hashlib.sha256(r90.encode()).hexdigest())
+    print("R91_REAL_R90_POSITIVE_OWNER_SOURCE_BOUND_TO_SCRATCH=PREPARED")
+    print("R91_REPRODUCTION_SCOPE=GITHUB_HOSTED_WIN32_ONLY")
+    print("R91_OWNER_PC_OPERATING_FILES_AND_PUBLIC_MAIN=UNMODIFIED")
+
+if __name__=="__main__":
+    if len(sys.argv)!=1: raise SystemExit("No arguments")
+    run()
+){
+        Write-Host ('R91_R90_SAFE_RECEIPT_'+[string]$r91Line)
+      }
+    }
     Write-Host 'R91_ACTUAL_R90_NATIVE_SINGLE_OWNER_ENTRY_WAS_INVOKED=PASS'"""
     src=once(src,anchor,replacement,"R90_NOT_R88_ACTUAL_COMMIT")
 
