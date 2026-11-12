@@ -50,7 +50,7 @@ def run()->None:
     function R96Once([string[]]$parms){
       $ret=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $r96Source -HostedFixtureRoot $app @parms 2>&1)
       if($LASTEXITCODE -ne 0){throw 'R96_NATIVE_RUNNER_EXITED_NONZERO'}
-      return ,$ret
+      return $ret
     }
     $plan=R96Once @()
     if($plan -cnotcontains 'RESULT=R96_READONLY_OWNER_LOGON_PLAN' -or
