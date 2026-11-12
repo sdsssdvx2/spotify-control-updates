@@ -1,4 +1,4 @@
-"""R98 HOLD: real native Windows guarded owner startup after R90/R94/R96/R97
+"""R98 HOLD: real native Windows guarded owner startup after R90/R94
 scratch. Observe that R98 refuses a second WScript; after exact stop of
 the owned process it starts precisely one new v0.6.30 resident, WMI
 resubscribes, and original transaction/rollback remains unchanged.
@@ -21,15 +21,14 @@ def main():
             os.environ.get("RUNNER_OS")=="Windows" and
             os.environ.get("RUNNER_ENVIRONMENT")=="github-hosted" and
             TEMP.is_dir() and not TEMP.is_symlink(),"HOSTED_WINDOWS_ONLY")
-    require(DRIVER.is_file() and GUARD.is_file(),"R97_DRIVER_AND_R98_GUARD")
+    require(DRIVER.is_file() and GUARD.is_file(),"R94_DRIVER_AND_R98_GUARD")
     s=DRIVER.read_text("utf-8")
-    mark="    Write-Host 'R97_HOSTED_SECOND_WSCRIPT_REMOVED_ORIGINAL_SINGLE_RESIDENT_PRESERVED=PASS'"
+    mark="    Write-Host 'R94_LOGON_STYLE_FRESH_WSCRIPT_ONE_OWNER_RESIDENT_AND_DATA_PRESERVED=PASS'"
     require(s.count(mark)==1 and
             "R94_FRESH_AGENT_NEW_WMI_START_SUBSCRIPTION=PASS" in s and
-            "R97_ACTUAL_SECOND_WSCRIPT_LOGON_STYLE_RESULT=" in s and
             "R93FreshSnapshot 'ROLLBACK'" in s,
-            "ACTUAL_R97_OWNER_WSCRIPT_PROOF_MISSING")
-    addition=r"""    Write-Host 'R97_HOSTED_SECOND_WSCRIPT_REMOVED_ORIGINAL_SINGLE_RESIDENT_PRESERVED=PASS'
+            "ACTUAL_R94_OWNER_WSCRIPT_PROOF_MISSING")
+    addition=r"""    Write-Host 'R94_LOGON_STYLE_FRESH_WSCRIPT_ONE_OWNER_RESIDENT_AND_DATA_PRESERVED=PASS'
     # R98 only tests test-owned ephemeral Win32 process instances.
     $guardSource=(Resolve-Path 'validation/spotify-exit-immediate-maintenance-HOLD/owner-single-resident-logon-guard-R98-HOLD.ps1').Path
     function R98Once(){
@@ -82,7 +81,6 @@ def main():
       throw 'R98_FRESH_GUARD_RESIDENT_SID_NOT_EXACT'
     }
     $newResident=Get-Process -Id ([int]$newCim[0].ProcessId) -ErrorAction Stop
-    Set-Variable -Name newResident -Scope 1 -Value $newResident
     $freshWmi=$false
     for($i=0;$i -lt 40;$i++){
       if(Test-Path -LiteralPath $log -PathType Leaf){
@@ -119,7 +117,7 @@ def main():
             "INJECTION_INCOMPLETE")
     prior=hashlib.sha256(DRIVER.read_bytes()).hexdigest()
     DRIVER.write_text(s,encoding="utf-8",newline="\n")
-    print("R98_PRIOR_R97_WIN32_FIXTURE_SHA256="+prior)
+    print("R98_PRIOR_R94_WIN32_FIXTURE_SHA256="+prior)
     print("R98_GUARDED_OWNER_SKIPS_DUPLICATE_AND_STARTS_ABSENT=PREPARED")
     print("R98_REAL_WINDOWS_LOGON_AND_USER_STARTUP_REGISTRATION=NOT_TESTED")
 
