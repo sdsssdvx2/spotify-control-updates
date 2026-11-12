@@ -83,7 +83,9 @@ jobs:
           $spa=Join-Path $env:APPDATA 'Spotify\Apps\xpui.spa'
           if(-not(Test-Path $spa -PathType Leaf)){throw 'R115_VANILLA_XPUI_MISSING'}
           Write-Host 'R115_REAL_VENDOR_SIGNED_SPOTIFY_136_VANILLA_XPUI=PASS'
-          Remove-Item -LiteralPath $installer -Force
+          # R124 reuses these exact authenticated bytes for the isolated,
+          # genuine standard user's own Spotify installation. Cleanup occurs
+          # immediately after transferring them to its new private scratch.
       - name: Authenticate new official v2.46.5 archive and derive exact executable from pinned bytes
         shell: powershell
         run: |
@@ -398,6 +400,11 @@ jobs:
               throw 'R124_VERIFIED_SPOTIFY_INSTALLER_MISSING'
             }
             [IO.File]::Copy($signedInstaller,(Join-Path $shared 'Spotify136-verified.exe'),$false)
+            if((Get-FileHash -LiteralPath (Join-Path $shared 'Spotify136-verified.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+               'e5ca46ad79de202c8deaf888c26f2a608b9e042142279e0690d589d80640591d'){
+              throw 'R124_STAGE_INSTALLER_READBACK_PIN_FAILED'
+            }
+            Remove-Item -LiteralPath $signedInstaller -Force -ErrorAction Stop
             Write-Host 'R124_VERIFIED_INSTALLER_AND_2464_CODE_STAGED=PASS'
             $runner=Join-Path $shared 'standard-owner-run.ps1'
             $receipt=Join-Path $shared 'receipt.txt'
