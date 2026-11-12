@@ -1,0 +1,106 @@
+name: HOLD R105 native mutation phase evidence (read-only)
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - validation/spotify-exit-immediate-maintenance-HOLD/owner-mutation-outcome-readonly-R105-HOLD.ps1
+      - .github/workflows/validate-owner-mutation-evidence-R105-HOLD.yml
+permissions: {contents: read}
+jobs:
+  native-mutation-observation:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Windows PowerShell 5.1 parse
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/owner-mutation-outcome-readonly-R105-HOLD.ps1'
+          $tokens=$null;$errors=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile($script,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){$errors | ForEach-Object{Write-Host $_.Message};throw 'R105_SYNTAX_INVALID'}
+          $content=Get-Content -LiteralPath $script -Raw
+          foreach($anchor in @(
+            'R105_ACTUAL_SPICETIFY_APPLY_OR_ADDON_CHANGE_SUCCESS=NOT_PROVEN',
+            'MUTATION_PHASE_ENTERED_REPORTED_NOT_SUCCESS_PROOF',
+            'R105_REPORT_DECISION_VS_EXECUTION_NOT_EQUAL=YES',
+            'R105_GITHUB_HOSTED_FIXTURE_ONLY',
+            'R105_OPERATING_APPLICATION_AND_USER_FILES=UNCHANGED')){
+            if(-not $content.Contains($anchor)){throw 'R105_CONTRACT_MISSING'}
+          }
+          Write-Host 'R105_WINDOWS_PS51_PARSE=PASS'
+      - name: Native Windows synthetic reports and failure/staleness classification
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/owner-mutation-outcome-readonly-R105-HOLD.ps1'
+          $root=Join-Path $env:RUNNER_TEMP ('R105-Owner-Scratch-'+[guid]::NewGuid().ToString('N'))
+          [void](New-Item -Path $root -ItemType Directory -ErrorAction Stop)
+          try{
+            $now=[DateTimeOffset]::UtcNow.ToString('o')
+            $st=Join-Path $root 'state.json'
+            $rp=Join-Path $root 'resident-agent-latest.json'
+            function SetFixture([string]$event,[string]$decision,[bool]$entered,[bool]$armed){
+              $state=[pscustomobject]@{
+                schema=20;last_agent_event=$event;last_agent_decision=$decision;
+                last_agent_tick_utc=$now;last_success_utc=$null;
+                agent_mutation_enabled=$armed;pending_maintenance=$true;
+                maintenance_check_healthy=$true;pending_addon_auto_ambiguous=0
+              }
+              $report=[pscustomobject]@{
+                generated_at=$now;spotify_control_version='0.6.30';
+                agent_version='0.1.1';event=$event;decision=$decision;
+                mutation_enabled=$armed;mutation_ran=$entered;
+                pending_maintenance=$true;auto_ambiguous=0
+              }
+              [IO.File]::WriteAllText($st,($state|ConvertTo-Json -Compress),[Text.Encoding]::UTF8)
+              [IO.File]::WriteAllText($rp,($report|ConvertTo-Json -Compress),[Text.Encoding]::UTF8)
+            }
+            SetFixture 'SpotifyExit' 'maintenance-phase-entered' $true $true
+            $entered=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $root)
+            foreach($required in @(
+              'R105_V0630_MAIN=HOSTED_FIXTURE',
+              'R105_MUTATION_PHASE_ADMISSION=REPORTED_ENTERED_NOT_OPERATION_SUCCESS',
+              'R105_AGENT_REPORT_MUTATION_FLAG=MUTATION_PHASE_ENTERED_REPORTED_NOT_SUCCESS_PROOF',
+              'RESULT=MUTATION_PHASE_ENTERED_NO_RESULT_PROOF')){
+              if($entered -cnotcontains $required){$entered|ForEach-Object{Write-Host $_};throw 'R105_ENTERED_CLASSIFICATION_FAILED'}
+            }
+            SetFixture 'SpotifyExit' 'pending-observed-mutation-disarmed' $false $false
+            $disarmed=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $root)
+            foreach($required in @(
+              'R105_LAST_DECISION_CLASS=MUTATION_DISARMED_PENDING',
+              'R105_MUTATION_ENABLED=FALSE_SAVED',
+              'R105_AGENT_REPORT_MUTATION_FLAG=MUTATION_PHASE_NOT_ENTERED_REPORTED',
+              'RESULT=EXIT_DECISION_AND_REPORT_CORRELATED_NO_MUTATION_SUCCESS_CLAIM')){
+              if($disarmed -cnotcontains $required){$disarmed|ForEach-Object{Write-Host $_};throw 'R105_DISARMED_CLASSIFICATION_FAILED'}
+            }
+            SetFixture 'SpotifyExit' 'maintenance-phase-entered' $true $true
+            $other=[pscustomobject]@{
+              generated_at=$now;spotify_control_version='0.6.30';
+              event='Startup';decision='maintenance-phase-entered';
+              mutation_ran=$true
+            }
+            [IO.File]::WriteAllText($rp,($other|ConvertTo-Json -Compress),[Text.Encoding]::UTF8)
+            $stale=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -HostedFixtureRoot $root)
+            if($stale -cnotcontains 'RESULT=EXIT_DECISION_CLASSIFIED_REPORT_UNCORRELATED' -or
+               $stale -ccontains 'R105_MUTATION_PHASE_ADMISSION=REPORTED_ENTERED_NOT_OPERATION_SUCCESS'){
+              $stale|ForEach-Object{Write-Host $_}
+              throw 'R105_UNCORRELATED_REPORT_UNSAFE_PROMOTION'
+            }
+            foreach($l in @($entered+$disarmed+$stale)){
+              if(([string]$l) -match 'R105-Owner-Scratch-|pending-observed-mutation-disarmed' -and
+                 ([string]$l) -notmatch '^R105_LAST_DECISION_CLASS='){
+                throw 'R105_RAW_INPUT_DISCLOSED'
+              }
+            }
+            Write-Host 'R105_NATIVE_MUTATION_PHASE_ADMISSION_NOT_SUCCESS=PASS'
+            Write-Host 'R105_NATIVE_DISARMED_NO_MUTATION_CLASS=PASS'
+            Write-Host 'R105_NATIVE_UNRELATED_REPORT_REFUSED=PASS'
+          }finally{
+            if(Test-Path -LiteralPath $root){Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction Stop}
+          }
+          if(Test-Path -LiteralPath $root){throw 'R105_SCRATCH_CLEANUP_FAILED'}
+          Write-Host 'R105_SCRATCH_CLEANUP=PASS'
+          Write-Host 'R105_OPERATING_OWNER_APP_TASK_REGISTRY=NOT_TOUCHED'
