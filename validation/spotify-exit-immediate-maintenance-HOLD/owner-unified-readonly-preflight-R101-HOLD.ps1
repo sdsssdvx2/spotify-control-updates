@@ -27,17 +27,17 @@ function GitBlob([byte[]]$data){
 }
 function ValueOf([object[]]$lines,[string]$key){
   $pattern=('^'+[regex]::Escape($key)+'=([A-Za-z0-9_.-]{1,115})$')
-  $matches=@($lines|Where-Object {[string]$_ -cmatch $pattern})
-  if($matches.Count -ne 1){return 'UNKNOWN_OR_DUPLICATE'}
-  $line=[string]$matches[0]
+  $foundLines=@($lines|Where-Object {[string]$_ -cmatch $pattern})
+  if($foundLines.Count -ne 1){return 'UNKNOWN_OR_DUPLICATE'}
+  $line=[string]$foundLines[0]
   return $line.Substring($key.Length+1)
 }
 function Status([byte[]]$source,[string]$fixture){
   $script=[ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($source))
   if([string]::IsNullOrEmpty($fixture)){
-    return ,@(& $script -Status)
+    return @(& $script -Status)
   }
-  return ,@(& $script -Status -HostedReadOnlyRoot $fixture)
+  return @(& $script -Status -HostedReadOnlyRoot $fixture)
 }
 try{
   if([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
