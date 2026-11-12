@@ -349,6 +349,7 @@ try{
     $stagedLink=Join-Path $stage 'staged.lnk'
     $receiptCreated=$false
     $linkMoved=$false
+    $sha=''
     try{
       $sh=New-Object -ComObject WScript.Shell -ErrorAction Stop
       $lnk=$sh.CreateShortcut($stagedLink)
@@ -377,7 +378,7 @@ try{
       $linkMoved=$true
       if(-not(OwnedLink $link $agent $wscript $root) -or
          (Hash $link) -cne $sha -or
-         (Hash $receiptPath) -ceq ''){
+         (Get-Content -LiteralPath $receiptPath -Raw -ErrorAction Stop) -cne $json){
         Deny 'R96_OWNER_LINK_READBACK_FAILED'
       }
       $out.Add('R96_COMMIT_RESULT=ONE_EXACT_USER_STARTUP_LINK_CREATED_NOT_LAUNCHED')
