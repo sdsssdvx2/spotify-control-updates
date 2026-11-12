@@ -5,7 +5,7 @@
 # R90 and R99 own their respective writes; R102 refuses to auto-rollback an
 # already committed release if logon registration subsequently fails.
 [CmdletBinding()]
-param([switch]$Prepare,[switch]$Commit,[string]$ApprovalPhrase='')
+param([switch]$Preflight,[switch]$Prepare,[switch]$Commit,[string]$ApprovalPhrase='')
 Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
 $phase='AUTHORIZATION'
@@ -66,13 +66,15 @@ function RequireOneResult([object[]]$rows){
   }
 }
 try{
-  if($Prepare -and $Commit){Deny 'R102_MODES_MUTUALLY_EXCLUSIVE'}
+  if(($Prepare -and $Commit) -or ($Prepare -and $Preflight) -or ($Commit -and $Preflight)){
+    Deny 'R102_MODES_MUTUALLY_EXCLUSIVE'
+  }
   if($Commit){
     if($ApprovalPhrase -cne 'APPROVE_PRIVATE_V0630_AND_GUARDED_LOGON_ONCE'){
       Deny 'R102_EXPLICIT_DUAL_SCOPE_OWNER_APPROVAL_REQUIRED'
     }
   }elseif($ApprovalPhrase -cne ''){Deny 'R102_APPROVAL_WITHOUT_COMMIT_FORBIDDEN'}
-  if(-not($Prepare -or $Commit)){
+  if(-not($Prepare -or $Commit -or $Preflight)){
     $out.Add('NETWORK=NO;FILE_WRITE=NO;PROCESS_CHANGE=NO;STARTUP_CHANGE=NO')
     $out.Add('RESULT=R102_INERT_DEFAULT_REQUIRES_EXPLICIT_MODE')
   }else{
@@ -105,7 +107,95 @@ try{
     RequireOnce $before 'R101_R100_R99_GUARDED_LOGON=NONE'
     RequireOnce $before 'R101_DEPLOY_AUTHORIZED=NO;AUTO_REPAIR=NO;AUTO_RETRY=NO'
     $out.Add('R102_CURRENT_OWNER_BASELINE=READONLY_CONSISTENT_NOT_DEPLOY_AUTHORITY')
-    if($Prepare){
+    $phase='READONLY_R90_STARTUP_ROUTE_INVENTORY'
+    $routes=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r90))) -Status)
+    RequireOneResult $routes
+    RequireOnce $routes 'RESULT=R93_READONLY_POSTFLIGHT_COLLECTED'
+    $startupCertain=$true
+    foreach($key in @('R95_LOGON_STARTUP_SHORTCUTS',
+                      'R95_LOGON_REGISTRY_RUN',
+                      'R95_LOGON_SCHEDULED_TASKS')){
+      $found=@($routes | Where-Object {([string]$_).StartsWith(
+                  ($key+'='),[StringComparison]::Ordinal)})
+      if($found.Count -ne 1){Deny 'R102_STARTUP_ROUTE_INVENTORY_MISSING'}
+      $value=([string]$found[0]).Substring($key.Length+1)
+      if($value -cnotmatch '^[A-Z0-9_]{2,90}
+      $staged=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r90))) -Prepare)
+      RequireOneResult $staged
+      RequireOnce $staged 'RESULT=R90_PREPARED_WITHOUT_OPERATING_UPDATE'
+      $out.Add('R102_PRIVATE_STAGE=R90_PREPARED_NOT_INSTALLED')
+      $out.Add('RESULT=R102_PREPARED_NO_RELEASE_OR_LOGON_CHANGE')
+    }else{
+      $phase='R90_EXPLICIT_RELEASE_COMMIT'
+      $updated=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r90))) -Commit -ApprovalPhrase 'APPROVE_EXACT_PRIVATE_V0630_OWNER_CUTOVER_ONCE')
+      RequireOneResult $updated
+      RequireOnce $updated 'RESULT=R90_EXACT_PRIVATE_OWNER_CUTOVER_COMMITTED'
+      RequireOnce $updated 'R90_R88_SINGLE_OWNER_RESIDENT_AND_BOOTSTRAP_ORIGINAL=VERIFIED'
+      $releaseCommitted=$true
+      $out.Add('R102_RELEASE=R90_COMMITTED_REPORTED_ONLY')
+      # Check the installed version before adding any logon startup entry.
+      $phase='R90_CANDIDATE_POSTFLIGHT'
+      $status=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r90))) -Status)
+      RequireOneResult $status
+      RequireOnce $status 'RESULT=R93_READONLY_POSTFLIGHT_COLLECTED'
+      RequireOnce $status 'R93_CLASSIFICATION=CANDIDATE_FILES_COMMITTED_RESIDENT_CODE_UNATTESTED'
+      RequireOnce $status 'R100_R99_GUARDED_LOGON=NONE'
+      $phase='R99_APPROVED_GUARDED_LOGON_REGISTRATION'
+      $startup=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r99))) -Commit -ApprovalPhrase 'APPROVE_EXACT_ONE_OWNER_LOGON_SHORTCUT_ONCE')
+      RequireOneResult $startup
+      RequireOnce $startup 'RESULT=R99_EXPLICIT_OWNER_LOGON_LINK_REGISTERED'
+      RequireOnce $startup 'R99_COMMIT_RESULT=ONE_GUARDED_USER_STARTUP_LINK_CREATED_NOT_LAUNCHED'
+      $guardRegistered=$true
+      $out.Add('R102_GUARDED_LOGON=R99_OWNER_LINK_CREATED_NOT_LOGON_PROVEN')
+      $phase='R101_FINAL_INDEPENDENT_READONLY_POSTFLIGHT'
+      $after=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r101))))
+      RequireOneResult $after
+      RequireOnce $after 'RESULT=R101_OFFLINE_READONLY_EVIDENCE_COLLECTED'
+      RequireOnce $after 'R101_INSTALLED_STAGE=CANDIDATE_V0630_FILES_EXACT'
+      RequireOnce $after 'R101_R100_R99_GUARDED_LOGON=ONE_OWNED_GUARDED_REGISTERED_NOT_LOGON_PROOF'
+      RequireOnce $after 'R101_OVERALL=CANDIDATE_FILES_GUARDED_LINK_CONSISTENT_REAL_LOGON_UNTESTED'
+      $out.Add('R102_FINAL_OWNER_FILE_AND_GUARDED_LINK=READONLY_CONSISTENT')
+      $out.Add('RESULT=R102_RELEASE_AND_GUARDED_LOGON_COMMITTED_REAL_REBOOT_UNTESTED')
+    }
+  }
+}catch{
+  $reason=[string]$_.Exception.Message
+  if($reason -cnotmatch '^R102_[A-Z0-9_]{5,100}$'){
+    $reason='R102_OWNER_ENVIRONMENT_OR_NESTED_OPERATION_HOLD'
+  }
+  $out.Add('FAILED_PHASE='+$phase)
+  $out.Add('HOLD_REASON='+$reason)
+  if($releaseCommitted){
+    $out.Add('R102_RELEASE=COMMITTED_REPORTED_POSTCOMMIT_REVIEW_REQUIRED')
+    $out.Add('R102_GUARDED_LOGON='+$(if($guardRegistered){'REGISTERED_REPORTED_READBACK_UNCERTAIN'}else{'NOT_CONFIRMED'}))
+    $out.Add('RESULT=R102_PARTIAL_POSTCOMMIT_HOLD_NO_AUTOROLLBACK')
+  }else{
+    $out.Add('RESULT=R102_HOLD_NO_AUTO_RETRY')
+  }
+}finally{
+  $out.Add('R102_REAL_WINDOWS_REBOOT_AND_LOGON=NOT_TESTED')
+  $out.Add('R102_AUTO_ROLLBACK=NO;AUTO_RETRY=NO;DEPLOY=EXPLICIT_APPROVAL_ONLY')
+  $out.Add('RAW_PATHS_SECRETS_PID_AND_PROCESS_ARGS_OUTPUT=NO')
+  try{Set-Clipboard -Value ($out -join [Environment]::NewLine) -ErrorAction Stop}catch{}
+  $out|ForEach-Object{Write-Output $_}
+}){
+        Deny 'R102_STARTUP_ROUTE_VALUE_UNVERIFIED'
+      }
+      $out.Add('R102_'+$key+'='+$value)
+      if($value -cne 'NONE_IN_EXAMINED_SCOPE'){$startupCertain=$false}
+    }
+    $out.Add('R102_GUARDED_STARTUP_ROUTE_ADMISSION='+$(if($startupCertain){
+      'NO_DIRECT_AGENT_AUTOSTART_FOUND'
+    }else{'HOLD_UNVERIFIED_OR_EXISTING_ROUTE'}))
+    if($Preflight){
+      $out.Add('RESULT='+$(if($startupCertain){
+        'R102_READONLY_STARTUP_ROUTE_ADMISSION_NOT_DEPLOY_AUTHORITY'
+      }else{'R102_READONLY_STARTUP_ROUTE_HOLD_NO_CHANGES'}))
+    }elseif(-not $startupCertain){
+      # R99 refuses any unverified direct VBS launch path. Stop before R90
+      # writes a candidate release that might be left without autostart.
+      Deny 'R102_UNVERIFIED_AUTOSTART_BEFORE_RELEASE_BLOCKED'
+    }elseif($Prepare){
       $phase='R90_PREPARE_PRIVATE_STAGE'
       $staged=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r90))) -Prepare)
       RequireOneResult $staged
