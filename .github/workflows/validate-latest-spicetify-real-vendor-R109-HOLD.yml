@@ -4,7 +4,7 @@ on:
     branches: [validate/spotify-exit-immediate-maintenance-HOLD]
     paths:
       - .github/workflows/validate-latest-spicetify-real-vendor-R109-HOLD.yml
-permissions: {contents: read}
+permissions: {contents: read, actions: read}
 jobs:
   real-signed-spotify-and-spicetify-cli:
     runs-on: windows-2025
