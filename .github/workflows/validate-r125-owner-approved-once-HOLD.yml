@@ -94,11 +94,7 @@ jobs:
                $receipt -cnotcontains 'RESULT=HOLD_NO_AUTOMATIC_RETRY' -or
                $receipt -cnotcontains 'SPOTIFY_CONTROL_PUBLIC_MAIN=UNCHANGED' -or
                $receipt -cnotcontains 'ORIGINAL_USER_FILES_DELETED=NO'){
-              $safe=@($receipt | Where-Object {$_ -match '^(HOLD_REASON|FAILED_PHASE|RESULT|SPOTIFY_CONTROL_PUBLIC_MAIN|ORIGINAL_USER_FILES_DELETED)=[A-Z_0-9]+
-            Write-Host ('R125_USER_SCOPE_AND_RECEIPT_'+$case.Label+'=PASS')
-          }
-          Write-Host 'R125_REAL_OWNER_PC_MODIFICATIONS=ZERO_HOSTED_TEST_ONLY'
-})
+              $safe=@($receipt | Where-Object {$_ -match '^(HOLD_REASON|FAILED_PHASE|RESULT|SPOTIFY_CONTROL_PUBLIC_MAIN|ORIGINAL_USER_FILES_DELETED)=[A-Z_0-9]+$'})
               Write-Host ('R125_SCOPE_RECEIPT_SAFE_DIAGNOSTIC='+($safe -join ';'))
               throw ('R125_DYNAMIC_INVOCATION_FAILURE_'+$case.Label)
             }
