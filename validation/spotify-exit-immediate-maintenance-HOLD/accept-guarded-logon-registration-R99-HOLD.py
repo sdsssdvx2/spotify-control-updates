@@ -80,6 +80,17 @@ def main():
     if([string]$record.guard_sha256 -cne $guardBytes.ToLowerInvariant()){
       throw 'R99_RECEIPT_NOT_BOUND_TO_GUARD_SOURCE_HASH'
     }
+    # The existing R90 single-command status must recognize an owned R99
+    # guarded link instead of incorrectly reporting no auto-start route.
+    $r90Status='validation/spotify-exit-immediate-maintenance-HOLD/owner-single-command-offline-R90-HOLD.ps1'
+    $r100=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $r90Status -Status -HostedReadOnlyRoot $app 2>&1)
+    if($LASTEXITCODE -ne 0 -or
+       $r100 -cnotcontains 'RESULT=R93_READONLY_POSTFLIGHT_COLLECTED' -or
+       $r100 -cnotcontains 'R100_R99_GUARDED_LOGON=ONE_OWNED_GUARDED_REGISTERED_NOT_LOGON_PROOF' -or
+       $r100 -cnotcontains 'R100_LOGON_ASSESSMENT=HOSTED_GUARDED_COM_VERIFIED_REAL_LOGON_NOT_TESTED'){
+      throw ('R100_EXACT_R99_GUARDED_OWNER_STATUS_NOT_RECOGNIZED '+(@($r100|Where-Object{$_ -match '^R100_'}) -join ';'))
+    }
+    Write-Host 'R100_SINGLE_COMMAND_OWNER_R99_GUARDED_STARTUP_READONLY_RECOGNITION=PASS'
     $noSecond=R99Once @()
     if($noSecond -cnotcontains 'R99_PLAN=OWNED_GUARDED_LOGON_LINK_PRESENT_EXECUTION_UNVERIFIED'){
       throw 'R99_OWNER_REGISTRATION_PLAN_AFTER_COMMIT_MISMATCH'
@@ -116,6 +127,13 @@ def main():
        (Test-Path -LiteralPath $ownerReceipt)){
       throw ('R99_EXACT_GUARD_LINK_RECEIPT_REVOKE_INCOMPLETE '+(@($removed|Where-Object {$_ -match '^(HOLD_REASON|R99_)='}) -join ';'))
     }
+    $r100Gone=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $r90Status -Status -HostedReadOnlyRoot $app 2>&1)
+    if($LASTEXITCODE -ne 0 -or
+       $r100Gone -cnotcontains 'R100_R99_GUARDED_LOGON=NONE' -or
+       $r100Gone -cnotcontains 'R100_LOGON_ASSESSMENT=NO_GUARDED_R99_REGISTRATION'){
+      throw 'R100_OWNER_GUARDED_REGISTRATION_NOT_REMOVED_IN_STATUS'
+    }
+    Write-Host 'R100_SINGLE_COMMAND_OWNER_GUARDED_LINK_REVOKE_REFLECTED=PASS'
     foreach($item in @(@{path=$main;sha=$mainFingerprint},
         @{path=$agent;sha=$agentFingerprint},
         @{path=$journal;sha=$journalFingerprint})){
