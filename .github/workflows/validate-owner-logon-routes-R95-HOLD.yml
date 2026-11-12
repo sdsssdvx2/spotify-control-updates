@@ -1,0 +1,90 @@
+name: HOLD R95 read-only Windows logon startup registry scheduled-task and synthetic shortcut route classification
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-owner-logon-routes-R95-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/owner-single-command-offline-R90-HOLD.ps1
+permissions: {contents: read}
+jobs:
+  exact-current-user-startup-audit:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native PS5.1 exact user startup shortcuts negative and positive without any real registry or task writes
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $source='validation/spotify-exit-immediate-maintenance-HOLD/owner-single-command-offline-R90-HOLD.ps1'
+          $raw=Get-Content -LiteralPath $source -Raw -Encoding UTF8
+          $raw=$raw.Replace(([string][char]13+[string][char]10),[string][char]10)
+          $tok=$null;$issues=$null
+          [void][Management.Automation.Language.Parser]::ParseInput($raw,[ref]$tok,[ref]$issues)
+          if(@($issues).Count -gt 0){
+            $issues|ForEach-Object{Write-Output $_.Message}
+            throw 'R95_NATIVE_COMPLETE_R90_PS51_SYNTAX_FAILED'
+          }
+          $start=$raw.IndexOf('# R95: observe, never create or change Windows logon registrations.',[StringComparison]::Ordinal)
+          $end=$raw.IndexOf(([string][char]10+'try{'+[string][char]10+'  if($Status){'),$start,[StringComparison]::Ordinal)
+          if($start -lt 0 -or $end -le $start -or $end-$start -lt 3000 -or $end-$start -gt 11000){
+            throw 'R95_EXACT_PRODUCTION_HELPER_FUNCTION_RANGE_NOT_FOUND'
+          }
+          $fn=[ScriptBlock]::Create($raw.Substring($start,$end-$start))
+          . $fn
+          $folder=Join-Path $env:RUNNER_TEMP ('R95TestOnlyStartup-'+[guid]::NewGuid().ToString('N'))
+          if(Test-Path -LiteralPath $folder){throw 'R95_HOSTED_TEST_STARTUP_PREEXISTS'}
+          [void][IO.Directory]::CreateDirectory($folder)
+          $shell=New-Object -ComObject WScript.Shell
+          $wscript=Join-Path $env:WINDIR 'System32\wscript.exe'
+          $agent='C:\R95SyntheticNotInstalled\bin\spotify-control-agent.vbs'
+          function WriteFakeShortcut([string]$name,[string]$arg){
+            $path=Join-Path $folder $name
+            $link=$shell.CreateShortcut($path)
+            $link.TargetPath=$wscript
+            $link.Arguments=$arg
+            $link.WorkingDirectory=$folder
+            $link.Save()
+          }
+          try{
+            $none=R95Shortcuts @($folder) $agent $wscript
+            if($none -cne 'NONE_IN_EXAMINED_SCOPE'){throw 'R95_FRESH_FOLDER_FALSE_AUTO_START'}
+            WriteFakeShortcut 'managed-1.lnk' ('"'+$agent+'"')
+            $one=R95Shortcuts @($folder) $agent $wscript
+            if($one -cne 'ONE_EXACT_REGISTERED_NOT_EXECUTION_PROOF'){
+              throw ('R95_VALID_MANAGED_LINK_NOT_MATCHED_'+$one)
+            }
+            WriteFakeShortcut 'unrelated.lnk' '"C:\UnrelatedSynthetic.vbs"'
+            if((R95Shortcuts @($folder) $agent $wscript) -cne $one){
+              throw 'R95_FOREIGN_USER_SHORTCUT_MISTAKEN_FOR_AUTOSTART'
+            }
+            WriteFakeShortcut 'managed-2.lnk' ('//B //NoLogo "'+$agent+'"')
+            $two=R95Shortcuts @($folder) $agent $wscript
+            if($two -cne 'MULTIPLE_EXACT_ROUTES'){
+              throw ('R95_TWO_MANAGED_STARTUP_ROUTES_NOT_CAUGHT_'+$two)
+            }
+            Remove-Item -LiteralPath (Join-Path $folder 'managed-2.lnk') -Force
+            WriteFakeShortcut 'ambiguous.lnk' ('//B "'+$agent+'" -unexpected')
+            $ambiguity=R95Shortcuts @($folder) $agent $wscript
+            if($ambiguity -cne 'ONE_EXACT_PLUS_UNVERIFIED'){
+              throw ('R95_FOREIGN_OR_WRAPPER_AMBIGUITY_NOT_REPORTED_'+$ambiguity)
+            }
+            $reg=R95RunRegistry $agent $wscript
+            $task=R95ScheduledLogon $agent $wscript
+            foreach($value in @($reg,$task)){
+              if($value -cnotin @('NONE_IN_EXAMINED_SCOPE','UNVERIFIED','UNKNOWN')){
+                throw 'R95_SYNTHETIC_AGENT_MATCHED_UNEXPECTED_REAL_AUTOSTART'
+              }
+            }
+            Write-Output 'R95_NATIVE_REAL_WIN32_COM_STARTUP_LINK=ONE_EXACT_REGISTERED_NOT_EXECUTION_PROOF'
+            Write-Output 'R95_FOREIGN_USER_SHORTCUT_UNTOUCHED_AND_UNCOUNTED=PASS'
+            Write-Output 'R95_DUPLICATE_STARTUP_AND_AMBIGUOUS_ARGS=DETECTED'
+            Write-Output 'R95_USER_RUN_REGISTRY_AND_SCHEDULED_LOGON_READONLY=PASS'
+            Write-Output 'R95_NO_ACTUAL_USER_LOGON_OR_BOOT_WAS_PERFORMED=YES'
+          }finally{
+            Remove-Item -LiteralPath $folder -Recurse -Force -ErrorAction SilentlyContinue
+            if(Test-Path -LiteralPath $folder){
+              throw 'R95_SYNTHETIC_STARTUP_FOLDER_NOT_CLEANED'
+            }
+          }
+          Write-Output 'R95_NATIVE_READONLY_AUTOSTART_SNAPSHOT_AND_HOSTED_CLEANUP=PASS'
