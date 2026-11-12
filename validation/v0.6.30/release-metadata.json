@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "version": "0.6.30",
+  "from_version": "0.6.28",
+  "source_commit": "27c3bbd2935c8568ee6d260085d8008aec5e173a",
+  "review_manifest_git_blob": "d858a7ea170d6df9ffe0b435a6e93dfec01549f8",
+  "official_bootstrap_sha256": "d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6",
+  "payload_set_sha256": "fb2bf4d27991e27b67c00d1df3efcc36166369d079173f9978c35f43a6e93fb8",
+  "files": {
+    "bin/spotify-control.ps1": {
+      "size": 294101,
+      "sha256": "b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92232d"
+    },
+    "bin/spotify-control-agent.vbs": {
+      "size": 13308,
+      "sha256": "e56609ed8927512595f55c01ea50dbb9c8c59e4a2c86dcb3d16195a565c604d5"
+    },
+    "bin/addon-manager.ps1": {
+      "size": 323385,
+      "sha256": "5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285"
+    }
+  },
+  "release_provenance": {
+    "r70_windows_full_owner_transport_ci": "42991222040",
+    "r73_signed_spotify_full_main_ci": "42996018531",
+    "r75_official_spicetify_2464_compatibility_ci": "pending_evidence_not_release_authority",
+    "r102_owner_private_cutover_ci": "43224292357",
+    "r102_owner_private_cutover_result": "R102_RELEASE_COMMITTED_EXISTING_LOGON_TASK_PRESERVED_REAL_LOGON_UNTESTED"
+  },
+  "protected_policy": {
+    "new_automatic_install_authority": false,
+    "ownership_migration_authorized": false,
+    "direct_copy_cleanup_authorized": false,
+    "disable_or_optimize_authorized": false,
+    "current_spotify_138_spicetify_2464_compatible": false
+  },
+  "publication_state": "REVIEW_ONLY_NOT_PUBLIC_MAIN"
+}
