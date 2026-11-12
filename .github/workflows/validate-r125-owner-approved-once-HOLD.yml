@@ -69,3 +69,29 @@ jobs:
           }
           Write-Host 'R125_R112_TWO_FUNCTION_BYTE_IDENTICAL=PASS'
           Write-Host 'R125_NO_PRODUCTION_WINDOWS_OR_HOSTED_OWNER_MUTATIONS=PASS'
+      - name: Reproduce user ScriptBlock.Create invocation with no approval and admin admission
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-r112-spicetify-v2467-onepass-R125-HOLD.ps1'
+          $data=[IO.File]::ReadAllText($script,[Text.Encoding]::UTF8)
+          foreach($case in @(
+            @{Label='NO_APPROVAL';Args=@('-Mode','Once');Expected='R125_EXPLICIT_APPROVAL_REQUIRED'},
+            @{Label='ADMIN_REFUSAL';Args=@('-Mode','Once','-ApprovalPhrase','APPROVE_R125_ONCE_SPOTIFY_CONTROL_AND_SPICETIFY');Expected='R125_STANDARD_OWNER_REQUIRED'}
+          )){
+            $actual=@()
+            $b=[ScriptBlock]::Create($data)
+            if($case.Label -ceq 'NO_APPROVAL'){
+              $actual=@(& $b -Mode Once)
+            }else{
+              $actual=@(& $b -Mode Once -ApprovalPhrase 'APPROVE_R125_ONCE_SPOTIFY_CONTROL_AND_SPICETIFY')
+            }
+            if($actual -cnotcontains ('HOLD_REASON='+$case.Expected) -or
+               $actual -cnotcontains 'RESULT=HOLD_NO_AUTOMATIC_RETRY' -or
+               $actual -cnotcontains 'SPOTIFY_CONTROL_PUBLIC_MAIN=UNCHANGED' -or
+               $actual -cnotcontains 'ORIGINAL_USER_FILES_DELETED=NO'){
+              throw ('R125_DYNAMIC_INVOCATION_FAILURE_'+$case.Label)
+            }
+            Write-Host ('R125_USER_SCOPE_AND_RECEIPT_'+$case.Label+'=PASS')
+          }
+          Write-Host 'R125_REAL_OWNER_PC_MODIFICATIONS=ZERO_HOSTED_TEST_ONLY'
