@@ -490,9 +490,17 @@ jobs:
               & $cli --no-restart config spotify_path $vendor prefs_path $prefs *> $null
               if($LASTEXITCODE -ne 0){throw 'R124_STANDARD_USER_CLI_CONFIG_FAILED'}
               $phase='PREAPPLY'
+              # Use a bounded real CLI process. PowerShell 5.1 redirection
+              # with ErrorAction=Stop can interrupt native exit-code capture.
               $privateCliLog=Join-Path $Shared 'CLI-Preapply-PRIVATE.txt'
-              & $cli --no-restart backup apply *> $privateCliLog
-              if($LASTEXITCODE -ne 0){
+              $privateCliError=Join-Path $Shared 'CLI-Preapply-ERR-PRIVATE.txt'
+              $cliProc=Start-Process -FilePath $cli -ArgumentList @('--no-restart','backup','apply') -RedirectStandardOutput $privateCliLog -RedirectStandardError $privateCliError -PassThru
+              if(-not $cliProc.WaitForExit(100000)){
+                Stop-Process -Id $cliProc.Id -Force -ErrorAction SilentlyContinue
+                $preapplyCode='OFFICIAL_CLI_TIMEOUT'
+                throw 'R124_STANDARD_USER_2464_BACKUP_APPLY_TIMEOUT'
+              }
+              if($cliProc.ExitCode -ne 0){
                 $preapplyCode='OFFICIAL_CLI_EXIT_NONZERO'
                 throw 'R124_STANDARD_USER_2464_BACKUP_APPLY_FAILED'
               }
@@ -535,7 +543,7 @@ jobs:
           }
           finally{
             if($preapplyCode -cin @('NONE','OFFICIAL_CLI_EXIT_NONZERO','BACKUP_FILES_ABSENT',
-              'BACKUP_METADATA_MISMATCH','PREAPPLY_UNCLASSIFIED_EXCEPTION')){
+              'BACKUP_METADATA_MISMATCH','PREAPPLY_UNCLASSIFIED_EXCEPTION','OFFICIAL_CLI_TIMEOUT')){
               [IO.File]::WriteAllText((Join-Path $Shared 'preapply-code.txt'),$preapplyCode,
                 (New-Object Text.UTF8Encoding($false)))
             }
@@ -575,16 +583,24 @@ jobs:
             if(Test-Path $prePath -PathType Leaf){
               $preCandidate=[IO.File]::ReadAllText($prePath).Trim()
               if($preCandidate -cin @('NONE','OFFICIAL_CLI_EXIT_NONZERO','BACKUP_FILES_ABSENT',
-                'BACKUP_METADATA_MISMATCH','PREAPPLY_UNCLASSIFIED_EXCEPTION')){
+                'BACKUP_METADATA_MISMATCH','PREAPPLY_UNCLASSIFIED_EXCEPTION','OFFICIAL_CLI_TIMEOUT')){
                 $preCode=$preCandidate
               }
             }
             Write-Host ('R124_STANDARD_PREAPPLY_CAUSE='+$preCode)
             $privateCli=Join-Path $shared 'CLI-Preapply-PRIVATE.txt'
             $safeHints=New-Object 'System.Collections.Generic.List[string]'
-            if(Test-Path $privateCli -PathType Leaf){
-              $cliText=[IO.File]::ReadAllText($privateCli)
-              if($cliText.Length -gt 2097152){throw 'R124_PRIVATE_CLI_LOG_SIZE_INVALID'}
+            $privateErr=Join-Path $shared 'CLI-Preapply-ERR-PRIVATE.txt'
+            if((Test-Path $privateCli -PathType Leaf) -or (Test-Path $privateErr -PathType Leaf)){
+              $cliText=''
+              foreach($p in @($privateCli,$privateErr)){
+                if(Test-Path $p -PathType Leaf){
+                  if((Get-Item -LiteralPath $p -Force).Length -gt 1048576){
+                    throw 'R124_PRIVATE_CLI_LOG_SIZE_INVALID'
+                  }
+                  $cliText+=([IO.File]::ReadAllText($p))
+                }
+              }
               foreach($v in @(
                 @('ADMIN_REFUSED','(?i)administrator|bypass.admin'),
                 @('FILE_ACCESS','(?i)access.denied|permission.denied|unauthorized'),
