@@ -1,0 +1,88 @@
+name: HOLD v0.6.30 stable channel promotion readiness (no publication)
+on:
+  push:
+    branches: [hold/spotify-v0630-boot-wmi-review-only]
+    paths:
+      - validation/v0.6.30/build_v0630.py
+      - validation/v0.6.30/release-metadata.json
+      - .github/workflows/validate-v0630-stable-promotion-review-HOLD.yml
+permissions: {contents: read}
+jobs:
+  stable-publication-readiness:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Freeze owner-first stable base and release-candidate identity
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'V0630_STABLE_BASE_MUST_NOT_MOVE_UNREVIEWED'
+          }
+          if((git merge-base 27c3bbd2935c8568ee6d260085d8008aec5e173a HEAD).Trim() -cne
+             '27c3bbd2935c8568ee6d260085d8008aec5e173a'){
+            throw 'V0630_SOURCE_COMMIT_NOT_AN_ANCESTOR'
+          }
+          $m=Get-Content -LiteralPath manifest.json -Raw | ConvertFrom-Json
+          if($m.latest_version -cne '0.6.30' -or
+             $m.source_commit -cne '27c3bbd2935c8568ee6d260085d8008aec5e173a' -or
+             @($m.updates[-1].patches).Count -ne 2){
+            throw 'V0630_REVIEW_MANIFEST_UNEXPECTED'
+          }
+          Write-Host 'V0630_REVIEW_SOURCE_AND_BASE_IDENTITIES=PASS'
+      - name: Reuse full stable manifest validator for all historical update paths
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python validation/stable/validate_stable.py
+          if($LASTEXITCODE -ne 0){throw 'V0630_STABLE_COMPLETE_MANIFEST_INTEGRITY_FAILED'}
+          Write-Host 'V0630_WHOLE_MANIFEST_AND_CHUNKS=PASS'
+      - name: Reconstruct exact product bytes and upstream protected addon from immutable history
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='validation/v0.6.30/build_v0630.py'
+          python -m py_compile $base
+          if($LASTEXITCODE -ne 0){throw 'V0630_BUILDER_SYNTAX_FAILED'}
+          python $base --validate-published
+          if($LASTEXITCODE -ne 0){throw 'V0630_EXACT_PRIVATE_CANARY_AND_PUBLIC_GRAPH_MISMATCH'}
+          python $base --build
+          if($LASTEXITCODE -ne 0){throw 'V0630_DETERMINISTIC_RECONSTRUCTION_FAILED'}
+          $root='validation/v0.6.30/out/bin'
+          $expected=@{
+            'spotify-control.ps1'='b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92232d'
+            'spotify-control-agent.vbs'='e56609ed8927512595f55c01ea50dbb9c8c59e4a2c86dcb3d16195a565c604d5'
+            'addon-manager.ps1'='5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285'
+          }
+          foreach($key in $expected.Keys){
+            $file=Join-Path $root $key
+            if(-not(Test-Path -LiteralPath $file -PathType Leaf) -or
+               (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected[$key]){
+              throw 'V0630_FINAL_PRODUCT_BYTES_DIFFER_FROM_APPROVED_PRIVATE_CANARY'
+            }
+            if($key.EndsWith('.ps1')){
+              $tokens=$null;$errors=$null
+              $null=[Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors)
+              if(@($errors).Count -ne 0){throw 'V0630_NATIVE_PRODUCT_PS51_PARSE_FAILED'}
+            }
+          }
+          Write-Host 'V0630_FINAL_PRIVATE_OWNER_IDENTICAL_FILE_PINS_AND_PS51_PARSE=PASS'
+      - name: Prove existing public stable CI layout is now complete without publication
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='validation/v0.6.30'
+          $builders=@(Get-ChildItem -LiteralPath $root -Filter 'build_v*.py' -File)
+          $metadata=@(Get-ChildItem -LiteralPath $root -File | Where-Object{
+            $_.Name -in @('candidate-metadata.json','release-metadata.json')
+          })
+          if($builders.Count -ne 1 -or $metadata.Count -ne 1){
+            throw 'V0630_EXISTING_STABLE_CI_RELEASE_LAYOUT_INCOMPLETE'
+          }
+          git diff --exit-code -- manifest.json manifest.schema.json packages/v0.6.30 validation/v0.6.30/release-metadata.json
+          if($LASTEXITCODE -ne 0){throw 'V0630_PINNED_PUBLICATION_INPUT_MUTATED'}
+          Write-Host 'V0630_EXISTING_STABLE_MAIN_RELEASE_LAYOUT_AND_REBUILD_CONTRACT=PASS'
+          Write-Host 'V0630_PRODUCTION_MAIN_WRITE=NO;PUBLIC_RELEASE_PUBLISHED=NO;OWNER_WINDOWS_MODIFIED=NO'
+          Write-Host 'V0630_REAL_WINDOWS_LOGIN_AND_MUTATION=NOT_TESTED'
