@@ -71,7 +71,7 @@ jobs:
           (root/"R112-exact-bootstrap-106.ps1").write_bytes(data)
           print("R112_OFFICIAL_BOOTSTRAP=EXACT_SHA_PASS")
           PY
-      - name: Native Windows branch matrix: authentic ahead, network error, tampered bootstrap, manifest mismatch, old version
+      - name: "Native Windows branch matrix: authentic ahead, network error, tampered bootstrap, manifest mismatch, old version"
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
