@@ -1,0 +1,119 @@
+name: HOLD R106 compatible Spotify and real Spicetify backup-apply-restore
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-real-compatible-spicetify-R106-HOLD.yml
+permissions: {contents: read}
+jobs:
+  real-vendor-scratch:
+    runs-on: windows-2025
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Immutable publisher-signed compatible Spotify 1.3.6 from archival cache
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows' -or
+             $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or
+             (Test-Path (Join-Path $env:APPDATA 'Spotify')) -or
+             @(Get-Process Spotify -ErrorAction SilentlyContinue).Count -ne 0){
+            throw 'R106_NOT_CLEAN_EPHEMERAL_WINDOWS_HOST'
+          }
+          $installer=Join-Path $env:RUNNER_TEMP 'R106-Spotify136-signed.exe'
+          $url='https://loadspot.amd64fox1.workers.dev/download/spotify_installer-1.3.6.1921.g7086c071a617-x64.exe'
+          & curl.exe --fail --location --silent --show-error --connect-timeout 20 --max-time 240 --output $installer $url
+          if($LASTEXITCODE -ne 0){throw 'R106_COMPATIBLE_ARCHIVE_UNAVAILABLE'}
+          if((Get-Item $installer).Length -lt 20000000 -or (Get-Item $installer).Length -gt 250000000){
+            throw 'R106_ARCHIVE_SIZE_UNEXPECTED'
+          }
+          # Pin originally published Spotify x64 version via its WinGet SHA.
+          $expected='e5ca46ad79de202c8deaf888c26f2a608b9e042142279e0690d589d80640591d'
+          if((Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected){
+            throw 'R106_ORIGINAL_SPOTIFY_136_PUBLISHED_SHA_MISMATCH'
+          }
+          $sig=Get-AuthenticodeSignature -LiteralPath $installer
+          if($sig.Status -ne 'Valid' -or $null -eq $sig.SignerCertificate -or
+             $sig.SignerCertificate.Subject -cnotmatch '(?i)(^|,)\s*O=Spotify AB(,|$)'){
+            throw 'R106_SIGNED_PUBLISHER_CERTIFICATE_NOT_VERIFIED'
+          }
+          Write-Host 'R106_VERIFIED_OFFICIAL_SPOTIFY_136_INSTALLER_BYTES_AND_SIGNATURE=PASS'
+          $p=Start-Process -FilePath $installer -ArgumentList @('/silent','/skip-app-launch') -PassThru
+          if(-not $p.WaitForExit(140000)){Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue;throw 'R106_SPOTIFY_INSTALL_TIMEOUT'}
+          if($p.ExitCode -ne 0){throw 'R106_SPOTIFY_INSTALL_FAILED'}
+          $exe=Join-Path $env:APPDATA 'Spotify\Spotify.exe'
+          if(-not(Test-Path $exe -PathType Leaf)){throw 'R106_NO_SIGNED_INSTALLATION'}
+          $sig=Get-AuthenticodeSignature -LiteralPath $exe
+          $v=[Diagnostics.FileVersionInfo]::GetVersionInfo($exe).ProductVersion
+          if($sig.Status -ne 'Valid' -or $null -eq $sig.SignerCertificate -or
+             $sig.SignerCertificate.Subject -cnotmatch '(?i)(^|,)\s*O=Spotify AB(,|$)' -or
+             [string]$v -cnotmatch '^1\.3\.6\.1921(\.|$)'){
+            throw 'R106_SIGNED_INSTALLED_136_VERSION_CHANGED'
+          }
+          if(@(Get-Process Spotify -ErrorAction SilentlyContinue).Count -ne 0){
+            throw 'R106_UNEXPECTED_SPOTIFY_AUTO_LAUNCH'
+          }
+          $spa=Join-Path $env:APPDATA 'Spotify\Apps\xpui.spa'
+          if(-not(Test-Path $spa -PathType Leaf)){throw 'R106_VANILLA_XPUI_MISSING'}
+          Write-Host 'R106_REAL_VENDOR_SIGNED_SPOTIFY_136_VANILLA_XPUI=PASS'
+          Remove-Item -LiteralPath $installer -Force
+      - name: Official exact Spicetify 2.46.4 binary plus real backup-apply-restore
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $zip=Join-Path $env:RUNNER_TEMP 'r106-cli.zip'
+          & curl.exe --fail --location --silent --show-error --connect-timeout 20 --max-time 100 --output $zip 'https://github.com/spicetify/cli/releases/download/v2.46.4/spicetify-2.46.4-windows-x64.zip'
+          if($LASTEXITCODE -ne 0){throw 'R106_OFFICIAL_CLI_DOWNLOAD_FAILED'}
+          if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+             '0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f'){
+            throw 'R106_OFFICIAL_CLI_ARCHIVE_SHA_CHANGED'
+          }
+          $unpack=Join-Path $env:RUNNER_TEMP 'r106-cli-unpack'
+          Expand-Archive -LiteralPath $zip -DestinationPath $unpack
+          $matches=@(Get-ChildItem -LiteralPath $unpack -Recurse -Filter 'spicetify.exe' -File)
+          if($matches.Count -ne 1){throw 'R106_CLI_EXE_COUNT_INVALID'}
+          $cli=$matches[0].FullName
+          if((Get-FileHash $cli -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+             '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+            throw 'R106_OFFICIAL_CLI_EXE_SHA_CHANGED'
+          }
+          if(([string]((& $cli -v 2>&1) -join ' ')) -notmatch '\b2\.46\.4\b'){
+            throw 'R106_CLI_VERSION_MISMATCH'
+          }
+          Write-Host 'R106_OFFICIAL_PINNED_SPICETIFY_2464=PASS'
+          $root=Join-Path $env:APPDATA 'Spotify'
+          $prefs=Join-Path $root 'prefs'
+          $spa=Join-Path $root 'Apps\xpui.spa'
+          $vanilla=(Get-FileHash $spa -Algorithm SHA256).Hash
+          # Only an ephemeral synthetic prefs; never any owner Spotify login.
+          if(-not (Test-Path $prefs -PathType Leaf)){
+            [IO.File]::WriteAllText($prefs,('[Settings]'+[Environment]::NewLine),[Text.Encoding]::UTF8)
+          }
+          # GitHub-hosted Windows runner may be elevated. --bypass-admin is ONLY
+          # for this disposable runner, NEVER a user deployment recommendation.
+          $flags=@('--bypass-admin','--no-restart')
+          & $cli @flags config spotify_path $root prefs_path $prefs
+          if($LASTEXITCODE -ne 0){throw 'R106_SCRATCH_CLI_CONFIG_FAILED'}
+          try {
+            & $cli @flags backup apply
+            if($LASTEXITCODE -ne 0){throw 'R106_REAL_BACKUP_APPLY_FAILED'}
+            $changed= -not(Test-Path $spa -PathType Leaf)
+            if(-not $changed){
+              $changed=((Get-FileHash $spa -Algorithm SHA256).Hash -cne $vanilla)
+            }
+            if(-not $changed){throw 'R106_APPLY_DID_NOT_CHANGE_REAL_XPUI'}
+            Write-Host 'R106_COMPATIBLE_REAL_CLI_BACKUP_APPLY_CHANGED_VENDOR_APP=PASS'
+          } finally {
+            & $cli @flags restore
+            if($LASTEXITCODE -ne 0){throw 'R106_REAL_RESTORE_FAILED'}
+            if(-not(Test-Path $spa -PathType Leaf) -or
+               (Get-FileHash $spa -Algorithm SHA256).Hash -cne $vanilla){
+              throw 'R106_VANILLA_XPUI_NOT_RESTORED_IDENTICALLY'
+            }
+            Write-Host 'R106_COMPATIBLE_REAL_CLI_RESTORE_VANILLA_EXACT_BYTES=PASS'
+          }
+          Write-Host 'R106_USER_SPOTIFY_ACCOUNT_AND_MUSIC=NOT_TESTED'
+          Write-Host 'R106_PRODUCT_AUTO_MAINTENANCE_ORCHESTRATION=NOT_TESTED'
+          Write-Host 'R106_OWNER_PC_AND_PUBLIC_MAIN_RELEASE=UNCHANGED'
