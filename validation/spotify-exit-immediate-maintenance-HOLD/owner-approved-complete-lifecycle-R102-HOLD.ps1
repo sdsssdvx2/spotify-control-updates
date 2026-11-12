@@ -10,6 +10,7 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
 $phase='AUTHORIZATION'
 $releaseCommitted=$false
+$releaseCommitEntered=$false
 $guardRegistered=$false
 $out=New-Object 'System.Collections.Generic.List[string]'
 $out.Add('DIAGNOSTIC=SPOTIFY_R102_APPROVED_PRIVATE_RELEASE_AND_GUARDED_LOGON_HOLD')
@@ -145,6 +146,7 @@ try{
       $out.Add('RESULT=R102_PREPARED_NO_RELEASE_OR_LOGON_CHANGE')
     }else{
       $phase='R90_EXPLICIT_RELEASE_COMMIT'
+      $releaseCommitEntered=$true
       $updated=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r90))) -Commit -ApprovalPhrase 'APPROVE_EXACT_PRIVATE_V0630_OWNER_CUTOVER_ONCE')
       RequireOneResult $updated
       RequireOnce $updated 'RESULT=R90_EXACT_PRIVATE_OWNER_CUTOVER_COMMITTED'
@@ -187,6 +189,9 @@ try{
     $out.Add('R102_RELEASE=COMMITTED_REPORTED_POSTCOMMIT_REVIEW_REQUIRED')
     $out.Add('R102_GUARDED_LOGON='+$(if($guardRegistered){'REGISTERED_REPORTED_READBACK_UNCERTAIN'}else{'NOT_CONFIRMED'}))
     $out.Add('RESULT=R102_PARTIAL_POSTCOMMIT_HOLD_NO_AUTOROLLBACK')
+  }elseif($releaseCommitEntered){
+    $out.Add('R102_OPERATING_RELEASE=UNKNOWN_POSSIBLE_PARTIAL_R90_COMMIT')
+    $out.Add('RESULT=R102_COMMIT_UNVERIFIED_HOLD_REQUIRES_READONLY_R101_REVIEW')
   }else{
     $out.Add('RESULT=R102_HOLD_NO_AUTO_RETRY')
   }
