@@ -379,7 +379,8 @@ jobs:
           try {
             $principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
             $admin=$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-            $medium=@(& whoami.exe /groups /fo csv /nh 2>$null) -match 'S-1-16-8192'
+            $medium=@([Security.Principal.WindowsIdentity]::GetCurrent().Groups |
+              Where-Object { $_.Value -ceq 'S-1-16-8192' })
             $token=if($admin){'ADMIN'}elseif(@($medium).Count -gt 0){'LIMITED_MEDIUM'}else{'OTHER_NOT_VERIFIED'}
             if($admin){$code=3}
             else {
@@ -417,6 +418,14 @@ jobs:
             public struct PROCESS_INFORMATION {
               public IntPtr hProcess, hThread; public uint dwProcessId, dwThreadId;
             }
+            [StructLayout(LayoutKind.Sequential)]
+            public struct SID_AND_ATTRIBUTES {
+              public IntPtr Sid; public uint Attributes;
+            }
+            [StructLayout(LayoutKind.Sequential)]
+            public struct TOKEN_MANDATORY_LABEL {
+              public SID_AND_ATTRIBUTES Label;
+            }
             [DllImport("kernel32.dll")] public static extern IntPtr GetCurrentProcess();
             [DllImport("kernel32.dll", SetLastError=true)] public static extern bool CloseHandle(IntPtr h);
             [DllImport("kernel32.dll", SetLastError=true)] public static extern uint WaitForSingleObject(IntPtr h, uint milliseconds);
@@ -427,6 +436,14 @@ jobs:
               IntPtr existing, uint flags, uint disabledCount, IntPtr disabled,
               uint deletedCount, IntPtr deleted, uint restrictedCount,
               IntPtr restricting, out IntPtr token);
+            [DllImport("advapi32.dll", EntryPoint="ConvertStringSidToSidW", CharSet=CharSet.Unicode, SetLastError=true)]
+            public static extern bool ConvertStringSidToSidW(string input, out IntPtr sid);
+            [DllImport("advapi32.dll", SetLastError=true)]
+            public static extern uint GetLengthSid(IntPtr sid);
+            [DllImport("advapi32.dll", SetLastError=true)]
+            public static extern bool SetTokenInformation(IntPtr token, int informationClass, IntPtr data, uint length);
+            [DllImport("kernel32.dll", SetLastError=true)]
+            public static extern IntPtr LocalFree(IntPtr hMem);
             [DllImport("advapi32.dll", EntryPoint="CreateProcessAsUserW", CharSet=CharSet.Unicode, SetLastError=true)]
             public static extern bool CreateProcessAsUserW(
               IntPtr token, string app, StringBuilder commandLine,
@@ -438,6 +455,8 @@ jobs:
             Add-Type -TypeDefinition $interop -ErrorAction Stop
             $originalToken=[IntPtr]::Zero
             $limitedToken=[IntPtr]::Zero
+            $mediumSid=[IntPtr]::Zero
+            $mandatoryLabelPtr=[IntPtr]::Zero
             $environmentPtr=[IntPtr]::Zero
             $nativeProcess=[R122NativeLUA+PROCESS_INFORMATION]::new()
             try {
@@ -453,6 +472,24 @@ jobs:
                  0,[IntPtr]::Zero,[ref]$limitedToken)){
                 throw 'R122_CREATE_RESTRICTED_TOKEN_FAILED'
               }
+              # Explicitly lower the new restricted same-owner token's
+              # mandatory integrity to Medium (8192). LUA_TOKEN alone does
+              # not establish the integrity-level proof on hosted runneradmin.
+              if(-not [R122NativeLUA]::ConvertStringSidToSidW('S-1-16-8192',[ref]$mediumSid)){
+                throw 'R122_MEDIUM_INTEGRITY_SID_ALLOCATION_FAILED'
+              }
+              $label=[R122NativeLUA+TOKEN_MANDATORY_LABEL]::new()
+              $label.Label.Sid=$mediumSid
+              $label.Label.Attributes=[uint32]0x20
+              $labelSize=[Runtime.InteropServices.Marshal]::SizeOf([type][R122NativeLUA+TOKEN_MANDATORY_LABEL])
+              $mandatoryLabelPtr=[Runtime.InteropServices.Marshal]::AllocHGlobal($labelSize)
+              [Runtime.InteropServices.Marshal]::StructureToPtr($label,$mandatoryLabelPtr,$false)
+              $tokenInfoSize=[uint32]($labelSize+[R122NativeLUA]::GetLengthSid($mediumSid))
+              if(-not [R122NativeLUA]::SetTokenInformation($limitedToken,25,$mandatoryLabelPtr,$tokenInfoSize)){
+                throw ('R122_MEDIUM_INTEGRITY_TOKEN_ADMISSION_FAILED_WIN32_'+
+                  [Runtime.InteropServices.Marshal]::GetLastWin32Error())
+              }
+              Write-Host 'R122_RESTRICTED_OWNER_TOKEN_MEDIUM_IL_REQUEST=PASS'
               $pairs=New-Object 'System.Collections.Generic.List[string]'
               $vars=[Environment]::GetEnvironmentVariables()
               foreach($key in @($vars.Keys | Sort-Object)){
@@ -495,6 +532,155 @@ jobs:
                 throw 'R122_NONADMIN_LAUNCHER_NO_RECEIPT'
               }
               $report=[IO.File]::ReadAllText($receipt).Trim()
+              $safeTokenClass='UNRECOGNIZED'
+              if($report -match '^TOKEN=(?<id>[A-Z_]+);EXIT=[0-9]+
+                throw 'R122_ELEVATED_TOKEN_REFUSED_BEFORE_PRODUCT_EXECUTION'
+              }
+              if(-not $report.StartsWith('TOKEN=LIMITED_MEDIUM;EXIT=')){
+                throw 'R122_TOKEN_NOT_CONFIRMED_MEDIUM_NONADMIN'
+              }
+              $taskExitText=$report.Substring('TOKEN=LIMITED_MEDIUM;EXIT='.Length)
+              $taskExit=0
+              if(-not [int]::TryParse($taskExitText,[ref]$taskExit)){
+                throw 'R122_AGENTTICK_EXIT_NOT_NUMERIC'
+              }
+              $exit=if($taskExit -eq 0){'ZERO'}elseif($taskExit -eq 5){'TIMEOUT'}else{'NONZERO'}
+              Write-Host 'R122_SAME_OWNER_MEDIUM_INTEGRITY_LUA_TOKEN=PASS'
+              Write-Host ('R122_LUA_AGENTTICK_EXIT='+$exit)
+            } finally {
+              if($nativeProcess.hThread -ne [IntPtr]::Zero){[void][R122NativeLUA]::CloseHandle($nativeProcess.hThread)}
+              if($nativeProcess.hProcess -ne [IntPtr]::Zero){[void][R122NativeLUA]::CloseHandle($nativeProcess.hProcess)}
+              if($limitedToken -ne [IntPtr]::Zero){[void][R122NativeLUA]::CloseHandle($limitedToken)}
+              if($mandatoryLabelPtr -ne [IntPtr]::Zero){[Runtime.InteropServices.Marshal]::FreeHGlobal($mandatoryLabelPtr)}
+              if($mediumSid -ne [IntPtr]::Zero){[void][R122NativeLUA]::LocalFree($mediumSid)}
+              if($originalToken -ne [IntPtr]::Zero){[void][R122NativeLUA]::CloseHandle($originalToken)}
+              if($environmentPtr -ne [IntPtr]::Zero){[Runtime.InteropServices.Marshal]::FreeHGlobal($environmentPtr)}
+              Write-Host 'R122_LUA_PROCESS_AND_TOKEN_HANDLES_CLOSED=YES'
+            }
+            $result=$null
+            try{$result=Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json}catch{}
+            $decisions=@('maintenance-phase-entered','maintenance-deferred-or-lease-busy','mutation-blocked-unhealthy-or-auto-ambiguous','pending-observed-mutation-disarmed','observe-only-closed','check-only-closed-no-pending','closed-check-not-due','running-check-not-due','check-only-running','noop')
+            $decision=if($null -ne $result -and [string]$result.last_agent_decision -cin $decisions){[string]$result.last_agent_decision}else{'OTHER_OR_UNAVAILABLE'}
+            $healthy=($null -ne $result -and $result.maintenance_check_healthy -eq $true)
+            $updatePending=($null -ne $result -and $result.pending_spicetify_upgrade -eq $true)
+            $updated=((Get-FileHash $cli -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $newSha)
+            Write-Host ('R113_AGENTTICK_EXIT='+$exit)
+            Write-Host ('R113_DISCOVERY_DECISION='+$decision)
+            Write-Host ('R113_DISCOVERY_HEALTH='+$(if($healthy){'TRUE'}else{'FALSE_OR_UNVERIFIED'}))
+            Write-Host ('R113_AUTHENTIC_UPGRADE_PENDING='+$(if($updatePending){'TRUE'}else{'FALSE_OR_UNVERIFIED'}))
+            Write-Host ('R113_OFFICIAL_2465_BINARY_INSTALLED='+$(if($updated){'EXACT'}else{'NO'}))
+            # Diagnose real host-owned failure without exposing any raw log
+            # lines, executable paths, authenticated URLs or arguments.
+            $tx=[string]$result.spicetify_last_transaction_status
+            $known=@('committed','prepared','staged','swapped','rolled-back',
+              'rolled-back-apply-failure','rolled-back-post-swap-verification-failure',
+              'rolled-back-post-apply-guard-failure',
+              'rolled-back-spotify-started-before-apply',
+              'rollback-binary-restored-apply-failed',
+              'rollback-root-restored-apply-failed','failed')
+            $safeTxn=if($tx -cin $known){$tx}
+              elseif([string]::IsNullOrWhiteSpace($tx)){'ABSENT'}
+              else{'OTHER_UNRECOGNIZED'}
+            Write-Host ('R114_PRODUCT_TRANSACTION_STATUS='+$safeTxn)
+            $contained=@()
+            foreach($filepath in @($stdout,$stderr)){
+              if(Test-Path -LiteralPath $filepath -PathType Leaf){
+                $fi=Get-Item -LiteralPath $filepath -Force
+                if($fi.Length -le 1048576){$contained+=([IO.File]::ReadAllText($filepath))}
+                else{$contained+=('LARGE_PRIVATE_CHILD_OUTPUT')}
+              }
+            }
+            $logRoot=Join-Path $root 'logs'
+            if(Test-Path -LiteralPath $logRoot -PathType Container){
+              $logs=@(Get-ChildItem -LiteralPath $logRoot -File -Filter '*.log' -ErrorAction SilentlyContinue | Select-Object -First 8)
+              foreach($file in $logs){
+                if($file.Length -le 1048576){$contained+=([IO.File]::ReadAllText($file.FullName))}
+                else{$contained+=('LARGE_PRIVATE_LOG')}
+              }
+            }
+            $raw=($contained -join [Environment]::NewLine)
+            $categories=New-Object 'System.Collections.Generic.List[string]'
+            foreach($p in @(
+              @('ADMIN_OR_ACCESS_GUARD','(?i)administrator|--bypass-admin|access.is.denied|unauthorized'),
+              @('SPICETIFY_BACKUP_METADATA','(?i)backup.metadata|backup.version.mismatch|backup.with'),
+              @('ADDON_BACKUP_GUARD','(?i)addon.*backup.*failed|backup.*addon.*failed'),
+              @('TRANSACTION_SWAP_OR_ROLLBACK','(?i)transaction.*(failed|rollback|abort)|rollback.*failed|full.root.*mismatch'),
+              @('SPICETIFY_APPLY_FAILED','(?i)spicetify.*apply.*failed|apply.*(exit.code|failed|error)'),
+              @('SPICETIFY_ROOT_PROVENANCE','(?i)spicetify.*(tree|root).*(mismatch|refused|failed)'),
+              @('TRUST_OR_SIGNATURE_GUARD','(?i)sha.256.*mismatch|signature.*invalid|digest.*mismatch'),
+              @('NETWORK_OR_RATE_LIMIT','(?i)429.too.many|rate.limit|connection.*timed.out|http.*(403|404|429|503)'),
+              @('PS_RUNTIME_EXCEPTION','(?i)at .*\.ps1:|categoryinfo|fullyqualifiederrorid'),
+              @('GENERAL_FAILURE_MARKER','(?i)error|failed|exception|blocked')
+            )){
+              if($raw -match $p[1]){$categories.Add($p[0])}
+            }
+            Write-Host ('R114_CHILD_AND_LOG_FAIL_CLASSES='+$(if($categories.Count){$categories.ToArray() -join ','}else{'NO_RECOGNIZED_MARKER'}))
+            $failureStages=New-Object 'System.Collections.Generic.List[string]'
+            if($raw.Contains('Installed Spicetify official payload path is missing')){$failureStages.Add('OFFICIAL_PATH_MISSING')}
+            if($raw.Contains('Installed Spicetify official payload file differs')){$failureStages.Add('OFFICIAL_FILE_DIFFERED')}
+            if($raw.Contains('Installed Spicetify root is not an exact official')){$failureStages.Add('OFFICIAL_BASELINE_REFUSED')}
+            if($raw.Contains('Spicetify executable is not managed by the official')){$failureStages.Add('CLI_INSTALL_NOT_MANAGED')}
+            if($raw.Contains('New official Spicetify payload path collides')){$failureStages.Add('EXTRA_USER_PATH_COLLISION')}
+            if($raw.Contains('Staged full-root Spicetify version verification failed')){$failureStages.Add('STAGED_EXE_VERSION')}
+            if($raw.Contains('Spicetify persistent rollback backup tree mismatch')){$failureStages.Add('ROLLBACK_BACKUP_TREE')}
+            if($raw.Contains('Spicetify transaction failed:')){$failureStages.Add('TRANSACTION_FAILURE_WRAPPER')}
+            if($raw.Contains('Smart Update Guard could not be enforced')){$failureStages.Add('SMART_GUARD')}
+            if($raw.Contains('New Spicetify apply failed')){$failureStages.Add('POST_SWAP_APPLY')}
+            Write-Host ('R120_PRECISE_FAILURE_STAGES='+$(if($failureStages.Count){$failureStages.ToArray() -join ','}else{'NONE_OF_KNOWN_PATTERNS'}))
+            $allowedReasons=@('config-or-prefs-missing','prefs-version-missing',
+              'backup-version-missing','already-current','backup-spicetify-version-mismatch',
+              'spotify-transaction-missing','spotify-transaction-not-committed',
+              'transaction-after-version-mismatch','transaction-fullversion-mismatch',
+              'transaction-apply-proof-missing','transaction-commit-proof-missing',
+              'backup-spa-missing','transaction-time-proof-unreadable',
+              'blocked-unproven','backup-spa-timestamp-outside-trusted-transaction')
+            $reasonFound=@($allowedReasons|Where-Object{$raw.Contains($_)})
+            Write-Host ('R116_SAFE_BACKUP_REASONS='+$(if($reasonFound.Count){$reasonFound -join ','}else{'NONE_DETECTED'}))
+            Write-Host ('R114_CHILD_STDOUT_CLASS='+$(if(Test-Path $stdout -PathType Leaf){
+              if((Get-Item $stdout).Length -gt 0){'NONEMPTY_PRIVATE'}else{'EMPTY'}
+            }else{'ABSENT'}))
+            Write-Host ('R114_CHILD_STDERR_CLASS='+$(if(Test-Path $stderr -PathType Leaf){
+              if((Get-Item $stderr).Length -gt 0){'NONEMPTY_PRIVATE'}else{'EMPTY'}
+            }else{'ABSENT'}))
+            Write-Host 'R114_RAW_CHILD_LOG_LINES_AND_USER_PATHS_OUTPUT=NO'
+
+            $class='NO_CHECK_REPORT'
+            foreach($file in @(Get-ChildItem -LiteralPath $root -Filter '*check*.json' -File -Recurse -ErrorAction SilentlyContinue)){
+              if($file.Length -gt 2097152){continue}
+              $doc=$null
+              try{$doc=Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json}catch{}
+              if($null -eq $doc -or [string]$doc.phase -cne 'check-only'){continue}
+              $errs=@($doc.errors | Where-Object{$_})
+              $class=if($errs.Count -eq 0){'NO_ERRORS'}
+                elseif(@($errs|Where-Object{$_ -match 'self-update'}).Count -gt 0){'SELF_UPDATE_DISCOVERY'}
+                elseif(@($errs|Where-Object{$_ -match 'Spicetify install'}).Count -gt 0){'MANAGED_CLI_LAYOUT'}
+                elseif(@($errs|Where-Object{$_ -match 'Spicetify latest'}).Count -gt 0){'OFFICIAL_CLI_RELEASE_DISCOVERY'}
+                elseif(@($errs|Where-Object{$_ -match 'compatibility metadata'}).Count -gt 0){'COMPATIBILITY_METADATA'}
+                elseif(@($errs|Where-Object{$_ -match 'Addon'}).Count -gt 0){'ADDON_SOURCE_CHECK'}
+                else{'OTHER_PRIVATE_CHECK_FAILURE'}
+              break
+            }
+            Write-Host ('R113_CHECK_ERROR_FAMILY='+$class)
+            if($exit -ceq 'ZERO' -and $updated -and $decision -ceq 'maintenance-phase-entered'){
+              $outcome='REAL_PRODUCT_UPDATED_EXACT_CLI'
+            }
+            Write-Host ('R113_PRODUCT_OUTCOME='+$outcome)
+          } finally {
+            $isStock=(Test-Path $xpui -PathType Leaf) -and ((Get-FileHash $xpui -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $baseline)
+            if(-not $isStock){
+              [IO.File]::Copy($copy,$xpui,$true)
+              if((Get-FileHash $xpui -Algorithm SHA256).Hash.ToLowerInvariant() -cne $baseline){throw 'R113_HOSTED_SCRATCH_RESTORE_FAILED'}
+              Write-Host 'R113_HOSTED_TEST_ONLY_VANILLA_COPY_RECOVERED=PASS_NOT_PRODUCT_PROOF'
+            }else{Write-Host 'R113_ORIGINAL_VENDOR_XPUI_EXACT=PASS'}
+          }
+          if($outcome -cne 'REAL_PRODUCT_UPDATED_EXACT_CLI'){throw 'R113_AUTO_UPDATE_HOLD_NOT_VERIFIED'}
+          Write-Host 'R113_REAL_PRIVATE_AHEAD_SPICETIFY_2465_AUTO_UPDATE=PASS'
+          Write-Host 'R113_REVIEW_CANDIDATE_ONLY;OWNER_PC_PUBLIC_MAIN_AND_USER_SETTINGS=UNCHANGED'
+ -and
+                 $Matches['id'] -cin @('ADMIN','LIMITED_MEDIUM','OTHER_NOT_VERIFIED','INIT_NOT_VERIFIED')){
+                $safeTokenClass=$Matches['id']
+              }
+              Write-Host ('R122_CHILD_TOKEN_CLASS='+$safeTokenClass)
               if($report.StartsWith('TOKEN=ADMIN')){
                 throw 'R122_ELEVATED_TOKEN_REFUSED_BEFORE_PRODUCT_EXECUTION'
               }
@@ -513,6 +699,8 @@ jobs:
               if($nativeProcess.hThread -ne [IntPtr]::Zero){[void][R122NativeLUA]::CloseHandle($nativeProcess.hThread)}
               if($nativeProcess.hProcess -ne [IntPtr]::Zero){[void][R122NativeLUA]::CloseHandle($nativeProcess.hProcess)}
               if($limitedToken -ne [IntPtr]::Zero){[void][R122NativeLUA]::CloseHandle($limitedToken)}
+              if($mandatoryLabelPtr -ne [IntPtr]::Zero){[Runtime.InteropServices.Marshal]::FreeHGlobal($mandatoryLabelPtr)}
+              if($mediumSid -ne [IntPtr]::Zero){[void][R122NativeLUA]::LocalFree($mediumSid)}
               if($originalToken -ne [IntPtr]::Zero){[void][R122NativeLUA]::CloseHandle($originalToken)}
               if($environmentPtr -ne [IntPtr]::Zero){[Runtime.InteropServices.Marshal]::FreeHGlobal($environmentPtr)}
               Write-Host 'R122_LUA_PROCESS_AND_TOKEN_HANDLES_CLOSED=YES'
