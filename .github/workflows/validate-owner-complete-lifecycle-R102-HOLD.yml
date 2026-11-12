@@ -48,7 +48,7 @@ jobs:
           }
           Write-Host 'R102_ACTUAL_WINDOWS_POWERSHELL_51_SYNTAX=PASS'
           Write-Host 'R102_FROZEN_R101_R90_R99_REPOSITORY_BLOBS=PASS'
-      - name: Exercise bounded native read-only task coverage diagnostic on Windows
+      - name: Exercise bounded native read-only task classification on Windows
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -56,16 +56,44 @@ jobs:
           $tokens=$null;$issues=$null
           $ast=[Management.Automation.Language.Parser]::ParseFile($source,[ref]$tokens,[ref]$issues)
           if(@($issues).Count -ne 0){throw 'R102_TASK_PROBE_SOURCE_PARSE_INVALID'}
-          $def=@($ast.FindAll({
-            param($node)
-            $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
-              $node.Name -ceq 'R102TaskProbe'
-          },$true))
-          if($def.Count -ne 1){throw 'R102_TASK_PROBE_FUNCTION_NOT_UNIQUE'}
-          $code=$def[0].Extent.Text+[Environment]::NewLine+"R102TaskProbe 'C:\UNLIKELY-OWNER-AGENT-TEST\spotify-control-agent.vbs'"
-          $rows=@(& ([ScriptBlock]::Create($code)))
-          foreach($field in @('R102_TASK_NATIVE_CMDLET','R102_TASK_COM_ENUM',
-                              'R102_TASK_VISIBLE_AGENT_REFERENCE')){
+          function ExtractFunction([string]$name) {
+            $found=@($ast.FindAll({
+              param($node)
+              $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -ceq $name
+            },$true))
+            if($found.Count -ne 1){throw 'R102_TASK_INSPECTOR_FUNCTION_NOT_UNIQUE'}
+            return $found[0].Extent.Text
+          }
+          $twoFunctions=(ExtractFunction 'R102AgentActionClass')+[Environment]::NewLine+
+                        (ExtractFunction 'R102TaskProbe')
+          $script=[ScriptBlock]::Create($twoFunctions)
+          & $script
+          $agent='C:\testowner\spotify-control-agent.vbs'
+          $wscript=Join-Path $env:WINDIR 'System32\wscript.exe'
+          $quote='"'+$agent+'"'
+          if((R102AgentActionClass $wscript $quote $agent $wscript) -cne 'DIRECT_WSCRIPT_EXACT'){
+            throw 'R102_EXACT_WSCRIPT_ACTION_NOT_RECOGNIZED'
+          }
+          if((R102AgentActionClass $wscript ('//B //NoLogo '+$quote) $agent $wscript) -cne 'DIRECT_WSCRIPT_EXACT'){
+            throw 'R102_WSCRIPT_NOBANNER_ACTION_NOT_RECOGNIZED'
+          }
+          if((R102AgentActionClass $wscript ('"'+$agent+'.bak"') $agent $wscript) -cne 'NO_EXACT_AGENT_PATH_TOKEN'){
+            throw 'R102_SUBSTRING_FALSE_POSITIVE'
+          }
+          if((R102AgentActionClass 'powershell.exe' ('-File '+$quote) $agent $wscript) -cne 'AGENT_REFERENCE_OTHER_LAUNCH_SHAPE'){
+            throw 'R102_OTHER_SHAPE_MUST_NOT_COUNT_DIRECT'
+          }
+          $rows=@(R102TaskProbe 'C:\UNLIKELY-OWNER-AGENT-TEST\spotify-control-agent.vbs')
+          foreach($field in @(
+            'R102_TASK_NATIVE_CMDLET','R102_TASK_COM_ENUM',
+            'R102_TASK_VISIBLE_AGENT_REFERENCE','R102_TASK_AGENT_TOKEN_MATCHES',
+            'R102_TASK_DIRECT_OWNER_LOGON_ENABLED',
+            'R102_TASK_DIRECT_OWNER_OTHER_TRIGGER_ENABLED',
+            'R102_TASK_OTHER_LAUNCH_SHAPE',
+            'R102_TASK_DISABLED_OR_NO_ENABLED_TRIGGER',
+            'R102_TASK_UNKNOWN_MATCH_DETAILS',
+            'R102_TASK_OTHER_OR_UNKNOWN_PRINCIPAL')){
             if(@($rows|Where-Object{([string]$_).StartsWith($field+'=')}).Count -ne 1){
               throw 'R102_TASK_PROBE_BOUNDED_RESULT_MISSING'
             }
@@ -73,10 +101,11 @@ jobs:
           if($rows -cnotcontains 'R102_TASK_ADMINISTRATIVE_GLOBAL_COVERAGE=NOT_PROVEN'){
             throw 'R102_TASK_PROBE_UNSAFE_GLOBAL_COVERAGE_CLAIM'
           }
-          if(@($rows|Where-Object{[string]$_ -cmatch '^[A-Z0-9_]+=[A-Z0-9_]+$'}).Count -ne 4){
+          if(@($rows|Where-Object{[string]$_ -cmatch '^[A-Z0-9_]+=[A-Z0-9_]+$'}).Count -ne 11){
             throw 'R102_TASK_PROBE_UNEXPECTED_DATA_EXPOSURE'
           }
-          Write-Host 'R102_NATIVE_TASKS_READONLY_DIAGNOSTIC_BOUNDED=PASS'
+          Write-Host 'R102_ACTUAL_WINDOWS_ACTION_CLASSIFICATION=PASS'
+          Write-Host 'R102_NATIVE_TASK_READONLY_BOUNDED_DIAGNOSTIC=PASS'
           Write-Host 'R102_NONADMIN_GLOBAL_COVERAGE_NOT_CLAIMED=PASS'
           Write-Host 'R102_OWNER_APPLICATION_AND_USER_TASK_CHANGES=NONE'
       - name: Verify inert and unapproved modes without network or user mutations
