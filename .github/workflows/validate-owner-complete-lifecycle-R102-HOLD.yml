@@ -66,6 +66,7 @@ jobs:
             return $found[0].Extent.Text
           }
           $twoFunctions=(ExtractFunction 'R102AgentActionClass')+[Environment]::NewLine+
+                        (ExtractFunction 'R102PrincipalClass')+[Environment]::NewLine+
                         (ExtractFunction 'R102TaskProbe')
           $script=[ScriptBlock]::Create($twoFunctions)
           . $script
@@ -84,6 +85,16 @@ jobs:
           if((R102AgentActionClass 'powershell.exe' ('-File '+$quote) $agent $wscript) -cne 'AGENT_REFERENCE_OTHER_LAUNCH_SHAPE'){
             throw 'R102_OTHER_SHAPE_MUST_NOT_COUNT_DIRECT'
           }
+          $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+          if((R102PrincipalClass $identity.User.Value '' $identity) -cne 'CURRENT_OWNER_RESOLVED'){
+            throw 'R102_CURRENT_USER_SID_NOT_RESOLVED'
+          }
+          if((R102PrincipalClass 'S-1-5-18' '' $identity) -cne 'BUILTIN_SERVICE'){
+            throw 'R102_SYSTEM_SERVICE_PRINCIPAL_NOT_CLASSIFIED'
+          }
+          if((R102PrincipalClass $identity.User.Value 'S-1-5-32-545' $identity) -cne 'GROUP_SCOPED'){
+            throw 'R102_GROUP_SCOPE_NOT_HELD'
+          }
           $rows=@(R102TaskProbe 'C:\UNLIKELY-OWNER-AGENT-TEST\spotify-control-agent.vbs')
           foreach($field in @(
             'R102_TASK_NATIVE_CMDLET','R102_TASK_COM_ENUM',
@@ -93,7 +104,13 @@ jobs:
             'R102_TASK_OTHER_LAUNCH_SHAPE',
             'R102_TASK_DISABLED_OR_NO_ENABLED_TRIGGER',
             'R102_TASK_UNKNOWN_MATCH_DETAILS',
-            'R102_TASK_OTHER_OR_UNKNOWN_PRINCIPAL')){
+            'R102_TASK_OTHER_OR_UNKNOWN_PRINCIPAL',
+            'R102_SINGLE_MATCH_PRINCIPAL',
+            'R102_SINGLE_MATCH_ACTION',
+            'R102_SINGLE_MATCH_ENABLED',
+            'R102_SINGLE_MATCH_TRIGGER',
+            'R102_SINGLE_MATCH_LOGON_SCOPE',
+            'R102_SINGLE_MATCH_INSTANCE_POLICY')){
             if(@($rows|Where-Object{([string]$_).StartsWith($field+'=')}).Count -ne 1){
               throw 'R102_TASK_PROBE_BOUNDED_RESULT_MISSING'
             }
@@ -101,7 +118,7 @@ jobs:
           if($rows -cnotcontains 'R102_TASK_ADMINISTRATIVE_GLOBAL_COVERAGE=NOT_PROVEN'){
             throw 'R102_TASK_PROBE_UNSAFE_GLOBAL_COVERAGE_CLAIM'
           }
-          if(@($rows|Where-Object{[string]$_ -cmatch '^[A-Z0-9_]+=[A-Z0-9_]+$'}).Count -ne 11){
+          if(@($rows|Where-Object{[string]$_ -cmatch '^[A-Z0-9_]+=[A-Z0-9_]+$'}).Count -ne 17){
             throw 'R102_TASK_PROBE_UNEXPECTED_DATA_EXPOSURE'
           }
           Write-Host 'R102_ACTUAL_WINDOWS_ACTION_CLASSIFICATION=PASS'
