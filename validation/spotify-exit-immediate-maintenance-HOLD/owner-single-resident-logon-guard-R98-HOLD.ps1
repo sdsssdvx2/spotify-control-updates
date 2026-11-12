@@ -13,6 +13,7 @@ $out.Add('DIAGNOSTIC=SPOTIFY_R98_OWNER_GUARDED_SINGLE_RESIDENT')
 $out.Add('UPDATE=NO;FILES_WRITE=NO;REGISTRY_WRITE=NO;TASK_WRITE=NO;PROCESS_KILL=NO')
 $lock=$null
 $locked=$false
+$launchAttempted=$false
 function Fail([string]$code){throw [InvalidOperationException]::new($code)}
 function Plain([string]$path,[bool]$dir){
   try{
@@ -133,6 +134,7 @@ try{
        'e56609ed8927512595f55c01ea50dbb9c8c59e4a2c86dcb3d16195a565c604d5'){
       Fail 'R98_PRESTART_AGENT_PIN_DRIFT'
     }
+    $launchAttempted=$true
     $created=Start-Process -FilePath $wscript -WorkingDirectory $root -WindowStyle Hidden -ArgumentList ('//B //NoLogo "'+$agent+'"') -PassThru -ErrorAction Stop
     Start-Sleep -Milliseconds 1500
     $created.Refresh()
@@ -150,7 +152,7 @@ try{
   }
   $out.Add('FAILED_PHASE='+$phase)
   $out.Add('HOLD_REASON='+$reason)
-  $out.Add('RESULT=R98_HOLD_NO_NEW_PROCESS_ON_UNCERTAINTY')
+  $out.Add($(if($launchAttempted){'RESULT=R98_POST_LAUNCH_UNCERTAIN_NO_RETRY'}else{'RESULT=R98_HOLD_NO_NEW_PROCESS_ON_UNCERTAINTY'}))
 }finally{
   if($locked){try{$lock.ReleaseMutex()}catch{}}
   if($null -ne $lock){$lock.Dispose()}
