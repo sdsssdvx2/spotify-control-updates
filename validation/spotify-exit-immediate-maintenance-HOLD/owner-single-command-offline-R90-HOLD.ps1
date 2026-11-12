@@ -218,6 +218,74 @@ function R95ScheduledLogon([string]$agent,[string]$wscript){
     return (R95Class $count $unverified)
   }catch{return 'UNKNOWN'}
 }
+# R100: recognize the actual R99 receipt-backed guarded Startup entry,
+# not merely an old direct-VBS shortcut. Never execute the link or guard.
+function R100GuardedOwnerRegistration([string]$root,[bool]$hosted){
+  try{
+    $startup=if($hosted){
+      Join-Path ([IO.Path]::GetDirectoryName($root)) 'R99UserStartup'
+    }else{
+      [Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)
+    }
+    $guard=Join-Path $root 'owner-guard-r99.ps1'
+    $receipt=Join-Path $root 'startup-owner-r99.json'
+    $link=Join-Path $startup 'Spotify Control Resident (R99 Guarded).lnk'
+    $present=@($guard,$receipt,$link | Where-Object {Test-Path -LiteralPath $_})
+    if($present.Count -eq 0){return 'NONE'}
+    if($present.Count -ne 3){return 'PARTIAL_OR_UNVERIFIED'}
+    foreach($p in @($guard,$receipt,$link)){
+      $item=Get-Item -LiteralPath $p -Force -ErrorAction Stop
+      if($item.PSIsContainer -or
+         ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){
+        return 'NONREGULAR_OR_REPARSE_HOLD'
+      }
+    }
+    $g=Get-Item -LiteralPath $guard -Force -ErrorAction Stop
+    $r=Get-Item -LiteralPath $receipt -Force -ErrorAction Stop
+    if([long]$g.Length -lt 6000 -or [long]$g.Length -gt 12000 -or
+       [long]$r.Length -lt 50 -or [long]$r.Length -gt 8192){
+      return 'SIZE_OUTSIDE_EXACT_HOLD'
+    }
+    [byte[]]$bytes=[IO.File]::ReadAllBytes($guard)
+    if((GitBlob $bytes) -cne '86a2bb96cab07f2b637234275fb52bc941af037b'){
+      return 'GUARD_SOURCE_IDENTITY_HOLD'
+    }
+    $rec=Get-Content -LiteralPath $receipt -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    if([string]$rec.schema -cne 'SPOTIFY_R99_OWNER_EXACT_STARTUP_LINK_V1' -or
+       [string]$rec.owner_sid -cne $sid -or
+       [string]$rec.guard_sha256 -cne
+         (Get-FileHash -LiteralPath $guard -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -or
+       [string]$rec.link_sha256 -cne
+         (Get-FileHash -LiteralPath $link -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -or
+       [string]$rec.installed_main_sha256 -cne
+         'b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92232d' -or
+       [string]$rec.installed_agent_sha256 -cne
+         'e56609ed8927512595f55c01ea50dbb9c8c59e4a2c86dcb3d16195a565c604d5'){
+      return 'OWNER_RECEIPT_NOT_EXACT_HOLD'
+    }
+    $ps=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $expected='-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "'+$guard+'"'
+    if($hosted){$expected+=' -HostedFixtureRoot "'+$root+'"'}
+    $shell=New-Object -ComObject WScript.Shell -ErrorAction Stop
+    $lnk=$shell.CreateShortcut($link)
+    if(-not [string]::Equals([string]$lnk.TargetPath,$ps,[StringComparison]::OrdinalIgnoreCase) -or
+       [string]$lnk.Arguments -cne $expected -or
+       -not [string]::Equals([string]$lnk.WorkingDirectory,$root,[StringComparison]::OrdinalIgnoreCase)){
+      return 'GUARDED_SHORTCUT_NOT_EXACT_HOLD'
+    }
+    foreach($f in @(Get-ChildItem -LiteralPath $startup -File -Force -Filter '*.lnk' -ErrorAction Stop)){
+      if([string]::Equals($f.FullName,$link,[StringComparison]::OrdinalIgnoreCase)){continue}
+      try{
+        $other=$shell.CreateShortcut($f.FullName)
+        if(([string]$other.Arguments).IndexOf($guard,[StringComparison]::OrdinalIgnoreCase) -ge 0){
+          return 'MULTIPLE_GUARD_REFERENCES_HOLD'
+        }
+      }catch{return 'FOREIGN_SHORTCUT_UNVERIFIED'}
+    }
+    return 'ONE_OWNED_GUARDED_REGISTERED_NOT_LOGON_PROOF'
+  }catch{return 'UNKNOWN'}
+}
 try{
   if($Status){
     $phase='R93_READONLY_POSTFLIGHT'
@@ -319,6 +387,24 @@ try{
     }
     $out.Add('R95_LOGON_ASSESSMENT='+$logonAssessment)
     $out.Add('R95_REAL_LOGON_EXECUTION=NOT_VERIFIED;STARTUP_CHANGES=NO')
+    $guarded=R100GuardedOwnerRegistration $root ($scope -ceq 'HOSTED_SCRATCH_ONLY')
+    $out.Add('R100_R99_GUARDED_LOGON='+$guarded)
+    if($guarded -ceq 'ONE_OWNED_GUARDED_REGISTERED_NOT_LOGON_PROOF'){
+      if($scope -ceq 'HOSTED_SCRATCH_ONLY'){
+        $out.Add('R100_LOGON_ASSESSMENT=HOSTED_GUARDED_COM_VERIFIED_REAL_LOGON_NOT_TESTED')
+      }elseif($linkLaunch -ceq 'NONE_IN_EXAMINED_SCOPE' -and
+             $registryLaunch -ceq 'NONE_IN_EXAMINED_SCOPE' -and
+             $taskLaunch -ceq 'NONE_IN_EXAMINED_SCOPE'){
+        $out.Add('R100_LOGON_ASSESSMENT=ONE_GUARDED_REGISTRATION_ACTUAL_LOGON_UNTESTED')
+      }else{
+        $out.Add('R100_LOGON_ASSESSMENT=GUARDED_WITH_AMBIGUOUS_OTHER_ROUTES_HOLD')
+      }
+    }elseif($guarded -ceq 'NONE'){
+      $out.Add('R100_LOGON_ASSESSMENT=NO_GUARDED_R99_REGISTRATION')
+    }else{
+      $out.Add('R100_LOGON_ASSESSMENT=GUARDED_R99_INCOMPLETE_OR_UNVERIFIED_HOLD')
+    }
+    $out.Add('R100_AUTO_START_EXECUTION=NOT_ATTESTED;AUTO_REPAIR=NO')
     $classification='HOLD_INDETERMINATE_NO_RETRY'
     if($addonClass -ceq 'BASELINE' -and $bootClass -ceq 'BASELINE'){
       if($mainClass -ceq 'BASELINE' -and $agentClass -ceq 'BASELINE'){
