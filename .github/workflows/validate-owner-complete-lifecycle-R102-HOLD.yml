@@ -1,0 +1,83 @@
+name: HOLD R102 one-approval private cutover and guarded logon precommit safety
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-owner-complete-lifecycle-R102-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-complete-lifecycle-R102-HOLD.ps1
+permissions: {contents: read}
+jobs:
+  native-inert-and-source-pins:
+    runs-on: windows-2025
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: PowerShell 5.1 parse and immutable source identity
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          $p=$base+'owner-approved-complete-lifecycle-R102-HOLD.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($p,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){
+            $errors|ForEach-Object {Write-Host $_.Message}
+            throw 'R102_NATIVE_POWERSHELL_51_PARSE_FAILED'
+          }
+          $pins=@{
+            'owner-unified-readonly-preflight-R101-HOLD.ps1'='f3e36f05979f8cd5987b5ca8c9de0774b07b3a8d'
+            'owner-single-command-offline-R90-HOLD.ps1'='52d97d536fe60c3833022e1d3e88a6b26eacddb3'
+            'owner-approved-guarded-logon-R99-HOLD.ps1'='7e78129d598bd11c273b5855f4059393767c5f85'
+          }
+          foreach($item in $pins.GetEnumerator()){
+            $got=((& git hash-object -- ($base+$item.Key)) | Out-String).Trim()
+            if($LASTEXITCODE -ne 0 -or $got -cne $item.Value){
+              throw 'R102_IMMUTABLE_PARENT_SOURCE_PIN_NOT_EXACT'
+            }
+          }
+          $src=Get-Content -LiteralPath $p -Raw
+          foreach($marker in @(
+            'R102_UNVERIFIED_AUTOSTART_BEFORE_RELEASE_BLOCKED',
+            'R102_COMMIT_UNVERIFIED_HOLD_REQUIRES_READONLY_R101_REVIEW',
+            'R102_RELEASE_AND_GUARDED_LOGON_COMMITTED_REAL_REBOOT_UNTESTED',
+            'R102_PARTIAL_POSTCOMMIT_HOLD_NO_AUTOROLLBACK',
+            "APPROVE_PRIVATE_V0630_AND_GUARDED_LOGON_ONCE")){
+            if(-not $src.Contains($marker)){throw 'R102_REQUIRED_OWNER_SAFETY_CONTRACT_MISSING'}
+          }
+          Write-Host 'R102_ACTUAL_WINDOWS_POWERSHELL_51_SYNTAX=PASS'
+          Write-Host 'R102_FROZEN_R101_R90_R99_REPOSITORY_BLOBS=PASS'
+      - name: Verify inert and unapproved modes without network or user mutations
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-complete-lifecycle-R102-HOLD.ps1'
+          function Run([string[]]$arguments){
+            $lines=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $p @arguments 2>&1)
+            if($LASTEXITCODE -ne 0){throw 'R102_NATIVE_PROCESS_EXIT_NONZERO'}
+            if(@($lines|Where-Object{[string]$_ -cmatch '^RESULT='}).Count -ne 1){
+              throw 'R102_BOUNDED_RESULT_MISSING_OR_DUPLICATE'
+            }
+            return $lines
+          }
+          $inert=Run @()
+          if($inert -cnotcontains 'RESULT=R102_INERT_DEFAULT_REQUIRES_EXPLICIT_MODE' -or
+             $inert -cnotcontains 'NETWORK=NO;FILE_WRITE=NO;PROCESS_CHANGE=NO;STARTUP_CHANGE=NO'){
+            throw 'R102_DEFAULT_NOT_INERT'
+          }
+          $denied=Run @('-Commit')
+          if($denied -cnotcontains 'HOLD_REASON=R102_EXPLICIT_DUAL_SCOPE_OWNER_APPROVAL_REQUIRED' -or
+             $denied -cnotcontains 'RESULT=R102_HOLD_NO_AUTO_RETRY'){
+            throw 'R102_UNAPPROVED_COMMIT_NOT_BLOCKED'
+          }
+          $conflict=Run @('-Prepare','-Preflight')
+          if($conflict -cnotcontains 'HOLD_REASON=R102_MODES_MUTUALLY_EXCLUSIVE'){
+            throw 'R102_CONFLICTING_MODE_NOT_BLOCKED'
+          }
+          $unauthorized=Run @('-Preflight','-ApprovalPhrase','APPROVE_PRIVATE_V0630_AND_GUARDED_LOGON_ONCE')
+          if($unauthorized -cnotcontains 'HOLD_REASON=R102_APPROVAL_WITHOUT_COMMIT_FORBIDDEN'){
+            throw 'R102_APPROVAL_LEAK_TO_READONLY_MODE'
+          }
+          Write-Host 'R102_NATIVE_INERT_AND_EXPLICIT_DUAL_APPROVAL_DENIAL=PASS'
+          Write-Host 'R102_OPERATING_RELEASE_AND_USER_LOGON_MUTATIONS=NONE'
+          Write-Host 'R102_POSITIVE_OWNER_CUTOVER_AND_REAL_LOGON=NOT_RUN'
