@@ -196,6 +196,7 @@ function OwnedLink([string]$path,[string]$agent,[string]$wscript,[string]$root){
 }
 try{
   if($Commit -and $Remove){Deny 'R96_MUTATION_MODES_MUTUALLY_EXCLUSIVE'}
+  if($Commit){Deny 'R96_DIRECT_VBS_STARTUP_DUPLICATES_REPRODUCED_R97_HOLD'}
   if($Commit -and $ApprovalPhrase -cne 'APPROVE_EXACT_ONE_OWNER_LOGON_SHORTCUT_ONCE'){
     Deny 'R96_CREATE_EXPLICIT_APPROVAL_REQUIRED'
   }
