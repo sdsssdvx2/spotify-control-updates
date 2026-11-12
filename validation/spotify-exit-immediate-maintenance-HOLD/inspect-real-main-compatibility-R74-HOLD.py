@@ -16,7 +16,7 @@ def main():
     s=src.decode("utf-8-sig").replace("\r\n","\n")
     lines=s.splitlines()
     fns=list(re.finditer(r'(?im)^function\s+([a-zA-Z0-9_-]+)\s*\{',s))
-    keywords=("SelfUpdate","Self-Updater","Test-DueHours","Spicetify","SpotifyVersion","Spotify-Version","VersionSpotify","Backup","Invoke-MaintenanceMutationPhase","Invoke-MaintenanceCheckPhase","Update-AutoApps","AgentTick","GuardPlan","spotify_path","prefs_path")
+    keywords=("Prefs","SelfUpdate","Self-Updater","Test-DueHours","Spicetify","SpotifyVersion","Spotify-Version","VersionSpotify","Backup","Invoke-MaintenanceMutationPhase","Invoke-MaintenanceCheckPhase","Update-AutoApps","AgentTick","GuardPlan","spotify_path","prefs_path")
     candidates=[(f.group(1),f.start(),f.end(),fns[i+1].start() if i+1<len(fns) else len(s)) for i,f in enumerate(fns) if any(k.lower() in f.group(1).lower() for k in keywords)]
     print("R74_MAIN_SHA256=PASS")
     print("R74_FUNCTIONS_TOTAL="+str(len(fns)))
