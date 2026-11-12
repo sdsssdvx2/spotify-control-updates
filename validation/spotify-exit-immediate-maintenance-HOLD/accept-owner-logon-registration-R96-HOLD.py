@@ -31,6 +31,9 @@ def run()->None:
             "R93_MIXED_SCRATCH_INTERRUPTION_REJECTED_AND_CLEANED=PASS" in source,
             "GROUNDED_R94_OWNER_LIFECYCLE_NOT_FOUND")
     content=r"""Write-Host 'R94_LOGON_STYLE_FRESH_WSCRIPT_ONE_OWNER_RESIDENT_AND_DATA_PRESERVED=PASS'
+    & {
+    # All R96 scratch variables stay scoped away from the existing R28/R94
+    # rollback variables such as mainBefore/agentBefore/txnBefore.
     # R96 operated against the fresh R94 native owner process, but modifies
     # exclusively per-runner scratch Startup folders and app receipt.
     $r96Source=(Resolve-Path 'validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-logon-startup-R96-HOLD.ps1').Path
@@ -124,7 +127,9 @@ def run()->None:
         throw 'R96_HOSTED_STARTUP_NOT_EMPTY_AFTER_OWNER_REVOKE'
       }
       [IO.Directory]::Delete($d)
-    }"""
+    }
+    } # close R96 test-owned local scope before native R28 rollback resumes
+    $global:LASTEXITCODE=0"""
     source=source.replace(
         "Write-Host 'R94_LOGON_STYLE_FRESH_WSCRIPT_ONE_OWNER_RESIDENT_AND_DATA_PRESERVED=PASS'",
         content,1)
