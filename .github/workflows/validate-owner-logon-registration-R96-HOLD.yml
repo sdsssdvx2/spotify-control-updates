@@ -224,7 +224,7 @@ jobs:
           $ErrorActionPreference='Stop'
           $outputs | ForEach-Object {
             $line=[string]$_
-            if($line -cmatch '^(R93_|R92_|R91_R90_SAFE_RECEIPT_|R91_|R89_|R87_|R28_|FUTURE_OFFICIAL_BOOTSTRAP_)'){
+            if($line -cmatch '^(R96_|R94_|R93_|R92_|R91_R90_SAFE_RECEIPT_|R91_|R89_|R87_|R28_|FUTURE_OFFICIAL_BOOTSTRAP_)'){
               Write-Output $line
             }
           }
