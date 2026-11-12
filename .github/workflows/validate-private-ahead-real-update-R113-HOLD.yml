@@ -414,6 +414,7 @@ jobs:
           param([string]$Shared)
           $ErrorActionPreference='Stop'
           $token='UNKNOWN';$code=6;$phase='PRECHECK'
+          $preapplyCode='NONE'
           try {
             $principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
             $medium=@(& whoami.exe /groups /fo csv /nh 2>$null | Where-Object{$_ -match 'S-1-16-8192'})
@@ -489,13 +490,18 @@ jobs:
               & $cli --no-restart config spotify_path $vendor prefs_path $prefs *> $null
               if($LASTEXITCODE -ne 0){throw 'R124_STANDARD_USER_CLI_CONFIG_FAILED'}
               $phase='PREAPPLY'
-              & $cli --no-restart backup apply *> $null
-              if($LASTEXITCODE -ne 0){throw 'R124_STANDARD_USER_2464_BACKUP_APPLY_FAILED'}
+              $privateCliLog=Join-Path $Shared 'CLI-Preapply-PRIVATE.txt'
+              & $cli --no-restart backup apply *> $privateCliLog
+              if($LASTEXITCODE -ne 0){
+                $preapplyCode='OFFICIAL_CLI_EXIT_NONZERO'
+                throw 'R124_STANDARD_USER_2464_BACKUP_APPLY_FAILED'
+              }
               $cfg=Join-Path $env:APPDATA 'spicetify\config-xpui.ini'
               $backupRoot=Join-Path $env:APPDATA 'spicetify\Backup'
               if(-not(Test-Path $cfg -PathType Leaf) -or
                  -not(Test-Path $backupRoot -PathType Container) -or
                  @(Get-ChildItem -LiteralPath $backupRoot -Filter '*.spa' -File).Count -lt 1){
+                $preapplyCode='BACKUP_FILES_ABSENT'
                 throw 'R124_STANDARD_USER_BACKUP_FILES_ABSENT'
               }
               $section=$false;$backVersion='';$backWith=''
@@ -508,6 +514,7 @@ jobs:
                 if($line -match '^\s*with\s*=\s*(?<v>.*)$'){$backWith=$Matches['v'].Trim()}
               }
               if($backVersion -cne $signedVersion -or $backWith -cne '2.46.4'){
+                $preapplyCode='BACKUP_METADATA_MISMATCH'
                 throw 'R124_STANDARD_USER_BACKUP_METADATA_NOT_AUTHENTIC'
               }
               $ps=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -520,8 +527,18 @@ jobs:
               }else{$code=$proc.ExitCode}
               $phase='DONE'
             }
-          }catch{$code=6}
+          }catch{
+            if($phase -ceq 'PREAPPLY' -and $preapplyCode -ceq 'NONE'){
+              $preapplyCode='PREAPPLY_UNCLASSIFIED_EXCEPTION'
+            }
+            $code=6
+          }
           finally{
+            if($preapplyCode -cin @('NONE','OFFICIAL_CLI_EXIT_NONZERO','BACKUP_FILES_ABSENT',
+              'BACKUP_METADATA_MISMATCH','PREAPPLY_UNCLASSIFIED_EXCEPTION')){
+              [IO.File]::WriteAllText((Join-Path $Shared 'preapply-code.txt'),$preapplyCode,
+                (New-Object Text.UTF8Encoding($false)))
+            }
             $numericExit=6
             if($null -ne $code -and [string]$code -match '^-?[0-9]+$'){
               $numericExit=[int]$code
@@ -553,6 +570,37 @@ jobs:
               else{$phaseClass='UNRECOGNIZED'}
             }
             Write-Host ('R123_STANDARD_OWNER_PHASE='+$phaseClass)
+            $prePath=Join-Path $shared 'preapply-code.txt'
+            $preCode='UNAVAILABLE'
+            if(Test-Path $prePath -PathType Leaf){
+              $preCandidate=[IO.File]::ReadAllText($prePath).Trim()
+              if($preCandidate -cin @('NONE','OFFICIAL_CLI_EXIT_NONZERO','BACKUP_FILES_ABSENT',
+                'BACKUP_METADATA_MISMATCH','PREAPPLY_UNCLASSIFIED_EXCEPTION')){
+                $preCode=$preCandidate
+              }
+            }
+            Write-Host ('R124_STANDARD_PREAPPLY_CAUSE='+$preCode)
+            $privateCli=Join-Path $shared 'CLI-Preapply-PRIVATE.txt'
+            $safeHints=New-Object 'System.Collections.Generic.List[string]'
+            if(Test-Path $privateCli -PathType Leaf){
+              $cliText=[IO.File]::ReadAllText($privateCli)
+              if($cliText.Length -gt 2097152){throw 'R124_PRIVATE_CLI_LOG_SIZE_INVALID'}
+              foreach($v in @(
+                @('ADMIN_REFUSED','(?i)administrator|bypass.admin'),
+                @('FILE_ACCESS','(?i)access.denied|permission.denied|unauthorized'),
+                @('SPOTIFY_RUNNING','(?i)spotify.{0,35}(running|open|close|exit)'),
+                @('SPOTIFY_NOT_FOUND','(?i)spotify.{0,35}(not.found|does.not.exist|not.installed|path)'),
+                @('CONFIG_PREFS','(?i)config-xpui|prefs|preferences|last.launched'),
+                @('BACKUP_ERROR','(?i)backup.{0,50}(failed|error|missing|invalid)'),
+                @('VERSION_ERROR','(?i)version.{0,40}(unknown|invalid|mismatch|unsupported)'),
+                @('ASSET_ERROR','(?i)xpui|preprocessing|extract|cannot.read'),
+                @('NETWORK_ERROR','(?i)connection.*failed|http.*(403|404|429|503)')
+              )){
+                if($cliText -match $v[1]){$safeHints.Add($v[0])}
+              }
+              Write-Host ('R124_PRIVATE_CLI_OUTPUT_CLASS='+$(if($cliText.Length -eq 0){'EMPTY'}else{'NONEMPTY'}))
+            }
+            Write-Host ('R124_OFFICIAL_CLI_PREAPPLY_SAFE_HINTS='+$(if($safeHints.Count){$safeHints -join ','}else{'NONE'}))
             if($phaseClass -cin @('AGENT','DONE')){
               Write-Host 'R124_STANDARD_OWNER_SIGNED_INSTALL_AND_2464_BACKUP_APPLY=PASS'
             }
