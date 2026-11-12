@@ -362,7 +362,7 @@ jobs:
             $plaintext='Az8!'+[Convert]::ToBase64String($random)
             [Array]::Clear($random,0,$random.Length)
             $secret=ConvertTo-SecureString $plaintext -AsPlainText -Force
-            $credential=New-Object Security.PSCredential(('.\'+$accountName),$secret)
+            $credential=[System.Management.Automation.PSCredential]::new(('.\'+$accountName),$secret)
             $plaintext=$null
             $user=New-LocalUser -Name $accountName -Password $secret -Description 'Disposable GitHub-hosted Spotify acceptance' -ErrorAction Stop
             $sid=[string]$user.SID.Value
