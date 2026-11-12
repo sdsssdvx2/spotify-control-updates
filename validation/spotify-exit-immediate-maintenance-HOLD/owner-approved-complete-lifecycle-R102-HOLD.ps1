@@ -130,6 +130,8 @@ function R102TaskProbe([string]$agent){
   $detailTrigger='UNVERIFIED'
   $detailLogonScope='UNVERIFIED'
   $detailPolicy='UNVERIFIED'
+  $detailLogonType='UNVERIFIED'
+  $detailRegistrationPin='UNVERIFIED'
   $wscript=Join-Path $env:WINDIR 'System32\wscript.exe'
   $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
   if($null -ne (Get-Command -Name Get-ScheduledTask -ErrorAction SilentlyContinue)){
@@ -192,6 +194,23 @@ function R102TaskProbe([string]$agent){
                 'OTHER_LAUNCH_SHAPE'
               }else{'DIRECT_WSCRIPT_WITH_EXTRA_ACTIONS'}
               $detailEnabled=if([bool]$task.Enabled){'YES'}else{'NO'}
+              $detailLogonType=try{
+                switch([int]$definition.Principal.LogonType){
+                  0 {'NONE'} 1 {'PASSWORD'} 2 {'S4U'}
+                  3 {'INTERACTIVE_TOKEN'} 4 {'GROUP'} 5 {'SERVICE_ACCOUNT'}
+                  6 {'INTERACTIVE_OR_PASSWORD'} default {'UNKNOWN'}
+                }
+              }catch{'UNKNOWN'}
+              $detailRegistrationPin=try{
+                $xml=[string]$task.Xml
+                $taskPath=[string]$task.Path
+                if($xml.Length -lt 100 -or $xml.Length -gt 1048576 -or
+                   [string]::IsNullOrWhiteSpace($taskPath)){throw 'NO_REGISTRATION_PIN'}
+                $reg=[Text.Encoding]::UTF8.GetBytes($taskPath+[char]0+$xml)
+                $h=[Security.Cryptography.SHA256]::Create()
+                try{([BitConverter]::ToString($h.ComputeHash($reg))).Replace('-','').ToLowerInvariant()}
+                finally{$h.Dispose()}
+              }catch{'UNVERIFIED'}
               $detailPolicy=try{
                 switch([int]$definition.Settings.MultipleInstances){
                   0 {'PARALLEL'} 1 {'QUEUE'} 2 {'IGNORE_NEW'} 3 {'STOP_EXISTING'}
@@ -199,8 +218,7 @@ function R102TaskProbe([string]$agent){
                 }
               }catch{'UNKNOWN'}
             }
-            $owned=([string]::Equals($owner,$identity.User.Value,[StringComparison]::OrdinalIgnoreCase) -or
-                    [string]::Equals($owner,$identity.Name,[StringComparison]::OrdinalIgnoreCase))
+            $owned=((R102PrincipalClass $owner ([string]$definition.Principal.GroupId) $identity) -ceq 'CURRENT_OWNER_RESOLVED')
             if(-not $owned){$foreignPrincipal++}
             if(-not [bool]$task.Enabled){
               $disabledOrNoTrigger++
@@ -275,6 +293,8 @@ function R102TaskProbe([string]$agent){
     $detailTrigger='NOT_SINGLE_MATCH'
     $detailLogonScope='NOT_SINGLE_MATCH'
     $detailPolicy='NOT_SINGLE_MATCH'
+    $detailLogonType='NOT_SINGLE_MATCH'
+    $detailRegistrationPin='NOT_SINGLE_MATCH'
   }
   return @(
     ('R102_TASK_NATIVE_CMDLET='+$native),
@@ -293,6 +313,8 @@ function R102TaskProbe([string]$agent){
     ('R102_SINGLE_MATCH_TRIGGER='+$detailTrigger),
     ('R102_SINGLE_MATCH_LOGON_SCOPE='+$detailLogonScope),
     ('R102_SINGLE_MATCH_INSTANCE_POLICY='+$detailPolicy),
+    ('R102_SINGLE_MATCH_LOGON_TYPE='+$detailLogonType),
+    ('R102_SINGLE_MATCH_REGISTRATION_PIN_SHA256='+$detailRegistrationPin),
     'R102_TASK_ADMINISTRATIVE_GLOBAL_COVERAGE=NOT_PROVEN'
   )
 }
