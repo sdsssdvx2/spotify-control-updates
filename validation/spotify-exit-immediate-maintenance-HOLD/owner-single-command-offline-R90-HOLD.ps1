@@ -247,7 +247,7 @@ function R100GuardedOwnerRegistration([string]$root,[bool]$hosted){
       return 'SIZE_OUTSIDE_EXACT_HOLD'
     }
     [byte[]]$bytes=[IO.File]::ReadAllBytes($guard)
-    if((GitBlob $bytes) -cne '86a2bb96cab07f2b637234275fb52bc941af037b'){
+    if((GitBlob $bytes) -cne '08e5bf6631f8d2e8e1374619557d1ee4463c2b5c'){
       return 'GUARD_SOURCE_IDENTITY_HOLD'
     }
     $rec=Get-Content -LiteralPath $receipt -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
