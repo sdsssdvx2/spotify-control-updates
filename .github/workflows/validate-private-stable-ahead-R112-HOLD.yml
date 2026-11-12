@@ -1,0 +1,146 @@
+name: HOLD R112 authenticated private-ahead exception native acceptance
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-private-stable-ahead-R112-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/build-private-stable-ahead-R112-HOLD.py
+permissions: {contents: read, actions: read}
+jobs:
+  exact-two-function-native:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Construct unmodified released v0.6.30 and only-two-function variant
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows' -or
+             $env:RUNNER_ENVIRONMENT -cne 'github-hosted'){throw 'R112_NOT_HOSTED'}
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R112_PUBLIC_STABLE_BASE_CHANGED'
+          }
+          $d='validation/spotify-exit-immediate-maintenance-HOLD/'
+          foreach($name in @(
+            'build-combined-exit-and-shortcut-R37-HOLD.py',
+            'build-eventdriven-vbs-R45-HOLD.py',
+            'build-single-discovery-maintenance-R49-HOLD.py',
+            'build-shared-maintenance-lock-R54-HOLD.py',
+            'build-rapid-restart-vbs-R58-HOLD.py',
+            'build-wmi-selfheal-R63-HOLD.py',
+            'build-wmi-rebind-R66-HOLD.py',
+            'build-wmi-logon-recovery-R69-HOLD.py',
+            'build-boot-wmi-release-R70-HOLD.py',
+            'build-private-stable-ahead-R112-HOLD.py'
+          )){
+            & python ($d+$name)
+            if($LASTEXITCODE -ne 0){throw ('R112_FROZEN_SOURCE_BUILD_FAILED_'+$name)}
+          }
+          $candidate=$d+'out/private-stable-ahead-R112/spotify-control.ps1'
+          $tokens=$null;$errors=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile($candidate,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){$errors|ForEach-Object{Write-Host $_.Message};throw 'R112_PS51_SYNTAX_INVALID'}
+          $fns=@($ast.FindAll({param($a)
+            $a -is [Management.Automation.Language.FunctionDefinitionAst] -and
+            $a.Name -in @('Get-SelfUpdateCheckResult','Invoke-MaintenanceCheckPhase')
+          },$true))
+          if($fns.Count -ne 2){throw 'R112_SOURCE_FUNCTION_COUNT_INVALID'}
+          Write-Host 'R112_UNMODIFIED_V0630_PARENT_EXACT=PASS'
+          Write-Host 'R112_TWO_FUNCTION_ONLY_CANDIDATE_POWERSHELL_51_PARSE=PASS'
+      - name: Retrieve exact official Bootstrap and validate authentic checksum
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' \
+            'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' \
+            > "$RUNNER_TEMP/r112-known-bootstrap-archive.zip"
+          python - <<'PY'
+          import hashlib,io,os,zipfile
+          from pathlib import Path
+          root=Path(os.environ["RUNNER_TEMP"])
+          with zipfile.ZipFile(root/"r112-known-bootstrap-archive.zip") as outer:
+              inner=outer.read("SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip")
+          with zipfile.ZipFile(io.BytesIO(inner)) as z:
+              data=z.read("bootstrap/spotify-control-self-updater.ps1")
+          assert (len(data),hashlib.sha256(data).hexdigest())==(
+             42963,"d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6")
+          (root/"R112-exact-bootstrap-106.ps1").write_bytes(data)
+          print("R112_OFFICIAL_BOOTSTRAP=EXACT_SHA_PASS")
+          PY
+      - name: Native Windows branch matrix: authentic ahead, network error, tampered bootstrap, manifest mismatch, old version
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='validation/spotify-exit-immediate-maintenance-HOLD/out/private-stable-ahead-R112/spotify-control.ps1'
+          $tokens=$null;$errors=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile($root,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R112_INVALID_CANDIDATE_AST'}
+          $fns=@($ast.FindAll({param($a)
+             $a -is [Management.Automation.Language.FunctionDefinitionAst] -and
+             $a.Name -ceq 'Get-SelfUpdateCheckResult'
+          },$true))
+          if($fns.Count -ne 1){throw 'R112_EXACT_SOURCE_FUNCTION_NOT_PRESENT'}
+          . ([ScriptBlock]::Create($fns[0].Extent.Text))
+          $ScriptVersion='0.6.30'
+          $SelfUpdater=Join-Path $env:RUNNER_TEMP 'R112-exact-bootstrap-106.ps1'
+          $versionError='Automatic Spotify Control downgrade refused: installed=0.6.30 latest=0.6.28'
+          $url='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/main/manifest.json'
+          $script:next=[pscustomobject]@{
+            ExitCode=1
+            Report=[pscustomobject]@{
+              schema=1;action='Check';success=$false;bootstrap_version='1.0.6';
+              installed_version='0.6.30';manifest_url=$url;error=$versionError;
+              transaction_status='committed';transaction_id=$null
+            }
+            Output=''
+          }
+          function Invoke-SelfUpdaterJsonAction {param($SelfAction) if($SelfAction -cne 'Check'){throw 'R112_CHECK_ACTION_ONLY'};return $script:next}
+          function Expect([bool]$positive,[string]$reason) {
+            $value=Get-SelfUpdateCheckResult
+            if($positive){
+              if($value.TrustedStableBehindPrivate -ne $true -or
+                 $value.Verified -ne $false -or
+                 $value.UpdateAvailable -ne $false -or
+                 $value.LatestVersion -cne '0.6.28'){
+                throw ('R112_TRUSTED_AHEAD_NOT_RECOGNIZED_'+$reason)
+              }
+            }else{
+              if($value.TrustedStableBehindPrivate -ne $false -or
+                 $value.Verified -ne $false -or
+                 $value.UpdateAvailable -ne $false){
+                throw ('R112_OTHER_ERROR_INCORRECTLY_BYPASSED_'+$reason)
+              }
+            }
+          }
+          Expect $true 'EXACT_SHA_SIGNED_STABLE_BEHIND'
+          $script:next.Report.error='Request failed: 503'
+          Expect $false 'NETWORK'
+          $script:next.Report.error=$versionError
+          $script:next.Report.manifest_url='https://example.invalid/main.json'
+          Expect $false 'MANIFEST_IDENTITY'
+          $script:next.Report.manifest_url=$url
+          $script:next.Report.installed_version='0.6.29'
+          Expect $false 'WRONG_INSTALLED'
+          $script:next.Report.installed_version='0.6.30'
+          $script:next.Report.bootstrap_version='1.0.7'
+          Expect $false 'WRONG_BOOTSTRAP_VERSION'
+          $script:next.Report.bootstrap_version='1.0.6'
+          $script:next.ExitCode=2
+          Expect $false 'WRONG_EXIT_CODE'
+          $script:next.ExitCode=1
+          $script:next.Report.transaction_status='prepared'
+          Expect $false 'PENDING_TRANSACTION'
+          $script:next.Report.transaction_status='committed'
+          $wrong=Join-Path $env:RUNNER_TEMP 'R112-tampered-bootstrap.ps1'
+          [IO.File]::WriteAllText($wrong,'# test only invalid bootstrap')
+          $SelfUpdater=$wrong
+          Expect $false 'BOOTSTRAP_TAMPER'
+          Write-Host 'R112_NATIVE_EXACT_PRIVATE_BEHIND_WARNING=PASS'
+          Write-Host 'R112_NATIVE_NETWORK_AND_OTHER_ERRORS_STILL_BLOCKED=PASS'
+          Write-Host 'R112_NATIVE_BOOTSTRAP_SHA_AND_TRANSACTION_GUARD=PASS'
+          Write-Host 'R112_REAL_PRODUCT_AUTOMATIC_UPDATE_EXECUTED=NO'
+          Write-Host 'R112_REAL_USER_PC_PUBLIC_MAIN=UNCHANGED'
