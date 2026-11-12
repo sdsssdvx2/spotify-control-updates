@@ -1,0 +1,228 @@
+name: HOLD R109 official Spicetify 2.46.5 signed Spotify 1.3.8 compatibility and genuine apply/restore
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-latest-spicetify-real-vendor-R109-HOLD.yml
+permissions: {contents: read}
+jobs:
+  real-signed-spotify-and-spicetify-cli:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Rebuild exact R70 main and WScript, prepare R72 vendor app fixture
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R73_PUBLIC_MAIN_STABLE_SOURCE_CHANGED'
+          }
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          foreach($py in @(
+            'build-combined-exit-and-shortcut-R37-HOLD.py',
+            'build-eventdriven-vbs-R45-HOLD.py',
+            'build-single-discovery-maintenance-R49-HOLD.py',
+            'build-shared-maintenance-lock-R54-HOLD.py',
+            'build-rapid-restart-vbs-R58-HOLD.py',
+            'build-wmi-selfheal-R63-HOLD.py',
+            'build-wmi-rebind-R66-HOLD.py',
+            'build-wmi-logon-recovery-R69-HOLD.py',
+            'build-boot-wmi-release-R70-HOLD.py',
+            'accept-real-signed-spotify-exit-R72-HOLD.py'
+          )){
+            & python ($base+$py)
+            if($LASTEXITCODE -ne 0){throw ('R73_VERIFIED_PRODUCT_BUILD_OR_COMPOSITE_FAILED_'+$py)}
+          }
+          Write-Host 'R75_R70_SHA_PINNED_MAIN_AND_VENDOR_FIXTURE_BUILT=PASS'
+      - name: Download and authenticate Spotify official current signed x64 full installer on disposable runner only
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if(@(Get-CimInstance Win32_Process -Filter "Name='Spotify.exe'" -ErrorAction Stop).Count -ne 0){
+            throw 'R72_FOREIGN_SPOTIFY_PROCESS_PRESENT_BEFORE_INSTALL'
+          }
+          $app=Join-Path $env:APPDATA 'Spotify\Spotify.exe'
+          if(Test-Path -LiteralPath $app){throw 'R72_EXISTING_SPOTIFY_INSTALL_PRESENT'}
+          $installer=Join-Path $env:RUNNER_TEMP 'R72-SpotifyFullSetupX64.exe'
+          if(Test-Path -LiteralPath $installer){throw 'R72_INSTALLER_PREEXISTED'}
+          & curl.exe --fail --location --silent --show-error --connect-timeout 20 --max-time 180 --output $installer 'https://download.scdn.co/SpotifyFullSetupX64.exe'
+          if($LASTEXITCODE -ne 0){throw 'R72_OFFICIAL_INSTALLER_TLS_FETCH_UNAVAILABLE'}
+          $stat=Get-Item -LiteralPath $installer -ErrorAction Stop
+          if($stat.Length -lt 20000000 -or $stat.Length -gt 250000000){
+            throw 'R72_OFFICIAL_INSTALLER_UNEXPECTED_SIZE'
+          }
+          $signature=Get-AuthenticodeSignature -LiteralPath $installer -ErrorAction Stop
+          if([string]$signature.Status -cne 'Valid' -or
+             $null -eq $signature.SignerCertificate -or
+             [string]$signature.SignerCertificate.Subject -cnotmatch '(?i)(^|,)\s*O=Spotify AB(,|$)'){
+             throw 'R72_OFFICIAL_INSTALLER_AUTHENTICODE_NOT_VERIFIED'
+          }
+          Write-Host 'R72_SPOTIFY_VENDOR_AB_SIGNATURE_AND_TLS=PASS'
+          Write-Host ('R72_OFFICIAL_CURRENT_INSTALLER_SHA256='+((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()))
+          Write-Host ('R72_OFFICIAL_CURRENT_INSTALLER_BYTES='+$stat.Length)
+          $proc=Start-Process -FilePath $installer -ArgumentList @('/silent','/skip-app-launch') -PassThru -ErrorAction Stop
+          if(-not $proc.WaitForExit(140000)){
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            throw 'R72_OFFICIAL_CURRENT_INSTALLER_DEADLINE_EXCEEDED'
+          }
+          if($proc.ExitCode -ne 0){throw 'R72_OFFICIAL_CURRENT_INSTALLER_NONZERO_EXIT'}
+          $appeared=$false
+          for($i=0;$i -lt 160;$i++){
+            if(Test-Path -LiteralPath $app -PathType Leaf){$appeared=$true;break}
+            Start-Sleep -Milliseconds 500
+          }
+          if(-not $appeared){throw 'R72_SPOTIFY_EXE_NOT_PRODUCED_BY_OFFICIAL_INSTALLER'}
+          $sig=Get-AuthenticodeSignature -LiteralPath $app -ErrorAction Stop
+          if([string]$sig.Status -cne 'Valid' -or
+             $null -eq $sig.SignerCertificate -or
+             [string]$sig.SignerCertificate.Subject -cnotmatch '(?i)(^|,)\s*O=Spotify AB(,|$)'){
+            throw 'R72_INSTALLED_REAL_SPOTIFY_EXE_NOT_SIGNED_BY_SPOTIFY_AB'
+          }
+          if(@(Get-CimInstance Win32_Process -Filter "Name='Spotify.exe'" -ErrorAction Stop).Count -ne 0){
+            throw 'R72_SPOTIFY_AUTOSTARTED_DESPITE_SKIP_APP_LAUNCH'
+          }
+          Remove-Item -LiteralPath $installer -Force -ErrorAction Stop
+          Write-Host 'R72_REAL_SIGNED_SPOTIFY_X64_INSTALLED_IN_EPHEMERAL_RUNNER=PASS'
+          Write-Host 'R72_USER_ACCOUNT_SIGNIN=NO;OWNER_PC_MODIFIED=NO;RELEASE_PUBLISHED=NO'
+      - name: Authenticate new official v2.46.5 archive and derive exact executable from pinned bytes
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $asset=Join-Path $env:RUNNER_TEMP 'r109-spicetify-v2465-official.zip'
+          if(Test-Path -LiteralPath $asset){throw 'R75_OFFICIAL_ARCHIVE_PREEXISTED'}
+          & curl.exe --fail --location --silent --show-error --connect-timeout 20 --max-time 100 --output $asset 'https://github.com/spicetify/cli/releases/download/v2.46.5/spicetify-2.46.5-windows-x64.zip'
+          if($LASTEXITCODE -ne 0){throw 'R75_CLI_UPSTREAM_RELEASE_FETCH_FAILED'}
+          $sourceSha=(Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sourceSha -cne '34db1d8fbbdc0d130782891b7c530d4e69f0c426a9361e8a65925cf4f54e056e'){
+            throw 'R75_UPSTREAM_OFFICIAL_RELEASE_ASSET_SHA_CHANGED'
+          }
+          $unpack=Join-Path $env:RUNNER_TEMP 'r75-extract'
+          $dest=Join-Path $env:RUNNER_TEMP 'r75-official-spicetify'
+          if((Test-Path -LiteralPath $unpack) -or (Test-Path -LiteralPath $dest)){
+            throw 'R75_SPICETIFY_TEMP_PREEXISTED'
+          }
+          Expand-Archive -LiteralPath $asset -DestinationPath $unpack -ErrorAction Stop
+          $matches=@(Get-ChildItem -LiteralPath $unpack -File -Filter 'spicetify.exe' -Recurse -ErrorAction Stop)
+          if($matches.Count -ne 1){throw 'R75_REAL_CLI_ARCHIVE_EXE_CARDINALITY_INVALID'}
+          $exactExeSha=(Get-FileHash -LiteralPath $matches[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($exactExeSha -notmatch '^[0-9a-f]{64}$'){
+            throw 'R109_ARCHIVE_EXE_EXTRACTED_DIGEST_NOT_VALID'
+          }
+          "R109_OFFICIAL_EXE_SHA256=$exactExeSha" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          [void][IO.Directory]::CreateDirectory($dest)
+          [IO.File]::Copy($matches[0].FullName,(Join-Path $dest 'spicetify.exe'),$false)
+          Remove-Item -LiteralPath $asset -Force -ErrorAction Stop
+          Write-Host 'R109_OFFICIAL_RELEASE_2465_ASSET_SHA256_PINNED_AND_EXE_EXTRACTED=PASS'
+      - name: Unmodified v0.6.30 full main must positively admit signed Spotify 1.3.8 with official CLI 2.46.5
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          # Reuse exact R75 source byte-for-byte. Only in-memory harness-side
+          # release IDs, expected CLI digest, and positive compat assertions
+          # change. No product source is edited or auto-mutation authorized.
+          @'
+          from pathlib import Path
+          import os,subprocess
+          file=Path("validation/spotify-exit-immediate-maintenance-HOLD/accept-real-cli-compatibility-R75-HOLD.py").resolve()
+          orig=file.read_text("utf-8")
+          expected=os.environ["R109_OFFICIAL_EXE_SHA256"]
+          old="3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db"
+          assert orig.count(old)>=2 and len(expected)==64, "R109_EXACT_HARNESS_DIGEST_BINDING_CHANGED"
+          updated=orig.replace(old,expected)
+          updated=updated.replace("2.46.4","2.46.5").replace(r"2\.46\.4",r"2\.46\.5")
+          updated=updated.replace("1.3.7","1.3.9")
+          assert updated!=orig and "3563f26acd" not in updated
+          # Signed Spotify x64 is currently 1.3.8; no synthetic process.
+          namespace={"__file__":str(file),"__name__":"__main__"}
+          exec(compile(updated,str(file),"exec"),namespace)
+          print("R109_ONLY_R75_TEST_HARNESS_EXPECTATIONS_ADAPTED=PASS")
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'R109_PINNED_NATIVE_FULL_MAIN_HARNESS_FAILED'}
+          $native=Join-Path $env:RUNNER_TEMP 'spotify-r75-real-spicetify-compatibility.ps1'
+          # Generated real Windows native harness: change only the truth-
+          # expectation from R75 unsupported to R109 supported, not code.
+          @'
+          from pathlib import Path
+          import os
+          f=Path(os.environ["RUNNER_TEMP"])/"spotify-r75-real-spicetify-compatibility.ps1"
+          s=f.read_text("utf-8")
+          items=(
+            ("$live.current_spotify_supported -ne $false",
+             "$live.current_spotify_supported -ne $true"),
+            ("R75_SPOTIFY_138_ABOVE_OFFICIAL_SPICETIFY_2464_MAX_137=TRUE",
+             "R109_SPOTIFY_138_SUPPORTED_WITH_2465_MAX_139=TRUE"),
+            ("R75_MAIN_COMPATIBILITY_CURRENT_SUPPORTED_FALSE=PASS",
+             "R109_MAIN_COMPATIBILITY_CURRENT_SUPPORTED_TRUE=PASS")
+          )
+          for before,after in items:
+            assert s.count(before)==1, "R109_REAL_HARNESS_SOURCE_DRIFT_"+before
+            s=s.replace(before,after,1)
+          f.write_text(s,encoding="utf-8",newline="\n")
+          print("R109_REAL_R75_HARNESS_POSITIVE_ONLY=PASS")
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'R109_FULL_MAIN_POSITIVE_ASSERTION_PREPARATION_FAILED'}
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($native,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R75_NATIVE_REAL_VENDOR_STACK_PS51_PARSE_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $native
+          if($LASTEXITCODE -ne 0){throw 'R75_REAL_OFFICIAL_SPICETIFY_COMPATIBILITY_FAILCLOSED_UNPROVEN'}
+          Write-Host 'R109_REAL_SIGNED_138_AND_OFFICIAL_2465_MAX_139_UNMODIFIED_V0630_GUARD=PASS'
+          Write-Host 'R109_OWNER_PC_AND_PUBLIC_RELEASE=UNCHANGED_HOLD'
+      - name: Real Spicetify 2.46.5 backup apply and exact byte-for-byte restore on signed compatible Spotify
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or
+             $env:RUNNER_OS -cne 'Windows'){
+            throw 'R109_ONLY_EPHEMERAL_GITHUB_WINDOWS'
+          }
+          if(@(Get-Process Spotify -ErrorAction SilentlyContinue).Count -ne 0){
+            throw 'R109_SPOTIFY_PROCESS_NOT_CLOSED'
+          }
+          $cli=Join-Path $env:RUNNER_TEMP 'r75-official-spicetify\spicetify.exe'
+          $sha=(Get-FileHash $cli -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($sha -cne $env:R109_OFFICIAL_EXE_SHA256){throw 'R109_CLI_BINARY_IDENTITY_CHANGED_AFTER_HARNESS'}
+          $spotify=Join-Path $env:APPDATA 'Spotify'
+          $prefs=Join-Path $spotify 'prefs'
+          $xpui=Join-Path $spotify 'Apps\xpui.spa'
+          if(-not(Test-Path $xpui -PathType Leaf)){throw 'R109_REAL_XPUI_MISSING'}
+          $vanilla=(Get-FileHash $xpui -Algorithm SHA256).Hash.ToLowerInvariant()
+          if(-not(Test-Path $prefs -PathType Leaf)){
+            [IO.File]::WriteAllText($prefs,'[Settings]'+[Environment]::NewLine,[Text.Encoding]::UTF8)
+          }
+          & $cli --bypass-admin --no-restart config spotify_path $spotify prefs_path $prefs
+          if($LASTEXITCODE -ne 0){throw 'R109_OFFICIAL_CLI_TEST_PROFILE_CONFIG_FAILED'}
+          $applyAttempted=$false;$applySuccess=$false;$restoreSuccess=$false
+          try {
+            $applyAttempted=$true
+            & $cli --bypass-admin --no-restart backup apply
+            if($LASTEXITCODE -ne 0){throw 'R109_REAL_CLI_2465_BACKUP_APPLY_FAILED'}
+            $changed= -not(Test-Path $xpui -PathType Leaf)
+            if(-not $changed){
+              $changed=((Get-FileHash $xpui -Algorithm SHA256).Hash.ToLowerInvariant() -cne $vanilla)
+            }
+            if(-not $changed){throw 'R109_REAL_CLI_2465_APPLY_DID_NOT_MODIFY_REAL_VENDOR_APP'}
+            $applySuccess=$true
+            Write-Host 'R109_REAL_2465_BACKUP_APPLY_CHANGED_SIGNED_VENDOR_XPUI=PASS'
+          } finally {
+            if($applyAttempted){
+              $stock=(Test-Path $xpui -PathType Leaf) -and
+                ((Get-FileHash $xpui -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $vanilla)
+              if($stock){$restoreSuccess=$true}
+              else {
+                & $cli --bypass-admin --no-restart restore
+                $restoreSuccess=($LASTEXITCODE -eq 0 -and
+                  (Test-Path $xpui -PathType Leaf) -and
+                  ((Get-FileHash $xpui -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $vanilla))
+              }
+              if(-not $restoreSuccess){throw 'R109_CLI_2465_RESTORE_EXACT_ORIGINAL_BYTES_NOT_PROVEN'}
+              Write-Host 'R109_REAL_2465_RESTORE_EXACT_ORIGINAL_XPUI_SHA256=PASS'
+            }
+          }
+          if(-not $applySuccess -or -not $restoreSuccess){throw 'R109_REAL_COMPATIBLE_FULL_TRANSACTION_INCOMPLETE'}
+          Write-Host 'R109_REAL_VENDOR_SPICETIFY_BACKUP_APPLY_RESTORE=PASS'
+          Write-Host 'R109_PRODUCT_MAIN_AUTO_MUTATION=NOT_AUTHORIZED_OR_PROVEN'
+          Write-Host 'R109_USER_ACCOUNT_AND_MUSIC_PLAYBACK=NOT_TESTED'
+          Write-Host 'R109_OWNER_PC_AND_PUBLIC_RELEASE=UNCHANGED'
