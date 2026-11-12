@@ -91,6 +91,21 @@ def main():
       throw ('R100_EXACT_R99_GUARDED_OWNER_STATUS_NOT_RECOGNIZED '+(@($r100|Where-Object{$_ -match '^R100_'}) -join ';'))
     }
     Write-Host 'R100_SINGLE_COMMAND_OWNER_R99_GUARDED_STARTUP_READONLY_RECOGNITION=PASS'
+    # R101 one offline-only owner preflight observes the same exact
+    # guarded candidate using embedded byte-pinned R77/R90. The R77
+    # live-owner path remains disabled in hosted scratch, intentionally.
+    $r101Source='validation/spotify-exit-immediate-maintenance-HOLD/owner-unified-readonly-preflight-R101-HOLD.ps1'
+    $unified=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $r101Source -HostedFixtureRoot $app 2>&1)
+    if($LASTEXITCODE -ne 0 -or
+       $unified -cnotcontains 'R101_R77_AND_R90_EXACT_GIT_OBJECTS=PASS' -or
+       $unified -cnotcontains 'R101_INSTALLED_STAGE=CANDIDATE_V0630_FILES_EXACT' -or
+       $unified -cnotcontains 'R101_R100_R99_GUARDED_LOGON=ONE_OWNED_GUARDED_REGISTERED_NOT_LOGON_PROOF' -or
+       $unified -cnotcontains 'R101_R77_LIVE_OWNER_ADMISSION=NOT_EXECUTED_HOSTED_FIXTURE' -or
+       $unified -cnotcontains 'R101_OVERALL=HOSTED_SCRATCH_STATUS_ONLY_NOT_OWNER_RELEASE_AUTHORITY' -or
+       $unified -cnotcontains 'RESULT=R101_OFFLINE_READONLY_EVIDENCE_COLLECTED'){
+      throw ('R101_REAL_R99_NATIVE_GUARDED_CANDIDATE_NOT_CLASSIFIED '+(@($unified|Where-Object{$_ -match '^(R101_INSTALLED_STAGE|R101_R100_R99_GUARDED_LOGON|HOLD_REASON|RESULT)='}) -join ';'))
+    }
+    Write-Host 'R101_REAL_NATIVE_CANDIDATE_R99_GUARDED_PRECHECK=PASS'
     $noSecond=R99Once @()
     if($noSecond -cnotcontains 'R99_PLAN=OWNED_GUARDED_LOGON_LINK_PRESENT_EXECUTION_UNVERIFIED'){
       throw 'R99_OWNER_REGISTRATION_PLAN_AFTER_COMMIT_MISMATCH'
@@ -134,6 +149,14 @@ def main():
       throw 'R100_OWNER_GUARDED_REGISTRATION_NOT_REMOVED_IN_STATUS'
     }
     Write-Host 'R100_SINGLE_COMMAND_OWNER_GUARDED_LINK_REVOKE_REFLECTED=PASS'
+    $unifiedGone=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $r101Source -HostedFixtureRoot $app 2>&1)
+    if($LASTEXITCODE -ne 0 -or
+       $unifiedGone -cnotcontains 'R101_R100_R99_GUARDED_LOGON=NONE' -or
+       $unifiedGone -cnotcontains 'R101_INSTALLED_STAGE=CANDIDATE_V0630_FILES_EXACT' -or
+       $unifiedGone -cnotcontains 'RESULT=R101_OFFLINE_READONLY_EVIDENCE_COLLECTED'){
+      throw 'R101_OWNER_GUARDED_REVOKE_INTEGRATED_STATUS_NOT_CONSISTENT'
+    }
+    Write-Host 'R101_REAL_NATIVE_CANDIDATE_AFTER_GUARDED_REVOKE=PASS'
     foreach($item in @(@{path=$main;sha=$mainFingerprint},
         @{path=$agent;sha=$agentFingerprint},
         @{path=$journal;sha=$journalFingerprint})){
