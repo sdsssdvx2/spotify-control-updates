@@ -339,6 +339,23 @@ jobs:
           $stdout=Join-Path $env:RUNNER_TEMP 'R113-main-stdout.txt'
           $stderr=Join-Path $env:RUNNER_TEMP 'R113-main-stderr.txt'
           $outcome='HOLD_NOT_PROVEN'
+          # GitHub-hosted elevated runner creates synthetic fixture files with
+          # high MIC labels. A normal owner process cannot write high-MIC
+          # objects even with matching user SID. Only in this disposable hosted
+          # VM, make the explicitly named scratch trees medium-integrity before
+          # starting a real standard-privilege AgentTick; never alter a user PC.
+          $sandboxHome=[IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd([char]'\\')+'\\'
+          $trees=@($root,$cliDir,$spotify,(Join-Path $env:APPDATA 'spicetify'))
+          foreach($tree in $trees){
+            $absolute=[IO.Path]::GetFullPath($tree)
+            if(-not $absolute.StartsWith($sandboxHome,[StringComparison]::OrdinalIgnoreCase) -or
+               -not(Test-Path -LiteralPath $absolute -PathType Container)){
+              throw 'R122_HOSTED_SCRATCH_SCOPE_INVALID'
+            }
+            & icacls.exe $absolute /setintegritylevel '(OI)(CI)M' /T /Q | Out-Null
+            if($LASTEXITCODE -ne 0){throw 'R122_SCRATCH_MEDIUM_IL_UNAVAILABLE'}
+          }
+          Write-Host 'R122_HOSTED_SCRATCH_MEDIUM_INTEGRITY=APPLIED_TEST_ONLY'
           try {
             $main=Join-Path $bin 'spotify-control.ps1'
             $args='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$main+'" -Action AgentTick -AgentEvent SpotifyExit'
@@ -430,9 +447,9 @@ jobs:
                  [ref]$originalToken)){
                 throw 'R122_OPEN_OWNER_TOKEN_FAILED'
               }
-              # DISABLE_MAX_PRIVILEGE | LUA_TOKEN; never SANDBOX_INERT.
+              # LUA_TOKEN only: match ordinary owner permissions; never SANDBOX_INERT.
               if(-not [R122NativeLUA]::CreateRestrictedToken(
-                 $originalToken,[uint32]5,0,[IntPtr]::Zero,0,[IntPtr]::Zero,
+                 $originalToken,[uint32]4,0,[IntPtr]::Zero,0,[IntPtr]::Zero,
                  0,[IntPtr]::Zero,[ref]$limitedToken)){
                 throw 'R122_CREATE_RESTRICTED_TOKEN_FAILED'
               }
@@ -470,6 +487,7 @@ jobs:
               }
               $nativeClass=if($nativeExit -eq 0){'ZERO'}elseif($nativeExit -eq 1){'ONE'}else{'OTHER_NONZERO'}
               Write-Host ('R122_NATIVE_CHILD_EXIT_CLASS='+$nativeClass)
+              Write-Host ('R122_NATIVE_CHILD_EXIT_HEX='+('0x{0:X8}' -f $nativeExit))
               if(-not(Test-Path -LiteralPath $receipt -PathType Leaf)){
                 throw 'R122_NONADMIN_LAUNCHER_NO_RECEIPT'
               }
