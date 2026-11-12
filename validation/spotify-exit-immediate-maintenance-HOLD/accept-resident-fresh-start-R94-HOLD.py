@@ -31,6 +31,7 @@ def run()->None:
            "GITHUB_HOSTED_WINDOWS_ONLY")
     ensure(TEST.is_file(),"R93_NATIVE_TEST_PREVIOUSLY_STAGED_REQUIRED")
     s=TEST.read_text("utf-8")
+    parent_sha=hashlib.sha256(s.encode("utf-8")).hexdigest()
     ensure("R93_FRESH_POWERSHELL_CANDIDATE_SOURCE_SNAPSHOT=PASS" not in s or
            "R93FreshSnapshot 'CANDIDATE'" in s,"R93_FRESH_STATUS_DRIVER_INVALID")
     ensure("R93FreshSnapshot 'CANDIDATE'" in s and
@@ -116,7 +117,7 @@ def run()->None:
            "FUTURE_OFFICIAL_BOOTSTRAP_CORRUPT_CHUNK_REJECTED_ORIGINAL_AND_OWNER_DATA_UNCHANGED_PASS" in s,
            "UNINTENDED_NATIVE_ROLLBACK_CHANGE")
     TEST.write_text(s,encoding="utf-8",newline="\n")
-    print("R94_FROZEN_R93_TEST_PARENT_SHA256="+hashlib.sha256(TEST.read_bytes()).hexdigest())
+    print("R94_FROZEN_R93_TEST_PARENT_SHA256="+parent_sha)
     print("R94_EXACT_COMMITTED_VBS_PROCESS_FRESH_OS_LAUNCH=PREPARED")
     print("R94_USER_WINDOWS_AND_PUBLIC_MAIN=UNMODIFIED")
     print("R94_PHYSICAL_REBOOT_AND_REAL_LOGON=NOT_TESTED")
