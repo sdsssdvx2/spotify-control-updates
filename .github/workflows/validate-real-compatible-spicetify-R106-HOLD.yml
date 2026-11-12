@@ -11,7 +11,7 @@ jobs:
     timeout-minutes: 16
     steps:
       - uses: actions/checkout@v4
-        with: {persist-credentials: false}
+        with: {persist-credentials: false, fetch-depth: 0}
       - name: Immutable publisher-signed compatible Spotify 1.3.6 from archival cache
         shell: powershell
         run: |
@@ -117,3 +117,76 @@ jobs:
           Write-Host 'R106_USER_SPOTIFY_ACCOUNT_AND_MUSIC=NOT_TESTED'
           Write-Host 'R106_PRODUCT_AUTO_MAINTENANCE_ORCHESTRATION=NOT_TESTED'
           Write-Host 'R106_OWNER_PC_AND_PUBLIC_MAIN_RELEASE=UNCHANGED'
+
+      - name: Positive compatibility check in exact unchanged full v0.6.30 main with real vendor binaries
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir='validation/spotify-exit-immediate-maintenance-HOLD/'
+          $sources=@(
+            'build-combined-exit-and-shortcut-R37-HOLD.py',
+            'build-eventdriven-vbs-R45-HOLD.py',
+            'build-single-discovery-maintenance-R49-HOLD.py',
+            'build-shared-maintenance-lock-R54-HOLD.py',
+            'build-rapid-restart-vbs-R58-HOLD.py',
+            'build-wmi-selfheal-R63-HOLD.py',
+            'build-wmi-rebind-R66-HOLD.py',
+            'build-wmi-logon-recovery-R69-HOLD.py',
+            'build-boot-wmi-release-R70-HOLD.py',
+            'accept-real-signed-spotify-exit-R72-HOLD.py'
+          )
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R107_STABLE_ORIGINAL_BASE_DRIFT'
+          }
+          foreach($script in $sources){
+            & python ($dir+$script)
+            if($LASTEXITCODE -ne 0){throw ('R107_EXACT_EXISTING_BUILD_FAILED_'+$script)}
+          }
+          $actual=@(Get-ChildItem -LiteralPath (Join-Path $env:RUNNER_TEMP 'r106-cli-unpack') -Filter 'spicetify.exe' -File -Recurse)
+          if($actual.Count -ne 1){throw 'R107_VERIFIED_OFFICIAL_CLI_NOT_AVAILABLE'}
+          $target=Join-Path $env:RUNNER_TEMP 'r75-official-spicetify'
+          [void][IO.Directory]::CreateDirectory($target)
+          $cli=Join-Path $target 'spicetify.exe'
+          [IO.File]::Copy($actual[0].FullName,$cli,$false)
+          if((Get-FileHash -LiteralPath $cli -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+             '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+            throw 'R107_CLI_BINARY_CHANGED'
+          }
+          # R75's verified original full-main harness is reused unchanged.
+          # Only its TEST-side expectation is replaced for a signed 1.3.6 client.
+          python ($dir+'accept-real-cli-compatibility-R75-HOLD.py')
+          if($LASTEXITCODE -ne 0){throw 'R107_PINNED_R75_HARNESS_NOT_RECONSTRUCTED'}
+          @'
+          from pathlib import Path
+          import os
+          path=Path(os.environ["RUNNER_TEMP"])/"spotify-r75-real-spicetify-compatibility.ps1"
+          t=path.read_text("utf-8")
+          pairs=(
+            ("'^1\\.3\\.8(\\.|$)'", "'^1\\.3\\.6(\\.|$)'"),
+            ("R75_THIS_ACCEPTANCE_EXPECTS_THE_GENUINE_SPOTIFY_1_3_8",
+             "R107_THIS_ACCEPTANCE_EXPECTS_THE_GENUINE_SPOTIFY_1_3_6"),
+            ("$live.current_spotify_supported -ne $false",
+             "$live.current_spotify_supported -ne $true"),
+            ("R75_SPOTIFY_138_ABOVE_OFFICIAL_SPICETIFY_2464_MAX_137=TRUE",
+             "R107_SPOTIFY_136_WITHIN_OFFICIAL_SPICETIFY_2464_MAX_137=TRUE"),
+            ("R75_MAIN_COMPATIBILITY_CURRENT_SUPPORTED_FALSE=PASS",
+             "R107_MAIN_COMPATIBILITY_CURRENT_SUPPORTED_TRUE=PASS"),
+          )
+          for old,new in pairs:
+            assert t.count(old)==1, "R107_TEST_ASSERTION_ANCHOR_DRIFT_"+old
+            t=t.replace(old,new,1)
+          assert "R75_MAIN_COMPATIBILITY_CURRENT_SUPPORTED_FALSE=PASS" not in t
+          path.write_text(t,encoding="utf-8",newline="\n")
+          print("R107_ONLY_TEST_ASSERTIONS_REBOUND_TO_COMPATIBLE_136=PASS")
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'R107_EXPECTED_COMPATIBLE_REBIND_INVALID'}
+          $test=Join-Path $env:RUNNER_TEMP 'spotify-r75-real-spicetify-compatibility.ps1'
+          $tokens=$null;$errors=$null
+          $null=[Management.Automation.Language.Parser]::ParseFile($test,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R107_NATIVE_PS51_POSITIVE_HARNESS_SYNTAX_INVALID'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test
+          if($LASTEXITCODE -ne 0){throw 'R107_REAL_SIGNED_COMPATIBLE_VENDOR_FULL_MAIN_GUARD_FAILED'}
+          Write-Host 'R107_FULL_UNMODIFIED_MAIN_REAL_SPOTIFY_136_AND_OFFICIAL_SPICETIFY_2464=PASS'
+          Write-Host 'R107_REAL_COMPATIBLE_GUARD_AND_DISCOVERY=PASS'
+          Write-Host 'R107_PRODUCT_MAIN_MUTATION=OFF;ACCOUNT_LOGIN_AND_PLAYBACK=NOT_TESTED'
+          Write-Host 'R107_OWNER_PC_AND_PUBLIC_RELEASE=UNCHANGED'
