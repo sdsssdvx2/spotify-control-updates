@@ -55,7 +55,8 @@ try{
       @{bits=@($true,$true,$true,$true,$true,$true,$false);expected='HOLD_TASK_RESIDENT_TEMPORAL_CORRELATION_UNVERIFIED'}
     )
     foreach($c in $arr){
-      if((R103Decision @($c.bits)) -cne $c.expected){
+      [object[]]$argsForTest=$c.bits
+      if((R103Decision @argsForTest) -cne $c.expected){
         Fail 'R103_HOSTED_DECISION_GATE_FAILED'
       }
     }
