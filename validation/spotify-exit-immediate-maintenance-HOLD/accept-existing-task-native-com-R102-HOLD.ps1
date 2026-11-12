@@ -91,7 +91,12 @@ try {
   if($folderMade){try{$root.DeleteFolder($folderName,0)}catch{}}
   try{
     $null=$root.GetFolder($global:R102HostedFolder)
-  }catch [Runtime.InteropServices.COMException]{$clean=$true}
+  }catch{
+    # Scheduler raises either COMException or FileNotFoundException for an
+    # already removed folder. Only ERROR_FILE_NOT_FOUND means clean.
+    if($_.Exception.HResult -eq -2147024894){$clean=$true}
+    else{throw}
+  }
   Remove-Variable R102HostedFolder -Scope Global -ErrorAction SilentlyContinue
   if(-not $clean){throw 'R102_HOSTED_TASK_CLEANUP_INCOMPLETE'}
 }
