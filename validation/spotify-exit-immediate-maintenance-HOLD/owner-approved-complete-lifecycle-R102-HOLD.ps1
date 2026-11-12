@@ -66,6 +66,89 @@ function RequireOneResult([object[]]$rows){
     Deny 'R102_RESULT_RECEIPT_COUNT_INVALID'
   }
 }
+# R102 read-only diagnosis; never promotes a partial task listing to 'NONE'.
+# Microsoft documents that non-admin users may not see other owners' tasks.
+# Do not print task names, paths, arguments, errors or unrelated task data.
+function R102TaskProbe([string]$agent){
+  $native='NOT_AVAILABLE'
+  $visible='UNKNOWN'
+  $com='UNAVAILABLE_OR_INCOMPLETE'
+  $hit=$false
+  $partial=$false
+  if($null -ne (Get-Command -Name Get-ScheduledTask -ErrorAction SilentlyContinue)){
+    try{
+      # A successful call is NOT a certificate that all tasks were visible.
+      $null=@(Get-ScheduledTask -ErrorAction Stop)
+      $native='RETURNED_NOT_GLOBAL_COVERAGE_PROOF'
+    }catch{
+      $errorCode=$_.Exception.HResult
+      if($errorCode -eq -2147024891 -or
+         $_.FullyQualifiedErrorId -match '(?i)accessdenied|unauthorized'){
+        $native='ACCESS_DENIED'
+      }else{
+        $native='FAILED_OR_PARTIAL_NOT_GLOBAL_PROOF'
+      }
+    }
+  }
+  try{
+    $service=New-Object -ComObject Schedule.Service -ErrorAction Stop
+    $service.Connect()
+    $root=$service.GetFolder('\')
+    $folders=New-Object System.Collections.Stack
+    $folders.Push($root)
+    $folderCount=0
+    $taskCount=0
+    while($folders.Count -gt 0){
+      $folderCount++
+      if($folderCount -gt 512){$partial=$true;break}
+      $folder=$folders.Pop()
+      try{
+        # 1 includes hidden tasks that this account may read.
+        $tasks=$folder.GetTasks(1)
+        for($i=1;$i -le $tasks.Count;$i++){
+          $taskCount++
+          if($taskCount -gt 4096){$partial=$true;break}
+          try{
+            $task=$tasks.Item($i)
+            if(-not $task.Enabled){continue}
+            $actions=$task.Definition.Actions
+            for($j=1;$j -le $actions.Count;$j++){
+              $action=$actions.Item($j)
+              if([string]$action.Arguments -and
+                 ([string]$action.Arguments).IndexOf(
+                   $agent,[StringComparison]::OrdinalIgnoreCase) -ge 0){
+                $hit=$true
+              }
+            }
+          }catch{$partial=$true}
+        }
+        if($taskCount -gt 4096){break}
+      }catch{$partial=$true}
+      try{
+        $subfolders=$folder.GetFolders(0)
+        for($k=1;$k -le $subfolders.Count;$k++){
+          $folders.Push($subfolders.Item($k))
+        }
+      }catch{$partial=$true}
+    }
+    $visible=if($hit){'POSSIBLE_DIRECT_AGENT_TASK_FOUND'}else{
+      'NO_VISIBLE_AGENT_TASK_NOT_GLOBAL_PROOF'
+    }
+    $com=if($partial){'PARTIAL_OR_ACCESS_RESTRICTED'}else{
+      'ACCESSIBLE_SCOPE_ENUMERATED_NOT_GLOBAL_PROOF'
+    }
+  }catch{
+    $com='UNAVAILABLE_OR_INCOMPLETE'
+    if($hit){$visible='POSSIBLE_DIRECT_AGENT_TASK_FOUND'}
+  }
+  return @(
+    ('R102_TASK_NATIVE_CMDLET='+$native),
+    ('R102_TASK_COM_ENUM='+$com),
+    ('R102_TASK_VISIBLE_AGENT_REFERENCE='+$visible),
+    'R102_TASK_ADMINISTRATIVE_GLOBAL_COVERAGE=NOT_PROVEN'
+  )
+}
+
 try{
   if(($Prepare -and $Commit) -or ($Prepare -and $Preflight) -or ($Commit -and $Preflight)){
     Deny 'R102_MODES_MUTUALLY_EXCLUSIVE'
@@ -125,6 +208,17 @@ try{
       }
       $out.Add('R102_'+$key+'='+$value)
       if($value -cne 'NONE_IN_EXAMINED_SCOPE'){$startupCertain=$false}
+    }
+    if(-not $startupCertain){
+      $taskField=@($routes|Where-Object {
+        ([string]$_).StartsWith('R95_LOGON_SCHEDULED_TASKS=',[StringComparison]::Ordinal)
+      })
+      if($taskField.Count -eq 1 -and
+         [string]$taskField[0] -ceq 'R95_LOGON_SCHEDULED_TASKS=UNKNOWN'){
+        $ownerAgent=Join-Path ([Environment]::GetFolderPath(
+          [Environment+SpecialFolder]::LocalApplicationData)) 'SpotifyControl\bin\spotify-control-agent.vbs'
+        foreach($row in @(R102TaskProbe $ownerAgent)){$out.Add([string]$row)}
+      }
     }
     $out.Add('R102_GUARDED_STARTUP_ROUTE_ADMISSION='+$(if($startupCertain){
       'NO_DIRECT_AGENT_AUTOSTART_FOUND'
