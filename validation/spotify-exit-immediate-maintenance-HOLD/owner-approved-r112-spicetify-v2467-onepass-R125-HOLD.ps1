@@ -17,13 +17,17 @@ $BootSHA='d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'
 $OldCliSHA='3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'
 $OfficialZipSHA='c5a723d31eae529ba13f6922a7a027124238c7f3da7edd182a73eab03c447e9e'
 $Phase='START'
-$StageRoot=$null
-$OriginalMain=$null
-$PatchedMain=$null
-$AgentStarted=$false
-$Succeeded=$false
-$SourceSwapped=$false
-$ExpectedNewExe=$null
+# Script-scope variables are read by helpers/finally. Define them in
+# that SAME scope even when this file is invoked via ScriptBlock.Create().
+# The previous unscoped declarations left $script:SourceSwapped undefined
+# under StrictMode and suppressed the original HOLD receipt.
+$script:StageRoot=$null
+$script:OriginalMain=$null
+$script:PatchedMain=$null
+$script:AgentStarted=$false
+$script:Succeeded=$false
+$script:SourceSwapped=$false
+$script:ExpectedNewExe=$null
 $Report=[System.Collections.Generic.List[string]]::new()
 function Emit([string]$k,[string]$v){[void]$Report.Add($k+'='+$v)}
 function Fail([string]$reason){throw [InvalidOperationException]::new($reason)}
