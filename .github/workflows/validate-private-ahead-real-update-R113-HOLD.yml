@@ -344,7 +344,7 @@ jobs:
           # objects even with matching user SID. Only in this disposable hosted
           # VM, make the explicitly named scratch trees medium-integrity before
           # starting a real standard-privilege AgentTick; never alter a user PC.
-          $sandboxHome=[IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd([char]'\\')+'\\'
+          $sandboxHome=[IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd([char]92)+[string][char]92
           $trees=@($root,$cliDir,$spotify,(Join-Path $env:APPDATA 'spicetify'))
           foreach($tree in $trees){
             $absolute=[IO.Path]::GetFullPath($tree)
