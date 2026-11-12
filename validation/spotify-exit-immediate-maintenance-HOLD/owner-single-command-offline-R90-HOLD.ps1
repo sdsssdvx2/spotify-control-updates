@@ -109,8 +109,8 @@ function ReadOnlyResident([string]$scriptPath){
 }
 # R95: observe, never create or change Windows logon registrations.
 # A registered route is NOT evidence of actual launch at boot/logon.
-function R95IsExactWScriptArgs([string]$args,[string]$agent){
-  $v=[string]$args
+function R95IsExactWScriptArgs([string]$arguments,[string]$agent){
+  $v=[string]$arguments
   $v=$v.Trim()
   $quoted='"'+$agent+'"'
   return ($v -ceq $quoted -or
