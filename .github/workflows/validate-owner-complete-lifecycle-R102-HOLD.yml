@@ -65,7 +65,11 @@ jobs:
             if($found.Count -ne 1){throw 'R102_TASK_INSPECTOR_FUNCTION_NOT_UNIQUE'}
             return $found[0].Extent.Text
           }
-          $twoFunctions=(ExtractFunction 'R102AgentActionClass')+[Environment]::NewLine+
+          $twoFunctions=(ExtractFunction 'Deny')+[Environment]::NewLine+
+                        (ExtractFunction 'RequireOnce')+[Environment]::NewLine+
+                        (ExtractFunction 'R102OneValue')+[Environment]::NewLine+
+                        (ExtractFunction 'R102ExistingTaskAdmission')+[Environment]::NewLine+
+                        (ExtractFunction 'R102AgentActionClass')+[Environment]::NewLine+
                         (ExtractFunction 'R102PrincipalClass')+[Environment]::NewLine+
                         (ExtractFunction 'R102TaskProbe')
           $script=[ScriptBlock]::Create($twoFunctions)
@@ -110,7 +114,9 @@ jobs:
             'R102_SINGLE_MATCH_ENABLED',
             'R102_SINGLE_MATCH_TRIGGER',
             'R102_SINGLE_MATCH_LOGON_SCOPE',
-            'R102_SINGLE_MATCH_INSTANCE_POLICY')){
+            'R102_SINGLE_MATCH_INSTANCE_POLICY',
+            'R102_SINGLE_MATCH_LOGON_TYPE',
+            'R102_SINGLE_MATCH_REGISTRATION_PIN_SHA256')){
             if(@($rows|Where-Object{([string]$_).StartsWith($field+'=')}).Count -ne 1){
               throw 'R102_TASK_PROBE_BOUNDED_RESULT_MISSING'
             }
@@ -118,9 +124,50 @@ jobs:
           if($rows -cnotcontains 'R102_TASK_ADMINISTRATIVE_GLOBAL_COVERAGE=NOT_PROVEN'){
             throw 'R102_TASK_PROBE_UNSAFE_GLOBAL_COVERAGE_CLAIM'
           }
-          if(@($rows|Where-Object{[string]$_ -cmatch '^[A-Z0-9_]+=[A-Z0-9_]+$'}).Count -ne 17){
+          if(@($rows|Where-Object{[string]$_ -cmatch '^[A-Z0-9_]+=[A-Z0-9_]+$'}).Count -ne 19){
             throw 'R102_TASK_PROBE_UNEXPECTED_DATA_EXPOSURE'
           }
+          $fixture=@(
+            'R102_TASK_COM_ENUM=ACCESSIBLE_SCOPE_ENUMERATED_NOT_GLOBAL_PROOF',
+            'R102_TASK_AGENT_TOKEN_MATCHES=1',
+            'R102_TASK_DIRECT_OWNER_LOGON_ENABLED=1',
+            'R102_TASK_DIRECT_OWNER_OTHER_TRIGGER_ENABLED=0',
+            'R102_TASK_OTHER_LAUNCH_SHAPE=0',
+            'R102_TASK_DISABLED_OR_NO_ENABLED_TRIGGER=0',
+            'R102_TASK_UNKNOWN_MATCH_DETAILS=0',
+            'R102_TASK_OTHER_OR_UNKNOWN_PRINCIPAL=0',
+            'R102_SINGLE_MATCH_PRINCIPAL=CURRENT_OWNER_RESOLVED',
+            'R102_SINGLE_MATCH_ACTION=ONE_DIRECT_WSCRIPT_ACTION',
+            'R102_SINGLE_MATCH_ENABLED=YES',
+            'R102_SINGLE_MATCH_TRIGGER=LOGON_ENABLED',
+            'R102_SINGLE_MATCH_LOGON_SCOPE=CURRENT_USER',
+            'R102_SINGLE_MATCH_INSTANCE_POLICY=IGNORE_NEW',
+            'R102_SINGLE_MATCH_LOGON_TYPE=INTERACTIVE_TOKEN',
+            ('R102_SINGLE_MATCH_REGISTRATION_PIN_SHA256='+('a'*64)),
+            'R102_TASK_ADMINISTRATIVE_GLOBAL_COVERAGE=NOT_PROVEN'
+          )
+          if((R102ExistingTaskAdmission $fixture) -cne ('a'*64)){
+            throw 'R102_VALID_OWNER_TASK_NOT_ADMITTED'
+          }
+          $negative=@($fixture | Where-Object {
+            $_ -cne 'R102_SINGLE_MATCH_PRINCIPAL=CURRENT_OWNER_RESOLVED'
+          })+@('R102_SINGLE_MATCH_PRINCIPAL=GROUP_SCOPED')
+          $rejected=$false
+          try { [void](R102ExistingTaskAdmission $negative) } catch {$rejected=$true}
+          if(-not $rejected){throw 'R102_GROUP_TASK_WRONGLY_ADMITTED'}
+          $negative=@($fixture | Where-Object {
+            $_ -cne 'R102_SINGLE_MATCH_LOGON_TYPE=INTERACTIVE_TOKEN'
+          })+@('R102_SINGLE_MATCH_LOGON_TYPE=S4U')
+          $rejected=$false
+          try { [void](R102ExistingTaskAdmission $negative) } catch {$rejected=$true}
+          if(-not $rejected){throw 'R102_S4U_TASK_WRONGLY_ADMITTED'}
+          $negative=@($fixture | Where-Object {
+            $_ -cne 'R102_TASK_AGENT_TOKEN_MATCHES=1'
+          })+@('R102_TASK_AGENT_TOKEN_MATCHES=2')
+          $rejected=$false
+          try { [void](R102ExistingTaskAdmission $negative) } catch {$rejected=$true}
+          if(-not $rejected){throw 'R102_MULTI_TASK_WRONGLY_ADMITTED'}
+          Write-Host 'R102_REUSE_EXACT_OWNER_TASK_SYNTHETIC_ADMISSION_AND_DENIAL=PASS'
           Write-Host 'R102_ACTUAL_WINDOWS_ACTION_CLASSIFICATION=PASS'
           Write-Host 'R102_NATIVE_TASK_READONLY_BOUNDED_DIAGNOSTIC=PASS'
           Write-Host 'R102_NONADMIN_GLOBAL_COVERAGE_NOT_CLAIMED=PASS'
@@ -155,6 +202,14 @@ jobs:
           $unauthorized=Run @('-Preflight','-ApprovalPhrase','APPROVE_PRIVATE_V0630_AND_GUARDED_LOGON_ONCE')
           if($unauthorized -cnotcontains 'HOLD_REASON=R102_APPROVAL_WITHOUT_COMMIT_FORBIDDEN'){
             throw 'R102_APPROVAL_LEAK_TO_READONLY_MODE'
+          }
+          $reuseWithoutApproval=Run @('-Commit','-ReuseExistingTask')
+          if($reuseWithoutApproval -cnotcontains 'HOLD_REASON=R102_EXPLICIT_DUAL_SCOPE_OWNER_APPROVAL_REQUIRED'){
+            throw 'R102_REUSE_COMMIT_WITHOUT_EXPLICIT_APPROVAL_NOT_BLOCKED'
+          }
+          $reuseInert=Run @('-ReuseExistingTask')
+          if($reuseInert -cnotcontains 'HOLD_REASON=R102_REUSE_REQUIRES_EXPLICIT_MODE'){
+            throw 'R102_REUSE_WITHOUT_MODE_NOT_INERT'
           }
           $taskConflict=Run @('-TaskOnly','-Commit')
           if($taskConflict -cnotcontains 'HOLD_REASON=R102_TASK_DIAG_CANNOT_COMBINE_MUTATION_OR_APPROVAL' -or
