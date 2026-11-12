@@ -357,12 +357,13 @@ jobs:
             $runnerText=@'
           param([string]$Root,[string]$Out,[string]$Err,[string]$Receipt)
           $ErrorActionPreference='Stop'
-          $principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-          $admin=$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-          $medium=@(& whoami.exe /groups /fo csv /nh 2>$null) -match 'S-1-16-8192'
-          $token=if($admin){'ADMIN'}elseif(@($medium).Count -gt 0){'LIMITED_MEDIUM'}else{'OTHER_NOT_VERIFIED'}
+          $token='INIT_NOT_VERIFIED'
           $code=4
           try {
+            $principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+            $admin=$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+            $medium=@(& whoami.exe /groups /fo csv /nh 2>$null) -match 'S-1-16-8192'
+            $token=if($admin){'ADMIN'}elseif(@($medium).Count -gt 0){'LIMITED_MEDIUM'}else{'OTHER_NOT_VERIFIED'}
             if($admin){$code=3}
             else {
               $product=Join-Path $Root 'bin\spotify-control.ps1'
@@ -403,6 +404,7 @@ jobs:
             [DllImport("kernel32.dll", SetLastError=true)] public static extern bool CloseHandle(IntPtr h);
             [DllImport("kernel32.dll", SetLastError=true)] public static extern uint WaitForSingleObject(IntPtr h, uint milliseconds);
             [DllImport("kernel32.dll", SetLastError=true)] public static extern bool TerminateProcess(IntPtr h, uint code);
+            [DllImport("kernel32.dll", SetLastError=true)] public static extern bool GetExitCodeProcess(IntPtr h, out uint exitCode);
             [DllImport("advapi32.dll", SetLastError=true)] public static extern bool OpenProcessToken(IntPtr h, uint access, out IntPtr token);
             [DllImport("advapi32.dll", SetLastError=true)] public static extern bool CreateRestrictedToken(
               IntPtr existing, uint flags, uint disabledCount, IntPtr disabled,
@@ -462,6 +464,12 @@ jobs:
                 [void][R122NativeLUA]::TerminateProcess($nativeProcess.hProcess,7)
                 throw 'R122_LUA_LAUNCHER_TIMEOUT_OR_WAIT_FAILED'
               }
+              $nativeExit=[uint32]0
+              if(-not [R122NativeLUA]::GetExitCodeProcess($nativeProcess.hProcess,[ref]$nativeExit)){
+                throw 'R122_NATIVE_EXIT_QUERY_FAILED'
+              }
+              $nativeClass=if($nativeExit -eq 0){'ZERO'}elseif($nativeExit -eq 1){'ONE'}else{'OTHER_NONZERO'}
+              Write-Host ('R122_NATIVE_CHILD_EXIT_CLASS='+$nativeClass)
               if(-not(Test-Path -LiteralPath $receipt -PathType Leaf)){
                 throw 'R122_NONADMIN_LAUNCHER_NO_RECEIPT'
               }
