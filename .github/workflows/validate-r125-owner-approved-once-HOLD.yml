@@ -86,10 +86,20 @@ jobs:
             }else{
               $actual=@(& $b -Mode Once -ApprovalPhrase 'APPROVE_R125_ONCE_SPOTIFY_CONTROL_AND_SPICETIFY')
             }
-            if($actual -cnotcontains ('HOLD_REASON='+$case.Expected) -or
-               $actual -cnotcontains 'RESULT=HOLD_NO_AUTOMATIC_RETRY' -or
-               $actual -cnotcontains 'SPOTIFY_CONTROL_PUBLIC_MAIN=UNCHANGED' -or
-               $actual -cnotcontains 'ORIGINAL_USER_FILES_DELETED=NO'){
+            # R125 emits one newline-joined receipt, not one pipeline item
+            # per key. Normalize it before asserting the exact allowlist.
+            $receipt=@(($actual -join [Environment]::NewLine) -split '[\r\n]+' |
+              Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            if($receipt -cnotcontains ('HOLD_REASON='+$case.Expected) -or
+               $receipt -cnotcontains 'RESULT=HOLD_NO_AUTOMATIC_RETRY' -or
+               $receipt -cnotcontains 'SPOTIFY_CONTROL_PUBLIC_MAIN=UNCHANGED' -or
+               $receipt -cnotcontains 'ORIGINAL_USER_FILES_DELETED=NO'){
+              $safe=@($receipt | Where-Object {$_ -match '^(HOLD_REASON|FAILED_PHASE|RESULT|SPOTIFY_CONTROL_PUBLIC_MAIN|ORIGINAL_USER_FILES_DELETED)=[A-Z_0-9]+
+            Write-Host ('R125_USER_SCOPE_AND_RECEIPT_'+$case.Label+'=PASS')
+          }
+          Write-Host 'R125_REAL_OWNER_PC_MODIFICATIONS=ZERO_HOSTED_TEST_ONLY'
+})
+              Write-Host ('R125_SCOPE_RECEIPT_SAFE_DIAGNOSTIC='+($safe -join ';'))
               throw ('R125_DYNAMIC_INVOCATION_FAILURE_'+$case.Label)
             }
             Write-Host ('R125_USER_SCOPE_AND_RECEIPT_'+$case.Label+'=PASS')
