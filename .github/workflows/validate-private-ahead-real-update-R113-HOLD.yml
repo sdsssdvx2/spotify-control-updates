@@ -469,10 +469,13 @@ jobs:
                 $runner+'" -Root "'+$root+'" -Out "'+$stdout+'" -Err "'+$stderr+'" -Receipt "'+$receipt+'"')
               $si=[R122NativeLUA+STARTUPINFO]::new()
               $si.cb=[uint32][Runtime.InteropServices.Marshal]::SizeOf([type][R122NativeLUA+STARTUPINFO])
-              # CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT, no desktop interaction.
+              # CREATE_UNICODE_ENVIRONMENT only. Under a restricted LUA token,
+              # CREATE_NO_WINDOW can cause STATUS_DLL_INIT_FAILED 0xC0000142
+              # before PowerShell executes any script. Inherit the hosted
+              # runner's console; this is a CI-only test launcher.
               if(-not [R122NativeLUA]::CreateProcessAsUserW(
                 $limitedToken,$psExe,$cmd,[IntPtr]::Zero,[IntPtr]::Zero,$false,
-                [uint32]0x08000400,$environmentPtr,$root,[ref]$si,[ref]$nativeProcess)){
+                [uint32]0x00000400,$environmentPtr,$root,[ref]$si,[ref]$nativeProcess)){
                 throw ('R122_RESTRICTED_ASUSER_CREATION_FAILED_WIN32_'+
                   [Runtime.InteropServices.Marshal]::GetLastWin32Error())
               }
