@@ -87,4 +87,51 @@ jobs:
               throw 'R95_SYNTHETIC_STARTUP_FOLDER_NOT_CLEANED'
             }
           }
+          # Actual unchanged R90 -Status in an independently-created tiny
+          # GitHub-hosted scratch root. Never writes a real startup link.
+          $scratch=Join-Path $env:RUNNER_TEMP ('R95IntegratedStatus-'+[guid]::NewGuid().ToString('N'))
+          $app=Join-Path $scratch 'SpotifyControl'
+          $fixtureStartup=Join-Path $scratch 'R95StartupFixture'
+          if(Test-Path -LiteralPath $scratch){throw 'R95_STATUS_SCRATCH_PREEXISTS'}
+          try{
+            [void][IO.Directory]::CreateDirectory((Join-Path $app 'bin'))
+            [void][IO.Directory]::CreateDirectory($fixtureStartup)
+            $actualAgent=Join-Path $app 'bin\spotify-control-agent.vbs'
+            $entry=Join-Path $fixtureStartup 'exact-test-owned.lnk'
+            $lk=$shell.CreateShortcut($entry)
+            $lk.TargetPath=$wscript
+            $lk.Arguments=('"'+$actualAgent+'"')
+            $lk.WorkingDirectory=$app
+            $lk.Save()
+            $status=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $source -Status -HostedReadOnlyRoot $app 2>&1)
+            if($LASTEXITCODE -ne 0 -or
+               $status -cnotcontains 'RESULT=R93_READONLY_POSTFLIGHT_COLLECTED' -or
+               $status -cnotcontains 'R93_CLASSIFICATION=HOLD_INDETERMINATE_NO_RETRY' -or
+               $status -cnotcontains 'R95_LOGON_STARTUP_SHORTCUTS=ONE_EXACT_REGISTERED_NOT_EXECUTION_PROOF' -or
+               $status -cnotcontains 'R95_LOGON_ASSESSMENT=HOSTED_FIXTURE_ONE_EXACT_SHORTCUT_NOT_REAL_LOGON' -or
+               $status -cnotcontains 'R95_LOGON_REGISTRY_RUN=HOSTED_NOT_ATTESTED' -or
+               $status -cnotcontains 'R95_LOGON_SCHEDULED_TASKS=HOSTED_NOT_ATTESTED' -or
+               $status -cnotcontains 'R95_REAL_LOGON_EXECUTION=NOT_VERIFIED;STARTUP_CHANGES=NO'){
+              throw 'R95_ACTUAL_R90_STATUS_RESULT_NOT_GROUNDED_IN_COM_SHORTCUT'
+            }
+            $dup=$shell.CreateShortcut((Join-Path $fixtureStartup 'duplicate-test-owned.lnk'))
+            $dup.TargetPath=$wscript
+            $dup.Arguments=('//B //NoLogo "'+$actualAgent+'"')
+            $dup.WorkingDirectory=$app
+            $dup.Save()
+            $repeat=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $source -Status -HostedReadOnlyRoot $app 2>&1)
+            if($LASTEXITCODE -ne 0 -or
+               $repeat -cnotcontains 'RESULT=R93_READONLY_POSTFLIGHT_COLLECTED' -or
+               $repeat -cnotcontains 'R95_LOGON_STARTUP_SHORTCUTS=MULTIPLE_EXACT_ROUTES' -or
+               $repeat -cnotcontains 'R95_LOGON_ASSESSMENT=HOSTED_FIXTURE_NO_VERIFIED_ROUTE'){
+              throw 'R95_ACTUAL_R90_STATUS_DOUBLE_AUTOSTART_NOT_DETECTED'
+            }
+            Write-Output 'R95_ACTUAL_R90_HOSTED_READONLY_STATUS_ONE_EXACT_AUTOSTART=PASS'
+            Write-Output 'R95_ACTUAL_R90_HOSTED_READONLY_STATUS_MULTIPLE_AUTOSTART=PASS'
+          }finally{
+            Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
+            if(Test-Path -LiteralPath $scratch){
+              throw 'R95_ACTUAL_STATUS_SYNTHETIC_ROOT_NOT_CLEANED'
+            }
+          }
           Write-Output 'R95_NATIVE_READONLY_AUTOSTART_SNAPSHOT_AND_HOSTED_CLEANUP=PASS'
