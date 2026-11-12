@@ -492,6 +492,7 @@ jobs:
               Write-Host 'R123_EPHEMERAL_STANDARD_ACCOUNT_DELETED=PASS'
             }
           }
+          try {
             $result=$null
             try{$result=Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json}catch{}
             $decisions=@('maintenance-phase-entered','maintenance-deferred-or-lease-busy','mutation-blocked-unhealthy-or-auto-ambiguous','pending-observed-mutation-disarmed','observe-only-closed','check-only-closed-no-pending','closed-check-not-due','running-check-not-due','check-only-running','noop')
