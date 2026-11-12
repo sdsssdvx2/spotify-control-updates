@@ -1,17 +1,8 @@
 name: HOLD R96 exact-owner Windows logon Startup shortcut COM approved create/revoke after R90 real WScript cutover
+# Historical source/acceptance retained. Unsafe direct VBS enrollment is
+# deliberately blocked after R97; never automatically replay this legacy flow.
 on:
-  push:
-    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
-    paths:
-      - .github/workflows/validate-owner-logon-registration-R96-HOLD.yml
-      - validation/spotify-exit-immediate-maintenance-HOLD/accept-offline-owned-cutover-R87-HOLD.py
-      - validation/spotify-exit-immediate-maintenance-HOLD/accept-single-owner-entry-R91-HOLD.py
-      - validation/spotify-exit-immediate-maintenance-HOLD/accept-first-owner-stage-R92-HOLD.py
-      - validation/spotify-exit-immediate-maintenance-HOLD/owner-single-command-offline-R90-HOLD.ps1
-      - validation/spotify-exit-immediate-maintenance-HOLD/accept-owner-postflight-R93-HOLD.py
-      - validation/spotify-exit-immediate-maintenance-HOLD/accept-resident-fresh-start-R94-HOLD.py
-      - validation/spotify-exit-immediate-maintenance-HOLD/accept-owner-logon-registration-R96-HOLD.py
-      - validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-logon-startup-R96-HOLD.ps1
+  workflow_dispatch:
 permissions: {contents: read, actions: read}
 jobs:
   real-immutable-review-r28-owner-wscript-cutover:
