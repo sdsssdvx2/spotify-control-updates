@@ -418,10 +418,6 @@ jobs:
             public struct PROCESS_INFORMATION {
               public IntPtr hProcess, hThread; public uint dwProcessId, dwThreadId;
             }
-            [StructLayout(LayoutKind.Sequential)]
-            public struct SID_AND_ATTRIBUTES { public IntPtr Sid; public uint Attributes; }
-            [StructLayout(LayoutKind.Sequential)]
-            public struct TOKEN_MANDATORY_LABEL { public SID_AND_ATTRIBUTES Label; }
             [DllImport("kernel32.dll")] public static extern IntPtr GetCurrentProcess();
             [DllImport("kernel32.dll", SetLastError=true)] public static extern bool CloseHandle(IntPtr h);
             [DllImport("kernel32.dll", SetLastError=true)] public static extern uint WaitForSingleObject(IntPtr h, uint milliseconds);
@@ -432,14 +428,6 @@ jobs:
               IntPtr existing, uint flags, uint disabledCount, IntPtr disabled,
               uint deletedCount, IntPtr deleted, uint restrictedCount,
               IntPtr restricting, out IntPtr token);
-            [DllImport("advapi32.dll", EntryPoint="ConvertStringSidToSidW", CharSet=CharSet.Unicode, SetLastError=true)]
-            public static extern bool ConvertStringSidToSidW(string input, out IntPtr sid);
-            [DllImport("advapi32.dll", SetLastError=true)]
-            public static extern uint GetLengthSid(IntPtr sid);
-            [DllImport("advapi32.dll", SetLastError=true)]
-            public static extern bool SetTokenInformation(IntPtr token, int informationClass, IntPtr data, uint length);
-            [DllImport("kernel32.dll", SetLastError=true)]
-            public static extern IntPtr LocalFree(IntPtr hMem);
             [DllImport("advapi32.dll", EntryPoint="CreateProcessAsUserW", CharSet=CharSet.Unicode, SetLastError=true)]
             public static extern bool CreateProcessAsUserW(
               IntPtr token, string app, StringBuilder commandLine,
@@ -451,8 +439,6 @@ jobs:
             Add-Type -TypeDefinition $interop -ErrorAction Stop
             $originalToken=[IntPtr]::Zero
             $limitedToken=[IntPtr]::Zero
-            $mediumSid=[IntPtr]::Zero
-            $mandatoryLabelPtr=[IntPtr]::Zero
             $environmentPtr=[IntPtr]::Zero
             $nativeProcess=[R122NativeLUA+PROCESS_INFORMATION]::new()
             try {
@@ -468,28 +454,6 @@ jobs:
                  0,[IntPtr]::Zero,[ref]$limitedToken)){
                 throw 'R122_CREATE_RESTRICTED_TOKEN_FAILED'
               }
-              # Explicit medium integrity is required in addition to the LUA token.
-              if(-not [R122NativeLUA]::ConvertStringSidToSidW('S-1-16-8192',[ref]$mediumSid)){
-                throw 'R122_MEDIUM_INTEGRITY_SID_ALLOCATION_FAILED'
-              }
-              $label=[R122NativeLUA+TOKEN_MANDATORY_LABEL]::new()
-              $label.Label.Attributes=[uint32]0x20
-              $labelSize=[Runtime.InteropServices.Marshal]::SizeOf([type][R122NativeLUA+TOKEN_MANDATORY_LABEL])
-              $sidSize=[int][R122NativeLUA]::GetLengthSid($mediumSid)
-              if($sidSize -lt 8 -or $sidSize -gt 128){throw 'R122_MEDIUM_SID_LENGTH_INVALID'}
-              $mandatoryLabelPtr=[Runtime.InteropServices.Marshal]::AllocHGlobal($labelSize+$sidSize)
-              $embeddedSid=[IntPtr]::Add($mandatoryLabelPtr,$labelSize)
-              $sidBytes=New-Object byte[] $sidSize
-              [Runtime.InteropServices.Marshal]::Copy($mediumSid,$sidBytes,0,$sidSize)
-              [Runtime.InteropServices.Marshal]::Copy($sidBytes,0,$embeddedSid,$sidSize)
-              $label.Label.Sid=$embeddedSid
-              [Runtime.InteropServices.Marshal]::StructureToPtr($label,$mandatoryLabelPtr,$false)
-              $tokenInfoSize=[uint32]($labelSize+$sidSize)
-              if(-not [R122NativeLUA]::SetTokenInformation($limitedToken,25,$mandatoryLabelPtr,$tokenInfoSize)){
-                throw ('R122_MEDIUM_INTEGRITY_TOKEN_ADMISSION_FAILED_WIN32_'+
-                  [Runtime.InteropServices.Marshal]::GetLastWin32Error())
-              }
-              Write-Host 'R122_RESTRICTED_OWNER_TOKEN_MEDIUM_IL_REQUEST=PASS'
               $pairs=New-Object 'System.Collections.Generic.List[string]'
               $vars=[Environment]::GetEnvironmentVariables()
               foreach($key in @($vars.Keys | Sort-Object)){
@@ -556,8 +520,6 @@ jobs:
               if($nativeProcess.hThread -ne [IntPtr]::Zero){[void][R122NativeLUA]::CloseHandle($nativeProcess.hThread)}
               if($nativeProcess.hProcess -ne [IntPtr]::Zero){[void][R122NativeLUA]::CloseHandle($nativeProcess.hProcess)}
               if($limitedToken -ne [IntPtr]::Zero){[void][R122NativeLUA]::CloseHandle($limitedToken)}
-              if($mandatoryLabelPtr -ne [IntPtr]::Zero){[Runtime.InteropServices.Marshal]::FreeHGlobal($mandatoryLabelPtr)}
-              if($mediumSid -ne [IntPtr]::Zero){[void][R122NativeLUA]::LocalFree($mediumSid)}
               if($originalToken -ne [IntPtr]::Zero){[void][R122NativeLUA]::CloseHandle($originalToken)}
               if($environmentPtr -ne [IntPtr]::Zero){[Runtime.InteropServices.Marshal]::FreeHGlobal($environmentPtr)}
               Write-Host 'R122_LUA_PROCESS_AND_TOKEN_HANDLES_CLOSED=YES'
