@@ -235,6 +235,28 @@ jobs:
           Write-Host 'R109_PRODUCT_MAIN_AUTO_MUTATION=NOT_AUTHORIZED_OR_PROVEN'
           Write-Host 'R109_USER_ACCOUNT_AND_MUSIC_PLAYBACK=NOT_TESTED'
           Write-Host 'R109_OWNER_PC_AND_PUBLIC_RELEASE=UNCHANGED'
+      - name: R110 retrieve genuine official Bootstrap v1.0.6 from preverified GitHub Actions artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' 'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' > "$RUNNER_TEMP/r110-bootstrap-archive.zip"
+          python - <<'PY'
+          import hashlib,io,os,zipfile
+          from pathlib import Path
+          root=Path(os.environ["RUNNER_TEMP"])
+          with zipfile.ZipFile(root/"r110-bootstrap-archive.zip") as outer:
+              data=outer.read("SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip")
+          with zipfile.ZipFile(io.BytesIO(data)) as inner:
+              original=inner.read("bootstrap/spotify-control-self-updater.ps1")
+          assert (len(original),hashlib.sha256(original).hexdigest())==(
+              42963,"d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6")
+          target=root/"R110-bootstrap-1.0.6-exact.ps1"
+          with target.open("xb") as fp:fp.write(original)
+          print("R110_EXACT_OFFICIAL_BOOTSTRAP_V106_PINNED=PASS")
+          PY
+          rm -f "$RUNNER_TEMP/r110-bootstrap-archive.zip"
       - name: R110 real discovery of older official 2.46.4 to 2.46.5 by unchanged v0.6.30 AgentTick, hosted scratch only
         shell: powershell
         run: |
@@ -261,6 +283,23 @@ jobs:
             }
             [IO.File]::Copy((Resolve-Path $src).Path,(Join-Path $bin $name),$false)
           }
+          # Original Bootstrap v1.0.6 is a REQUIRED fourth operating component.
+          # Earlier R108/R110 synthetic installations lacked it.
+          $sourceBoot=Join-Path $env:RUNNER_TEMP 'R110-bootstrap-1.0.6-exact.ps1'
+          if((Get-Item -LiteralPath $sourceBoot -ErrorAction Stop).Length -ne 42963 -or
+             (Get-FileHash $sourceBoot -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+             'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'){
+            throw 'R110_OFFICIAL_BOOTSTRAP_SOURCE_PIN_INVALID'
+          }
+          $bootDir=Join-Path $root 'bootstrap'
+          [void][IO.Directory]::CreateDirectory($bootDir)
+          $boot=Join-Path $bootDir 'spotify-control-self-updater.ps1'
+          [IO.File]::Copy($sourceBoot,$boot,$false)
+          if((Get-FileHash $boot -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+             'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6'){
+            throw 'R110_BOOTSTRAP_READBACK_CHANGED'
+          }
+          Write-Host 'R110_FULL_V0630_PLUS_OFFICIAL_BOOTSTRAP=PINNED'
           $spotify=Join-Path $env:APPDATA 'Spotify'
           $xpui=Join-Path $spotify 'Apps\xpui.spa'
           $prefs=Join-Path $spotify 'prefs'
