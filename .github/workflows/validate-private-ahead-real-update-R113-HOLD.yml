@@ -260,6 +260,23 @@ jobs:
           if(-not $preapplied){throw 'R115_COMPATIBLE_2464_ACTUAL_APPLY_NOT_OBSERVED'}
           Write-Host 'R115_VERIFIED_SIGNED_136_PREFS_SYNTHETIC=PASS'
           Write-Host 'R115_REAL_2464_BACKUP_AND_APPLY_FIXTURE=PASS'
+          $cfg=Join-Path $env:APPDATA 'spicetify\config-xpui.ini'
+          if(-not(Test-Path $cfg -PathType Leaf)){throw 'R116_OFFICIAL_CONFIG_MISSING'}
+          $inBackup=$false;$backupVersion=$null;$backupWith=$null
+          foreach($line in [IO.File]::ReadAllLines($cfg)){
+            if($line -match '^\s*\[(?<section>[^]]+)\]\s*$'){
+              $inBackup=($Matches['section'] -ceq 'Backup')
+              continue
+            }
+            if(-not $inBackup){continue}
+            if($line -match '^\s*version\s*=\s*(?<value>.*)$'){$backupVersion=$Matches['value'].Trim()}
+            if($line -match '^\s*with\s*=\s*(?<value>.*)$'){$backupWith=$Matches['value'].Trim()}
+          }
+          Write-Host ('R116_OFFICIAL_BACKUP_VERSION_PRESENT='+$(if($backupVersion){'YES'}else{'NO'}))
+          Write-Host ('R116_OFFICIAL_BACKUP_WITH_PRESENT='+$(if($backupWith){'YES'}else{'NO'}))
+          Write-Host ('R116_OFFICIAL_BACKUP_VERSION_EQUALS_SIGNED_VENDOR='+$(if($backupVersion -ceq $vendorFull){'YES'}else{'NO'}))
+          Write-Host ('R116_OFFICIAL_BACKUP_WITH_EQUALS_INSTALLED_2464='+$(if($backupWith -ceq '2.46.4'){'YES'}else{'NO'}))
+          Write-Host 'R116_RAW_BACKUP_CONFIG_OR_PREFS=NOT_PRINTED'
           $new=Join-Path $env:RUNNER_TEMP 'r75-official-spicetify\spicetify.exe'
           $newSha='e2a0fd568d104ff3b7fa55ea7cefc90ad5d4def42258a2f56032164587b46d22'
           if((Get-FileHash $new -Algorithm SHA256).Hash.ToLowerInvariant() -cne $newSha){throw 'R113_LATEST_2465_BIN_NOT_PINNED'}
@@ -337,6 +354,15 @@ jobs:
               if($raw -match $p[1]){$categories.Add($p[0])}
             }
             Write-Host ('R114_CHILD_AND_LOG_FAIL_CLASSES='+$(if($categories.Count){$categories.ToArray() -join ','}else{'NO_RECOGNIZED_MARKER'}))
+            $allowedReasons=@('config-or-prefs-missing','prefs-version-missing',
+              'backup-version-missing','already-current','backup-spicetify-version-mismatch',
+              'spotify-transaction-missing','spotify-transaction-not-committed',
+              'transaction-after-version-mismatch','transaction-fullversion-mismatch',
+              'transaction-apply-proof-missing','transaction-commit-proof-missing',
+              'backup-spa-missing','transaction-time-proof-unreadable',
+              'blocked-unproven','backup-spa-timestamp-outside-trusted-transaction')
+            $reasonFound=@($allowedReasons|Where-Object{$raw.Contains($_)})
+            Write-Host ('R116_SAFE_BACKUP_REASONS='+$(if($reasonFound.Count){$reasonFound -join ','}else{'NONE_DETECTED'}))
             Write-Host ('R114_CHILD_STDOUT_CLASS='+$(if(Test-Path $stdout -PathType Leaf){
               if((Get-Item $stdout).Length -gt 0){'NONEMPTY_PRIVATE'}else{'EMPTY'}
             }else{'ABSENT'}))
