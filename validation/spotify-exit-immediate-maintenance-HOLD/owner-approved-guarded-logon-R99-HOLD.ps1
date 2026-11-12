@@ -344,7 +344,7 @@ try{
   }
   $phase='READONLY_EXISTING_REGISTRATION_INVENTORY'
   $link=Join-Path $startup 'Spotify Control Resident (R99 Guarded).lnk'
-  $receiptPath=Join-Path $root 'startup-owner-r96.json'
+  $receiptPath=Join-Path $root 'startup-owner-r99.json'
   $linkExists=Test-Path -LiteralPath $link
   $receiptExists=Test-Path -LiteralPath $receiptPath
   $guardExists=Test-Path -LiteralPath $guard
@@ -423,7 +423,7 @@ try{
     # exactly once into Startup. Never write any other startup destination.
     $working=[IO.Path]::GetDirectoryName($startup)
     if(-not(PlainDir $working)){Deny 'R99_STARTUP_PARENT_NOT_VERIFIED'}
-    $stage=Join-Path $working ('.spotify-r96-'+[guid]::NewGuid().ToString('N'))
+    $stage=Join-Path $working ('.spotify-r99-'+[guid]::NewGuid().ToString('N'))
     [void][IO.Directory]::CreateDirectory($stage)
     $stagedLink=Join-Path $stage 'staged.lnk'
     $stagedGuard=Join-Path $stage 'guard.ps1'
