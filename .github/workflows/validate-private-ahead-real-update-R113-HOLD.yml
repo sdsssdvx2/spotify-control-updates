@@ -215,9 +215,43 @@ jobs:
           if((Get-FileHash $items[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
             throw 'R113_OFFICIAL_2464_BINARY_PIN_FAILED'
           }
+          # Official v0.6.30 transactional updater authenticates the entire
+          # installed release manifest, not merely spicetify.exe.
+          # R113/R117 previously copied only the EXE, creating a false
+          # missing-official-payload baseline. Mirror the SHA-pinned archive.
+          foreach($file in @('spicetify.exe','globals.d.ts','css-map.json')){
+            if(-not(Test-Path -LiteralPath (Join-Path $extract $file) -PathType Leaf)){
+              throw 'R119_OFFICIAL_ARCHIVE_REQUIRED_FILE_MISSING'
+            }
+          }
+          foreach($group in @('CustomApps','Extensions','Themes','jsHelper')){
+            if(-not(Test-Path -LiteralPath (Join-Path $extract $group) -PathType Container)){
+              throw 'R119_OFFICIAL_ARCHIVE_REQUIRED_GROUP_MISSING'
+            }
+          }
           [void][IO.Directory]::CreateDirectory($cliDir)
+          foreach($entry in @(Get-ChildItem -LiteralPath $extract -Force)){
+            if(($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){
+              throw 'R119_UNEXPECTED_REPARSE_IN_SIGNED_ARCHIVE'
+            }
+            Copy-Item -LiteralPath $entry.FullName -Destination $cliDir -Recurse -ErrorAction Stop
+          }
+          $srcFiles=@(Get-ChildItem -LiteralPath $extract -Recurse -File -Force)
+          $dstFiles=@(Get-ChildItem -LiteralPath $cliDir -Recurse -File -Force)
+          if($srcFiles.Count -ne $dstFiles.Count -or $srcFiles.Count -lt 7){
+            throw 'R119_INSTALLED_RELEASE_FILE_COUNT_INVALID'
+          }
+          foreach($file in $srcFiles){
+            $rel=$file.FullName.Substring($extract.Length).TrimStart([char[]]@('\','/'))
+            $dest=Join-Path $cliDir $rel
+            if(-not(Test-Path -LiteralPath $dest -PathType Leaf) -or
+               (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash -cne
+               (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash){
+              throw 'R119_OFFICIAL_FULL_PAYLOAD_BYTE_MISMATCH'
+            }
+          }
           $cli=Join-Path $cliDir 'spicetify.exe'
-          [IO.File]::Copy($items[0].FullName,$cli,$false)
+          Write-Host 'R119_EXACT_FULL_OFFICIAL_2464_INSTALLED_ROOT=PASS'
           $env:PATH=$cliDir+';'+$env:PATH
           & $cli --bypass-admin --no-restart config spotify_path $spotify prefs_path $prefs
           if($LASTEXITCODE -ne 0){throw 'R113_MANAGED_CLI_CONFIG_INVALID'}
