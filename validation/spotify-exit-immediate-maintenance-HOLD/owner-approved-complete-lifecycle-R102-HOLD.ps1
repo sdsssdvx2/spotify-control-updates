@@ -5,7 +5,8 @@
 # R90 and R99 own their respective writes; R102 refuses to auto-rollback an
 # already committed release if logon registration subsequently fails.
 [CmdletBinding()]
-param([switch]$TaskOnly,[switch]$Preflight,[switch]$Prepare,[switch]$Commit,[string]$ApprovalPhrase='')
+param([switch]$TaskOnly,[switch]$Preflight,[switch]$Prepare,[switch]$Commit,
+      [switch]$ReuseExistingTask,[string]$ApprovalPhrase='')
 Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
 $phase='AUTHORIZATION'
@@ -65,6 +66,40 @@ function RequireOneResult([object[]]$rows){
   if(@($rows | Where-Object {[string]$_ -cmatch '^RESULT='}).Count -ne 1){
     Deny 'R102_RESULT_RECEIPT_COUNT_INVALID'
   }
+}
+function R102OneValue([object[]]$rows,[string]$key){
+  $all=@($rows | Where-Object {
+    ([string]$_).StartsWith($key+'=',[StringComparison]::Ordinal)
+  })
+  if($all.Count -ne 1){Deny 'R102_OWNER_TASK_RECEIPT_KEY_UNIQUE_REQUIRED'}
+  return ([string]$all[0]).Substring($key.Length+1)
+}
+function R102ExistingTaskAdmission([object[]]$rows){
+  foreach($line in @(
+    'R102_TASK_COM_ENUM=ACCESSIBLE_SCOPE_ENUMERATED_NOT_GLOBAL_PROOF',
+    'R102_TASK_AGENT_TOKEN_MATCHES=1',
+    'R102_TASK_DIRECT_OWNER_LOGON_ENABLED=1',
+    'R102_TASK_DIRECT_OWNER_OTHER_TRIGGER_ENABLED=0',
+    'R102_TASK_OTHER_LAUNCH_SHAPE=0',
+    'R102_TASK_DISABLED_OR_NO_ENABLED_TRIGGER=0',
+    'R102_TASK_UNKNOWN_MATCH_DETAILS=0',
+    'R102_TASK_OTHER_OR_UNKNOWN_PRINCIPAL=0',
+    'R102_SINGLE_MATCH_PRINCIPAL=CURRENT_OWNER_RESOLVED',
+    'R102_SINGLE_MATCH_ACTION=ONE_DIRECT_WSCRIPT_ACTION',
+    'R102_SINGLE_MATCH_ENABLED=YES',
+    'R102_SINGLE_MATCH_TRIGGER=LOGON_ENABLED',
+    'R102_SINGLE_MATCH_LOGON_SCOPE=CURRENT_USER',
+    'R102_SINGLE_MATCH_INSTANCE_POLICY=IGNORE_NEW',
+    'R102_SINGLE_MATCH_LOGON_TYPE=INTERACTIVE_TOKEN',
+    'R102_TASK_ADMINISTRATIVE_GLOBAL_COVERAGE=NOT_PROVEN'
+  )){
+    RequireOnce $rows $line
+  }
+  $pin=R102OneValue $rows 'R102_SINGLE_MATCH_REGISTRATION_PIN_SHA256'
+  if($pin -cnotmatch '^[0-9a-f]{64}$'){
+    Deny 'R102_OWNER_TASK_REGISTRATION_PIN_UNVERIFIED'
+  }
+  return $pin
 }
 # R102 read-only diagnosis; never promotes a partial task listing to 'NONE'.
 # Microsoft documents that non-admin users may not see other owners' tasks.
@@ -320,14 +355,20 @@ function R102TaskProbe([string]$agent){
 }
 
 try{
-  if($TaskOnly -and ($Preflight -or $Prepare -or $Commit -or $ApprovalPhrase -cne '')){
+  if($TaskOnly -and ($Preflight -or $Prepare -or $Commit -or $ReuseExistingTask -or $ApprovalPhrase -cne '')){
     Deny 'R102_TASK_DIAG_CANNOT_COMBINE_MUTATION_OR_APPROVAL'
   }
   if(($Prepare -and $Commit) -or ($Prepare -and $Preflight) -or ($Commit -and $Preflight)){
     Deny 'R102_MODES_MUTUALLY_EXCLUSIVE'
   }
+  if($ReuseExistingTask -and -not($Preflight -or $Prepare -or $Commit)){
+    Deny 'R102_REUSE_REQUIRES_EXPLICIT_MODE'
+  }
   if($Commit){
-    if($ApprovalPhrase -cne 'APPROVE_PRIVATE_V0630_AND_GUARDED_LOGON_ONCE'){
+    $expected=if($ReuseExistingTask){
+      'APPROVE_PRIVATE_V0630_PRESERVE_OWNER_LOGON_TASK_ONCE'
+    }else{'APPROVE_PRIVATE_V0630_AND_GUARDED_LOGON_ONCE'}
+    if($ApprovalPhrase -cne $expected){
       Deny 'R102_EXPLICIT_DUAL_SCOPE_OWNER_APPROVAL_REQUIRED'
     }
   }elseif($ApprovalPhrase -cne ''){Deny 'R102_APPROVAL_WITHOUT_COMMIT_FORBIDDEN'}
@@ -367,10 +408,10 @@ try{
     [byte[]]$r101=Frozen $ref 'owner-unified-readonly-preflight-R101-HOLD.ps1' 'f3e36f05979f8cd5987b5ca8c9de0774b07b3a8d' 70000
     [byte[]]$r90=Frozen $ref 'owner-single-command-offline-R90-HOLD.ps1' '52d97d536fe60c3833022e1d3e88a6b26eacddb3' 32000
     [byte[]]$r99=$null
-    if($Commit){
+    if($Commit -and -not $ReuseExistingTask){
       $r99=Frozen $ref 'owner-approved-guarded-logon-R99-HOLD.ps1' '7e78129d598bd11c273b5855f4059393767c5f85' 28000
     }
-    $out.Add('R102_FROZEN_R101_R90'+$(if($Commit){'_R99'}else{''})+'=GIT_OBJECTS_EXACT')
+    $out.Add('R102_FROZEN_R101_R90'+$(if($Commit -and -not $ReuseExistingTask){'_R99'}else{''})+'=GIT_OBJECTS_EXACT')
     $phase='LIVE_BASELINE_R101_READONLY'
     $before=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r101))))
     RequireOneResult $before
@@ -398,7 +439,25 @@ try{
       $out.Add('R102_'+$key+'='+$value)
       if($value -cne 'NONE_IN_EXAMINED_SCOPE'){$startupCertain=$false}
     }
-    if(-not $startupCertain){
+    $ownerTaskPin=''
+    if($ReuseExistingTask){
+      $phase='READONLY_EXISTING_OWNER_LOGON_TASK_ADMISSION'
+      if((R102OneValue $routes 'R95_LOGON_STARTUP_SHORTCUTS') -cne 'NONE_IN_EXAMINED_SCOPE' -or
+         (R102OneValue $routes 'R95_LOGON_REGISTRY_RUN') -cne 'NONE_IN_EXAMINED_SCOPE'){
+        Deny 'R102_REUSE_OWNER_TASK_OTHER_STARTUP_ROUTE_PRESENT'
+      }
+      $taskRoute=R102OneValue $routes 'R95_LOGON_SCHEDULED_TASKS'
+      if($taskRoute -cnotin @('UNKNOWN','UNVERIFIED','ONE_EXACT_REGISTERED_NOT_EXECUTION_PROOF')){
+        Deny 'R102_REUSE_OWNER_TASK_R95_ROUTE_CONFLICT'
+      }
+      $ownerAgent=Join-Path ([Environment]::GetFolderPath(
+        [Environment+SpecialFolder]::LocalApplicationData)) 'SpotifyControl\bin\spotify-control-agent.vbs'
+      $probe=@(R102TaskProbe $ownerAgent)
+      $ownerTaskPin=R102ExistingTaskAdmission $probe
+      $out.Add('R102_EXISTING_OWNER_TASK=ONE_EXACT_INTERACTIVE_LOGON_IGNORED_DUPLICATE_SCHEDULER_TASK')
+      $out.Add('R102_STARTUP_PLAN=PRESERVE_EXISTING_OWNER_TASK_NO_NEW_R99_LINK')
+      $startupCertain=$true
+    }elseif(-not $startupCertain){
       $taskField=@($routes|Where-Object {
         ([string]$_).StartsWith('R95_LOGON_SCHEDULED_TASKS=',[StringComparison]::Ordinal)
       })
@@ -409,26 +468,37 @@ try{
         foreach($row in @(R102TaskProbe $ownerAgent)){$out.Add([string]$row)}
       }
     }
-    $out.Add('R102_GUARDED_STARTUP_ROUTE_ADMISSION='+$(if($startupCertain){
+    $out.Add('R102_GUARDED_STARTUP_ROUTE_ADMISSION='+$(if($ReuseExistingTask){
+      'ONE_EXISTING_OWNER_TASK_REUSE_ONLY'
+    }elseif($startupCertain){
       'NO_DIRECT_AGENT_AUTOSTART_FOUND'
     }else{'HOLD_UNVERIFIED_OR_EXISTING_ROUTE'}))
     if($Preflight){
-      $out.Add('RESULT='+$(if($startupCertain){
+      $out.Add('RESULT='+$(if($ReuseExistingTask){
+        'R102_READONLY_OWNER_TASK_REUSE_ADMITTED_NOT_DEPLOY_AUTHORITY'
+      }elseif($startupCertain){
         'R102_READONLY_STARTUP_ROUTE_ADMISSION_NOT_DEPLOY_AUTHORITY'
       }else{'R102_READONLY_STARTUP_ROUTE_HOLD_NO_CHANGES'}))
     }elseif(-not $startupCertain){
-      # R99 refuses any unverified direct VBS launch path. Stop before R90
-      # writes a candidate release that might be left without autostart.
       Deny 'R102_UNVERIFIED_AUTOSTART_BEFORE_RELEASE_BLOCKED'
     }elseif($Prepare){
       $phase='R90_PREPARE_PRIVATE_STAGE'
       $staged=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r90))) -Prepare)
       RequireOneResult $staged
       RequireOnce $staged 'RESULT=R90_PREPARED_WITHOUT_OPERATING_UPDATE'
+      if($ReuseExistingTask){
+        $verified=R102ExistingTaskAdmission @(R102TaskProbe $ownerAgent)
+        if($verified -cne $ownerTaskPin){Deny 'R102_OWNER_TASK_CHANGED_DURING_STAGE'}
+        $out.Add('R102_EXISTING_OWNER_TASK=UNCHANGED_AFTER_PRIVATE_STAGE')
+      }
       $out.Add('R102_PRIVATE_STAGE=R90_PREPARED_NOT_INSTALLED')
       $out.Add('RESULT=R102_PREPARED_NO_RELEASE_OR_LOGON_CHANGE')
     }else{
       $phase='R90_EXPLICIT_RELEASE_COMMIT'
+      if($ReuseExistingTask){
+        $rechecked=R102ExistingTaskAdmission @(R102TaskProbe $ownerAgent)
+        if($rechecked -cne $ownerTaskPin){Deny 'R102_OWNER_TASK_CHANGED_BEFORE_COMMIT'}
+      }
       $releaseCommitEntered=$true
       $updated=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r90))) -Commit -ApprovalPhrase 'APPROVE_EXACT_PRIVATE_V0630_OWNER_CUTOVER_ONCE')
       RequireOneResult $updated
@@ -443,6 +513,20 @@ try{
       RequireOnce $status 'RESULT=R93_READONLY_POSTFLIGHT_COLLECTED'
       RequireOnce $status 'R93_CLASSIFICATION=CANDIDATE_FILES_COMMITTED_RESIDENT_CODE_UNATTESTED'
       RequireOnce $status 'R100_R99_GUARDED_LOGON=NONE'
+      if($ReuseExistingTask){
+        $phase='PRESERVED_OWNER_TASK_POSTFLIGHT'
+        $preserved=R102ExistingTaskAdmission @(R102TaskProbe $ownerAgent)
+        if($preserved -cne $ownerTaskPin){Deny 'R102_OWNER_TASK_CHANGED_DURING_RELEASE'}
+        $phase='R101_CANDIDATE_EXISTING_TASK_POSTFLIGHT'
+        $after=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r101))))
+        RequireOneResult $after
+        RequireOnce $after 'RESULT=R101_OFFLINE_READONLY_EVIDENCE_COLLECTED'
+        RequireOnce $after 'R101_INSTALLED_STAGE=CANDIDATE_V0630_FILES_EXACT'
+        RequireOnce $after 'R101_R100_R99_GUARDED_LOGON=NONE'
+        $out.Add('R102_EXISTING_OWNER_TASK=REGISTRATION_PIN_PRESERVED_AFTER_RELEASE')
+        $out.Add('R102_FINAL_OWNER_FILE_STAGE=CANDIDATE_EXACT_OWNER_TASK_LOGON_UNTESTED')
+        $out.Add('RESULT=R102_RELEASE_COMMITTED_EXISTING_LOGON_TASK_PRESERVED_REAL_LOGON_UNTESTED')
+      }else{
       $phase='R99_APPROVED_GUARDED_LOGON_REGISTRATION'
       $startup=@(& ([ScriptBlock]::Create([Text.Encoding]::UTF8.GetString($r99))) -Commit -ApprovalPhrase 'APPROVE_EXACT_ONE_OWNER_LOGON_SHORTCUT_ONCE')
       RequireOneResult $startup
@@ -459,6 +543,7 @@ try{
       RequireOnce $after 'R101_OVERALL=CANDIDATE_FILES_GUARDED_LINK_CONSISTENT_REAL_LOGON_UNTESTED'
       $out.Add('R102_FINAL_OWNER_FILE_AND_GUARDED_LINK=READONLY_CONSISTENT')
       $out.Add('RESULT=R102_RELEASE_AND_GUARDED_LOGON_COMMITTED_REAL_REBOOT_UNTESTED')
+      }
     }
   }
 }catch{
