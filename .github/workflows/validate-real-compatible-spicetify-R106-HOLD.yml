@@ -240,6 +240,14 @@ jobs:
             throw 'R108_SIGNED_SPOTIFY_FIXTURE_UNAVAILABLE'
           }
           $vanilla=(Get-FileHash $xpui -Algorithm SHA256).Hash.ToLowerInvariant()
+          # Retain an exact independent vanilla copy in disposable runner space.
+          # Never rely on Spicetify restore if it already reports stock state.
+          $originalCopy=Join-Path $env:RUNNER_TEMP 'R108-original-vanilla-xpui.spa'
+          if(Test-Path $originalCopy){throw 'R108_BASELINE_ALREADY_EXISTS'}
+          [IO.File]::Copy($xpui,$originalCopy,$false)
+          if((Get-FileHash $originalCopy -Algorithm SHA256).Hash.ToLowerInvariant() -cne $vanilla){
+            throw 'R108_EPHEMERAL_ORIGINAL_COPY_NOT_EXACT'
+          }
           & $cli --bypass-admin --no-restart config spotify_path $spotify prefs_path $prefs
           if($LASTEXITCODE -ne 0){throw 'R108_CLI_CONFIG_FAILED'}
           $now=[DateTimeOffset]::UtcNow.ToString('o')
@@ -257,6 +265,8 @@ jobs:
           $main=Join-Path $bin 'spotify-control.ps1'
           $out=Join-Path $env:RUNNER_TEMP 'R108-AgentTick-stdout.txt'
           $err=Join-Path $env:RUNNER_TEMP 'R108-AgentTick-stderr.txt'
+          $originalError='NONE'
+          $testedResult='HOLD_NOT_PROVEN'
           try {
             $arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$main+'" -Action AgentTick -AgentEvent SpotifyExit'
             $proc=Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
@@ -264,7 +274,11 @@ jobs:
               Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
               throw 'R108_AGENTTICK_TIMEOUT_NO_RETRY'
             }
-            if($proc.ExitCode -ne 0){throw 'R108_REAL_AGENTTICK_NONZERO_NO_RETRY'}
+            Write-Host ('R108_CHILD_EXIT='+$(if($proc.ExitCode -eq 0){'ZERO'}else{'NONZERO'}))
+            if(Test-Path $err -PathType Leaf){
+              $item=Get-Item $err
+              Write-Host ('R108_CHILD_STDERR='+$(if($item.Length -eq 0){'EMPTY'}else{'NONEMPTY_PRIVATE'}))
+            }
             $after=Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
             $rp=Join-Path $sc 'resident-agent-latest.json'
             if(-not(Test-Path $rp -PathType Leaf)){
@@ -274,25 +288,61 @@ jobs:
             if(Test-Path $rp -PathType Leaf){$report=Get-Content -LiteralPath $rp -Raw | ConvertFrom-Json}
             $changed= -not(Test-Path $xpui -PathType Leaf)
             if(-not $changed){$changed=((Get-FileHash $xpui -Algorithm SHA256).Hash.ToLowerInvariant() -cne $vanilla)}
-            Write-Host ('R108_REAL_STATE_EVENT='+$(if([string]$after.last_agent_event -ceq 'SpotifyExit'){'SPOTIFYEXIT'}else{'NOT_PROVEN'}))
-            Write-Host ('R108_REAL_DECISION='+$(if([string]$after.last_agent_decision -ceq 'maintenance-phase-entered'){'MUTATION_PHASE_ENTERED'}else{'OTHER_OR_HOLD'}))
-            Write-Host ('R108_REAL_MUTATION_FLAG='+$(if($null -ne $report -and $report.mutation_ran -eq $true){'TRUE'}else{'NOT_PROVEN'}))
+            $evt=([string]$after.last_agent_event -ceq 'SpotifyExit')
+            $phase=([string]$after.last_agent_decision -ceq 'maintenance-phase-entered')
+            $ran=($null -ne $report -and $report.mutation_ran -eq $true)
+            Write-Host ('R108_REAL_STATE_EVENT='+$(if($evt){'SPOTIFYEXIT'}else{'NOT_PROVEN'}))
+            Write-Host ('R108_REAL_DECISION='+$(if($phase){'MUTATION_PHASE_ENTERED'}else{'OTHER_OR_HOLD'}))
+            Write-Host ('R108_REAL_MUTATION_FLAG='+$(if($ran){'TRUE'}else{'NOT_PROVEN'}))
             Write-Host ('R108_REAL_VENDOR_XPUI_CHANGED='+$(if($changed){'YES'}else{'NOT_PROVEN'}))
-            if([string]$after.last_agent_event -cne 'SpotifyExit' -or
-               [string]$after.last_agent_decision -cne 'maintenance-phase-entered' -or
-               $null -eq $report -or $report.mutation_ran -ne $true -or -not $changed){
+            if($proc.ExitCode -ne 0){throw 'R108_REAL_AGENTTICK_NONZERO_NO_RETRY'}
+            if(-not $evt -or -not $phase -or -not $ran -or -not $changed){
               throw 'R108_EXACT_PRODUCT_AUTOMATIC_MUTATION_NOT_PROVEN_HOLD'
             }
+            $testedResult='FULL_AGENTTICK_CHANGED_REAL_XPUI'
             Write-Host 'R108_REAL_EXACT_PRODUCT_AGENTTICK_SPICETIFY_MUTATION=PASS'
+          } catch {
+            $originalError=if($_.Exception.Message -cin @(
+              'R108_AGENTTICK_TIMEOUT_NO_RETRY',
+              'R108_REAL_AGENTTICK_NONZERO_NO_RETRY',
+              'R108_EXACT_PRODUCT_AUTOMATIC_MUTATION_NOT_PROVEN_HOLD')){
+              $_.Exception.Message
+            }else{'R108_OTHER_UNVERIFIED_EXCEPTION'}
+            Write-Host ('R108_PRIMARY_DECISION='+$originalError)
           } finally {
-            # Only hosted test-owned application: restore exact original xPUI.
-            if((Test-Path $cli -PathType Leaf) -and (Test-Path $xpui -PathType Leaf)){
-              & $cli --bypass-admin --no-restart restore
-              if($LASTEXITCODE -ne 0 -or
-                 (Get-FileHash $xpui -Algorithm SHA256).Hash.ToLowerInvariant() -cne $vanilla){
-                throw 'R108_EPHEMERAL_VANILLA_RESTORE_UNVERIFIED'
+            # Only ephemeral runner files. Preserve original error classification
+            # even if official CLI restore is unsuitable for an already-stock app.
+            $stock=if(Test-Path $xpui -PathType Leaf){
+              ((Get-FileHash $xpui -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $vanilla)
+            }else{$false}
+            if($stock){
+              Write-Host 'R108_ORIGINAL_VENDOR_XPUI=ALREADY_STOCK_IDENTICAL_NO_RESTORE_REQUIRED'
+            }else{
+              $officialRestore='NOT_PROVEN'
+              if(Test-Path $cli -PathType Leaf){
+                & $cli --bypass-admin --no-restart restore
+                if($LASTEXITCODE -eq 0 -and
+                   (Test-Path $xpui -PathType Leaf) -and
+                   (Get-FileHash $xpui -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $vanilla){
+                  $officialRestore='EXACT_RESTORED'
+                }
               }
-              Write-Host 'R108_EXACT_POSTTEST_VANILLA_XPUI_RESTORED=PASS'
+              if($officialRestore -ceq 'EXACT_RESTORED'){
+                Write-Host 'R108_REAL_CLI_POSTPRODUCT_RESTORE_EXACT=PASS'
+              }else{
+                # Mandatory test fixture cleanup only. This is not evidence
+                # that the real CLI or product succeeded at rollback.
+                [IO.File]::Copy($originalCopy,$xpui,$true)
+                if((Get-FileHash $xpui -Algorithm SHA256).Hash.ToLowerInvariant() -cne $vanilla){
+                  throw 'R108_DISPOSABLE_RUNNER_ORIGINAL_BYTES_NOT_RECOVERED'
+                }
+                Write-Host 'R108_TEST_ONLY_VANILLA_COPY_RESTORED=PASS_NOT_CLI_RECOVERY'
+                $originalError='R108_REAL_CLI_RESTORE_UNPROVEN'
+              }
             }
+          }
+          if($originalError -cne 'NONE'){throw $originalError}
+          if($testedResult -cne 'FULL_AGENTTICK_CHANGED_REAL_XPUI'){
+            throw 'R108_END_TO_END_MUTATION_NOT_SUCCESSFULLY_PROVEN'
           }
           Write-Host 'R108_PUBLIC_STABLE_AND_OWNER_PC=UNCHANGED'
