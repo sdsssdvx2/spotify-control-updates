@@ -107,6 +107,117 @@ function ReadOnlyResident([string]$scriptPath){
     return 'ONE_OWNER_PATH_OBSERVED_CODE_NOT_ATTESTED'
   }catch{return 'UNKNOWN'}
 }
+# R95: observe, never create or change Windows logon registrations.
+# A registered route is NOT evidence of actual launch at boot/logon.
+function R95IsExactWScriptArgs([string]$args,[string]$agent){
+  $v=[string]$args
+  $v=$v.Trim()
+  $quoted='"'+$agent+'"'
+  return ($v -ceq $quoted -or
+          $v -ceq ('//B //NoLogo '+$quoted) -or
+          $v -ceq ('//NoLogo //B '+$quoted))
+}
+function R95Class([int]$count,[bool]$unverified){
+  if($count -gt 1){return 'MULTIPLE_EXACT_ROUTES'}
+  if($count -eq 1 -and $unverified){return 'ONE_EXACT_PLUS_UNVERIFIED'}
+  if($count -eq 1){return 'ONE_EXACT_REGISTERED_NOT_EXECUTION_PROOF'}
+  if($unverified){return 'UNVERIFIED'}
+  return 'NONE_IN_EXAMINED_SCOPE'
+}
+function R95Shortcuts([string[]]$folders,[string]$agent,[string]$wscript){
+  $count=0
+  $unverified=$false
+  $shell=$null
+  try{
+    $shell=New-Object -ComObject WScript.Shell -ErrorAction Stop
+    foreach($folder in $folders){
+      if([string]::IsNullOrWhiteSpace($folder)){$unverified=$true;continue}
+      if(-not(Test-Path -LiteralPath $folder -PathType Container)){
+        $unverified=$true;continue
+      }
+      $d=Get-Item -LiteralPath $folder -Force -ErrorAction Stop
+      if(($d.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){
+        $unverified=$true;continue
+      }
+      foreach($f in @(Get-ChildItem -LiteralPath $folder -File -Force -Filter '*.lnk' -ErrorAction Stop)){
+        if(($f.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){
+          $unverified=$true;continue
+        }
+        try{
+          $link=$shell.CreateShortcut($f.FullName)
+          if([string]::Equals([string]$link.TargetPath,$wscript,[StringComparison]::OrdinalIgnoreCase) -and
+             (R95IsExactWScriptArgs ([string]$link.Arguments) $agent)){
+            $count++
+          }elseif(([string]$link.Arguments).IndexOf($agent,[StringComparison]::OrdinalIgnoreCase) -ge 0){
+            $unverified=$true
+          }
+        }catch{$unverified=$true}
+      }
+    }
+    return (R95Class $count $unverified)
+  }catch{return 'UNKNOWN'}
+}
+function R95RunRegistry([string]$agent,[string]$wscript){
+  $count=0;$unverified=$false
+  $keys=@('Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run',
+          'Registry::HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Run',
+          'Registry::HKEY_LOCAL_MACHINE\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Run')
+  foreach($key in $keys){
+    try{
+      if(-not(Test-Path -LiteralPath $key)){$unverified=$true;continue}
+      $values=Get-ItemProperty -LiteralPath $key -ErrorAction Stop
+      foreach($property in $values.PSObject.Properties){
+        if(-not($property.Value -is [string])){continue}
+        $v=[string]$property.Value
+        if($v.IndexOf($agent,[StringComparison]::OrdinalIgnoreCase) -lt 0){continue}
+        # The target can also be enclosed in double quotes; require exact
+        # WScript + script only, not a wrapper or altered command.
+        $cmd=$v.Trim()
+        $exact=$false
+        foreach($exe in @($wscript,('"'+$wscript+'"'))){
+          if($cmd.StartsWith(($exe+' '),[StringComparison]::OrdinalIgnoreCase) -and
+             (R95IsExactWScriptArgs ($cmd.Substring($exe.Length).Trim()) $agent)){
+            $exact=$true;break
+          }
+        }
+        if($exact){$count++}else{$unverified=$true}
+      }
+    }catch{$unverified=$true}
+  }
+  return (R95Class $count $unverified)
+}
+function R95ScheduledLogon([string]$agent,[string]$wscript){
+  $count=0;$unverified=$false
+  try{
+    $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $name=[Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $tasks=@(Get-ScheduledTask -ErrorAction Stop)
+    foreach($t in $tasks){
+      if([string]$t.State -ceq 'Disabled'){continue}
+      $validTriggers=@($t.Triggers | Where-Object {
+        $null -ne $_ -and [string]$_.CimClass.CimClassName -ceq 'MSFT_TaskLogonTrigger' -and
+        $_.Enabled -ne $false
+      })
+      if($validTriggers.Count -eq 0){continue}
+      $user=[string]$t.Principal.UserId
+      $actions=@($t.Actions)
+      foreach($a in $actions){
+        if($null -eq $a){continue}
+        $arguments=[string]$a.Arguments
+        if($arguments.IndexOf($agent,[StringComparison]::OrdinalIgnoreCase) -lt 0){continue}
+        if($actions.Count -ne 1 -or
+           -not [string]::Equals([string]$a.Execute,$wscript,[StringComparison]::OrdinalIgnoreCase) -or
+           -not(R95IsExactWScriptArgs $arguments $agent) -or
+           ($user -cne $sid -and
+            -not [string]::Equals($user,$name,[StringComparison]::OrdinalIgnoreCase))){
+          $unverified=$true;continue
+        }
+        $count++
+      }
+    }
+    return (R95Class $count $unverified)
+  }catch{return 'UNKNOWN'}
+}
 try{
   if($Status){
     $phase='R93_READONLY_POSTFLIGHT'
@@ -166,6 +277,48 @@ try{
       $ready=if($stages.Count -eq 0){'NONE'}elseif($stages.Count -eq 1){'ONE'}else{'MULTIPLE'}
     }catch{}
     $out.Add('R93_PRIVATE_STAGE_COUNT='+$ready)
+    $agentPath=Join-Path $bin 'spotify-control-agent.vbs'
+    $wscript=Join-Path $env:WINDIR 'System32\wscript.exe'
+    if($scope -ceq 'HOSTED_SCRATCH_ONLY'){
+      # Hosted-only fixture rooted inside RUNNER_TEMP. Never consult the
+      # GitHub runner's actual startup configuration as if it were the owner.
+      $startupFolder=Join-Path ([IO.Path]::GetDirectoryName($root)) 'R95StartupFixture'
+      $linkLaunch=R95Shortcuts @($startupFolder) $agentPath $wscript
+      $registryLaunch='HOSTED_NOT_ATTESTED'
+      $taskLaunch='HOSTED_NOT_ATTESTED'
+    }else{
+      $startup=@([Environment]::GetFolderPath([Environment+SpecialFolder]::Startup),
+                 [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonStartup))
+      $linkLaunch=R95Shortcuts $startup $agentPath $wscript
+      $registryLaunch=R95RunRegistry $agentPath $wscript
+      $taskLaunch=R95ScheduledLogon $agentPath $wscript
+    }
+    $out.Add('R95_LOGON_STARTUP_SHORTCUTS='+$linkLaunch)
+    $out.Add('R95_LOGON_REGISTRY_RUN='+$registryLaunch)
+    $out.Add('R95_LOGON_SCHEDULED_TASKS='+$taskLaunch)
+    $exactCategories=@($linkLaunch,$registryLaunch,$taskLaunch |
+      Where-Object {$_ -ceq 'ONE_EXACT_REGISTERED_NOT_EXECUTION_PROOF'})
+    $logonAssessment='NOT_PROVEN'
+    if($scope -ceq 'HOSTED_SCRATCH_ONLY'){
+      $logonAssessment=if($linkLaunch -ceq 'ONE_EXACT_REGISTERED_NOT_EXECUTION_PROOF'){
+        'HOSTED_FIXTURE_ONE_EXACT_SHORTCUT_NOT_REAL_LOGON'
+      }else{'HOSTED_FIXTURE_NO_VERIFIED_ROUTE'}
+    }elseif(@($linkLaunch,$registryLaunch,$taskLaunch |
+        Where-Object {$_ -eq 'MULTIPLE_EXACT_ROUTES' -or
+                        $_ -eq 'ONE_EXACT_PLUS_UNVERIFIED'}).Count -gt 0 -or
+       @($linkLaunch,$registryLaunch,$taskLaunch |
+        Where-Object {$_ -eq 'ONE_EXACT_REGISTERED_NOT_EXECUTION_PROOF'}).Count -gt 1){
+      $logonAssessment='MULTIPLE_OR_AMBIGUOUS_STARTUP_ROUTES_HOLD'
+    }elseif($exactCategories.Count -eq 1){
+      $logonAssessment='ONE_EXACT_REGISTERED_EXECUTION_UNTESTED'
+    }elseif(@($linkLaunch,$registryLaunch,$taskLaunch |
+       Where-Object {$_ -eq 'UNKNOWN' -or $_ -eq 'UNVERIFIED'}).Count -gt 0){
+      $logonAssessment='UNKNOWN_NO_AUTO_START_PROOF'
+    }else{
+      $logonAssessment='NO_EXACT_OWNER_AUTO_START_ROUTE_PROVEN'
+    }
+    $out.Add('R95_LOGON_ASSESSMENT='+$logonAssessment)
+    $out.Add('R95_REAL_LOGON_EXECUTION=NOT_VERIFIED;STARTUP_CHANGES=NO')
     $classification='HOLD_INDETERMINATE_NO_RETRY'
     if($addonClass -ceq 'BASELINE' -and $bootClass -ceq 'BASELINE'){
       if($mainClass -ceq 'BASELINE' -and $agentClass -ceq 'BASELINE'){
