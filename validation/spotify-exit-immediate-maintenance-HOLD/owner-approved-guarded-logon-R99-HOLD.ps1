@@ -214,9 +214,9 @@ function R99ImmutableGuard(){
   }finally{if($null -ne $response){$response.Dispose()}}
 }
 function R99GuardArgs([string]$guard,[string]$root,[bool]$hosted){
-  $args='-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "'+$guard+'"'
-  if($hosted){$args+=' -HostedFixtureRoot "'+$root+'"'}
-  return $args
+  $guardArguments='-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "'+$guard+'"'
+  if($hosted){$guardArguments+=' -HostedFixtureRoot "'+$root+'"'}
+  return $guardArguments
 }
 function R99GuardRoutes([string[]]$folders,[string]$guard,[string]$own){
   $match=0;$foreign=$false
@@ -250,14 +250,14 @@ function OwnerReceipt([string]$linkHash,[string]$sid,[string]$guardHash){
   }
   return ($obj|ConvertTo-Json -Compress)
 }
-function OwnedLink([string]$path,[string]$guard,[string]$powershell,[string]$args,[string]$root){
+function OwnedLink([string]$path,[string]$guard,[string]$powershell,[string]$guardArguments,[string]$root){
   if(-not (PlainFile $path)){return $false}
   try{
     $sh=New-Object -ComObject WScript.Shell -ErrorAction Stop
     $lk=$sh.CreateShortcut($path)
     return (
       [string]::Equals([string]$lk.TargetPath,$powershell,[StringComparison]::OrdinalIgnoreCase) -and
-      [string]$lk.Arguments -ceq $args -and
+      [string]$lk.Arguments -ceq $guardArguments -and
       [string]::Equals([string]$lk.WorkingDirectory,$root,[StringComparison]::OrdinalIgnoreCase)
     )
   }catch{return $false}
@@ -348,7 +348,7 @@ try{
   $linkExists=Test-Path -LiteralPath $link
   $receiptExists=Test-Path -LiteralPath $receiptPath
   $guardExists=Test-Path -LiteralPath $guard
-  $args=R99GuardArgs $guard $root $hosted
+  $guardArguments=R99GuardArgs $guard $root $hosted
   $route=R99GuardRoutes @($startup,$common) $guard $link
   $out.Add('R99_GUARDED_ROUTE='+$route)
   if($hosted){
@@ -381,7 +381,7 @@ try{
   }
   $ownedPresent=$false
   if($linkExists -and $ownRecord){
-    $ownedPresent=(OwnedLink $link $guard $powershell $args $root) -and
+    $ownedPresent=(OwnedLink $link $guard $powershell $guardArguments $root) -and
       (PlainFile $guard) -and
       ((Hash $guard) -ceq [string]$rec.guard_sha256) -and
       ((Hash $link) -ceq [string]$rec.link_sha256)
@@ -437,11 +437,11 @@ try{
       [IO.File]::WriteAllBytes($stagedGuard,(R99ImmutableGuard))
       $guardHash=Hash $stagedGuard
       $lnk.TargetPath=$powershell
-      $lnk.Arguments=$args
+      $lnk.Arguments=$guardArguments
       $lnk.WorkingDirectory=$root
       $lnk.Description='Spotify Control guarded resident (owner-managed R99)'
       $lnk.Save()
-      if(-not(OwnedLink $stagedLink $guard $powershell $args $root)){
+      if(-not(OwnedLink $stagedLink $guard $powershell $guardArguments $root)){
         Deny 'R99_STAGED_COM_SHORTCUT_NOT_EXACT'
       }
       $sha=Hash $stagedLink
@@ -462,7 +462,7 @@ try{
       }
       [IO.File]::Move($stagedLink,$link)
       $linkMoved=$true
-      if(-not(OwnedLink $link $guard $powershell $args $root) -or
+      if(-not(OwnedLink $link $guard $powershell $guardArguments $root) -or
          (Hash $guard) -cne $guardHash -or
          (Hash $link) -cne $sha -or
          (Get-Content -LiteralPath $receiptPath -Raw -ErrorAction Stop) -cne $json){
