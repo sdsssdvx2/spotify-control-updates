@@ -1,4 +1,4 @@
-name: HOLD R115 real signed Spotify 1.3.6 pre-applied with old official CLI, R112 candidate auto-upgrade
+name: HOLD R115 genuine old-CLI backup on signed Spotify 1.3.6 followed by private-ahead auto-upgrade
 on:
   push:
     branches: [validate/spotify-exit-immediate-maintenance-HOLD]
@@ -37,7 +37,7 @@ jobs:
             if($LASTEXITCODE -ne 0){throw ('R73_VERIFIED_PRODUCT_BUILD_OR_COMPOSITE_FAILED_'+$py)}
           }
           Write-Host 'R75_R70_SHA_PINNED_MAIN_AND_VENDOR_FIXTURE_BUILT=PASS'
-      - name: R115 verify genuine Spotify 1.3.6 compatible with both CLI 2.46.4 and 2.46.5, SHA and signature
+      - name: R115 signed compatible Spotify 1.3.6 as authentic old-CLI baseline
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -221,9 +221,9 @@ jobs:
           $env:PATH=$cliDir+';'+$env:PATH
           & $cli --bypass-admin --no-restart config spotify_path $spotify prefs_path $prefs
           if($LASTEXITCODE -ne 0){throw 'R113_MANAGED_CLI_CONFIG_INVALID'}
-          # Authenticate a real, supported 1.3.6 full-version to seed a
-          # synthetic, unauthenticated scratch prefs (not a real user profile).
-          # Old 2.46.4 must produce a genuine matched [Backup] record itself.
+          # The signed 1.3.6 is compatible with old official CLI 2.46.4.
+          # In a fresh hosted, unauthenticated user prefs fixture only, seed
+          # Spotify's full version from the actual signed vendor executable.
           $spotifyExe=Join-Path $spotify 'Spotify.exe'
           $sig=Get-AuthenticodeSignature -LiteralPath $spotifyExe
           $vendorFull=[string]([Diagnostics.FileVersionInfo]::GetVersionInfo($spotifyExe).ProductVersion)
@@ -233,125 +233,8 @@ jobs:
             throw 'R115_VENDOR_PREFS_FULL_VERSION_NOT_SIGNED'
           }
           $txt=[IO.File]::ReadAllText($prefs)
-          $values=@([regex]::Matches($txt,'(?m)^\s*app\.last-launched-version\s*=\s*"?(?<v>[^"\r\n]+)"?\s*
-          $new=Join-Path $env:RUNNER_TEMP 'r75-official-spicetify\spicetify.exe'
-          $newSha='e2a0fd568d104ff3b7fa55ea7cefc90ad5d4def42258a2f56032164587b46d22'
-          if((Get-FileHash $new -Algorithm SHA256).Hash.ToLowerInvariant() -cne $newSha){throw 'R113_LATEST_2465_BIN_NOT_PINNED'}
-          Write-Host 'R113_OLD_2464_AND_LATEST_2465_OFFICIAL_BYTES=PASS'
-          # Only owner permission; pending work must be discovered independently.
-          $state=[ordered]@{schema=20;agent_mutation_enabled=$true;last_agent_event=$null;last_agent_decision=$null;last_agent_tick_utc=$null}
-          $statePath=Join-Path $root 'state.json'
-          [IO.File]::WriteAllText($statePath,($state|ConvertTo-Json -Compress),[Text.Encoding]::UTF8)
-          $stdout=Join-Path $env:RUNNER_TEMP 'R113-main-stdout.txt'
-          $stderr=Join-Path $env:RUNNER_TEMP 'R113-main-stderr.txt'
-          $outcome='HOLD_NOT_PROVEN'
-          try {
-            $main=Join-Path $bin 'spotify-control.ps1'
-            $args='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$main+'" -Action AgentTick -AgentEvent SpotifyExit'
-            $proc=Start-Process -FilePath 'powershell.exe' -ArgumentList $args -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
-            if(-not $proc.WaitForExit(180000)){
-              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-              $exit='TIMEOUT'
-            }else{$exit=if($proc.ExitCode -eq 0){'ZERO'}else{'NONZERO'}}
-            $result=$null
-            try{$result=Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json}catch{}
-            $decisions=@('maintenance-phase-entered','maintenance-deferred-or-lease-busy','mutation-blocked-unhealthy-or-auto-ambiguous','pending-observed-mutation-disarmed','observe-only-closed','check-only-closed-no-pending','closed-check-not-due','running-check-not-due','check-only-running','noop')
-            $decision=if($null -ne $result -and [string]$result.last_agent_decision -cin $decisions){[string]$result.last_agent_decision}else{'OTHER_OR_UNAVAILABLE'}
-            $healthy=($null -ne $result -and $result.maintenance_check_healthy -eq $true)
-            $updatePending=($null -ne $result -and $result.pending_spicetify_upgrade -eq $true)
-            $updated=((Get-FileHash $cli -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $newSha)
-            Write-Host ('R113_AGENTTICK_EXIT='+$exit)
-            Write-Host ('R113_DISCOVERY_DECISION='+$decision)
-            Write-Host ('R113_DISCOVERY_HEALTH='+$(if($healthy){'TRUE'}else{'FALSE_OR_UNVERIFIED'}))
-            Write-Host ('R113_AUTHENTIC_UPGRADE_PENDING='+$(if($updatePending){'TRUE'}else{'FALSE_OR_UNVERIFIED'}))
-            Write-Host ('R113_OFFICIAL_2465_BINARY_INSTALLED='+$(if($updated){'EXACT'}else{'NO'}))
-            # Diagnose real host-owned failure without exposing any raw log
-            # lines, executable paths, authenticated URLs or arguments.
-            $tx=[string]$result.spicetify_last_transaction_status
-            $known=@('committed','prepared','staged','swapped','rolled-back',
-              'rolled-back-apply-failure','rolled-back-post-swap-verification-failure',
-              'rolled-back-post-apply-guard-failure',
-              'rolled-back-spotify-started-before-apply',
-              'rollback-binary-restored-apply-failed',
-              'rollback-root-restored-apply-failed','failed')
-            $safeTxn=if($tx -cin $known){$tx}
-              elseif([string]::IsNullOrWhiteSpace($tx)){'ABSENT'}
-              else{'OTHER_UNRECOGNIZED'}
-            Write-Host ('R114_PRODUCT_TRANSACTION_STATUS='+$safeTxn)
-            $contained=@()
-            foreach($filepath in @($stdout,$stderr)){
-              if(Test-Path -LiteralPath $filepath -PathType Leaf){
-                $fi=Get-Item -LiteralPath $filepath -Force
-                if($fi.Length -le 1048576){$contained+=([IO.File]::ReadAllText($filepath))}
-                else{$contained+=('LARGE_PRIVATE_CHILD_OUTPUT')}
-              }
-            }
-            $logRoot=Join-Path $root 'logs'
-            if(Test-Path -LiteralPath $logRoot -PathType Container){
-              $logs=@(Get-ChildItem -LiteralPath $logRoot -File -Filter '*.log' -ErrorAction SilentlyContinue | Select-Object -First 8)
-              foreach($file in $logs){
-                if($file.Length -le 1048576){$contained+=([IO.File]::ReadAllText($file.FullName))}
-                else{$contained+=('LARGE_PRIVATE_LOG')}
-              }
-            }
-            $raw=($contained -join [Environment]::NewLine)
-            $categories=New-Object 'System.Collections.Generic.List[string]'
-            foreach($p in @(
-              @('ADMIN_OR_ACCESS_GUARD','(?i)administrator|--bypass-admin|access.is.denied|unauthorized'),
-              @('SPICETIFY_BACKUP_METADATA','(?i)backup.metadata|backup.version.mismatch|backup.with'),
-              @('ADDON_BACKUP_GUARD','(?i)addon.*backup.*failed|backup.*addon.*failed'),
-              @('TRANSACTION_SWAP_OR_ROLLBACK','(?i)transaction.*(failed|rollback|abort)|rollback.*failed|full.root.*mismatch'),
-              @('SPICETIFY_APPLY_FAILED','(?i)spicetify.*apply.*failed|apply.*(exit.code|failed|error)'),
-              @('SPICETIFY_ROOT_PROVENANCE','(?i)spicetify.*(tree|root).*(mismatch|refused|failed)'),
-              @('TRUST_OR_SIGNATURE_GUARD','(?i)sha.256.*mismatch|signature.*invalid|digest.*mismatch'),
-              @('NETWORK_OR_RATE_LIMIT','(?i)429.too.many|rate.limit|connection.*timed.out|http.*(403|404|429|503)'),
-              @('PS_RUNTIME_EXCEPTION','(?i)at .*\.ps1:|categoryinfo|fullyqualifiederrorid'),
-              @('GENERAL_FAILURE_MARKER','(?i)error|failed|exception|blocked')
-            )){
-              if($raw -match $p[1]){$categories.Add($p[0])}
-            }
-            Write-Host ('R114_CHILD_AND_LOG_FAIL_CLASSES='+$(if($categories.Count){$categories.ToArray() -join ','}else{'NO_RECOGNIZED_MARKER'}))
-            Write-Host ('R114_CHILD_STDOUT_CLASS='+$(if(Test-Path $stdout -PathType Leaf){
-              if((Get-Item $stdout).Length -gt 0){'NONEMPTY_PRIVATE'}else{'EMPTY'}
-            }else{'ABSENT'}))
-            Write-Host ('R114_CHILD_STDERR_CLASS='+$(if(Test-Path $stderr -PathType Leaf){
-              if((Get-Item $stderr).Length -gt 0){'NONEMPTY_PRIVATE'}else{'EMPTY'}
-            }else{'ABSENT'}))
-            Write-Host 'R114_RAW_CHILD_LOG_LINES_AND_USER_PATHS_OUTPUT=NO'
-
-            $class='NO_CHECK_REPORT'
-            foreach($file in @(Get-ChildItem -LiteralPath $root -Filter '*check*.json' -File -Recurse -ErrorAction SilentlyContinue)){
-              if($file.Length -gt 2097152){continue}
-              $doc=$null
-              try{$doc=Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json}catch{}
-              if($null -eq $doc -or [string]$doc.phase -cne 'check-only'){continue}
-              $errs=@($doc.errors | Where-Object{$_})
-              $class=if($errs.Count -eq 0){'NO_ERRORS'}
-                elseif(@($errs|Where-Object{$_ -match 'self-update'}).Count -gt 0){'SELF_UPDATE_DISCOVERY'}
-                elseif(@($errs|Where-Object{$_ -match 'Spicetify install'}).Count -gt 0){'MANAGED_CLI_LAYOUT'}
-                elseif(@($errs|Where-Object{$_ -match 'Spicetify latest'}).Count -gt 0){'OFFICIAL_CLI_RELEASE_DISCOVERY'}
-                elseif(@($errs|Where-Object{$_ -match 'compatibility metadata'}).Count -gt 0){'COMPATIBILITY_METADATA'}
-                elseif(@($errs|Where-Object{$_ -match 'Addon'}).Count -gt 0){'ADDON_SOURCE_CHECK'}
-                else{'OTHER_PRIVATE_CHECK_FAILURE'}
-              break
-            }
-            Write-Host ('R113_CHECK_ERROR_FAMILY='+$class)
-            if($exit -ceq 'ZERO' -and $updated -and $decision -ceq 'maintenance-phase-entered'){
-              $outcome='REAL_PRODUCT_UPDATED_EXACT_CLI'
-            }
-            Write-Host ('R113_PRODUCT_OUTCOME='+$outcome)
-          } finally {
-            $isStock=(Test-Path $xpui -PathType Leaf) -and ((Get-FileHash $xpui -Algorithm SHA256).Hash.ToLowerInvariant() -ceq $baseline)
-            if(-not $isStock){
-              [IO.File]::Copy($copy,$xpui,$true)
-              if((Get-FileHash $xpui -Algorithm SHA256).Hash.ToLowerInvariant() -cne $baseline){throw 'R113_HOSTED_SCRATCH_RESTORE_FAILED'}
-              Write-Host 'R113_HOSTED_TEST_ONLY_VANILLA_COPY_RECOVERED=PASS_NOT_PRODUCT_PROOF'
-            }else{Write-Host 'R113_ORIGINAL_VENDOR_XPUI_EXACT=PASS'}
-          }
-          if($outcome -cne 'REAL_PRODUCT_UPDATED_EXACT_CLI'){throw 'R113_AUTO_UPDATE_HOLD_NOT_VERIFIED'}
-          Write-Host 'R113_REAL_PRIVATE_AHEAD_SPICETIFY_2465_AUTO_UPDATE=PASS'
-          Write-Host 'R113_REVIEW_CANDIDATE_ONLY;OWNER_PC_PUBLIC_MAIN_AND_USER_SETTINGS=UNCHANGED'
-))
+          $expr='(?m)^\s*app\.last-launched-version\s*=\s*"?(?<v>[^"\r\n]+)"?\s*$'
+          $values=@([regex]::Matches($txt,$expr))
           if($values.Count -gt 1){throw 'R115_SYNTHETIC_PREFS_VERSION_AMBIGUOUS'}
           if($values.Count -eq 1){
             if($values[0].Groups['v'].Value.Trim() -cne $vendorFull){
@@ -362,8 +245,8 @@ jobs:
               'app.last-launched-version="'+$vendorFull+'"'+[Environment]::NewLine),
               [Text.Encoding]::UTF8)
           }
-          # Unlike prior bare-CLI fixtures, produce legitimate backup/apply
-          # metadata using compatible OLD official CLI before agent maintenance.
+          # Obtain real matched backup/apply metadata from old official CLI,
+          # not from manually invented Backup INI fields.
           & $cli --bypass-admin --no-restart backup apply
           if($LASTEXITCODE -ne 0){throw 'R115_REAL_COMPATIBLE_2464_PREAPPLY_FAILED'}
           $spiceBackup=Join-Path $env:APPDATA 'spicetify\Backup'
