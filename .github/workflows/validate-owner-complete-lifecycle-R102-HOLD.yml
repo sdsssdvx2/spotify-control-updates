@@ -178,8 +178,16 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $script='validation/spotify-exit-immediate-maintenance-HOLD/accept-existing-task-native-com-R102-HOLD.ps1'
+          $ErrorActionPreference='Continue'
           $received=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script 2>&1)
           $rc=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          foreach($line in @($received)){
+            $value=[string]$line
+            if($value -match '^R102_' -or $value -match '(?i)(exception|error|failed|cannot|not found|invalid|At .*ps1:)'){
+              Write-Host $value
+            }
+          }
           $safe=@($received|Where-Object {
             [string]$_ -cmatch '^R102_[A-Z0-9_]+=[A-Z0-9_]+$'
           })
