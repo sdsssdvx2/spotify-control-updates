@@ -65,6 +65,10 @@ def run()->None:
        [string]$ownerBefore.Sid -cne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value){
       throw 'R94_ORIGINAL_RESIDENT_OWNER_SID_NOT_EXACT'
     }
+    $hostLog=Join-Path $app 'logs/resident-agent-host.log'
+    $beforeLogCount=if(Test-Path -LiteralPath $hostLog -PathType Leaf){
+      @(Get-Content -LiteralPath $hostLog -ErrorAction Stop).Count
+    }else{0}
     $priorPid=[int]$newResident.Id
     $priorCreation=[datetime]$beforeProcess.CreationDate
     # Only the test-owned process returned by the original R28 fixture
@@ -89,6 +93,27 @@ def run()->None:
        [int]$fresh.ProcessId -eq $priorPid){
       throw 'R94_LOGON_STYLE_FRESH_WSCRIPT_IDENTITY_UNVERIFIED'
     }
+    # A fresh WScript PID is not sufficient: require new WMI START subscription
+    # evidence appended by the freshly launched actual v0.1.2 agent.
+    $wmiFreshStart=$false
+    for($probe=0;$probe -lt 40;$probe++){
+      if(Test-Path -LiteralPath $hostLog -PathType Leaf){
+        $logLines=@(Get-Content -LiteralPath $hostLog -ErrorAction SilentlyContinue)
+        if($logLines.Count -gt $beforeLogCount){
+          $newLines=@($logLines | Select-Object -Skip $beforeLogCount)
+          if(@($newLines | Where-Object {$_ -like '*WMI START EVENT subscribed*' -or
+                                        $_ -like '*WMI START EVENT resubscribed*'}).Count -gt 0){
+            $wmiFreshStart=$true
+            break
+          }
+        }
+      }
+      $newResident.Refresh()
+      if($newResident.HasExited){throw 'R94_NEW_WSCRIPT_EXITED_BEFORE_WMI_STARTUP'}
+      Start-Sleep -Milliseconds 250
+    }
+    if(-not $wmiFreshStart){throw 'R94_FRESH_AGENT_WMI_START_SUBSCRIPTION_NOT_OBSERVED'}
+    Write-Host 'R94_FRESH_AGENT_NEW_WMI_START_SUBSCRIPTION=PASS'
     $ownerAfter=Invoke-CimMethod -InputObject $fresh -MethodName GetOwnerSid -ErrorAction Stop
     if([int]$ownerAfter.ReturnValue -ne 0 -or
        [string]$ownerAfter.Sid -cne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value){
