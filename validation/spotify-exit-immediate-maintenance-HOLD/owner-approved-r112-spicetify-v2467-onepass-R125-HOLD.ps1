@@ -141,7 +141,12 @@ function PatchExactR112([byte[]]$raw){
     [Array]::Copy(([byte[]]@(239,187,191)),$bytes,3)
     [Array]::Copy($encoded,0,$bytes,3,$encoded.Length)
   }else{$bytes=$encoded}
-  if((HashBytes $bytes) -cne $CandidateSHA){Fail 'R125_R112_TARGET_SHA_MISMATCH'}
+  $actualCandidateSHA=HashBytes $bytes
+  if($actualCandidateSHA -cne $CandidateSHA){
+    Emit 'R125_BUILD_CANDIDATE_SHA256' $actualCandidateSHA
+    Emit 'R125_BUILD_CANDIDATE_BYTES' ([string]$bytes.Length)
+    Fail 'R125_R112_TARGET_SHA_MISMATCH'
+  }
   return ,$bytes
 }
 function Acquire([string]$purpose,[string]$sid){
@@ -175,6 +180,7 @@ function ReplaceMain([string]$expected,[byte[]]$contents,[string]$backupName){
     $backup=Join-Path $script:StageRoot $backupName
     if(Test-Path $backup){Fail 'R125_BACKUP_COLLISION'}
     [IO.File]::Replace($temp,$script:OriginalMain,$backup,$false)
+    $script:SourceSwapped=$true
     if((HashFile $script:OriginalMain) -cne (HashBytes $contents) -or
        (HashFile $backup) -cne $expected){
       Fail 'R125_ATOMIC_PUBLICATION_NOT_VERIFIED'
@@ -229,6 +235,7 @@ try {
       Fail 'R125_BUILDONLY_REQUIRES_PINNED_HOSTED_FIXTURE'
     }
     if(-not(Regular $SourcePath 500000)){Fail 'R125_FIXTURE_ABSENT'}
+    $Phase='BUILD_PATCH'
     $candidate=PatchExactR112 ([IO.File]::ReadAllBytes($SourcePath))
     Emit 'R125_TWO_FUNCTION_PATCH' 'EXACT_SHA_PASS'
     Emit 'R125_SOURCE_WRITES' 'ZERO'
@@ -356,9 +363,20 @@ try {
     'R125_SPOTIFY_RUNNING','R125_SPOTIFY_STARTED_DURING_TRANSACTION',
     'R125_OFFICIAL_RELEASE_ASSET_NOT_PINNED','R125_OFFICIAL_CLI_ARCHIVE_EXE_UNIQUE_REQUIRED',
     'R125_MAIN_CHANGED_DURING_TRANSACTION','R125_ATOMIC_PUBLICATION_NOT_VERIFIED',
-    'R125_TRANSACTION_AND_POSTFLIGHT_NOT_PROVEN','R125_AGENT_ONESHOT_TIMEOUT_UNCERTAIN'
+    'R125_TRANSACTION_AND_POSTFLIGHT_NOT_PROVEN','R125_AGENT_ONESHOT_TIMEOUT_UNCERTAIN',
+    'R125_R112_TARGET_SHA_MISMATCH','R125_ORIGINAL_MAIN_SHA_MISMATCH'
   )
-  $reason=if($message -cin $known){$message}else{'R125_UNCLASSIFIED_HOLD'}
+  $reason=if($message -cin $known -or
+      $message -match '^R125_PINNED_PATCH_ANCHOR_DRIFT_[A-Z_]+$' -or
+      $message -match '^R125_PINNED_FUNCTION_DRIFT_[A-Za-z_-]+$'){
+    $message
+  }else{'R125_UNCLASSIFIED_HOLD'}
+  $errClass=$_.Exception.GetType().Name
+  if($errClass -cin @('InvalidOperationException','ArgumentException','ArgumentOutOfRangeException',
+    'MethodException','RuntimeException','NullReferenceException','ParameterBindingException',
+    'FormatException','IOException','FileNotFoundException')){
+    Emit 'R125_ERROR_CLASS' $errClass
+  }
   Emit 'HOLD_REASON' $reason
   Emit 'FAILED_PHASE' $Phase
   Emit 'RESULT' 'HOLD_NO_AUTOMATIC_RETRY'
