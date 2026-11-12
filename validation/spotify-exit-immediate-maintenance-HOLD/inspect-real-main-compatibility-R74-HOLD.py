@@ -21,7 +21,7 @@ def main():
     print("R74_MAIN_SHA256=PASS")
     print("R74_FUNCTIONS_TOTAL="+str(len(fns)))
     print("R74_SOURCE_KEYWORD_FUNCTIONS="+",".join(x[0] for x in candidates)[:3000])
-    selected=["Get-SelfUpdateCheckResult","Invoke-SelfUpdaterJsonAction","Get-SpicetifyLatestReleaseInfo","Invoke-MaintenanceCheckPhase","Repair-SpicetifyBackupMetadataIfTrusted","Get-SpotifyPrefsLaunchedVersion","Test-SpicetifyBackupMetadataRepairEligibility","Invoke-SpicetifyTransactionalMaintenance","Invoke-MaintenanceMutationPhase","Maintain","Invoke-ResidentAgentTick","Update-AutoApps"]
+    selected=["Get-SelfUpdateCheckResult","Invoke-SelfUpdaterJsonAction","Get-SpicetifyLatestReleaseInfo","Invoke-MaintenanceCheckPhase","Repair-SpicetifyBackupMetadataIfTrusted","Get-SpotifyPrefsLaunchedVersion","Test-SpicetifyBackupMetadataRepairEligibility","Invoke-SpicetifyTransactionalMaintenance","Start-SpicetifyCliTransaction","Get-SpicetifyRootManifest","Get-SpicetifyManagedInstallInfo","Copy-SpicetifyRootExact","Invoke-MaintenanceMutationPhase","Maintain","Invoke-ResidentAgentTick","Update-AutoApps"]
     for n,b,_,e in candidates:
         if n in selected:
             fragment=s[b:e].splitlines()
