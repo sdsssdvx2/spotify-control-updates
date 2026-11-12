@@ -399,7 +399,7 @@ jobs:
             $runnerText=@'
           param([string]$Shared)
           $ErrorActionPreference='Stop'
-          $token='UNKNOWN';$code=6
+          $token='UNKNOWN';$code=6;$phase='PRECHECK'
           try {
             $principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
             $medium=@(& whoami.exe /groups /fo csv /nh 2>$null | Where-Object{$_ -match 'S-1-16-8192'})
@@ -407,6 +407,7 @@ jobs:
               elseif($medium.Count -eq 1){'LIMITED_MEDIUM'}else{'OTHER_NOT_VERIFIED'}
             if($token -cne 'LIMITED_MEDIUM'){$code=3}
             else{
+              $phase='COPY'
               $dest=[ordered]@{
                 'spotify-control'=(Join-Path $env:LOCALAPPDATA 'SpotifyControl')
                 'spicetify-cli'=(Join-Path $env:LOCALAPPDATA 'spicetify')
@@ -433,19 +434,29 @@ jobs:
                  '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
                 throw 'R123_STANDARD_USER_SOURCE_PIN_MISMATCH'
               }
+              $phase='CONFIG'
               & $cli --no-restart config spotify_path $vendor prefs_path $prefs *> $null
               if($LASTEXITCODE -ne 0){throw 'R123_OFFICIAL_STANDARD_USER_CLI_CONFIG_FAILED'}
               $ps=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
               $arg='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$main+'" -Action AgentTick -AgentEvent SpotifyExit'
+              $phase='AGENT'
               $proc=Start-Process -FilePath $ps -ArgumentList $arg -RedirectStandardOutput (Join-Path $Shared 'stdout.txt') -RedirectStandardError (Join-Path $Shared 'stderr.txt') -PassThru
               if(-not $proc.WaitForExit(180000)){
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
                 $code=5
               }else{$code=$proc.ExitCode}
+              $phase='DONE'
             }
           }catch{$code=6}
           finally{
-            [IO.File]::WriteAllText((Join-Path $Shared 'receipt.txt'),('TOKEN='+$token+';EXIT='+$code),
+            $numericExit=6
+            if($null -ne $code -and [string]$code -match '^-?[0-9]+$'){
+              $numericExit=[int]$code
+            }
+            if($phase -cin @('PRECHECK','COPY','CONFIG','AGENT','DONE')){
+              [IO.File]::WriteAllText((Join-Path $Shared 'phase.txt'),$phase,(New-Object Text.UTF8Encoding($false)))
+            }
+            [IO.File]::WriteAllText((Join-Path $Shared 'receipt.txt'),('TOKEN='+$token+';EXIT='+$numericExit),
               (New-Object Text.UTF8Encoding($false)))
           }
           '@
@@ -461,6 +472,14 @@ jobs:
               throw 'R123_STANDARD_OWNER_RECEIPT_MISSING'
             }
             $report=[IO.File]::ReadAllText($receipt).Trim()
+            $phaseFile=Join-Path $shared 'phase.txt'
+            $phaseClass='ABSENT'
+            if(Test-Path $phaseFile -PathType Leaf){
+              $candidate=[IO.File]::ReadAllText($phaseFile).Trim()
+              if($candidate -cin @('PRECHECK','COPY','CONFIG','AGENT','DONE')){$phaseClass=$candidate}
+              else{$phaseClass='UNRECOGNIZED'}
+            }
+            Write-Host ('R123_STANDARD_OWNER_PHASE='+$phaseClass)
             $safe='UNKNOWN'
             if($report -match '^TOKEN=(?<token>[A-Z_]+);EXIT=[0-9]+$'){$safe=[string]$Matches['token']}
             Write-Host ('R123_REAL_STANDARD_OWNER_TOKEN='+$safe)
