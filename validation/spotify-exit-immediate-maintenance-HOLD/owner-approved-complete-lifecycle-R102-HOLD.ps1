@@ -69,15 +69,43 @@ function RequireOneResult([object[]]$rows){
 # R102 read-only diagnosis; never promotes a partial task listing to 'NONE'.
 # Microsoft documents that non-admin users may not see other owners' tasks.
 # Do not print task names, paths, arguments, errors or unrelated task data.
+# Classify a command-line reference without treating mere substrings as a
+# direct invocation. Reuse in the read-only COM inspector and synthetic CI.
+function R102AgentActionClass([string]$executable,[string]$arguments,
+                               [string]$agent,[string]$wscript){
+  $pattern='(^|[\s"])'+[regex]::Escape($agent)+'(?=$|[\s"])'
+  if(-not [regex]::IsMatch($arguments,$pattern,
+       [Text.RegularExpressions.RegexOptions]::IgnoreCase)){
+    return 'NO_EXACT_AGENT_PATH_TOKEN'
+  }
+  $v=$arguments.Trim()
+  $q='"'+$agent+'"'
+  $exact=($v -ceq $q -or $v -ceq ('//B //NoLogo '+$q) -or
+          $v -ceq ('//NoLogo //B '+$q))
+  if($exact -and [string]::Equals($executable,$wscript,
+     [StringComparison]::OrdinalIgnoreCase)){
+    return 'DIRECT_WSCRIPT_EXACT'
+  }
+  return 'AGENT_REFERENCE_OTHER_LAUNCH_SHAPE'
+}
+# A partial enumeration MUST NEVER certify the absence of another logon route.
+# No task identifiers, user SIDs, command lines or other task properties leak.
 function R102TaskProbe([string]$agent){
   $native='NOT_AVAILABLE'
   $visible='UNKNOWN'
   $com='UNAVAILABLE_OR_INCOMPLETE'
-  $hit=$false
   $partial=$false
+  $total=0
+  $directLogon=0
+  $directOther=0
+  $otherShape=0
+  $disabledOrNoTrigger=0
+  $unknownDetails=0
+  $foreignPrincipal=0
+  $wscript=Join-Path $env:WINDIR 'System32\wscript.exe'
+  $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
   if($null -ne (Get-Command -Name Get-ScheduledTask -ErrorAction SilentlyContinue)){
     try{
-      # A successful call is NOT a certificate that all tasks were visible.
       $null=@(Get-ScheduledTask -ErrorAction Stop)
       $native='RETURNED_NOT_GLOBAL_COVERAGE_PROOF'
     }catch{
@@ -93,9 +121,8 @@ function R102TaskProbe([string]$agent){
   try{
     $service=New-Object -ComObject Schedule.Service -ErrorAction Stop
     $service.Connect()
-    $root=$service.GetFolder('\')
     $folders=New-Object System.Collections.Stack
-    $folders.Push($root)
+    $folders.Push($service.GetFolder('\'))
     $folderCount=0
     $taskCount=0
     while($folders.Count -gt 0){
@@ -103,24 +130,64 @@ function R102TaskProbe([string]$agent){
       if($folderCount -gt 512){$partial=$true;break}
       $folder=$folders.Pop()
       try{
-        # 1 includes hidden tasks that this account may read.
-        $tasks=$folder.GetTasks(1)
+        $tasks=$folder.GetTasks(1)  # Include hidden tasks visible to this owner.
         for($i=1;$i -le $tasks.Count;$i++){
           $taskCount++
           if($taskCount -gt 4096){$partial=$true;break}
           try{
             $task=$tasks.Item($i)
-            if(-not $task.Enabled){continue}
-            $actions=$task.Definition.Actions
+            $definition=$task.Definition
+            $actions=$definition.Actions
+            $classes=New-Object 'System.Collections.Generic.List[string]'
             for($j=1;$j -le $actions.Count;$j++){
-              $action=$actions.Item($j)
-              if([string]$action.Arguments -and
-                 ([string]$action.Arguments).IndexOf(
-                   $agent,[StringComparison]::OrdinalIgnoreCase) -ge 0){
-                $hit=$true
-              }
+              try{
+                $action=$actions.Item($j)
+                if([int]$action.Type -ne 0){continue}
+                $kind=R102AgentActionClass ([string]$action.Path) ([string]$action.Arguments) $agent $wscript
+                if($kind -cne 'NO_EXACT_AGENT_PATH_TOKEN'){$classes.Add($kind)}
+              }catch{$partial=$true}
             }
-          }catch{$partial=$true}
+            if($classes.Count -eq 0){continue}
+            $total++
+            if($classes -ccontains 'AGENT_REFERENCE_OTHER_LAUNCH_SHAPE'){
+              $otherShape++
+            }
+            $allExact=($classes.Count -eq 1 -and
+                       $classes[0] -ceq 'DIRECT_WSCRIPT_EXACT' -and
+                       $actions.Count -eq 1)
+            $owner=[string]$definition.Principal.UserId
+            $owned=([string]::Equals($owner,$identity.User.Value,[StringComparison]::OrdinalIgnoreCase) -or
+                    [string]::Equals($owner,$identity.Name,[StringComparison]::OrdinalIgnoreCase))
+            if(-not $owned){$foreignPrincipal++}
+            if(-not [bool]$task.Enabled){
+              $disabledOrNoTrigger++
+              continue
+            }
+            $logon=$false
+            $other=$false
+            $triggers=$definition.Triggers
+            for($k=1;$k -le $triggers.Count;$k++){
+              $trigger=$triggers.Item($k)
+              if(-not [bool]$trigger.Enabled){continue}
+              if([int]$trigger.Type -eq 9){$logon=$true}
+              else{$other=$true}
+            }
+            if(-not ($logon -or $other)){
+              $disabledOrNoTrigger++
+              continue
+            }
+            if(-not $allExact -or -not $owned){
+              $unknownDetails++
+              continue
+            }
+            if($logon){$directLogon++}
+            if($other){$directOther++}
+          }catch{
+            # A task that references our agent must not become a false
+            # 'no references' result if principal/trigger details are unreadable.
+            $partial=$true
+            $unknownDetails++
+          }
         }
         if($taskCount -gt 4096){break}
       }catch{$partial=$true}
@@ -131,20 +198,27 @@ function R102TaskProbe([string]$agent){
         }
       }catch{$partial=$true}
     }
-    $visible=if($hit){'POSSIBLE_DIRECT_AGENT_TASK_FOUND'}else{
-      'NO_VISIBLE_AGENT_TASK_NOT_GLOBAL_PROOF'
+    $visible=if($total -gt 0){'AGENT_PATH_TOKEN_REFERENCED_NOT_EXECUTION_PROOF'}else{
+      'NO_VISIBLE_AGENT_TOKEN_NOT_GLOBAL_PROOF'
     }
     $com=if($partial){'PARTIAL_OR_ACCESS_RESTRICTED'}else{
       'ACCESSIBLE_SCOPE_ENUMERATED_NOT_GLOBAL_PROOF'
     }
   }catch{
     $com='UNAVAILABLE_OR_INCOMPLETE'
-    if($hit){$visible='POSSIBLE_DIRECT_AGENT_TASK_FOUND'}
+    if($total -gt 0){$visible='AGENT_PATH_TOKEN_REFERENCED_NOT_EXECUTION_PROOF'}
   }
   return @(
     ('R102_TASK_NATIVE_CMDLET='+$native),
     ('R102_TASK_COM_ENUM='+$com),
     ('R102_TASK_VISIBLE_AGENT_REFERENCE='+$visible),
+    ('R102_TASK_AGENT_TOKEN_MATCHES='+$total),
+    ('R102_TASK_DIRECT_OWNER_LOGON_ENABLED='+$directLogon),
+    ('R102_TASK_DIRECT_OWNER_OTHER_TRIGGER_ENABLED='+$directOther),
+    ('R102_TASK_OTHER_LAUNCH_SHAPE='+$otherShape),
+    ('R102_TASK_DISABLED_OR_NO_ENABLED_TRIGGER='+$disabledOrNoTrigger),
+    ('R102_TASK_UNKNOWN_MATCH_DETAILS='+$unknownDetails),
+    ('R102_TASK_OTHER_OR_UNKNOWN_PRINCIPAL='+$foreignPrincipal),
     'R102_TASK_ADMINISTRATIVE_GLOBAL_COVERAGE=NOT_PROVEN'
   )
 }
