@@ -1,0 +1,233 @@
+name: HOLD R94 actual Windows WScript owner restart after R90 commit plus R93 recovery classification and rollback
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-resident-restart-R94-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/accept-offline-owned-cutover-R87-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/accept-single-owner-entry-R91-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/accept-first-owner-stage-R92-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/owner-single-command-offline-R90-HOLD.ps1
+      - validation/spotify-exit-immediate-maintenance-HOLD/accept-owner-postflight-R93-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/accept-resident-fresh-start-R94-HOLD.py
+permissions: {contents: read, actions: read}
+jobs:
+  real-immutable-review-r28-owner-wscript-cutover:
+    runs-on: windows-2025
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Check first-stage Python adapter source before substantial Windows fixtures
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/accept-first-owner-stage-R92-HOLD.py'
+          & python -B -c "import ast,pathlib,sys;ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))" $p
+          if($LASTEXITCODE -ne 0){throw 'R92_FIRST_STAGE_PYTHON_SOURCE_PARSE_FAILED'}
+          Write-Host 'R92_FIRST_STAGE_PYTHON_AST_PARSE=PASS'
+      - name: Reconstruct full exact prepublication R70 main, WScript and Bootstrap base
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'R82_PUBLIC_MAIN_CHANGED'}
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/'
+          foreach($name in @('build-combined-exit-and-shortcut-R37-HOLD.py',
+            'build-eventdriven-vbs-R45-HOLD.py',
+            'build-single-discovery-maintenance-R49-HOLD.py',
+            'build-shared-maintenance-lock-R54-HOLD.py',
+            'build-rapid-restart-vbs-R58-HOLD.py',
+            'build-wmi-selfheal-R63-HOLD.py',
+            'build-wmi-rebind-R66-HOLD.py',
+            'build-wmi-logon-recovery-R69-HOLD.py',
+            'build-boot-wmi-release-R70-HOLD.py')){
+            & python ($p+$name)
+            if($LASTEXITCODE -ne 0){throw ('R82_PREVIOUS_EXACT_OWNER_RUNTIME_BUILD_FAILED_'+$name)}
+          }
+          Write-Host 'R82_VERIFIED_EXISTING_SOURCE_CHAIN_TO_R70=PASS'
+      - name: Get actual original Bootstrap v106 with immutable official hash
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' \
+            'repos/sdsssdvx2/spotify-control-updates/actions/artifacts/12555778387/zip' \
+            > "$RUNNER_TEMP/spotify-r50-bootstrap-inspect.zip"
+          python - <<'PY'
+          import zipfile,hashlib,io,os
+          from pathlib import Path
+          root=Path(os.environ["RUNNER_TEMP"])
+          with zipfile.ZipFile(root/"spotify-r50-bootstrap-inspect.zip") as outer:
+              inner=outer.read("SpotifyControl-Installed-ivLyrics-Transaction-Repair-v0.6.14.zip")
+          with zipfile.ZipFile(io.BytesIO(inner)) as nested:
+              data=nested.read("bootstrap/spotify-control-self-updater.ps1")
+          assert (len(data),hashlib.sha256(data).hexdigest())==(
+              42963,"d9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6")
+          (root/"spotify-verified-bootstrap-v106.ps1").write_bytes(data)
+          print("R70_ORIGINAL_BOOTSTRAP_106_EXACT_SHA256=PASS")
+          PY
+          rm -f "$RUNNER_TEMP/spotify-r50-bootstrap-inspect.zip"
+      - name: Prepare R84 immutable private candidate and R85 entirely local bootstrap
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          $a=@(& ($base+'stage-immutable-review-native-R84-HOLD.ps1') -StageOwnerCandidate)
+          $a | ForEach-Object {Write-Output $_}
+          if($a -cnotcontains 'R84_RESULT=PRIVATE_CANDIDATE_STAGED_NOT_INSTALLED' -or
+             $a -cnotcontains 'R84_OWNER_STAGED_IMMUTABLE_CHUNKS_21_OF_21=PASS'){
+            throw 'R87_R84_SOURCE_STAGE_MISSING'
+          }
+          $matches=@($a | Where-Object {$_ -cmatch '^R84_OWNER_PRIVATE_STAGE_ID=[0-9a-f]{32}$'})
+          if($matches.Count -ne 1){throw 'R87_R84_STAGE_NOT_UNIQUE'}
+          $stage=Join-Path $env:LOCALAPPDATA ('SpotifyControlCanary-ready-'+([string]$matches[0]).Split('=')[1])
+          $boot=Join-Path $env:RUNNER_TEMP 'spotify-verified-bootstrap-v106.ps1'
+          $b=@(& ($base+'compose-private-offline-bootstrap-R85-HOLD.ps1') -R84ReadyPath $stage -OfficialBootstrapPath $boot)
+          $b | ForEach-Object {Write-Output $_}
+          if($b -cnotcontains 'RESULT=R85_OWNER_PRIVATE_OFFLINE_TRANSPORT_PREPARED_HOLD' -or
+             $b -cnotcontains 'R85_R84_PINNED_21_CHUNKS_MIRRORED_FROM_LOCAL_DISK=PASS'){
+            throw 'R87_R85_LOCAL_BOOTSTRAP_NOT_PREPARED'
+          }
+          Write-Host 'R87_NATIVE_R84_R85_IMMUTABLE_LOCAL_SOURCE=READY_NO_OWNER_INSTALL'
+      - name: R81 independently authenticates all 21 real immutable held review chunks and full target bytes
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & python validation/spotify-exit-immediate-maintenance-HOLD/accept-immutable-review-bootstrap-R81-HOLD.py stage
+          if($LASTEXITCODE -ne 0){throw 'R82_GENUINE_REVIEW_SOURCE_NOT_ADMITTED'}
+          Write-Host 'R82_REAL_GITHUB_REVIEW_SOURCE_21_OF_21_REMOTE_PASS'
+      - name: Compose exact existing R70 hosted native R28 owner process test with R81 source admission
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & python validation/spotify-exit-immediate-maintenance-HOLD/accept-boot-wmi-release-R70-HOLD.py prepare-win
+          if($LASTEXITCODE -ne 0){throw 'R82_PREVIOUS_PINNED_R28_OWNER_TEST_NOT_BUILT'}
+          & python validation/spotify-exit-immediate-maintenance-HOLD/accept-offline-owned-cutover-R87-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R82_IMMUTABLE_REVIEW_NATIVE_OWNER_TEST_NOT_PREPARED'}
+          $test=Join-Path $env:RUNNER_TEMP 'spotify-r43-integrated-real-owner-cutover.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($test,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R82_WINDOWS_NATIVE_OWNER_TEST_PS51_PARSE_ERROR'}
+          Write-Host 'R82_R28_OWNER_LIFECYCLE_REUSED_SOURCE_PINNED=PASS'
+      - name: Bind actual native production-target R88 one-shot source to the proven R87 owner Win32 runtime
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & python validation/spotify-exit-immediate-maintenance-HOLD/accept-private-owner-runtime-R89-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R89_REAL_R88_OWNER_TEST_ADAPTER_FAILED'}
+          $test=Join-Path $env:RUNNER_TEMP 'spotify-r43-integrated-real-owner-cutover.ps1'
+          $t=$null;$e=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($test,[ref]$t,[ref]$e)
+          if(@($e).Count -gt 0){throw 'R89_NATIVE_R88_WIN32_OWNER_FIXTURE_PARSE_FAILED'}
+          Write-Host 'R89_NATIVE_R88_WIN32_OWNER_FIXTURE_PREPARED=PASS'
+      - name: Substitute actual R90 single-entry approved owner command in existing verified R89 hosted scratch
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & python validation/spotify-exit-immediate-maintenance-HOLD/accept-single-owner-entry-R91-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R91_SINGLE_OWNER_ENTRY_HOSTED_NATIVE_ADAPTER_FAILED'}
+          $base=Join-Path $env:RUNNER_TEMP 'spotify-r43-integrated-real-owner-cutover.ps1'
+          $driver=Join-Path $env:RUNNER_TEMP 'spotify-r91-hosted-r90-driver.ps1'
+          foreach($p in @($base,$driver)){
+            $tokens=$null;$issues=$null
+            [void][Management.Automation.Language.Parser]::ParseFile($p,[ref]$tokens,[ref]$issues)
+            if(@($issues).Count -gt 0){
+              $issues|ForEach-Object {Write-Output $_.Message}
+              throw 'R91_POWERSHELL_51_HOSTED_R90_SOURCE_SYNTAX_INVALID'
+            }
+          }
+          Write-Host 'R91_REAL_R90_OWNER_ENTRY_NATIVE_PS51_AND_WIN32_HARNESS_READY=PASS'
+      - name: Integrate pinned actual first-time R86 R84 R85 private stage into R90 in hosted Windows owner scratch
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & python validation/spotify-exit-immediate-maintenance-HOLD/accept-first-owner-stage-R92-HOLD.py
+          if($LASTEXITCODE -ne 0){throw 'R92_REAL_R86_NEW_STAGE_TEST_ADAPTER_FAILED'}
+          foreach($p in @(
+            (Join-Path $env:RUNNER_TEMP 'spotify-r43-integrated-real-owner-cutover.ps1'),
+            (Join-Path $env:RUNNER_TEMP 'spotify-r91-hosted-r90-driver.ps1'),
+            (Join-Path $env:RUNNER_TEMP 'spotify-r92-hosted-r86-driver.ps1'))){
+            $t=$null;$errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile($p,[ref]$t,[ref]$errors)
+            if(@($errors).Count -ne 0){
+              $errors|ForEach-Object{Write-Output $_.Message}
+              throw 'R92_NATIVE_PS51_FIRST_STAGE_PARSE_INVALID'
+            }
+          }
+          Write-Host 'R92_FIRST_TIME_R86_REAL_R84_R85_NATIVE_PS51_SOURCES_READY=PASS'
+      - name: Bind fresh independent native R93 postflight to original R92 owner transaction at four lifecycle states
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/accept-owner-postflight-R93-HOLD.py'
+          & python -B -c "import ast,pathlib,sys;ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))" $p
+          if($LASTEXITCODE -ne 0){throw 'R93_POSTFLIGHT_ADAPTER_PYTHON_SYNTAX_FAILED'}
+          & python $p
+          if($LASTEXITCODE -ne 0){throw 'R93_NATIVE_FOUR_SNAPSHOT_ADAPTER_FAILED'}
+          $driver=Join-Path $env:RUNNER_TEMP 'spotify-r43-integrated-real-owner-cutover.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($driver,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){
+            $errors|ForEach-Object{Write-Output $_.Message}
+            throw 'R93_NATIVE_POSTFLIGHT_WIN32_DRIVER_PARSE_FAILED'
+          }
+          Write-Host 'R93_LIFECYCLE_FOUR_SNAPSHOT_TEST_READY=PASS'
+      - name: Inject exact-owner Win32 WScript post-commit fresh launch and independent R93 status recheck
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/accept-resident-fresh-start-R94-HOLD.py'
+          & python -B -c "import ast,pathlib,sys;ast.parse(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))" $p
+          if($LASTEXITCODE -ne 0){throw 'R94_RESTART_ADAPTER_SYNTAX_INVALID'}
+          & python $p
+          if($LASTEXITCODE -ne 0){throw 'R94_NATIVE_RESTART_PREPARATION_FAILED'}
+          $test=Join-Path $env:RUNNER_TEMP 'spotify-r43-integrated-real-owner-cutover.ps1'
+          $t=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($test,[ref]$t,[ref]$errors)
+          if(@($errors).Count -ne 0){
+            $errors|ForEach-Object{Write-Output $_.Message}
+            throw 'R94_WIN32_NATIVE_RESTART_CODE_SYNTAX_INVALID'
+          }
+          Write-Host 'R94_EXACT_OWNER_WSCRIPT_RESTART_PS51_TEST_READY=PASS'
+      - name: Execute full real Windows owner WScript handoff through R85 local file URI Bootstrap and rollback
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $test=Join-Path $env:RUNNER_TEMP 'spotify-r43-integrated-real-owner-cutover.ps1'
+          $ErrorActionPreference='Continue'
+          $outputs=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $test 2>&1)
+          $exitCode=$LASTEXITCODE
+          $ErrorActionPreference='Stop'
+          $outputs | ForEach-Object {
+            $line=[string]$_
+            if($line -cmatch '^(R93_|R92_|R91_R90_SAFE_RECEIPT_|R91_|R89_|R87_|R28_|FUTURE_OFFICIAL_BOOTSTRAP_)'){
+              Write-Output $line
+            }
+          }
+          if($exitCode -ne 0){throw 'R87_NATIVE_OWNER_AND_PRIVATE_BOOTSTRAP_EXIT_NONZERO'}
+          foreach($required in @(
+            'R87_NO_HTTP_SERVER_OFFLINE_FILE_URI_ONLY=PASS',
+            'R87_REAL_R85_IMMUTABLE_OFFLINE_MANIFEST_AND_BOOTSTRAP_BOUND=PASS',
+            'R89_REAL_R88_NATIVE_WIN32_OWNER_PRIVATE_OFFLINE_CUTOVER=PASS',
+            'R89_NATIVE_PRODUCTION_CANDIDATE_R88_DRIVER_ACTUALLY_SELECTED=PASS',
+            'R91_ACTUAL_R90_NATIVE_SINGLE_OWNER_ENTRY_WAS_INVOKED=PASS',
+            'R91_REAL_R90_PINNED_OWNER_SINGLE_ENTRY_WITH_R88_WSCRIPT_TRANSACTION=PASS',
+            'R92_REAL_R86_R84_R85_FIRST_STAGE_TO_R90_R88_OWNER_WSCRIPT_COMMIT=PASS',
+            'R93_FRESH_POWERSHELL_BASELINE_SOURCE_SNAPSHOT=PASS',
+            'R93_FRESH_POWERSHELL_CANDIDATE_SOURCE_SNAPSHOT=PASS',
+            'R93_FRESH_POWERSHELL_ROLLBACK_SOURCE_SNAPSHOT=PASS',
+            'R93_FRESH_POWERSHELL_MIXED_SOURCE_SNAPSHOT=PASS',
+            'R93_MIXED_SCRATCH_INTERRUPTION_REJECTED_AND_CLEANED=PASS',
+            'R94_LOGON_STYLE_FRESH_WSCRIPT_ONE_OWNER_RESIDENT_AND_DATA_PRESERVED=PASS',
+            'R94_REAL_WINDOWS_REBOOT=NO_PROCESS_RESTART_ONLY',
+            'R89_ACTUAL_R88_OWNER_CUTOVER_PRESERVED_OFFICIAL_BOOTSTRAP=PASS',
+            'R28_ONE_OWNER_APPROVAL_THROUGH_BOOTSTRAP_AND_NEW_VBS_COMPLETE_PASS',
+            'R28_SUCCESSFUL_UPDATE_NO_SECOND_ATTEMPT_AND_RESIDENT_PRESERVED_PASS',
+            'R87_INSTALLED_OFFICIAL_BOOTSTRAP_SHA256_UNCHANGED_AFTER_OWNER_CUTOVER_AND_ROLLBACK=PASS',
+            'FUTURE_OFFICIAL_BOOTSTRAP_LOCALHOST_EXACT_ROLLBACK_AND_USER_DATA_PRESERVATION_PASS',
+            'FUTURE_OFFICIAL_BOOTSTRAP_CORRUPT_CHUNK_REJECTED_ORIGINAL_AND_OWNER_DATA_UNCHANGED_PASS')){
+            if($outputs -cnotcontains $required){throw ('R87_ACTUAL_EXECUTION_PROOF_MISSING_'+$required)}
+          }
+          Write-Host 'R94_WIN32_FRESH_WSCRIPT_AFTER_R90_COMMIT_THEN_ROLLBACK_AND_MIXED_HOLD=PASS'
+          Write-Host 'R87_PRODUCTION_MAIN_AND_OWNER_PC=UNMODIFIED'
