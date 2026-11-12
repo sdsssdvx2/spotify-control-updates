@@ -1,0 +1,71 @@
+name: HOLD R125 exact two-function owner-candidate build-only
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-r125-owner-approved-once-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-r112-spicetify-v2467-onepass-R125-HOLD.ps1
+permissions: {contents: read}
+jobs:
+  r125-buildonly:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Reconstruct pinned R70 original source without owner-PC changes
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if((git rev-parse origin/main).Trim() -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R125_ORIGINAL_PUBLIC_MAIN_DRIFT'
+          }
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          foreach($py in @(
+            'build-combined-exit-and-shortcut-R37-HOLD.py',
+            'build-eventdriven-vbs-R45-HOLD.py',
+            'build-single-discovery-maintenance-R49-HOLD.py',
+            'build-shared-maintenance-lock-R54-HOLD.py',
+            'build-rapid-restart-vbs-R58-HOLD.py',
+            'build-wmi-selfheal-R63-HOLD.py',
+            'build-wmi-rebind-R66-HOLD.py',
+            'build-wmi-logon-recovery-R69-HOLD.py',
+            'build-boot-wmi-release-R70-HOLD.py'
+          )){
+            & python ($base+$py)
+            if($LASTEXITCODE -ne 0){throw ('R125_EXACT_SOURCE_BUILD_FAILED_'+$py)}
+          }
+          Write-Host 'R125_R70_ORIGINAL_PREDECESSOR_BUILT=PASS'
+      - name: Execute exact R125 PowerShell code against read-only original bytes
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $source='validation/spotify-exit-immediate-maintenance-HOLD/out/release-staging-boot-wmi-R70/bin/spotify-control.ps1'
+          $expected='b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92232d'
+          if((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected){
+            throw 'R125_PARENT_SOURCE_PIN_MISMATCH'
+          }
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-r112-spicetify-v2467-onepass-R125-HOLD.ps1'
+          $bytes=[IO.File]::ReadAllBytes($script)
+          $parseErrors=$null
+          $tokens=$null
+          $ast=[Management.Automation.Language.Parser]::ParseInput(
+            [Text.Encoding]::UTF8.GetString($bytes),[ref]$tokens,[ref]$parseErrors)
+          if($null -eq $ast -or @($parseErrors).Count -ne 0){
+            throw 'R125_POWERSHELL_PARSER_FAILED'
+          }
+          Write-Host 'R125_POWERSHELL_51_SYNTAX=PASS'
+          $result=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -Mode BuildOnly -SourcePath $source)
+          if($LASTEXITCODE -ne 0 -or
+             $result -cnotcontains 'R125_TWO_FUNCTION_PATCH=EXACT_SHA_PASS' -or
+             $result -cnotcontains 'R125_SOURCE_WRITES=ZERO' -or
+             $result -cnotcontains 'RESULT=BUILDONLY_PASS_NO_MUTATION'){
+            $safe=@($result | Where-Object {$_ -match '^((HOLD_REASON|FAILED_PHASE|RESULT|R125_TWO_FUNCTION_PATCH|R125_SOURCE_WRITES)=[A-Z_0-9]+)$'})
+            Write-Host ($safe -join [Environment]::NewLine)
+            throw 'R125_R112_OWNER_BUILDER_NOT_BYTE_IDENTICAL'
+          }
+          if((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected){
+            throw 'R125_BUILDONLY_SOURCE_CHANGED'
+          }
+          Write-Host 'R125_R112_TWO_FUNCTION_BYTE_IDENTICAL=PASS'
+          Write-Host 'R125_NO_PRODUCTION_WINDOWS_OR_HOSTED_OWNER_MUTATIONS=PASS'
