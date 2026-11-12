@@ -317,6 +317,60 @@ jobs:
             Write-Host ('R113_DISCOVERY_HEALTH='+$(if($healthy){'TRUE'}else{'FALSE_OR_UNVERIFIED'}))
             Write-Host ('R113_AUTHENTIC_UPGRADE_PENDING='+$(if($updatePending){'TRUE'}else{'FALSE_OR_UNVERIFIED'}))
             Write-Host ('R113_OFFICIAL_2465_BINARY_INSTALLED='+$(if($updated){'EXACT'}else{'NO'}))
+            # Diagnose real host-owned failure without exposing any raw log
+            # lines, executable paths, authenticated URLs or arguments.
+            $tx=[string]$result.spicetify_last_transaction_status
+            $known=@('committed','prepared','staged','swapped','rolled-back',
+              'rolled-back-apply-failure','rolled-back-post-swap-verification-failure',
+              'rolled-back-post-apply-guard-failure',
+              'rolled-back-spotify-started-before-apply',
+              'rollback-binary-restored-apply-failed',
+              'rollback-root-restored-apply-failed','failed')
+            $safeTxn=if($tx -cin $known){$tx}
+              elseif([string]::IsNullOrWhiteSpace($tx)){'ABSENT'}
+              else{'OTHER_UNRECOGNIZED'}
+            Write-Host ('R114_PRODUCT_TRANSACTION_STATUS='+$safeTxn)
+            $contained=@()
+            foreach($filepath in @($stdout,$stderr)){
+              if(Test-Path -LiteralPath $filepath -PathType Leaf){
+                $fi=Get-Item -LiteralPath $filepath -Force
+                if($fi.Length -le 1048576){$contained+=([IO.File]::ReadAllText($filepath))}
+                else{$contained+=('LARGE_PRIVATE_CHILD_OUTPUT')}
+              }
+            }
+            $logRoot=Join-Path $root 'logs'
+            if(Test-Path -LiteralPath $logRoot -PathType Container){
+              $logs=@(Get-ChildItem -LiteralPath $logRoot -File -Filter '*.log' -ErrorAction SilentlyContinue | Select-Object -First 8)
+              foreach($file in $logs){
+                if($file.Length -le 1048576){$contained+=([IO.File]::ReadAllText($file.FullName))}
+                else{$contained+=('LARGE_PRIVATE_LOG')}
+              }
+            }
+            $raw=($contained -join [Environment]::NewLine)
+            $categories=New-Object 'System.Collections.Generic.List[string]'
+            foreach($p in @(
+              @('ADMIN_OR_ACCESS_GUARD','(?i)administrator|--bypass-admin|access.is.denied|unauthorized'),
+              @('SPICETIFY_BACKUP_METADATA','(?i)backup.metadata|backup.version.mismatch|backup.with'),
+              @('ADDON_BACKUP_GUARD','(?i)addon.*backup.*failed|backup.*addon.*failed'),
+              @('TRANSACTION_SWAP_OR_ROLLBACK','(?i)transaction.*(failed|rollback|abort)|rollback.*failed|full.root.*mismatch'),
+              @('SPICETIFY_APPLY_FAILED','(?i)spicetify.*apply.*failed|apply.*(exit.code|failed|error)'),
+              @('SPICETIFY_ROOT_PROVENANCE','(?i)spicetify.*(tree|root).*(mismatch|refused|failed)'),
+              @('TRUST_OR_SIGNATURE_GUARD','(?i)sha.256.*mismatch|signature.*invalid|digest.*mismatch'),
+              @('NETWORK_OR_RATE_LIMIT','(?i)429.too.many|rate.limit|connection.*timed.out|http.*(403|404|429|503)'),
+              @('PS_RUNTIME_EXCEPTION','(?i)at .*\.ps1:|categoryinfo|fullyqualifiederrorid'),
+              @('GENERAL_FAILURE_MARKER','(?i)error|failed|exception|blocked')
+            )){
+              if($raw -match $p[1]){$categories.Add($p[0])}
+            }
+            Write-Host ('R114_CHILD_AND_LOG_FAIL_CLASSES='+$(if($categories.Count){$categories.ToArray() -join ','}else{'NO_RECOGNIZED_MARKER'}))
+            Write-Host ('R114_CHILD_STDOUT_CLASS='+$(if(Test-Path $stdout -PathType Leaf){
+              if((Get-Item $stdout).Length -gt 0){'NONEMPTY_PRIVATE'}else{'EMPTY'}
+            }else{'ABSENT'}))
+            Write-Host ('R114_CHILD_STDERR_CLASS='+$(if(Test-Path $stderr -PathType Leaf){
+              if((Get-Item $stderr).Length -gt 0){'NONEMPTY_PRIVATE'}else{'EMPTY'}
+            }else{'ABSENT'}))
+            Write-Host 'R114_RAW_CHILD_LOG_LINES_AND_USER_PATHS_OUTPUT=NO'
+
             $class='NO_CHECK_REPORT'
             foreach($file in @(Get-ChildItem -LiteralPath $root -Filter '*check*.json' -File -Recurse -ErrorAction SilentlyContinue)){
               if($file.Length -gt 2097152){continue}
