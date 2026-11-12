@@ -190,3 +190,109 @@ jobs:
           Write-Host 'R107_REAL_COMPATIBLE_GUARD_AND_DISCOVERY=PASS'
           Write-Host 'R107_PRODUCT_MAIN_MUTATION=OFF;ACCOUNT_LOGIN_AND_PLAYBACK=NOT_TESTED'
           Write-Host 'R107_OWNER_PC_AND_PUBLIC_RELEASE=UNCHANGED'
+      - name: Exact unchanged v0.6.30 AgentTick attempts real owner-armed repair in disposable signed Spotify profile
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows' -or
+             $env:RUNNER_ENVIRONMENT -cne 'github-hosted'){
+            throw 'R108_HOSTED_WINDOWS_ONLY'
+          }
+          if(@(Get-Process Spotify -ErrorAction SilentlyContinue).Count -ne 0){
+            throw 'R108_FOREIGN_SPOTIFY_PROCESS'
+          }
+          $source='validation/spotify-exit-immediate-maintenance-HOLD/out/release-staging-boot-wmi-R70/bin'
+          $sc=Join-Path $env:LOCALAPPDATA 'SpotifyControl'
+          $bin=Join-Path $sc 'bin'
+          if(Test-Path -LiteralPath $sc){throw 'R108_EXISTING_PRODUCT_ROOT_DENY'}
+          [void][IO.Directory]::CreateDirectory($bin)
+          $pins=@{
+            'spotify-control.ps1'='b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92232d'
+            'spotify-control-agent.vbs'='e56609ed8927512595f55c01ea50dbb9c8c59e4a2c86dcb3d16195a565c604d5'
+            'addon-manager.ps1'='5ab556c1d90b9f8e6d5784e238ffd1798c5363a0f7cd7b8313d1f106b5b6a285'
+          }
+          foreach($key in $pins.Keys){
+            $src=Join-Path $source $key
+            if((Get-FileHash $src -Algorithm SHA256).Hash.ToLowerInvariant() -cne $pins[$key]){
+              throw 'R108_PRODUCT_SOURCE_PIN_CHANGED'
+            }
+            [IO.File]::Copy((Resolve-Path $src).Path,(Join-Path $bin $key),$false)
+          }
+          $spiceBin=Join-Path $env:LOCALAPPDATA 'spicetify'
+          if(Test-Path (Join-Path $spiceBin 'spicetify.exe')){
+            throw 'R108_CLI_DESTINATION_PREEXISTED'
+          }
+          [void][IO.Directory]::CreateDirectory($spiceBin)
+          $found=@(Get-ChildItem -LiteralPath (Join-Path $env:RUNNER_TEMP 'r106-cli-unpack') -Filter 'spicetify.exe' -File -Recurse)
+          if($found.Count -ne 1){throw 'R108_CLI_SOURCE_UNVERIFIED'}
+          $cli=Join-Path $spiceBin 'spicetify.exe'
+          [IO.File]::Copy($found[0].FullName,$cli,$false)
+          if((Get-FileHash $cli -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+            '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+            throw 'R108_CLI_HASH_UNVERIFIED'
+          }
+          $env:PATH=$spiceBin+';'+$env:PATH
+          $spotify=Join-Path $env:APPDATA 'Spotify'
+          $prefs=Join-Path $spotify 'prefs'
+          $xpui=Join-Path $spotify 'Apps\xpui.spa'
+          if(-not (Test-Path $prefs -PathType Leaf) -or
+             -not (Test-Path $xpui -PathType Leaf)){
+            throw 'R108_SIGNED_SPOTIFY_FIXTURE_UNAVAILABLE'
+          }
+          $vanilla=(Get-FileHash $xpui -Algorithm SHA256).Hash.ToLowerInvariant()
+          & $cli --bypass-admin --no-restart config spotify_path $spotify prefs_path $prefs
+          if($LASTEXITCODE -ne 0){throw 'R108_CLI_CONFIG_FAILED'}
+          $now=[DateTimeOffset]::UtcNow.ToString('o')
+          $state=[ordered]@{
+            schema=20;agent_mutation_enabled=$true;pending_maintenance=$true;
+            maintenance_check_healthy=$true;pending_addon_auto_ambiguous=0;
+            pending_self_update=$false;pending_spotify_update=$false;
+            pending_spicetify_upgrade=$false;pending_spicetify_repair=$true;
+            pending_marketplace_update=$false;last_check_only_utc=$now;
+            last_agent_event=$null;last_agent_decision=$null;
+            last_agent_tick_utc=$null;pending_reasons=@('test-owned-spicetify-repair')
+          }
+          $statePath=Join-Path $sc 'state.json'
+          [IO.File]::WriteAllText($statePath,($state|ConvertTo-Json -Depth 8 -Compress),[Text.Encoding]::UTF8)
+          $main=Join-Path $bin 'spotify-control.ps1'
+          $out=Join-Path $env:RUNNER_TEMP 'R108-AgentTick-stdout.txt'
+          $err=Join-Path $env:RUNNER_TEMP 'R108-AgentTick-stderr.txt'
+          try {
+            $arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$main+'" -Action AgentTick -AgentEvent SpotifyExit'
+            $proc=Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
+            if(-not $proc.WaitForExit(180000)){
+              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+              throw 'R108_AGENTTICK_TIMEOUT_NO_RETRY'
+            }
+            if($proc.ExitCode -ne 0){throw 'R108_REAL_AGENTTICK_NONZERO_NO_RETRY'}
+            $after=Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+            $rp=Join-Path $sc 'resident-agent-latest.json'
+            if(-not(Test-Path $rp -PathType Leaf)){
+              $rp=Join-Path $sc 'logs\resident-agent-latest.json'
+            }
+            $report=$null
+            if(Test-Path $rp -PathType Leaf){$report=Get-Content -LiteralPath $rp -Raw | ConvertFrom-Json}
+            $changed= -not(Test-Path $xpui -PathType Leaf)
+            if(-not $changed){$changed=((Get-FileHash $xpui -Algorithm SHA256).Hash.ToLowerInvariant() -cne $vanilla)}
+            Write-Host ('R108_REAL_STATE_EVENT='+$(if([string]$after.last_agent_event -ceq 'SpotifyExit'){'SPOTIFYEXIT'}else{'NOT_PROVEN'}))
+            Write-Host ('R108_REAL_DECISION='+$(if([string]$after.last_agent_decision -ceq 'maintenance-phase-entered'){'MUTATION_PHASE_ENTERED'}else{'OTHER_OR_HOLD'}))
+            Write-Host ('R108_REAL_MUTATION_FLAG='+$(if($null -ne $report -and $report.mutation_ran -eq $true){'TRUE'}else{'NOT_PROVEN'}))
+            Write-Host ('R108_REAL_VENDOR_XPUI_CHANGED='+$(if($changed){'YES'}else{'NOT_PROVEN'}))
+            if([string]$after.last_agent_event -cne 'SpotifyExit' -or
+               [string]$after.last_agent_decision -cne 'maintenance-phase-entered' -or
+               $null -eq $report -or $report.mutation_ran -ne $true -or -not $changed){
+              throw 'R108_EXACT_PRODUCT_AUTOMATIC_MUTATION_NOT_PROVEN_HOLD'
+            }
+            Write-Host 'R108_REAL_EXACT_PRODUCT_AGENTTICK_SPICETIFY_MUTATION=PASS'
+          } finally {
+            # Only hosted test-owned application: restore exact original xPUI.
+            if((Test-Path $cli -PathType Leaf) -and (Test-Path $xpui -PathType Leaf)){
+              & $cli --bypass-admin --no-restart restore
+              if($LASTEXITCODE -ne 0 -or
+                 (Get-FileHash $xpui -Algorithm SHA256).Hash.ToLowerInvariant() -cne $vanilla){
+                throw 'R108_EPHEMERAL_VANILLA_RESTORE_UNVERIFIED'
+              }
+              Write-Host 'R108_EXACT_POSTTEST_VANILLA_XPUI_RESTORED=PASS'
+            }
+          }
+          Write-Host 'R108_PUBLIC_STABLE_AND_OWNER_PC=UNCHANGED'
