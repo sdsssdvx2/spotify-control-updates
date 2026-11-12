@@ -42,6 +42,7 @@ jobs:
             'R102_COMMIT_UNVERIFIED_HOLD_REQUIRES_READONLY_R101_REVIEW',
             'R102_RELEASE_AND_GUARDED_LOGON_COMMITTED_REAL_REBOOT_UNTESTED',
             'R102_PARTIAL_POSTCOMMIT_HOLD_NO_AUTOROLLBACK',
+            'R102_TASK_DIAGNOSTIC_ONLY_NOT_DEPLOY_AUTHORITY',
             "APPROVE_PRIVATE_V0630_AND_GUARDED_LOGON_ONCE")){
             if(-not $src.Contains($marker)){throw 'R102_REQUIRED_OWNER_SAFETY_CONTRACT_MISSING'}
           }
@@ -108,6 +109,11 @@ jobs:
           $unauthorized=Run @('-Preflight','-ApprovalPhrase','APPROVE_PRIVATE_V0630_AND_GUARDED_LOGON_ONCE')
           if($unauthorized -cnotcontains 'HOLD_REASON=R102_APPROVAL_WITHOUT_COMMIT_FORBIDDEN'){
             throw 'R102_APPROVAL_LEAK_TO_READONLY_MODE'
+          }
+          $taskConflict=Run @('-TaskOnly','-Commit')
+          if($taskConflict -cnotcontains 'HOLD_REASON=R102_TASK_DIAG_CANNOT_COMBINE_MUTATION_OR_APPROVAL' -or
+             $taskConflict -cnotcontains 'RESULT=R102_HOLD_NO_AUTO_RETRY'){
+            throw 'R102_TASK_ONLY_MUTATION_COMBINATION_NOT_BLOCKED'
           }
           Write-Host 'R102_NATIVE_INERT_AND_EXPLICIT_DUAL_APPROVAL_DENIAL=PASS'
           Write-Host 'R102_OPERATING_RELEASE_AND_USER_LOGON_MUTATIONS=NONE'
