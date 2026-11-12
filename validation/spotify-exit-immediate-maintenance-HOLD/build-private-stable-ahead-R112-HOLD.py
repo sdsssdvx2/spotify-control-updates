@@ -104,26 +104,31 @@ def main()->None:
             "HOSTED_WINDOWS_SOURCE_BUILD_ONLY")
     original=SOURCE.read_bytes()
     require(sha(original)==PIN,"PRODUCTION_V0630_SOURCE_BYTES_CHANGED")
-    s=original.decode("utf-8-sig").replace("\r\n","\n")
+    newline="\r\n" if b"\r\n" in original else "\n"
+    bom=b"\xef\xbb\xbf" if original.startswith(b"\xef\xbb\xbf") else b""
+    plain=original.decode("utf-8-sig").replace("\r\n","\n")
+    s=plain
     a,b=span(s,"Get-SelfUpdateCheckResult")
-    oldfn=s[a:b];newfn=patch_selfupdate(oldfn)
-    require(newfn!=oldfn,"SELFUPDATE_NOT_CHANGED")
-    s=s[:a]+newfn+s[b:]
+    original_self=s[a:b];revised_self=patch_selfupdate(original_self)
+    require(revised_self!=original_self,"SELFUPDATE_NOT_CHANGED")
+    s=s[:a]+revised_self+s[b:]
     c,d=span(s,"Invoke-MaintenanceCheckPhase")
-    oldfn=s[c:d];newfn=patch_check(oldfn)
-    require(newfn!=oldfn,"CHECK_NOT_CHANGED")
-    s=s[:c]+newfn+s[d:]
-    # These exactly two named functions are the ONLY edited source spans.
-    x,y=span(s,"Get-SelfUpdateCheckResult")
-    recovered=s[:x]+oldfn.replace(oldfn,oldfn) if False else None
-    # Independently replay the reverse source-slice edits to protect the rest.
-    orig=s.replace(newfn,oldfn,1).replace(newfn,oldfn,1) if False else None
-    body=s.encode("utf-8")
+    original_check=s[c:d];revised_check=patch_check(original_check)
+    require(revised_check!=original_check,"CHECK_NOT_CHANGED")
+    s=s[:c]+revised_check+s[d:]
+    require(s.count(revised_self)==1 and s.count(revised_check)==1,
+            "MODIFIED_FUNCTION_NOT_UNIQUE")
+    reverse=s.replace(revised_check,original_check,1).replace(
+        revised_self,original_self,1)
+    require(reverse==plain,"EXACT_TWO_FUNCTION_REPLAY_MISMATCH")
+    require(bom+reverse.replace("\n",newline).encode("utf-8")==original,
+            "ORIGINAL_SOURCE_BYTES_NOT_RECOVERABLE")
+    body=bom+s.replace("\n",newline).encode("utf-8")
     require(body!=original,"CANDIDATE_UNCHANGED")
     require(s.count("TrustedStableBehindPrivate=$true")==1,"AHEAD_FLAG_SINGLE_SOURCE")
-    require(s.count("Invoke-MaintenanceMutationPhase -State $State")>=1,
+    require("Invoke-MaintenanceMutationPhase -State $State" in s,
             "MUTATION_ENTRYPOINT_MISSING")
-    require(s.count('if (-not $selfUpdate.Verified) {')==1,
+    require(revised_check.count('if (-not $selfUpdate.Verified) {')==1,
             "CHECK_HANDLER_DUPLICATED")
     require(not OUT.exists(),"EXISTING_CANDIDATE_NOT_OVERWRITTEN")
     OUT.parent.mkdir(parents=True,exist_ok=True)
