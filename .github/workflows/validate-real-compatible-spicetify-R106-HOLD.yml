@@ -293,6 +293,39 @@ jobs:
             $ran=($null -ne $report -and $report.mutation_ran -eq $true)
             Write-Host ('R108_REAL_STATE_EVENT='+$(if($evt){'SPOTIFYEXIT'}else{'NOT_PROVEN'}))
             Write-Host ('R108_REAL_DECISION='+$(if($phase){'MUTATION_PHASE_ENTERED'}else{'OTHER_OR_HOLD'}))
+            # Explain the exact observed fail-closed decision as a fixed enum,
+            # without printing private stdout, paths, command lines, or logs.
+            $codes=@(
+              'maintenance-phase-entered',
+              'maintenance-deferred-or-lease-busy',
+              'mutation-blocked-unhealthy-or-auto-ambiguous',
+              'pending-observed-mutation-disarmed',
+              'observe-only-closed',
+              'check-only-closed-no-pending',
+              'closed-check-not-due',
+              'running-check-not-due',
+              'check-only-running',
+              'noop'
+            )
+            $safeDecision=if([string]$after.last_agent_decision -cin $codes){
+              [string]$after.last_agent_decision
+            }else{'UNRECOGNIZED_OR_ABSENT'}
+            Write-Host ('R108_SAFE_SAVED_DECISION='+$safeDecision)
+            Write-Host ('R108_SAFE_PENDING_MAINTENANCE='+$(if($after.pending_maintenance -eq $true){'TRUE'}elseif($after.pending_maintenance -eq $false){'FALSE'}else{'UNKNOWN'}))
+            Write-Host ('R108_SAFE_SPICETIFY_REPAIR_PENDING='+$(if($after.pending_spicetify_repair -eq $true){'TRUE'}elseif($after.pending_spicetify_repair -eq $false){'FALSE'}else{'UNKNOWN'}))
+            Write-Host ('R108_SAFE_CHECK_HEALTH='+$(if($after.maintenance_check_healthy -eq $true){'TRUE'}elseif($after.maintenance_check_healthy -eq $false){'FALSE'}else{'UNKNOWN'}))
+            if(Test-Path -LiteralPath $out -PathType Leaf){
+              $stdout=Get-Content -LiteralPath $out -Raw
+              $stdoutCategory=if($stdout -match '(?i)parameter cannot be found|cannot process argument'){ 'PARAMETER_INVOCATION' }
+                elseif($stdout -match '(?i)the term .+ is not recognized'){ 'COMMAND_NOT_RESOLVED' }
+                elseif($stdout -match '(?i)administrator|access is denied|unauthorized'){ 'PERMISSION_OR_ADMIN_GUARD' }
+                elseif($stdout -match '(?i)Spicetify.+(?:backup|restore).+(?:mismatch|failed)'){ 'SPICETIFY_BACKUP_GUARD' }
+                elseif($stdout -match '(?i)transaction.+(?:failed|rejected|blocked)'){ 'TRANSACTION_GUARD' }
+                elseif($stdout -match '(?i)error|failed|exception'){ 'OTHER_REDACTED_ERROR' }
+                elseif([string]::IsNullOrWhiteSpace($stdout)){ 'NO_CHILD_STDOUT' }
+                else{'OTHER_UNCLASSIFIED_OUTPUT'}
+              Write-Host ('R108_PRIVATE_STDOUT_CLASS='+$stdoutCategory)
+            }
             Write-Host ('R108_REAL_MUTATION_FLAG='+$(if($ran){'TRUE'}else{'NOT_PROVEN'}))
             Write-Host ('R108_REAL_VENDOR_XPUI_CHANGED='+$(if($changed){'YES'}else{'NOT_PROVEN'}))
             if($proc.ExitCode -ne 0){throw 'R108_REAL_AGENTTICK_NONZERO_NO_RETRY'}
