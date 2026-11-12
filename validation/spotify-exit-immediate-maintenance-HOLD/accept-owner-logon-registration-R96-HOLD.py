@@ -49,6 +49,12 @@ def run()->None:
     $txnBefore=Get-FileHash -LiteralPath (Join-Path $app 'self-update-last-transaction.json') -Algorithm SHA256
     function R96Once([string[]]$parms){
       $ret=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $r96Source -HostedFixtureRoot $app @parms 2>&1)
+      foreach($line in @($ret)){
+        $safe=[string]$line
+        if($safe -cmatch '^R96_[A-Z0-9_]{2,50}=[A-Z0-9_;-]{1,150}$'){
+          Write-Host ('R96_SAFE_HOSTED_RECEIPT_'+$safe)
+        }
+      }
       if($LASTEXITCODE -ne 0){throw 'R96_NATIVE_RUNNER_EXITED_NONZERO'}
       return $ret
     }
