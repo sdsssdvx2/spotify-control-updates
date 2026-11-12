@@ -375,11 +375,11 @@ jobs:
             [void][IO.Directory]::CreateDirectory($shared)
             & icacls.exe $shared /grant ('*'+$sid+':(OI)(CI)M') /Q | Out-Null
             if($LASTEXITCODE -ne 0){throw 'R123_SHARED_SCRATCH_PERMISSION_FAILED'}
+            # Trust only the pinned code + full official old CLI. Generate
+            # the vendor installation and user backup under the NEW user SID.
             $fixture=[ordered]@{
               'spotify-control'=$root
               'spicetify-cli'=$cliDir
-              'spotify-vendor'=$spotify
-              'spicetify-config'=(Join-Path $env:APPDATA 'spicetify')
             }
             foreach($key in $fixture.Keys){
               $source=[string]$fixture[$key]
@@ -391,7 +391,14 @@ jobs:
               if($links.Count -gt 0){throw 'R123_FIXTURE_LINK_REFUSED'}
               Copy-Item -LiteralPath $source -Destination (Join-Path $shared $key) -Recurse -ErrorAction Stop
             }
-            Write-Host 'R123_PINNED_EXISTING_FIXTURE_STAGED=PASS'
+            $signedInstaller=Join-Path $env:RUNNER_TEMP 'R106-Spotify136-signed.exe'
+            if(-not(Test-Path $signedInstaller -PathType Leaf) -or
+               (Get-FileHash $signedInstaller -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+               'e5ca46ad79de202c8deaf888c26f2a608b9e042142279e0690d589d80640591d'){
+              throw 'R124_VERIFIED_SPOTIFY_INSTALLER_MISSING'
+            }
+            [IO.File]::Copy($signedInstaller,(Join-Path $shared 'Spotify136-verified.exe'),$false)
+            Write-Host 'R124_VERIFIED_INSTALLER_AND_2464_CODE_STAGED=PASS'
             $runner=Join-Path $shared 'standard-owner-run.ps1'
             $receipt=Join-Path $shared 'receipt.txt'
             $stdout=Join-Path $shared 'stdout.txt'
@@ -411,8 +418,6 @@ jobs:
               $dest=[ordered]@{
                 'spotify-control'=(Join-Path $env:LOCALAPPDATA 'SpotifyControl')
                 'spicetify-cli'=(Join-Path $env:LOCALAPPDATA 'spicetify')
-                'spotify-vendor'=(Join-Path $env:APPDATA 'Spotify')
-                'spicetify-config'=(Join-Path $env:APPDATA 'spicetify')
               }
               foreach($key in $dest.Keys){
                 $target=[string]$dest[$key]
@@ -424,7 +429,7 @@ jobs:
               $main=Join-Path $root 'bin\spotify-control.ps1'
               $boot=Join-Path $root 'bootstrap\spotify-control-self-updater.ps1'
               $cli=Join-Path $dest['spicetify-cli'] 'spicetify.exe'
-              $vendor=$dest['spotify-vendor']
+              $vendor=Join-Path $env:APPDATA 'Spotify'
               $prefs=Join-Path $vendor 'prefs'
               if((Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne
                  'beb850064670c078a679585ace25f8071daa88c0b264185c03ef3364329b431b' -or
@@ -434,9 +439,70 @@ jobs:
                  '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
                 throw 'R123_STANDARD_USER_SOURCE_PIN_MISMATCH'
               }
+              # Authenticated old installer, in the real standard owner's
+              # profile. No previously prepared admin-owned Backup is copied.
+              $phase='INSTALL'
+              if(Test-Path $vendor){throw 'R124_STANDARD_VENDOR_ALREADY_PRESENT'}
+              $setup=Join-Path $Shared 'Spotify136-verified.exe'
+              if((Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                 'e5ca46ad79de202c8deaf888c26f2a608b9e042142279e0690d589d80640591d'){
+                throw 'R124_STANDARD_VENDOR_INSTALLER_PIN_FAILED'
+              }
+              $setupProcess=Start-Process -FilePath $setup -ArgumentList @('/silent','/skip-app-launch') -PassThru
+              if(-not $setupProcess.WaitForExit(140000)){
+                Stop-Process -Id $setupProcess.Id -Force -ErrorAction SilentlyContinue
+                throw 'R124_STANDARD_VENDOR_INSTALL_TIMED_OUT'
+              }
+              if($setupProcess.ExitCode -ne 0){throw 'R124_STANDARD_VENDOR_INSTALL_FAILED'}
+              $vendorExe=Join-Path $vendor 'Spotify.exe'
+              $vendorXpui=Join-Path $vendor 'Apps\xpui.spa'
+              if(-not(Test-Path $vendorExe -PathType Leaf) -or -not(Test-Path $vendorXpui -PathType Leaf)){
+                throw 'R124_STANDARD_VENDOR_FILES_ABSENT'
+              }
+              $signature=Get-AuthenticodeSignature -LiteralPath $vendorExe
+              $signedVersion=[string]([Diagnostics.FileVersionInfo]::GetVersionInfo($vendorExe).ProductVersion)
+              if($signature.Status -ne 'Valid' -or $null -eq $signature.SignerCertificate -or
+                 $signature.SignerCertificate.Subject -cnotmatch '(?i)(^|,)\s*O=Spotify AB(,|$)' -or
+                 $signedVersion -cnotmatch '^1\.3\.6\.1921(\.|$)'){
+                throw 'R124_STANDARD_VENDOR_SIGNED_IDENTITY_UNVERIFIED'
+              }
+              if(Test-Path $prefs -PathType Leaf){
+                $initialPrefs=[IO.File]::ReadAllText($prefs)
+                if($initialPrefs -match '(?m)^\s*app\.last-launched-version\s*='){
+                  throw 'R124_NEW_PROFILE_EXISTING_PREFS_VERSION'
+                }
+              }else{$initialPrefs='[Settings]'+[Environment]::NewLine}
+              [IO.File]::WriteAllText($prefs,
+                ('app.last-launched-version = '+$signedVersion+[Environment]::NewLine+$initialPrefs),
+                (New-Object Text.UTF8Encoding($false)))
+              if(@(Get-Process Spotify -ErrorAction SilentlyContinue).Count -ne 0){
+                throw 'R124_STANDARD_USER_SPOTIFY_MUST_BE_CLOSED'
+              }
               $phase='CONFIG'
               & $cli --no-restart config spotify_path $vendor prefs_path $prefs *> $null
-              if($LASTEXITCODE -ne 0){throw 'R123_OFFICIAL_STANDARD_USER_CLI_CONFIG_FAILED'}
+              if($LASTEXITCODE -ne 0){throw 'R124_STANDARD_USER_CLI_CONFIG_FAILED'}
+              $phase='PREAPPLY'
+              & $cli --no-restart backup apply *> $null
+              if($LASTEXITCODE -ne 0){throw 'R124_STANDARD_USER_2464_BACKUP_APPLY_FAILED'}
+              $cfg=Join-Path $env:APPDATA 'spicetify\config-xpui.ini'
+              $backupRoot=Join-Path $env:APPDATA 'spicetify\Backup'
+              if(-not(Test-Path $cfg -PathType Leaf) -or
+                 -not(Test-Path $backupRoot -PathType Container) -or
+                 @(Get-ChildItem -LiteralPath $backupRoot -Filter '*.spa' -File).Count -lt 1){
+                throw 'R124_STANDARD_USER_BACKUP_FILES_ABSENT'
+              }
+              $section=$false;$backVersion='';$backWith=''
+              foreach($line in [IO.File]::ReadAllLines($cfg)){
+                if($line -match '^\s*\[(?<sec>[^]]+)\]\s*$'){
+                  $section=($Matches['sec'] -ceq 'Backup');continue
+                }
+                if(-not $section){continue}
+                if($line -match '^\s*version\s*=\s*(?<v>.*)$'){$backVersion=$Matches['v'].Trim()}
+                if($line -match '^\s*with\s*=\s*(?<v>.*)$'){$backWith=$Matches['v'].Trim()}
+              }
+              if($backVersion -cne $signedVersion -or $backWith -cne '2.46.4'){
+                throw 'R124_STANDARD_USER_BACKUP_METADATA_NOT_AUTHENTIC'
+              }
               $ps=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
               $arg='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$main+'" -Action AgentTick -AgentEvent SpotifyExit'
               $phase='AGENT'
@@ -453,7 +519,7 @@ jobs:
             if($null -ne $code -and [string]$code -match '^-?[0-9]+$'){
               $numericExit=[int]$code
             }
-            if($phase -cin @('PRECHECK','COPY','CONFIG','AGENT','DONE')){
+            if($phase -cin @('PRECHECK','COPY','INSTALL','CONFIG','PREAPPLY','AGENT','DONE')){
               [IO.File]::WriteAllText((Join-Path $Shared 'phase.txt'),$phase,(New-Object Text.UTF8Encoding($false)))
             }
             [IO.File]::WriteAllText((Join-Path $Shared 'receipt.txt'),('TOKEN='+$token+';EXIT='+$numericExit),
@@ -476,10 +542,13 @@ jobs:
             $phaseClass='ABSENT'
             if(Test-Path $phaseFile -PathType Leaf){
               $candidate=[IO.File]::ReadAllText($phaseFile).Trim()
-              if($candidate -cin @('PRECHECK','COPY','CONFIG','AGENT','DONE')){$phaseClass=$candidate}
+              if($candidate -cin @('PRECHECK','COPY','INSTALL','CONFIG','PREAPPLY','AGENT','DONE')){$phaseClass=$candidate}
               else{$phaseClass='UNRECOGNIZED'}
             }
             Write-Host ('R123_STANDARD_OWNER_PHASE='+$phaseClass)
+            if($phaseClass -cin @('AGENT','DONE')){
+              Write-Host 'R124_STANDARD_OWNER_SIGNED_INSTALL_AND_2464_BACKUP_APPLY=PASS'
+            }
             $safe='UNKNOWN'
             if($report -match '^TOKEN=(?<token>[A-Z_]+);EXIT=[0-9]+$'){$safe=[string]$Matches['token']}
             Write-Host ('R123_REAL_STANDARD_OWNER_TOKEN='+$safe)
