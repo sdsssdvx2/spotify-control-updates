@@ -113,6 +113,7 @@ function PatchExactR112([byte[]]$raw){
     }
     if ($r.ExitCode -ne 0 -or $null -eq $r.Report -or -not [bool]$r.Report.success) {
 '@
+  $new=$new.Replace($crlf,$lf)
   $selfText=UniqueReplace $selfText $old $new 'SELFUPDATE_AHEAD_GUARD'
   $selfText=UniqueReplace $selfText 'Verified=$false; UpdateAvailable=$false; InstalledVersion=$ScriptVersion;' 'Verified=$false; TrustedStableBehindPrivate=$false; UpdateAvailable=$false; InstalledVersion=$ScriptVersion;' 'SELFUPDATE_ERROR_FALSE'
   $selfText=UniqueReplace $selfText ('        Verified=$true'+$lf) ('        Verified=$true'+$lf+'        TrustedStableBehindPrivate=$false'+$lf) 'SELFUPDATE_SUCCESS_FALSE'
@@ -131,6 +132,7 @@ function PatchExactR112([byte[]]$raw){
             }
         }
 '@
+  $newCheck=$newCheck.Replace($crlf,$lf)
   $checkText=UniqueReplace $checkText $oldCheck $newCheck 'INDEPENDENT_DISCOVERY_AHEAD'
   $oldCache='            Verified=(-not [string]::IsNullOrWhiteSpace([string]$State.self_update_latest_version))'
   $checkText=UniqueReplace $checkText $oldCache ($oldCache+$lf+'            TrustedStableBehindPrivate=$false') 'CACHE_NOT_AHEAD'
