@@ -380,7 +380,7 @@ jobs:
           '@
             [IO.File]::WriteAllText($runner,$runnerText,(New-Object Text.UTF8Encoding($false)))
             # R122: Use a restricted LUA primary token of the SAME owner,
-            # not an elevated GitHub runner scheduled task. Preserve APPDATA
+            # via CreateProcessAsUserW, not an elevated scheduled task. Preserve APPDATA
             # and Spotify fixture, and never execute AgentTick when the child
             # is still elevated or lacks confirmed medium integrity.
             $interop=@'
@@ -408,11 +408,12 @@ jobs:
               IntPtr existing, uint flags, uint disabledCount, IntPtr disabled,
               uint deletedCount, IntPtr deleted, uint restrictedCount,
               IntPtr restricting, out IntPtr token);
-            [DllImport("advapi32.dll", EntryPoint="CreateProcessWithTokenW", CharSet=CharSet.Unicode, SetLastError=true)]
-            public static extern bool CreateProcessWithTokenW(
-              IntPtr token, uint logonFlags, string app,
-              StringBuilder commandLine, uint creationFlags, IntPtr environment,
-              string workingDirectory, ref STARTUPINFO start, out PROCESS_INFORMATION info);
+            [DllImport("advapi32.dll", EntryPoint="CreateProcessAsUserW", CharSet=CharSet.Unicode, SetLastError=true)]
+            public static extern bool CreateProcessAsUserW(
+              IntPtr token, string app, StringBuilder commandLine,
+              IntPtr processAttributes, IntPtr threadAttributes, bool inheritHandles,
+              uint creationFlags, IntPtr environment, string workingDirectory,
+              ref STARTUPINFO start, out PROCESS_INFORMATION info);
           }
           '@
             Add-Type -TypeDefinition $interop -ErrorAction Stop
@@ -450,10 +451,10 @@ jobs:
               $si=[R122NativeLUA+STARTUPINFO]::new()
               $si.cb=[uint32][Runtime.InteropServices.Marshal]::SizeOf([type][R122NativeLUA+STARTUPINFO])
               # CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT, no desktop interaction.
-              if(-not [R122NativeLUA]::CreateProcessWithTokenW(
-                $limitedToken,0,$psExe,$cmd,[uint32]0x08000400,
-                $environmentPtr,$root,[ref]$si,[ref]$nativeProcess)){
-                throw ('R122_LUA_PROCESS_CREATION_FAILED_WIN32_'+
+              if(-not [R122NativeLUA]::CreateProcessAsUserW(
+                $limitedToken,$psExe,$cmd,[IntPtr]::Zero,[IntPtr]::Zero,$false,
+                [uint32]0x08000400,$environmentPtr,$root,[ref]$si,[ref]$nativeProcess)){
+                throw ('R122_RESTRICTED_ASUSER_CREATION_FAILED_WIN32_'+
                   [Runtime.InteropServices.Marshal]::GetLastWin32Error())
               }
               $wait=[R122NativeLUA]::WaitForSingleObject($nativeProcess.hProcess,180000)
