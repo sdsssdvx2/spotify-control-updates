@@ -68,7 +68,7 @@ jobs:
           $twoFunctions=(ExtractFunction 'R102AgentActionClass')+[Environment]::NewLine+
                         (ExtractFunction 'R102TaskProbe')
           $script=[ScriptBlock]::Create($twoFunctions)
-          & $script
+          . $script
           $agent='C:\testowner\spotify-control-agent.vbs'
           $wscript=Join-Path $env:WINDIR 'System32\wscript.exe'
           $quote='"'+$agent+'"'
