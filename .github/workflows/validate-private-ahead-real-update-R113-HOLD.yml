@@ -1,4 +1,4 @@
-name: HOLD R122 same-owner native LUA real Spotify CLI auto-upgrade acceptance
+name: HOLD real standard-user Spotify CLI auto-upgrade acceptance
 on:
   push:
     branches: [validate/spotify-exit-immediate-maintenance-HOLD]
@@ -339,191 +339,159 @@ jobs:
           $stdout=Join-Path $env:RUNNER_TEMP 'R113-main-stdout.txt'
           $stderr=Join-Path $env:RUNNER_TEMP 'R113-main-stderr.txt'
           $outcome='HOLD_NOT_PROVEN'
-          # GitHub-hosted elevated runner creates synthetic fixture files with
-          # high MIC labels. A normal owner process cannot write high-MIC
-          # objects even with matching user SID. Only in this disposable hosted
-          # VM, make the explicitly named scratch trees medium-integrity before
-          # starting a real standard-privilege AgentTick; never alter a user PC.
-          $sandboxHome=[IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd([char]92)+[string][char]92
-          $trees=@($root,$cliDir,$spotify,(Join-Path $env:APPDATA 'spicetify'))
-          foreach($tree in $trees){
-            $absolute=[IO.Path]::GetFullPath($tree)
-            if(-not $absolute.StartsWith($sandboxHome,[StringComparison]::OrdinalIgnoreCase) -or
-               -not(Test-Path -LiteralPath $absolute -PathType Container)){
-              throw 'R122_HOSTED_SCRATCH_SCOPE_INVALID'
-            }
-            & icacls.exe $absolute /setintegritylevel '(OI)(CI)M' /T /Q | Out-Null
-            if($LASTEXITCODE -ne 0){throw 'R122_SCRATCH_MEDIUM_IL_UNAVAILABLE'}
-          }
-          Write-Host 'R122_HOSTED_SCRATCH_MEDIUM_INTEGRITY=APPLIED_TEST_ONLY'
+          # R123 disposable true-standard-user acceptance: never use an
+          # administrator token or touch the owner's real Windows profile.
+          $outcome='HOLD_NOT_PROVEN'
+          $accountName=$null
+          $shared=$null
+          $newHome=$null
           try {
-            $main=Join-Path $bin 'spotify-control.ps1'
-            $args='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$main+'" -Action AgentTick -AgentEvent SpotifyExit'
-            # GitHub-hosted runneradmin is elevated. Official Spicetify refuses
-            # administrator access; product auto-apply intentionally does NOT
-            # inject the unsafe --bypass-admin flag. For faithful acceptance,
-            # launch exact owner AgentTick with Task Scheduler RunLevel=LUA.
-            # This registration exists only on disposable github-hosted VM.
-            $receipt=Join-Path $root 'R121-lowpriv-exit-receipt.txt'
-            $stdout=Join-Path $root 'R121-lowpriv-main-stdout.txt'
-            $stderr=Join-Path $root 'R121-lowpriv-main-stderr.txt'
-            $runner=Join-Path $root 'R121-lowpriv-launcher.ps1'
-            if((Test-Path $receipt) -or (Test-Path $runner)){
-              throw 'R121_SCRATCH_LAUNCHER_ALREADY_EXISTS'
+            if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows' -or
+               $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or
+               -not [Environment]::Is64BitProcess){throw 'R123_HOSTED_WINDOWS_ONLY'}
+            if(@(Get-Process Spotify -ErrorAction SilentlyContinue).Count -ne 0){
+              throw 'R123_SPOTIFY_RUNNING'
             }
+            $accountName='spc'+([guid]::NewGuid().ToString('N').Substring(0,10))
+            if(Get-LocalUser -Name $accountName -ErrorAction SilentlyContinue){
+              throw 'R123_LOCAL_ACCOUNT_PREEXISTS'
+            }
+            $rng=[Security.Cryptography.RandomNumberGenerator]::Create()
+            $random=New-Object byte[] 32
+            try{$rng.GetBytes($random)}finally{$rng.Dispose()}
+            $plaintext='Az8!'+[Convert]::ToBase64String($random)
+            [Array]::Clear($random,0,$random.Length)
+            $secret=ConvertTo-SecureString $plaintext -AsPlainText -Force
+            $credential=New-Object Security.PSCredential(('.\'+$accountName),$secret)
+            $plaintext=$null
+            $user=New-LocalUser -Name $accountName -Password $secret -Description 'Disposable GitHub-hosted Spotify acceptance' -ErrorAction Stop
+            $sid=[string]$user.SID.Value
+            if($sid -notmatch '^S-1-5-21-(\d+-){3}\d+$'){throw 'R123_LOCAL_SID_INVALID'}
+            $adminMembers=@(Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction Stop)
+            if(@($adminMembers|Where-Object{[string]$_.SID.Value -ceq $sid}).Count -ne 0){
+              throw 'R123_ACCOUNT_ADMIN_REFUSED'
+            }
+            $shared=Join-Path $env:PUBLIC ('SPC-HOLD-'+([guid]::NewGuid().ToString('N')))
+            [void][IO.Directory]::CreateDirectory($shared)
+            & icacls.exe $shared /grant ('*'+$sid+':(OI)(CI)M') /Q | Out-Null
+            if($LASTEXITCODE -ne 0){throw 'R123_SHARED_SCRATCH_PERMISSION_FAILED'}
+            $fixture=[ordered]@{
+              'spotify-control'=$root
+              'spicetify-cli'=$cliDir
+              'spotify-vendor'=$spotify
+              'spicetify-config'=(Join-Path $env:APPDATA 'spicetify')
+            }
+            foreach($key in $fixture.Keys){
+              $source=[string]$fixture[$key]
+              if(-not(Test-Path -LiteralPath $source -PathType Container)){
+                throw 'R123_HOSTED_FIXTURE_MISSING'
+              }
+              $links=@(Get-ChildItem -LiteralPath $source -Recurse -Force -ErrorAction Stop |
+                Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 })
+              if($links.Count -gt 0){throw 'R123_FIXTURE_LINK_REFUSED'}
+              Copy-Item -LiteralPath $source -Destination (Join-Path $shared $key) -Recurse -ErrorAction Stop
+            }
+            Write-Host 'R123_PINNED_EXISTING_FIXTURE_STAGED=PASS'
+            $runner=Join-Path $shared 'standard-owner-run.ps1'
+            $receipt=Join-Path $shared 'receipt.txt'
+            $stdout=Join-Path $shared 'stdout.txt'
+            $stderr=Join-Path $shared 'stderr.txt'
             $runnerText=@'
-          param([string]$Root,[string]$Out,[string]$Err,[string]$Receipt)
+          param([string]$Shared)
           $ErrorActionPreference='Stop'
-          $token='INIT_NOT_VERIFIED'
-          $code=4
+          $token='UNKNOWN';$code=6
           try {
             $principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-            $admin=$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-            $medium=@([Security.Principal.WindowsIdentity]::GetCurrent().Groups |
-              Where-Object { $_.Value -ceq 'S-1-16-8192' })
-            $token=if($admin){'ADMIN'}elseif(@($medium).Count -gt 0){'LIMITED_MEDIUM'}else{'OTHER_NOT_VERIFIED'}
-            if($admin){$code=3}
-            else {
-              $product=Join-Path $Root 'bin\spotify-control.ps1'
-              $args='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$product+'" -Action AgentTick -AgentEvent SpotifyExit'
-              $proc=Start-Process -FilePath 'powershell.exe' -ArgumentList $args -RedirectStandardOutput $Out -RedirectStandardError $Err -PassThru
-              if(-not $proc.WaitForExit(150000)){
+            $medium=@(& whoami.exe /groups /fo csv /nh 2>$null | Where-Object{$_ -match 'S-1-16-8192'})
+            $token=if($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){'ADMIN'}
+              elseif($medium.Count -eq 1){'LIMITED_MEDIUM'}else{'OTHER_NOT_VERIFIED'}
+            if($token -cne 'LIMITED_MEDIUM'){$code=3}
+            else{
+              $dest=[ordered]@{
+                'spotify-control'=(Join-Path $env:LOCALAPPDATA 'SpotifyControl')
+                'spicetify-cli'=(Join-Path $env:LOCALAPPDATA 'spicetify')
+                'spotify-vendor'=(Join-Path $env:APPDATA 'Spotify')
+                'spicetify-config'=(Join-Path $env:APPDATA 'spicetify')
+              }
+              foreach($key in $dest.Keys){
+                $target=[string]$dest[$key]
+                if(Test-Path -LiteralPath $target){throw 'R123_STANDARD_PROFILE_NOT_CLEAN'}
+                [void][IO.Directory]::CreateDirectory((Split-Path $target -Parent))
+                Copy-Item -LiteralPath (Join-Path $Shared $key) -Destination $target -Recurse -ErrorAction Stop
+              }
+              $root=$dest['spotify-control']
+              $main=Join-Path $root 'bin\spotify-control.ps1'
+              $boot=Join-Path $root 'bootstrap\spotify-control-self-updater.ps1'
+              $cli=Join-Path $dest['spicetify-cli'] 'spicetify.exe'
+              $vendor=$dest['spotify-vendor']
+              $prefs=Join-Path $vendor 'prefs'
+              if((Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                 'beb850064670c078a679585ace25f8071daa88c0b264185c03ef3364329b431b' -or
+                 (Get-FileHash $boot -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                 'd9b28007eb95874f02c48ed50d8ada71134e15e6492fef0e2d45dd2522053fe6' -or
+                 (Get-FileHash $cli -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                 '3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'){
+                throw 'R123_STANDARD_USER_SOURCE_PIN_MISMATCH'
+              }
+              & $cli --no-restart config spotify_path $vendor prefs_path $prefs *> $null
+              if($LASTEXITCODE -ne 0){throw 'R123_OFFICIAL_STANDARD_USER_CLI_CONFIG_FAILED'}
+              $ps=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+              $arg='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$main+'" -Action AgentTick -AgentEvent SpotifyExit'
+              $proc=Start-Process -FilePath $ps -ArgumentList $arg -RedirectStandardOutput (Join-Path $Shared 'stdout.txt') -RedirectStandardError (Join-Path $Shared 'stderr.txt') -PassThru
+              if(-not $proc.WaitForExit(180000)){
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
                 $code=5
               }else{$code=$proc.ExitCode}
             }
           }catch{$code=6}
           finally{
-            [IO.File]::WriteAllText($Receipt,('TOKEN='+$token+';EXIT='+$code),(New-Object Text.UTF8Encoding($false)))
+            [IO.File]::WriteAllText((Join-Path $Shared 'receipt.txt'),('TOKEN='+$token+';EXIT='+$code),
+              (New-Object Text.UTF8Encoding($false)))
           }
           '@
             [IO.File]::WriteAllText($runner,$runnerText,(New-Object Text.UTF8Encoding($false)))
-            # R122: Use a restricted LUA primary token of the SAME owner,
-            # via CreateProcessAsUserW, not an elevated scheduled task. Preserve APPDATA
-            # and Spotify fixture, and never execute AgentTick when the child
-            # is still elevated or lacks confirmed medium integrity.
-            $interop=@'
-          using System;
-          using System.Text;
-          using System.Runtime.InteropServices;
-          public static class R122NativeLUA {
-            [StructLayout(LayoutKind.Sequential)]
-            public struct STARTUPINFO {
-              public uint cb; public IntPtr lpReserved, lpDesktop, lpTitle;
-              public uint dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars;
-              public uint dwFillAttribute, dwFlags; public ushort wShowWindow, cbReserved2;
-              public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+            $psExe=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+            $args='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$runner+'" -Shared "'+$shared+'"'
+            $process=Start-Process -FilePath $psExe -ArgumentList $args -Credential $credential -LoadUserProfile -PassThru
+            if(-not $process.WaitForExit(210000)){
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              throw 'R123_REAL_STANDARD_OWNER_TIMEOUT'
             }
-            [StructLayout(LayoutKind.Sequential)]
-            public struct PROCESS_INFORMATION {
-              public IntPtr hProcess, hThread; public uint dwProcessId, dwThreadId;
+            if(-not(Test-Path -LiteralPath $receipt -PathType Leaf)){
+              throw 'R123_STANDARD_OWNER_RECEIPT_MISSING'
             }
-            [DllImport("kernel32.dll")] public static extern IntPtr GetCurrentProcess();
-            [DllImport("kernel32.dll", SetLastError=true)] public static extern bool CloseHandle(IntPtr h);
-            [DllImport("kernel32.dll", SetLastError=true)] public static extern uint WaitForSingleObject(IntPtr h, uint milliseconds);
-            [DllImport("kernel32.dll", SetLastError=true)] public static extern bool TerminateProcess(IntPtr h, uint code);
-            [DllImport("kernel32.dll", SetLastError=true)] public static extern bool GetExitCodeProcess(IntPtr h, out uint exitCode);
-            [DllImport("advapi32.dll", SetLastError=true)] public static extern bool OpenProcessToken(IntPtr h, uint access, out IntPtr token);
-            [DllImport("advapi32.dll", SetLastError=true)] public static extern bool CreateRestrictedToken(
-              IntPtr existing, uint flags, uint disabledCount, IntPtr disabled,
-              uint deletedCount, IntPtr deleted, uint restrictedCount,
-              IntPtr restricting, out IntPtr token);
-            [DllImport("advapi32.dll", EntryPoint="CreateProcessAsUserW", CharSet=CharSet.Unicode, SetLastError=true)]
-            public static extern bool CreateProcessAsUserW(
-              IntPtr token, string app, StringBuilder commandLine,
-              IntPtr processAttributes, IntPtr threadAttributes, bool inheritHandles,
-              uint creationFlags, IntPtr environment, string workingDirectory,
-              ref STARTUPINFO start, out PROCESS_INFORMATION info);
+            $report=[IO.File]::ReadAllText($receipt).Trim()
+            $safe='UNKNOWN'
+            if($report -match '^TOKEN=(?<token>[A-Z_]+);EXIT=[0-9]+$'){$safe=[string]$Matches['token']}
+            Write-Host ('R123_REAL_STANDARD_OWNER_TOKEN='+$safe)
+            if(-not $report.StartsWith('TOKEN=LIMITED_MEDIUM;EXIT=')){
+              throw 'R123_NOT_PROVEN_STANDARD_USER_PRODUCT_BLOCKED'
+            }
+            $childExit=0
+            if(-not [int]::TryParse($report.Substring('TOKEN=LIMITED_MEDIUM;EXIT='.Length),[ref]$childExit)){
+              throw 'R123_OWNER_EXIT_NOT_NUMERIC'
+            }
+            $exit=if($childExit -eq 0){'ZERO'}elseif($childExit -eq 5){'TIMEOUT'}else{'NONZERO'}
+            Write-Host 'R123_REAL_STANDARD_USER_TOKEN=PASS'
+            Write-Host ('R123_REAL_OWNER_AGENTTICK_EXIT='+$exit)
+            $profileKey='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\'+$sid
+            $info=Get-ItemProperty -LiteralPath $profileKey -ErrorAction Stop
+            $newHome=[Environment]::ExpandEnvironmentVariables([string]$info.ProfileImagePath)
+            if(-not [IO.Path]::IsPathRooted($newHome) -or
+               (Split-Path $newHome -Leaf) -cne $accountName){
+              throw 'R123_PROFILE_USER_SID_MISMATCH'
+            }
+            $root=Join-Path $newHome 'AppData\Local\SpotifyControl'
+            $cli=Join-Path $newHome 'AppData\Local\spicetify\spicetify.exe'
+            $xpui=Join-Path $newHome 'AppData\Roaming\Spotify\Apps\xpui.spa'
+            $statePath=Join-Path $root 'state.json'
+          } finally {
+            if($null -ne $accountName -and
+               $null -ne (Get-LocalUser -Name $accountName -ErrorAction SilentlyContinue)){
+              Remove-LocalUser -Name $accountName -ErrorAction Stop
+              Write-Host 'R123_EPHEMERAL_STANDARD_ACCOUNT_DELETED=PASS'
+            }
           }
-          '@
-            Add-Type -TypeDefinition $interop -ErrorAction Stop
-            $originalToken=[IntPtr]::Zero
-            $limitedToken=[IntPtr]::Zero
-            $environmentPtr=[IntPtr]::Zero
-            $nativeProcess=[R122NativeLUA+PROCESS_INFORMATION]::new()
-            try {
-              # TOKEN_ASSIGN_PRIMARY | TOKEN_DUPLICATE | TOKEN_QUERY | TOKEN_ADJUST_DEFAULT
-              if(-not [R122NativeLUA]::OpenProcessToken(
-                 [R122NativeLUA]::GetCurrentProcess(), [uint32]0x8b,
-                 [ref]$originalToken)){
-                throw 'R122_OPEN_OWNER_TOKEN_FAILED'
-              }
-              # LUA_TOKEN only: match ordinary owner permissions; never SANDBOX_INERT.
-              if(-not [R122NativeLUA]::CreateRestrictedToken(
-                 $originalToken,[uint32]4,0,[IntPtr]::Zero,0,[IntPtr]::Zero,
-                 0,[IntPtr]::Zero,[ref]$limitedToken)){
-                throw 'R122_CREATE_RESTRICTED_TOKEN_FAILED'
-              }
-              $pairs=New-Object 'System.Collections.Generic.List[string]'
-              $vars=[Environment]::GetEnvironmentVariables()
-              foreach($key in @($vars.Keys | Sort-Object)){
-                $k=[string]$key
-                if($k.StartsWith('=')){continue}
-                $pairs.Add($k+'='+[string]$vars[$key])
-              }
-              $environmentPtr=[Runtime.InteropServices.Marshal]::StringToHGlobalUni(
-                 ([string]::Join([char]0,$pairs.ToArray())+[char]0+[char]0))
-              $psExe=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-              if(-not(Test-Path -LiteralPath $psExe -PathType Leaf)){throw 'R122_OS_POWERSHELL_ABSENT'}
-              $cmd=New-Object Text.StringBuilder
-              [void]$cmd.Append('"'+$psExe+'" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+
-                $runner+'" -Root "'+$root+'" -Out "'+$stdout+'" -Err "'+$stderr+'" -Receipt "'+$receipt+'"')
-              $si=[R122NativeLUA+STARTUPINFO]::new()
-              $si.cb=[uint32][Runtime.InteropServices.Marshal]::SizeOf([type][R122NativeLUA+STARTUPINFO])
-              # CREATE_UNICODE_ENVIRONMENT only. Under a restricted LUA token,
-              # CREATE_NO_WINDOW can cause STATUS_DLL_INIT_FAILED 0xC0000142
-              # before PowerShell executes any script. Inherit the hosted
-              # runner's console; this is a CI-only test launcher.
-              if(-not [R122NativeLUA]::CreateProcessAsUserW(
-                $limitedToken,$psExe,$cmd,[IntPtr]::Zero,[IntPtr]::Zero,$false,
-                [uint32]0x00000400,$environmentPtr,$root,[ref]$si,[ref]$nativeProcess)){
-                throw ('R122_RESTRICTED_ASUSER_CREATION_FAILED_WIN32_'+
-                  [Runtime.InteropServices.Marshal]::GetLastWin32Error())
-              }
-              $wait=[R122NativeLUA]::WaitForSingleObject($nativeProcess.hProcess,180000)
-              if($wait -ne 0){
-                [void][R122NativeLUA]::TerminateProcess($nativeProcess.hProcess,7)
-                throw 'R122_LUA_LAUNCHER_TIMEOUT_OR_WAIT_FAILED'
-              }
-              $nativeExit=[uint32]0
-              if(-not [R122NativeLUA]::GetExitCodeProcess($nativeProcess.hProcess,[ref]$nativeExit)){
-                throw 'R122_NATIVE_EXIT_QUERY_FAILED'
-              }
-              $nativeClass=if($nativeExit -eq 0){'ZERO'}elseif($nativeExit -eq 1){'ONE'}else{'OTHER_NONZERO'}
-              Write-Host ('R122_NATIVE_CHILD_EXIT_CLASS='+$nativeClass)
-              Write-Host ('R122_NATIVE_CHILD_EXIT_HEX='+('0x{0:X8}' -f $nativeExit))
-              if(-not(Test-Path -LiteralPath $receipt -PathType Leaf)){
-                throw 'R122_NONADMIN_LAUNCHER_NO_RECEIPT'
-              }
-              $report=[IO.File]::ReadAllText($receipt).Trim()
-              $safeTokenClass='UNRECOGNIZED'
-              if($report -match '^TOKEN=(?<id>[A-Z_]+);EXIT=[0-9]+$' -and
-                 $Matches['id'] -cin @('ADMIN','LIMITED_MEDIUM','OTHER_NOT_VERIFIED','INIT_NOT_VERIFIED')){
-                $safeTokenClass=$Matches['id']
-              }
-              Write-Host ('R122_CHILD_TOKEN_CLASS='+$safeTokenClass)
-              if($report.StartsWith('TOKEN=ADMIN')){
-                throw 'R122_ELEVATED_TOKEN_REFUSED_BEFORE_PRODUCT_EXECUTION'
-              }
-              if(-not $report.StartsWith('TOKEN=LIMITED_MEDIUM;EXIT=')){
-                throw 'R122_TOKEN_NOT_CONFIRMED_MEDIUM_NONADMIN'
-              }
-              $taskExitText=$report.Substring('TOKEN=LIMITED_MEDIUM;EXIT='.Length)
-              $taskExit=0
-              if(-not [int]::TryParse($taskExitText,[ref]$taskExit)){
-                throw 'R122_AGENTTICK_EXIT_NOT_NUMERIC'
-              }
-              $exit=if($taskExit -eq 0){'ZERO'}elseif($taskExit -eq 5){'TIMEOUT'}else{'NONZERO'}
-              Write-Host 'R122_SAME_OWNER_MEDIUM_INTEGRITY_LUA_TOKEN=PASS'
-              Write-Host ('R122_LUA_AGENTTICK_EXIT='+$exit)
-            } finally {
-              if($nativeProcess.hThread -ne [IntPtr]::Zero){[void][R122NativeLUA]::CloseHandle($nativeProcess.hThread)}
-              if($nativeProcess.hProcess -ne [IntPtr]::Zero){[void][R122NativeLUA]::CloseHandle($nativeProcess.hProcess)}
-              if($limitedToken -ne [IntPtr]::Zero){[void][R122NativeLUA]::CloseHandle($limitedToken)}
-              if($originalToken -ne [IntPtr]::Zero){[void][R122NativeLUA]::CloseHandle($originalToken)}
-              if($environmentPtr -ne [IntPtr]::Zero){[Runtime.InteropServices.Marshal]::FreeHGlobal($environmentPtr)}
-              Write-Host 'R122_LUA_PROCESS_AND_TOKEN_HANDLES_CLOSED=YES'
-            }
             $result=$null
             try{$result=Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json}catch{}
             $decisions=@('maintenance-phase-entered','maintenance-deferred-or-lease-busy','mutation-blocked-unhealthy-or-auto-ambiguous','pending-observed-mutation-disarmed','observe-only-closed','check-only-closed-no-pending','closed-check-not-due','running-check-not-due','check-only-running','noop')
