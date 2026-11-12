@@ -186,7 +186,7 @@ function GitBlob([byte[]]$data){
 }
 function R99ImmutableGuard(){
   $url='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/'+
-       'a05e20d2e7de97662893d74c2f0aba39657eb5c4'+
+       '6af4c396e05343c6e34c1ffd3104a22675be9943'+
        '/validation/spotify-exit-immediate-maintenance-HOLD/owner-single-resident-logon-guard-R98-HOLD.ps1'
   $req=[Net.HttpWebRequest][Net.WebRequest]::Create($url)
   $req.Method='GET';$req.Timeout=35000;$req.ReadWriteTimeout=35000
@@ -206,7 +206,7 @@ function R99ImmutableGuard(){
       }
       [byte[]]$got=$bytes.ToArray()
       if($got.Length -lt 6000 -or (GitBlob $got) -cne
-         '86a2bb96cab07f2b637234275fb52bc941af037b'){
+         '08e5bf6631f8d2e8e1374619557d1ee4463c2b5c'){
         Deny 'R99_PINNED_R98_GUARD_GIT_OBJECT_CHANGED'
       }
       return ,$got
