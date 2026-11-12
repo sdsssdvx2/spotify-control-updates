@@ -56,9 +56,13 @@ def git_blob(data: bytes) -> str:
 
 
 def validate_release() -> tuple[dict, dict[str, bytes]]:
-    raw = (ROOT / "manifest.json").read_bytes()
+    # Windows checkout may translate LF to CRLF, so pin the committed
+    # Git blob instead of comparing working-tree raw bytes to a Git blob ID.
+    raw = git("show", "HEAD:manifest.json")
     require(git_blob(raw) == REVIEW_MANIFEST_BLOB, "EXACT_REVIEW_MANIFEST_CHANGED")
     m = json.loads(raw)
+    require(json.loads((ROOT / "manifest.json").read_text("utf-8-sig")) == m,
+            "WORKTREE_MANIFEST_SEMANTIC_DRIFT")
     meta = json.loads((HERE / "release-metadata.json").read_text("utf-8"))
     require(m.get("latest_version") == meta.get("version") == "0.6.30",
             "VERSION_MISMATCH")
