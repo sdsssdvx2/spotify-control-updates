@@ -90,6 +90,28 @@ function R102AgentActionClass([string]$executable,[string]$arguments,
 }
 # A partial enumeration MUST NEVER certify the absence of another logon route.
 # No task identifiers, user SIDs, command lines or other task properties leak.
+# An account name can be an alias to the current owner SID. Group-scoped
+# principals are a separate case and must never be treated as an exact owner.
+function R102PrincipalClass([string]$user,[string]$group,
+                            [Security.Principal.WindowsIdentity]$identity){
+  if(-not [string]::IsNullOrWhiteSpace($group)){return 'GROUP_SCOPED'}
+  if([string]::IsNullOrWhiteSpace($user)){return 'MISSING_OR_DYNAMIC'}
+  try{
+    $principal=if($user -match '^S-\d-\d+(?:-\d+)+$'){
+      [Security.Principal.SecurityIdentifier]::new($user)
+    }else{
+      ([Security.Principal.NTAccount]::new($user)).Translate(
+        [Security.Principal.SecurityIdentifier])
+    }
+    if([string]::Equals($principal.Value,$identity.User.Value,
+       [StringComparison]::OrdinalIgnoreCase)){return 'CURRENT_OWNER_RESOLVED'}
+    if($principal.Value -cin @('S-1-5-18','S-1-5-19','S-1-5-20')){
+      return 'BUILTIN_SERVICE'
+    }
+    return 'OTHER_RESOLVED_PRINCIPAL'
+  }catch{return 'UNRESOLVED_PRINCIPAL'}
+}
+
 function R102TaskProbe([string]$agent){
   $native='NOT_AVAILABLE'
   $visible='UNKNOWN'
@@ -102,6 +124,12 @@ function R102TaskProbe([string]$agent){
   $disabledOrNoTrigger=0
   $unknownDetails=0
   $foreignPrincipal=0
+  $detailPrincipal='UNVERIFIED'
+  $detailAction='UNVERIFIED'
+  $detailEnabled='UNVERIFIED'
+  $detailTrigger='UNVERIFIED'
+  $detailLogonScope='UNVERIFIED'
+  $detailPolicy='UNVERIFIED'
   $wscript=Join-Path $env:WINDIR 'System32\wscript.exe'
   $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
   if($null -ne (Get-Command -Name Get-ScheduledTask -ErrorAction SilentlyContinue)){
@@ -156,6 +184,21 @@ function R102TaskProbe([string]$agent){
                        $classes[0] -ceq 'DIRECT_WSCRIPT_EXACT' -and
                        $actions.Count -eq 1)
             $owner=[string]$definition.Principal.UserId
+            if($total -eq 1){
+              $group=[string]$definition.Principal.GroupId
+              $detailPrincipal=R102PrincipalClass $owner $group $identity
+              $detailAction=if($allExact){'ONE_DIRECT_WSCRIPT_ACTION'}elseif(
+                $classes -ccontains 'AGENT_REFERENCE_OTHER_LAUNCH_SHAPE'){
+                'OTHER_LAUNCH_SHAPE'
+              }else{'DIRECT_WSCRIPT_WITH_EXTRA_ACTIONS'}
+              $detailEnabled=if([bool]$task.Enabled){'YES'}else{'NO'}
+              $detailPolicy=try{
+                switch([int]$definition.Settings.MultipleInstances){
+                  0 {'PARALLEL'} 1 {'QUEUE'} 2 {'IGNORE_NEW'} 3 {'STOP_EXISTING'}
+                  default {'UNKNOWN'}
+                }
+              }catch{'UNKNOWN'}
+            }
             $owned=([string]::Equals($owner,$identity.User.Value,[StringComparison]::OrdinalIgnoreCase) -or
                     [string]::Equals($owner,$identity.Name,[StringComparison]::OrdinalIgnoreCase))
             if(-not $owned){$foreignPrincipal++}
@@ -165,12 +208,29 @@ function R102TaskProbe([string]$agent){
             }
             $logon=$false
             $other=$false
+            $logonScope='NONE'
             $triggers=$definition.Triggers
             for($k=1;$k -le $triggers.Count;$k++){
               $trigger=$triggers.Item($k)
               if(-not [bool]$trigger.Enabled){continue}
-              if([int]$trigger.Type -eq 9){$logon=$true}
-              else{$other=$true}
+              if([int]$trigger.Type -eq 9){
+                $logon=$true
+                $triggerUser=[string]$trigger.UserId
+                if([string]::IsNullOrWhiteSpace($triggerUser)){
+                  $logonScope=if(-not [string]::IsNullOrWhiteSpace(
+                    [string]$definition.Principal.GroupId)){
+                    'GROUP_SCOPED_OR_ANY_MEMBER'
+                  }else{'ANY_USER'}
+                }elseif((R102PrincipalClass $triggerUser '' $identity) -ceq
+                        'CURRENT_OWNER_RESOLVED'){$logonScope='CURRENT_USER'}
+                else{$logonScope='OTHER_OR_UNRESOLVED_USER'}
+              }else{$other=$true}
+            }
+            if($total -eq 1){
+              $detailTrigger=if($logon -and $other){'LOGON_PLUS_OTHER_ENABLED'}elseif(
+                $logon){'LOGON_ENABLED'}elseif($other){'NON_LOGON_ENABLED'}
+                else{'NO_ENABLED_TRIGGERS'}
+              $detailLogonScope=$logonScope
             }
             if(-not ($logon -or $other)){
               $disabledOrNoTrigger++
@@ -208,6 +268,14 @@ function R102TaskProbe([string]$agent){
     $com='UNAVAILABLE_OR_INCOMPLETE'
     if($total -gt 0){$visible='AGENT_PATH_TOKEN_REFERENCED_NOT_EXECUTION_PROOF'}
   }
+  if($total -ne 1){
+    $detailPrincipal='NOT_SINGLE_MATCH'
+    $detailAction='NOT_SINGLE_MATCH'
+    $detailEnabled='NOT_SINGLE_MATCH'
+    $detailTrigger='NOT_SINGLE_MATCH'
+    $detailLogonScope='NOT_SINGLE_MATCH'
+    $detailPolicy='NOT_SINGLE_MATCH'
+  }
   return @(
     ('R102_TASK_NATIVE_CMDLET='+$native),
     ('R102_TASK_COM_ENUM='+$com),
@@ -219,6 +287,12 @@ function R102TaskProbe([string]$agent){
     ('R102_TASK_DISABLED_OR_NO_ENABLED_TRIGGER='+$disabledOrNoTrigger),
     ('R102_TASK_UNKNOWN_MATCH_DETAILS='+$unknownDetails),
     ('R102_TASK_OTHER_OR_UNKNOWN_PRINCIPAL='+$foreignPrincipal),
+    ('R102_SINGLE_MATCH_PRINCIPAL='+$detailPrincipal),
+    ('R102_SINGLE_MATCH_ACTION='+$detailAction),
+    ('R102_SINGLE_MATCH_ENABLED='+$detailEnabled),
+    ('R102_SINGLE_MATCH_TRIGGER='+$detailTrigger),
+    ('R102_SINGLE_MATCH_LOGON_SCOPE='+$detailLogonScope),
+    ('R102_SINGLE_MATCH_INSTANCE_POLICY='+$detailPolicy),
     'R102_TASK_ADMINISTRATIVE_GLOBAL_COVERAGE=NOT_PROVEN'
   )
 }
