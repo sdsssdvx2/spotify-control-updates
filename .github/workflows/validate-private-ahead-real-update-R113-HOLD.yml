@@ -493,6 +493,11 @@ jobs:
             $exit=if($childExit -eq 0){'ZERO'}elseif($childExit -eq 5){'TIMEOUT'}else{'NONZERO'}
             Write-Host 'R123_REAL_STANDARD_USER_TOKEN=PASS'
             Write-Host ('R123_REAL_OWNER_AGENTTICK_EXIT='+$exit)
+            if($childExit -ge 0 -and $childExit -le 255){
+              Write-Host ('R123_REAL_OWNER_PRODUCT_EXIT_NUMBER='+$childExit)
+            }else{
+              Write-Host 'R123_REAL_OWNER_PRODUCT_EXIT_NUMBER=OTHER'
+            }
             $profileKey='HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\'+$sid
             $info=Get-ItemProperty -LiteralPath $profileKey -ErrorAction Stop
             $newHome=[Environment]::ExpandEnvironmentVariables([string]$info.ProfileImagePath)
@@ -598,6 +603,39 @@ jobs:
               if((Get-Item $stderr).Length -gt 0){'NONEMPTY_PRIVATE'}else{'EMPTY'}
             }else{'ABSENT'}))
             Write-Host 'R114_RAW_CHILD_LOG_LINES_AND_USER_PATHS_OUTPUT=NO'
+            # The new ordinary Windows user has no credentials or personal
+            # data; classify its private stdout without printing raw strings.
+            $stdoutShape='ABSENT';$fieldHints=@();$knownHints=@()
+            if(Test-Path -LiteralPath $stdout -PathType Leaf){
+              $txt=[IO.File]::ReadAllText($stdout)
+              $stdoutShape=if([string]::IsNullOrWhiteSpace($txt)){'EMPTY'}
+                elseif($txt.TrimStart().StartsWith('{')){'JSON_LIKE'}
+                elseif($txt -match '(?m)^\s*[A-Za-z_][A-Za-z_0-9]+\s*:'){'KEY_VALUE'}
+                else{'TEXT'}
+              foreach($k in @('diagnostic','mode','result','status','phase','reason',
+                'action','decision','error_code','exit_code')){
+                if($txt -match ('(?i)(^|[{"\s])'+[regex]::Escape($k)+'(["\s]*[:=])')){
+                  $fieldHints+=($k.ToUpperInvariant())
+                }
+              }
+              foreach($e in @(
+                @('POLICY_DENIAL','(?i)not.authorized|not.permitted|permission|access.denied'),
+                @('EARLY_PREFLIGHT','(?i)preflight|precondition|not.installed|missing.setup'),
+                @('MAINTENANCE_NOOP','(?i)not.due|already.current|no.updates|up.to.date'),
+                @('SELF_UPDATE','(?i)self.update|bootstrap|private.ahead'),
+                @('SPICETIFY_STATE','(?i)spicetify|backup|prefs|config'),
+                @('MUTATION','(?i)transaction|commit|rollback|apply'),
+                @('AGENT','(?i)agent.tick|resident|mutex|lease'),
+                @('NET','(?i)github|http|fetch|network|rate.limit'),
+                @('HELP','(?i)usage|help|invalid.argument|unknown.action')
+              )){
+                if($txt -match $e[1]){$knownHints+=($e[0])}
+              }
+              Write-Host ('R123_STANDARD_STDOUT_BYTE_CLASS='+$(if($txt.Length -lt 1000){'SHORT'}elseif($txt.Length -lt 10000){'MEDIUM'}else{'LONG'}))
+            }
+            Write-Host ('R123_STANDARD_STDOUT_SHAPE='+$stdoutShape)
+            Write-Host ('R123_STANDARD_STDOUT_FIELD_NAMES='+$(if($fieldHints.Count){$fieldHints -join ','}else{'NONE'}))
+            Write-Host ('R123_STANDARD_STDOUT_TOPIC_HINTS='+$(if($knownHints.Count){$knownHints -join ','}else{'NONE'}))
 
             $class='NO_CHECK_REPORT'
             foreach($file in @(Get-ChildItem -LiteralPath $root -Filter '*check*.json' -File -Recurse -ErrorAction SilentlyContinue)){
