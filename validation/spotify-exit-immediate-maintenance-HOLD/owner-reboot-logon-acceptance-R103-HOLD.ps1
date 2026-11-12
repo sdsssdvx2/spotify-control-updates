@@ -39,6 +39,27 @@ function R103Decision([bool]$file,[bool]$task,[bool]$one,[bool]$newBoot,
 function Eq([string]$a,[string]$b){
   return [string]::Equals($a,$b,[StringComparison]::OrdinalIgnoreCase)
 }
+# Keep exactly the same principal/account SID resolution as approved R102.
+# Task Scheduler may store NTAccount aliases rather than a literal SID.
+function R103PrincipalClass([string]$user,[string]$group,
+                            [Security.Principal.WindowsIdentity]$identity){
+  if(-not [string]::IsNullOrWhiteSpace($group)){return 'GROUP_SCOPED'}
+  if([string]::IsNullOrWhiteSpace($user)){return 'MISSING_OR_DYNAMIC'}
+  try{
+    $principal=if($user -match '^S-\d-\d+(?:-\d+)+$'){
+      [Security.Principal.SecurityIdentifier]::new($user)
+    }else{
+      ([Security.Principal.NTAccount]::new($user)).Translate(
+        [Security.Principal.SecurityIdentifier])
+    }
+    if([string]::Equals($principal.Value,$identity.User.Value,
+       [StringComparison]::OrdinalIgnoreCase)){return 'CURRENT_OWNER_RESOLVED'}
+    if($principal.Value -cin @('S-1-5-18','S-1-5-19','S-1-5-20')){
+      return 'BUILTIN_SERVICE'
+    }
+    return 'OTHER_RESOLVED_PRINCIPAL'
+  }catch{return 'UNRESOLVED_PRINCIPAL'}
+}
 try{
   if($HostedDecisionSelfTest){
     if($env:GITHUB_ACTIONS -cne 'true' -or
@@ -54,6 +75,16 @@ try{
       @{bits=@($true,$true,$true,$true,$false,$true,$true);expected='HOLD_LOGON_TASK_AND_RESIDENT_THIS_BOOT_UNVERIFIED'},
       @{bits=@($true,$true,$true,$true,$true,$true,$false);expected='HOLD_TASK_RESIDENT_TEMPORAL_CORRELATION_UNVERIFIED'}
     )
+    $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+    foreach($value in @($identity.User.Value,$identity.Name)){
+      if((R103PrincipalClass $value '' $identity) -cne 'CURRENT_OWNER_RESOLVED'){
+        Fail 'R103_OWNER_SID_OR_ALIAS_RESOLUTION_FAILED'
+      }
+    }
+    if((R103PrincipalClass $identity.User.Value 'S-1-5-32-545' $identity) -cne
+       'GROUP_SCOPED'){Fail 'R103_GROUP_PRINCIPAL_MUST_BE_REJECTED'}
+    if((R103PrincipalClass 'S-1-5-18' '' $identity) -cne
+       'BUILTIN_SERVICE'){Fail 'R103_BUILTIN_PRINCIPAL_MUST_BE_REJECTED'}
     foreach($c in $arr){
       [object[]]$argsForTest=$c.bits
       if((R103Decision @argsForTest) -cne $c.expected){
@@ -121,6 +152,7 @@ try{
     $stack.Push($svc.GetFolder('\'))
     $taskCount=0;$folderCount=0;$matches=0;$partial=$false
     $chosen=$null
+    $singleReject='NOT_OBSERVED'
     while($stack.Count -gt 0){
       if(++$folderCount -gt 512){$partial=$true;break}
       $folder=$stack.Pop()
@@ -154,26 +186,29 @@ try{
               if(-not [bool]$tr.Enabled){continue}
               $triggerCount++
               if([int]$tr.Type -ne 9 -or
-                 -not(Eq ([string]$tr.UserId) $identity.User.Value)){
+                 (R103PrincipalClass ([string]$tr.UserId) '' $identity) -cne
+                    'CURRENT_OWNER_RESOLVED'){
                 $allLogon=$false
               }
             }
             $principal=[string]$definition.Principal.UserId
             $group=[string]$definition.Principal.GroupId
-            $ownerOK=(Eq $principal $identity.User.Value) -or (Eq $principal $identity.Name)
-            if(-not $ownerOK -and
-               -not [string]::IsNullOrWhiteSpace($principal)){
-              try{
-                $sid=([Security.Principal.NTAccount]::new($principal)).Translate(
-                  [Security.Principal.SecurityIdentifier])
-                $ownerOK=Eq $sid.Value $identity.User.Value
-              }catch{}
-            }
+            $ownerOK=((R103PrincipalClass $principal $group $identity) -ceq
+                      'CURRENT_OWNER_RESOLVED')
             $acceptable=($exact -and $ownerOK -and [string]::IsNullOrWhiteSpace($group) -and
                          [bool]$task.Enabled -and $triggerCount -ge 1 -and $allLogon -and
                          [int]$definition.Principal.LogonType -eq 3 -and
                          [int]$definition.Settings.MultipleInstances -eq 2)
-            if($acceptable){$chosen=$task}
+            if($acceptable){$chosen=$task;$singleReject='NONE'}
+            else{
+              $singleReject=if(-not $exact){'ACTION_MISMATCH'}
+              elseif(-not $ownerOK){'PRINCIPAL_MISMATCH'}
+              elseif(-not [bool]$task.Enabled){'TASK_DISABLED'}
+              elseif($triggerCount -lt 1 -or -not $allLogon){'TRIGGER_SCOPE_MISMATCH'}
+              elseif([int]$definition.Principal.LogonType -ne 3){'LOGON_TOKEN_MISMATCH'}
+              elseif([int]$definition.Settings.MultipleInstances -ne 2){'INSTANCE_POLICY_MISMATCH'}
+              else{'OTHER_UNVERIFIED'}
+            }
           }catch{$partial=$true}
         }
       }catch{$partial=$true}
@@ -184,6 +219,8 @@ try{
     }
     $taskVerified=($matches -eq 1 -and $null -ne $chosen -and -not $partial)
     $out.Add('R103_OWNER_LOGON_TASK='+$(if($taskVerified){'ONE_EXACT_VISIBLE_SCOPE'}else{'HOLD_UNVERIFIED'}))
+    $out.Add('R103_AGENT_REFERENCING_TASKS='+$(if($matches -eq 0){'ZERO'}elseif($matches -eq 1){'ONE'}else{'MULTIPLE'}))
+    $out.Add('R103_SINGLE_MATCH_REJECTION='+$(if($matches -eq 1){$singleReject}else{'NOT_SINGLE_MATCH'}))
     $out.Add('R103_TASK_ENUMERATION='+$(if($partial){'PARTIAL'}else{'ACCESSIBLE_SCOPE_ONLY'}))
     $taskRun=$false;$taskMoment=$null
     if($taskVerified){
