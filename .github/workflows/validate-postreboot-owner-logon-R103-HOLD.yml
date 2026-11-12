@@ -1,0 +1,61 @@
+name: HOLD R103 post-reboot owner logon read-only acceptance
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - validation/spotify-exit-immediate-maintenance-HOLD/owner-reboot-logon-acceptance-R103-HOLD.ps1
+      - .github/workflows/validate-postreboot-owner-logon-R103-HOLD.yml
+permissions: {contents: read}
+jobs:
+  native-powershell-inert-and-decision:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Windows PowerShell 5.1 parse and read-only bounded contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $source='validation/spotify-exit-immediate-maintenance-HOLD/owner-reboot-logon-acceptance-R103-HOLD.ps1'
+          $tokens=$null;$errors=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile($source,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){
+            $errors|ForEach-Object{Write-Host $_.Message}
+            throw 'R103_NATIVE_PS51_PARSE_FAILED'
+          }
+          $txt=Get-Content -LiteralPath $source -Raw
+          foreach($marker in @(
+            'R103_REAL_COM',
+            'R103_SCHEDULER_TASK_RAN_THIS_BOOT',
+            'R103_TASK_RESIDENT_TEMPORAL_CORRELATION',
+            'R103_TASK_PROCESS_CAUSAL_PROOF=NOT_CLAIMED',
+            'R103_IN_MEMORY_AGENT_CODE_VERSION=NOT_PROVEN',
+            'R103_SPOTIFY_PLAYBACK_FUNCTIONALITY=NOT_TESTED',
+            'R103_USER_ORIGINALS_AND_OPERATING_SETTINGS=UNCHANGED')){
+            if(-not $txt.Contains($marker)){
+              if($marker -cne 'R103_REAL_COM'){throw 'R103_OBSERVATION_CONTRACT_MISSING'}
+            }
+          }
+          $fileFns=@($ast.FindAll({
+            param($node)
+            $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -ceq 'R103Decision'
+          },$true))
+          if($fileFns.Count -ne 1){throw 'R103_DECISION_FUNCTION_NOT_UNIQUE'}
+          Write-Host 'R103_NATIVE_PS51_SYNTAX=PASS'
+          Write-Host 'R103_OBSERVATION_CONTRACT=PASS'
+      - name: Hosted decision matrix without user process or task mutation
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $source='validation/spotify-exit-immediate-maintenance-HOLD/owner-reboot-logon-acceptance-R103-HOLD.ps1'
+          $output=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $source -HostedDecisionSelfTest 2>&1)
+          if($LASTEXITCODE -ne 0 -or
+             $output -cnotcontains 'RESULT=R103_HOSTED_DECISION_TEST_PASS_NO_OWNER_INSPECTION'){
+            $output|ForEach-Object{Write-Host ([string]$_)}
+            throw 'R103_HOSTED_DECISION_MATRIX_FAILED'
+          }
+          Write-Host 'R103_HOSTED_DECISION_MATRIX=PASS'
+          Write-Host 'R103_REAL_OWNER_LOGON=NOT_EXECUTED'
+          Write-Host 'R103_OWNER_APP_SETTINGS_TASKS_PROCESSES=UNCHANGED'
