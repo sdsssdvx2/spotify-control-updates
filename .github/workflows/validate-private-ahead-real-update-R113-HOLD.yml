@@ -355,28 +355,28 @@ jobs:
               throw 'R121_SCRATCH_LAUNCHER_ALREADY_EXISTS'
             }
             $runnerText=@'
-param([string]$Root,[string]$Out,[string]$Err,[string]$Receipt)
-$ErrorActionPreference='Stop'
-$principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-$admin=$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-$token=if($admin){'ADMIN'}else{'LIMITED'}
-$code=4
-try {
-  if($admin){$code=3}
-  else {
-    $product=Join-Path $Root 'bin\spotify-control.ps1'
-    $args='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$product+'" -Action AgentTick -AgentEvent SpotifyExit'
-    $proc=Start-Process -FilePath 'powershell.exe' -ArgumentList $args -RedirectStandardOutput $Out -RedirectStandardError $Err -PassThru
-    if(-not $proc.WaitForExit(150000)){
-      Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-      $code=5
-    }else{$code=$proc.ExitCode}
-  }
-}catch{$code=6}
-finally{
-  [IO.File]::WriteAllText($Receipt,('TOKEN='+$token+';EXIT='+$code),(New-Object Text.UTF8Encoding($false)))
-}
-'@
+          param([string]$Root,[string]$Out,[string]$Err,[string]$Receipt)
+          $ErrorActionPreference='Stop'
+          $principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+          $admin=$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          $token=if($admin){'ADMIN'}else{'LIMITED'}
+          $code=4
+          try {
+            if($admin){$code=3}
+            else {
+              $product=Join-Path $Root 'bin\spotify-control.ps1'
+              $args='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$product+'" -Action AgentTick -AgentEvent SpotifyExit'
+              $proc=Start-Process -FilePath 'powershell.exe' -ArgumentList $args -RedirectStandardOutput $Out -RedirectStandardError $Err -PassThru
+              if(-not $proc.WaitForExit(150000)){
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                $code=5
+              }else{$code=$proc.ExitCode}
+            }
+          }catch{$code=6}
+          finally{
+            [IO.File]::WriteAllText($Receipt,('TOKEN='+$token+';EXIT='+$code),(New-Object Text.UTF8Encoding($false)))
+          }
+          '@
             [IO.File]::WriteAllText($runner,$runnerText,(New-Object Text.UTF8Encoding($false)))
             $sched=New-Object -ComObject Schedule.Service
             $sched.Connect()
