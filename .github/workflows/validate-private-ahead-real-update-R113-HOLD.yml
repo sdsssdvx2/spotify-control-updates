@@ -473,12 +473,18 @@ jobs:
                 throw 'R122_MEDIUM_INTEGRITY_SID_ALLOCATION_FAILED'
               }
               $label=[R122NativeLUA+TOKEN_MANDATORY_LABEL]::new()
-              $label.Label.Sid=$mediumSid
               $label.Label.Attributes=[uint32]0x20
               $labelSize=[Runtime.InteropServices.Marshal]::SizeOf([type][R122NativeLUA+TOKEN_MANDATORY_LABEL])
-              $mandatoryLabelPtr=[Runtime.InteropServices.Marshal]::AllocHGlobal($labelSize)
+              $sidSize=[int][R122NativeLUA]::GetLengthSid($mediumSid)
+              if($sidSize -lt 8 -or $sidSize -gt 128){throw 'R122_MEDIUM_SID_LENGTH_INVALID'}
+              $mandatoryLabelPtr=[Runtime.InteropServices.Marshal]::AllocHGlobal($labelSize+$sidSize)
+              $embeddedSid=[IntPtr]::Add($mandatoryLabelPtr,$labelSize)
+              $sidBytes=New-Object byte[] $sidSize
+              [Runtime.InteropServices.Marshal]::Copy($mediumSid,$sidBytes,0,$sidSize)
+              [Runtime.InteropServices.Marshal]::Copy($sidBytes,0,$embeddedSid,$sidSize)
+              $label.Label.Sid=$embeddedSid
               [Runtime.InteropServices.Marshal]::StructureToPtr($label,$mandatoryLabelPtr,$false)
-              $tokenInfoSize=[uint32]($labelSize+[R122NativeLUA]::GetLengthSid($mediumSid))
+              $tokenInfoSize=[uint32]($labelSize+$sidSize)
               if(-not [R122NativeLUA]::SetTokenInformation($limitedToken,25,$mandatoryLabelPtr,$tokenInfoSize)){
                 throw ('R122_MEDIUM_INTEGRITY_TOKEN_ADMISSION_FAILED_WIN32_'+
                   [Runtime.InteropServices.Marshal]::GetLastWin32Error())
