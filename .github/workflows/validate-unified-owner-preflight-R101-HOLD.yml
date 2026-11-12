@@ -1,0 +1,58 @@
+name: HOLD R101 single offline unified owner preflight pinned R77/R90 and no-write hosted scratch
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/validate-unified-owner-preflight-R101-HOLD.yml
+      - validation/spotify-exit-immediate-maintenance-HOLD/owner-unified-readonly-preflight-R101-HOLD.ps1
+permissions: {contents: read}
+jobs:
+  offline-owner-admission:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify native PowerShell 5.1 syntax and exact frozen R77/R90 Git object identities
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $file='validation/spotify-exit-immediate-maintenance-HOLD/owner-unified-readonly-preflight-R101-HOLD.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){
+            $errors|ForEach-Object{Write-Host $_.Message}
+            throw 'R101_NATIVE_PS51_SYNTAX_INVALID'
+          }
+          $scratch=Join-Path $env:RUNNER_TEMP ('R101-Isolated-'+[guid]::NewGuid().ToString('N'))
+          $root=Join-Path $scratch 'SpotifyControl'
+          if(Test-Path -LiteralPath $scratch){throw 'R101_SCRATCH_PREEXISTS'}
+          try{
+            [void][IO.Directory]::CreateDirectory((Join-Path $root 'bin'))
+            $before=@(Get-ChildItem -LiteralPath $root -Recurse -File -Force -ErrorAction Stop)
+            if($before.Count -ne 0){throw 'R101_HOSTED_FIXTURE_NOT_EMPTY'}
+            $output=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $file -HostedFixtureRoot $root 2>&1)
+            $rc=$LASTEXITCODE
+            foreach($p in @(
+              'R101_R77_AND_R90_EXACT_GIT_OBJECTS=PASS',
+              'R101_OWNER_IDENTITY=HOSTED_SYNTHETIC_NO_REAL_OWNER_ATTESTATION',
+              'R101_INSTALLED_STAGE=HOLD_UNVERIFIED',
+              'R101_R77_LIVE_OWNER_ADMISSION=NOT_EXECUTED_HOSTED_FIXTURE',
+              'R101_OVERALL=HOSTED_SCRATCH_STATUS_ONLY_NOT_OWNER_RELEASE_AUTHORITY',
+              'RESULT=R101_OFFLINE_READONLY_EVIDENCE_COLLECTED',
+              'R101_DEPLOY_AUTHORIZED=NO;AUTO_REPAIR=NO;AUTO_RETRY=NO')){
+              if($output -cnotcontains $p){
+                $safe=@($output|Where-Object {([string]$_) -match '^R101_[A-Z0-9_]{3,55}=[A-Z0-9_.;-]{1,130}$'})
+                $safe|ForEach-Object{Write-Host $_}
+                throw ('R101_PINNED_SOURCE_OR_READONLY_ROUTER_NOT_VERIFIED_'+$p)
+              }
+            }
+            if($rc -ne 0){throw 'R101_SOURCE_GUARD_SCRIPT_EXIT_NONZERO'}
+            $after=@(Get-ChildItem -LiteralPath $root -Recurse -File -Force -ErrorAction Stop)
+            if($after.Count -ne 0){throw 'R101_WROTE_HOSTED_FIXTURE_FILE'}
+            Write-Host 'R101_REAL_WINDOWS_PS51_EMBEDDED_R77_R90_GIT_OBJECTS=PASS'
+            Write-Host 'R101_GITHUB_HOSTED_NO_OWNER_DATA_OR_SPOTIFY_FILES=TOUCHED_NONE'
+            Write-Host 'R101_OFFLINE_NO_INSTALL_NO_NETWORK_NO_AUTOSTART=PASS'
+          }finally{
+            Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
+            if(Test-Path -LiteralPath $scratch){throw 'R101_HOSTED_FIXTURE_NOT_CLEANED'}
+          }
