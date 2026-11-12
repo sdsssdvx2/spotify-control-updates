@@ -295,6 +295,22 @@ jobs:
           if(-not $preapplied){throw 'R115_COMPATIBLE_2464_ACTUAL_APPLY_NOT_OBSERVED'}
           Write-Host 'R115_VERIFIED_SIGNED_136_PREFS_SYNTHETIC=PASS'
           Write-Host 'R115_REAL_2464_BACKUP_AND_APPLY_FIXTURE=PASS'
+          # Read-only proof that old official CLI backup/apply did not alter
+          # any of the exact 2.46.4 official payload paths in managed root.
+          $officialMissing=0;$officialDiffered=0
+          foreach($file in $srcFiles){
+            $rel=$file.FullName.Substring($extract.Length).TrimStart([char[]]@('\','/'))
+            $dest=Join-Path $cliDir $rel
+            if(-not(Test-Path -LiteralPath $dest -PathType Leaf)){
+              $officialMissing++;continue
+            }
+            if((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash -cne
+               (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash){$officialDiffered++}
+          }
+          $postApplyOfficialSame=($officialMissing -eq 0 -and $officialDiffered -eq 0)
+          Write-Host ('R120_OFFICIAL_FILES_UNCHANGED_AFTER_2464_APPLY='+$(if($postApplyOfficialSame){'YES'}else{'NO'}))
+          Write-Host ('R120_MISSING_OFFICIAL_FILE_COUNT='+$officialMissing)
+          Write-Host ('R120_DIFFERED_OFFICIAL_FILE_COUNT='+$officialDiffered)
           $cfg=Join-Path $env:APPDATA 'spicetify\config-xpui.ini'
           if(-not(Test-Path $cfg -PathType Leaf)){throw 'R116_OFFICIAL_CONFIG_MISSING'}
           $inBackup=$false;$backupVersion=$null;$backupWith=$null
@@ -389,6 +405,18 @@ jobs:
               if($raw -match $p[1]){$categories.Add($p[0])}
             }
             Write-Host ('R114_CHILD_AND_LOG_FAIL_CLASSES='+$(if($categories.Count){$categories.ToArray() -join ','}else{'NO_RECOGNIZED_MARKER'}))
+            $failureStages=New-Object 'System.Collections.Generic.List[string]'
+            if($raw.Contains('Installed Spicetify official payload path is missing')){$failureStages.Add('OFFICIAL_PATH_MISSING')}
+            if($raw.Contains('Installed Spicetify official payload file differs')){$failureStages.Add('OFFICIAL_FILE_DIFFERED')}
+            if($raw.Contains('Installed Spicetify root is not an exact official')){$failureStages.Add('OFFICIAL_BASELINE_REFUSED')}
+            if($raw.Contains('Spicetify executable is not managed by the official')){$failureStages.Add('CLI_INSTALL_NOT_MANAGED')}
+            if($raw.Contains('New official Spicetify payload path collides')){$failureStages.Add('EXTRA_USER_PATH_COLLISION')}
+            if($raw.Contains('Staged full-root Spicetify version verification failed')){$failureStages.Add('STAGED_EXE_VERSION')}
+            if($raw.Contains('Spicetify persistent rollback backup tree mismatch')){$failureStages.Add('ROLLBACK_BACKUP_TREE')}
+            if($raw.Contains('Spicetify transaction failed:')){$failureStages.Add('TRANSACTION_FAILURE_WRAPPER')}
+            if($raw.Contains('Smart Update Guard could not be enforced')){$failureStages.Add('SMART_GUARD')}
+            if($raw.Contains('New Spicetify apply failed')){$failureStages.Add('POST_SWAP_APPLY')}
+            Write-Host ('R120_PRECISE_FAILURE_STAGES='+$(if($failureStages.Count){$failureStages.ToArray() -join ','}else{'NONE_OF_KNOWN_PATTERNS'}))
             $allowedReasons=@('config-or-prefs-missing','prefs-version-missing',
               'backup-version-missing','already-current','backup-spicetify-version-mismatch',
               'spotify-transaction-missing','spotify-transaction-not-committed',
