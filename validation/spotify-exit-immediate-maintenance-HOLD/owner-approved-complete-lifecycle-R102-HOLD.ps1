@@ -5,7 +5,7 @@
 # R90 and R99 own their respective writes; R102 refuses to auto-rollback an
 # already committed release if logon registration subsequently fails.
 [CmdletBinding()]
-param([switch]$Preflight,[switch]$Prepare,[switch]$Commit,[string]$ApprovalPhrase='')
+param([switch]$TaskOnly,[switch]$Preflight,[switch]$Prepare,[switch]$Commit,[string]$ApprovalPhrase='')
 Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
 $phase='AUTHORIZATION'
@@ -150,6 +150,9 @@ function R102TaskProbe([string]$agent){
 }
 
 try{
+  if($TaskOnly -and ($Preflight -or $Prepare -or $Commit -or $ApprovalPhrase -cne '')){
+    Deny 'R102_TASK_DIAG_CANNOT_COMBINE_MUTATION_OR_APPROVAL'
+  }
   if(($Prepare -and $Commit) -or ($Prepare -and $Preflight) -or ($Commit -and $Preflight)){
     Deny 'R102_MODES_MUTUALLY_EXCLUSIVE'
   }
@@ -158,7 +161,23 @@ try{
       Deny 'R102_EXPLICIT_DUAL_SCOPE_OWNER_APPROVAL_REQUIRED'
     }
   }elseif($ApprovalPhrase -cne ''){Deny 'R102_APPROVAL_WITHOUT_COMMIT_FORBIDDEN'}
-  if(-not($Prepare -or $Commit -or $Preflight)){
+  if($TaskOnly){
+    if([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
+       $PSVersionTable.PSEdition -cne 'Desktop' -or
+       $PSVersionTable.PSVersion.Major -ne 5 -or -not [Environment]::Is64BitProcess){
+      Deny 'R102_TASK_DIAG_WIN_PS51_X64_REQUIRED'
+    }
+    $id=[Security.Principal.WindowsIdentity]::GetCurrent()
+    if(([Security.Principal.WindowsPrincipal]::new($id)).IsInRole(
+       [Security.Principal.WindowsBuiltInRole]::Administrator)){
+      Deny 'R102_TASK_DIAG_STANDARD_USER_REQUIRED'
+    }
+    $ownerAgent=Join-Path ([Environment]::GetFolderPath(
+      [Environment+SpecialFolder]::LocalApplicationData)) 'SpotifyControl\bin\spotify-control-agent.vbs'
+    $out.Add('R102_TASK_ONLY=NO_GITHUB_READ_NO_INSTALL_NO_REGISTRY_OR_TASK_WRITE')
+    foreach($row in @(R102TaskProbe $ownerAgent)){$out.Add([string]$row)}
+    $out.Add('RESULT=R102_TASK_DIAGNOSTIC_ONLY_NOT_DEPLOY_AUTHORITY')
+  }elseif(-not($Prepare -or $Commit -or $Preflight)){
     $out.Add('NETWORK=NO;FILE_WRITE=NO;PROCESS_CHANGE=NO;STARTUP_CHANGE=NO')
     $out.Add('RESULT=R102_INERT_DEFAULT_REQUIRES_EXPLICIT_MODE')
   }else{
