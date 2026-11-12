@@ -296,12 +296,16 @@ try{
   }
 }catch{
   $why=[string]$_.Exception.Message
-  if($why -cnotmatch '^R90_[A-Z0-9_]{5,90}$'){
+  if($Status){
+    if($why -cnotmatch '^R93_[A-Z0-9_]{5,90}$'){
+      $why='R93_READONLY_OBSERVATION_UNVERIFIED'
+    }
+  }elseif($why -cnotmatch '^R90_[A-Z0-9_]{5,90}$'){
     $why='R90_OWNER_ENVIRONMENT_OR_REMOTE_UNVERIFIED'
   }
   $out.Add('FAILED_PHASE='+$phase)
   $out.Add('HOLD_REASON='+$why)
-  $out.Add('RESULT=R90_HOLD_NO_AUTO_RETRY')
+  $out.Add($(if($Status){'RESULT=R93_HOLD_READONLY_NO_CHANGES'}else{'RESULT=R90_HOLD_NO_AUTO_RETRY'}))
 }finally{
   $out.Add('PUBLIC_MAIN_RELEASE_UNCHANGED=YES')
   $out.Add('OWNER_ORIGINAL_DELETE=NO;AUTO_RETRY=NO')
