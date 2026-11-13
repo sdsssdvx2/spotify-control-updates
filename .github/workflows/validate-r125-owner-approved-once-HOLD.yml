@@ -293,3 +293,77 @@ jobs:
             }
           }
           Write-Host 'R125_PRODUCT_FUNCTIONS_INSPECTED_WITHOUT_INVOCATION=PASS'
+      - name: Verify R125 fresh commit ledger and apply/guard evidence against spoofed or stale results
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-StrictMode -Version 2.0
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          $source=$base+'owner-approved-r112-spicetify-v2467-onepass-R125-HOLD.ps1'
+          $all=[IO.File]::ReadAllText($source,[Text.Encoding]::UTF8)
+          $errs=$null;$tok=$null
+          $ast=[Management.Automation.Language.Parser]::ParseInput($all,[ref]$tok,[ref]$errs)
+          if(@($errs).Count -ne 0){throw 'R125_PROOF_SOURCE_PARSE_HOLD'}
+          $names=@('R125Field','Test-R125CommittedUpgrade')
+          $fns=@($ast.FindAll({
+            param($x)
+            $x -is [Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -cin $names
+          },$true))
+          if($fns.Count -ne 2){throw 'R125_PROOF_HELPERS_NOT_EXACT'}
+          $OldCliSHA='3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'
+          $CandidateSHA='beb850064670c078a679585ace25f8071daa88c0b264185c03ef3364329b431b'
+          $OfficialZipSHA='c5a723d31eae529ba13f6922a7a027124238c7f3da7edd182a73eab03c447e9e'
+          . ([ScriptBlock]::Create((@($fns | ForEach-Object{$_.Extent.Text}) -join [Environment]::NewLine)))
+          $expectedExe=('b'*64)
+          $begin=[DateTimeOffset]::UtcNow.AddMinutes(-2)
+          $txn=[pscustomobject]@{
+            id='owner-new-transaction';schema=3;status='committed';root_transaction=$true
+            before_version='2.46.4';after_version='2.46.7';release_tag='v2.46.7'
+            before_sha256=$OldCliSHA;after_sha256=$expectedExe
+            asset_digest=('sha256:'+$OfficialZipSHA)
+            apply_attempted=$true;apply_succeeded=$true;post_apply_guard_succeeded=$true
+            extras_preserved=$true;extras_before_tree_sha256=('a'*64);extras_after_tree_sha256=('a'*64)
+            committed_at=([DateTimeOffset]::UtcNow.ToString('o'))
+          }
+          $state=[pscustomobject]@{
+            spicetify_last_transaction_id='owner-new-transaction'
+            spicetify_last_transaction_status='committed'
+            spicetify_installed_version='2.46.7'
+            pending_spicetify_upgrade=$false
+          }
+          function AssertProof([string]$label,$t,$st,[string]$prior,[DateTimeOffset]$start,
+                               [string]$actual,[string]$main,[string]$expected){
+            $r=Test-R125CommittedUpgrade $t $st $prior $start $expectedExe $actual $main
+            if($r -cne $expected){throw ('R125_PROOF_'+$label+'_EXPECTED_'+$expected+'_GOT_'+$r)}
+            Write-Host ('R125_PROOF_'+$label+'=PASS')
+          }
+          AssertProof 'FRESH_COMMIT' $txn $state 'previous-transaction' $begin $expectedExe $CandidateSHA 'FRESH_COMMITTED_ROOT_APPLY_AND_EXTRAS_VERIFIED'
+          AssertProof 'SAME_OLD_TRANSACTION' $txn $state 'owner-new-transaction' $begin $expectedExe $CandidateSHA 'NO_NEW_TRANSACTION_ID'
+          AssertProof 'OLD_COMMIT_TIMESTAMP' $txn $state 'previous-transaction' ([DateTimeOffset]::UtcNow.AddMinutes(1)) $expectedExe $CandidateSHA 'COMMIT_NOT_NEWER_THAN_ATTEMPT'
+          AssertProof 'WRONG_INSTALLED_EXE' $txn $state 'previous-transaction' $begin ('0'*64) $CandidateSHA 'EXACT_BINARY_OR_MAIN_MISMATCH'
+          AssertProof 'WRONG_MAIN' $txn $state 'previous-transaction' $begin $expectedExe ('0'*64) 'EXACT_BINARY_OR_MAIN_MISMATCH'
+          $t2=($txn | ConvertTo-Json -Depth 6 | ConvertFrom-Json); $t2.apply_succeeded=$false
+          AssertProof 'APPLY_NOT_PROVEN' $t2 $state 'previous-transaction' $begin $expectedExe $CandidateSHA 'APPLY_GUARD_OR_EXTRAS_UNPROVEN'
+          $t3=($txn | ConvertTo-Json -Depth 6 | ConvertFrom-Json); $t3.post_apply_guard_succeeded=$false
+          AssertProof 'POST_APPLY_GUARD_NOT_PROVEN' $t3 $state 'previous-transaction' $begin $expectedExe $CandidateSHA 'APPLY_GUARD_OR_EXTRAS_UNPROVEN'
+          $t4=($txn | ConvertTo-Json -Depth 6 | ConvertFrom-Json); $t4.extras_after_tree_sha256=('b'*64)
+          AssertProof 'EXTRAS_NOT_PRESERVED' $t4 $state 'previous-transaction' $begin $expectedExe $CandidateSHA 'USER_EXTRAS_PRESERVATION_UNPROVEN'
+          $t5=($txn | ConvertTo-Json -Depth 6 | ConvertFrom-Json); $t5.asset_digest='sha256:' + ('0'*64)
+          AssertProof 'ASSET_NOT_PINNED' $t5 $state 'previous-transaction' $begin $expectedExe $CandidateSHA 'RELEASE_ASSET_DIGEST_UNPROVEN'
+          $t6=($txn | ConvertTo-Json -Depth 6 | ConvertFrom-Json); $t6.status='prepared'
+          AssertProof 'UNCOMMITTED' $t6 $state 'previous-transaction' $begin $expectedExe $CandidateSHA 'NO_COMMITTED_TXN'
+          $s2=($state | ConvertTo-Json -Depth 4 | ConvertFrom-Json);$s2.spicetify_last_transaction_id='previous-transaction'
+          AssertProof 'STATE_LEDGER_ID_MISMATCH' $txn $s2 'previous-transaction' $begin $expectedExe $CandidateSHA 'STATE_AND_LEDGER_NOT_CORRELATED'
+          AssertProof 'MISSING_LEDGER' $null $state 'previous-transaction' $begin $expectedExe $CandidateSHA 'UNVERIFIED_LEDGER'
+          $data=$all
+          if($data.Contains('Stop-Process -Id $proc.Id') -or
+             -not $data.Contains("Fail 'R125_AGENT_TIMEOUT_LEFT_RUNNING_FOR_OWNER_REVIEW'")){
+            throw 'R125_MID_TRANSACTION_FORCED_KILL_NOT_DISABLED'
+          }
+          Write-Host 'R125_NO_FORCED_KILL_DURING_UNCERTAIN_FULL_ROOT_UPDATE=PASS'
+          $main=[IO.File]::ReadAllText(($base+'out/private-stable-ahead-R112/spotify-control.ps1'),[Text.Encoding]::UTF8)
+          if(-not $main.Contains('$SpicetifyTransactionPath = Join-Path $Root "spicetify-last-transaction.json"')){
+            throw 'R125_JOURNAL_PATH_NOT_PROVEN_AGAINST_PRODUCT'
+          }
+          Write-Host 'R125_LEDGER_PATH_EXACT_PRODUCT_CONTRACT=PASS'
+          Write-Host 'R125_OWNER_INSTALLATIONS_AND_SECRET_CONTENTS_UNTOUCHED=PASS'
