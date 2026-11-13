@@ -145,7 +145,9 @@ try{
   }
   $script:Phase='PIN_SOURCES'
   [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+  $script:Phase='PIN_R131_COMPILED_SOURCE'
   $mainSource=Pinned-Download 'spotify-control-R131-Owner-Candidate-HOLD.ps1' $script:NewMainSha 316638
+  $script:Phase='PIN_R132_OWNER_SOURCE'
   $ownerSource=Pinned-Download 'owner-r132-current-preimage-adoption-HOLD.ps1' $script:R132Sha 12497
   Emit 'R131_SOURCE' 'EXACT_PIN_VERIFIED'
   Emit 'R132_SOURCE' 'EXACT_PIN_VERIFIED'
@@ -216,6 +218,11 @@ try{
   }
 }catch{
   Emit 'FAILED_PHASE' $script:Phase
+  if([string]$_.Exception.Message -ceq 'R133_REMOTE_SOURCE_PIN_INVALID'){
+    Emit 'BLOCK_CLASS' 'SOURCE_BYTES_NOT_PINNED'
+  }elseif($script:Phase -like 'PIN_*'){
+    Emit 'BLOCK_CLASS' 'SOURCE_FETCH_OR_PARSER'
+  }
   if($script:Published -and -not $script:Adopted){
     Release-Locks
     Try-SafeRestore
