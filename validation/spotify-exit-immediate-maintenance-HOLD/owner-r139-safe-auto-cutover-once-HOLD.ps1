@@ -95,6 +95,25 @@ function ReadEnabledState {
     return [bool]$s.agent_mutation_enabled
   }catch{return $false}
 }
+function ValidR139Receipt {
+  if(-not(Test-Path -LiteralPath $receiptPath -PathType Leaf)){return $false}
+  try{
+    $item=Get-Item -LiteralPath $receiptPath -Force
+    if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){return $false}
+    $r=Get-Content -LiteralPath $receiptPath -Raw|ConvertFrom-Json
+    if([string]$r.schema -cne '1' -or
+       [string]$r.kind -cne 'R139_SAFE_AUTO_AFTER_VERIFIED_R135' -or
+       [string]$r.r135_claim_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
+       [string]$r.r135_committed_ledger_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
+       [string]$r.r135_transaction_id -cnotmatch '^\d{8}-\d{6}-[a-f0-9]{8}$' -or
+       [string]$r.spicetify_version -cne '2.46.7' -or
+       [string]$r.spicetify_exe_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
+       [string]$r.r135_asset_digest -cne 'sha256:c5a723d31eae529ba13f6922a7a027124238c7f3da7edd182a73eab03c447e9e'){
+      return $false
+    }
+    return ((Hash $claimPath) -ceq [string]$r.r135_claim_sha256)
+  }catch{return $false}
+}
 
 $maintenance=$null
 $agent=$null
@@ -105,7 +124,7 @@ try{
     $mainHash=Hash $main
     $backupHash=Hash $backup
     if($mainHash -eq $newMainSha -and
-       (Test-Path -LiteralPath $receiptPath -PathType Leaf) -and
+       (ValidR139Receipt) -and
        (ReadEnabledState)){
       [void]$out.Add('R139_MAIN=INSTALLED_PIN_VERIFIED')
       [void]$out.Add('R139_SAFE_AUTO_BASELINE=PRESENT')
@@ -225,7 +244,7 @@ try{
              $enableOutput -contains 'R139_R135_BASELINE=SEALED' -and
              $enableOutput -contains 'R139_AGENT_MUTATION=ENABLED')
   if(-not $enableOk){throw 'R139_SAFE_AUTO_ENABLE_NOT_CONFIRMED'}
-  if(-not(Test-Path -LiteralPath $receiptPath -PathType Leaf)){throw 'R139_RECEIPT_NOT_CREATED'}
+  if(-not(ValidR139Receipt)){throw 'R139_RECEIPT_NOT_VERIFIED'}
   if(-not(ReadEnabledState)){throw 'R139_AGENT_MUTATION_NOT_ENABLED'}
   if((Hash $main) -cne $newMainSha){throw 'R139_MAIN_CHANGED_AFTER_ENABLE'}
 
