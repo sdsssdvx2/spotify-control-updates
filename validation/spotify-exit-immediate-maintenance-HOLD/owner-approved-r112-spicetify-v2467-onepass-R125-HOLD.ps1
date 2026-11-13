@@ -193,6 +193,43 @@ function ReplaceMain([string]$expected,[byte[]]$contents,[string]$backupName){
     }
   }finally{Release $m2;Release $m1}
 }
+# A resident agent is not a static state machine. Since the previous read-only
+# probe it may have completed a normal tick and changed its last decision,
+# pending work, or cached discovery health. None is an authorization grant.
+# The actual agent MUST rerun fresh discovery and verify its own state under
+# the existing cross-process mutex before any mutation.
+function StateClass($state) {
+  if($null -eq $state){return 'STATE_MISSING'}
+  $arm=$state.PSObject.Properties['agent_mutation_enabled']
+  if($null -eq $arm -or $arm.Value -isnot [bool]){return 'MUTATION_APPROVAL_UNVERIFIED'}
+  if($arm.Value -ne $true){return 'MUTATION_DISARMED'}
+  $a=$state.PSObject.Properties['pending_addon_auto_ambiguous']
+  if($null -eq $a){return 'AUTO_AMBIGUITY_UNVERIFIED'}
+  $number=0
+  if(-not [int]::TryParse([string]$a.Value,[ref]$number) -or
+     $number -lt 0){return 'AUTO_AMBIGUITY_UNVERIFIED'}
+  if($number -gt 0){return 'AUTO_AMBIGUITY_PRESENT'}
+  return 'ARMED_FRESH_DISCOVERY_REQUIRED'
+}
+function StateFlag($state,[string]$name){
+  if($null -eq $state){return 'UNKNOWN'}
+  $p=$state.PSObject.Properties[$name]
+  if($null -eq $p -or $p.Value -isnot [bool]){return 'UNKNOWN'}
+  if($p.Value){return 'TRUE'}
+  return 'FALSE'
+}
+function StateDecisionClass($state){
+  if($null -eq $state){return 'UNKNOWN'}
+  $p=$state.PSObject.Properties['last_agent_decision']
+  if($null -eq $p){return 'UNKNOWN'}
+  $v=[string]$p.Value
+  if($v -cin @('closed-check-not-due','closed-idle-or-not-due',
+      'maintenance-phase-entered','maintenance-deferred-or-lease-busy',
+      'pending-observed-mutation-disarmed','mutation-blocked-unhealthy-or-auto-ambiguous',
+      'check-only-closed-no-pending','check-only-running','observe-only-closed',
+      'running-idle-or-not-due')){return $v}
+  return 'OTHER_OR_ABSENT'
+}
 function StopRunningCondition{
   if(@(Get-Process -Name Spotify -ErrorAction SilentlyContinue).Count -ne 0){Fail 'R125_SPOTIFY_RUNNING'}
 }
@@ -290,15 +327,24 @@ try {
       Fail 'R125_SIGNED_COMPATIBLE_SPOTIFY_REQUIRED'
     }
     if(-not(Regular $statePath 2097152)){Fail 'R125_STATE_MISSING'}
+    $stateReadSha=HashFile $statePath
     $state=Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
-    if($state.agent_mutation_enabled -ne $true -or
-       $state.maintenance_check_healthy -ne $true -or
-       $state.pending_maintenance -ne $false -or
-       $state.pending_spicetify_upgrade -ne $false -or
-       [string]$state.last_agent_decision -cne 'closed-check-not-due'){
-      Fail 'R125_OWNER_STATE_DRIFT_OR_NOT_HEALTHY'
-    }
     $beforeStateSha=HashFile $statePath
+    if($beforeStateSha -cne $stateReadSha){
+      Fail 'R125_STATE_CHANGED_DURING_READ'
+    }
+    $admission=StateClass $state
+    Emit 'R125_STATE_ADMISSION' $admission
+    Emit 'R125_SAVED_DISCOVERY_HEALTH' (StateFlag $state 'maintenance_check_healthy')
+    Emit 'R125_SAVED_PENDING_MAINTENANCE' (StateFlag $state 'pending_maintenance')
+    Emit 'R125_SAVED_PENDING_SPICETIFY' (StateFlag $state 'pending_spicetify_upgrade')
+    Emit 'R125_LAST_DECISION_CLASS' (StateDecisionClass $state)
+    if($admission -cne 'ARMED_FRESH_DISCOVERY_REQUIRED'){
+      Fail 'R125_OWNER_STATE_UNSAFE_OR_NOT_ARMED'
+    }
+    # Last decision and pending flags are stale observations, not a lease,
+    # not an approval grant, and not proof of currently due maintenance.
+    # The pinned product's fresh check and guarded admission remain mandatory.
     $oldBytes=[IO.File]::ReadAllBytes($script:OriginalMain)
     $script:PatchedMain=PatchExactR112 $oldBytes
     Emit 'R125_R112_PATCH' 'EXACT_SOURCE_BYTES_PROVEN'
@@ -370,7 +416,8 @@ try {
     'R125_OFFICIAL_RELEASE_ASSET_NOT_PINNED','R125_OFFICIAL_CLI_ARCHIVE_EXE_UNIQUE_REQUIRED',
     'R125_MAIN_CHANGED_DURING_TRANSACTION','R125_ATOMIC_PUBLICATION_NOT_VERIFIED',
     'R125_TRANSACTION_AND_POSTFLIGHT_NOT_PROVEN','R125_AGENT_ONESHOT_TIMEOUT_UNCERTAIN',
-    'R125_R112_TARGET_SHA_MISMATCH','R125_ORIGINAL_MAIN_SHA_MISMATCH'
+    'R125_R112_TARGET_SHA_MISMATCH','R125_ORIGINAL_MAIN_SHA_MISMATCH',
+    'R125_OWNER_STATE_UNSAFE_OR_NOT_ARMED','R125_STATE_CHANGED_DURING_READ'
   )
   $reason=if($message -cin $known -or
       $message -match '^R125_PINNED_PATCH_ANCHOR_DRIFT_[A-Z_]+$' -or
@@ -387,7 +434,7 @@ try {
   Emit 'FAILED_PHASE' $Phase
   Emit 'RESULT' 'HOLD_NO_AUTOMATIC_RETRY'
 }finally{
-  if($Mode -ceq 'Once' -and $script:SourceSwapped -and -not $script:Succeeded){
+  if($Mode -ceq 'Once' -and $script:SourceSwapped -and -not $script:Succeeded -and -not $script:AgentStarted){
     try{
       if((HashFile $script:OriginalMain) -ceq $CandidateSHA){
         $originalBytes=[IO.File]::ReadAllBytes((Join-Path $script:StageRoot 'ORIGINAL-v0630-RETAIN.ps1'))
@@ -396,6 +443,10 @@ try {
         Emit 'R125_MAIN_SOURCE_ROLLBACK' 'ORIGINAL_V0630_SHA_PASS'
       }else{Emit 'R125_MAIN_SOURCE_ROLLBACK' 'SKIPPED_SOURCE_DRIFT_REVIEW_REQUIRED'}
     }catch{Emit 'R125_MAIN_SOURCE_ROLLBACK' 'FAILED_REVIEW_REQUIRED'}
+  }
+  if($Mode -ceq 'Once' -and $script:SourceSwapped -and -not $script:Succeeded -and $script:AgentStarted){
+    Emit 'R125_MAIN_ROLLBACK' 'NOT_ATTEMPTED_AFTER_AGENT_START_UNCERTAIN_MUTATION'
+    Emit 'R125_OWNER_REVIEW' 'REQUIRED_NO_AUTO_RETRY_OR_AUTOMATIC_RECOVERY'
   }
   if($null -ne $script:StageRoot){
     Emit 'R125_RECOVERY_FOLDER' 'RETAINED_IN_LOCALAPPDATA'
