@@ -17,7 +17,8 @@ $required=@('New-SpicetifyMigrationPreimage','Restore-SpicetifyMigrationSurface'
   'Get-SpicetifyRootManifest','Copy-SpicetifyRootExact','Get-ExactFileSha256',
   'Get-StringSha256','Get-SpicetifyConfigSemanticHash','Get-IniSectionValue',
   'Commit-SpicetifyCliTransaction','Rollback-SpicetifyCliTransaction',
-  'Invoke-SpicetifyTransactionalMaintenance')
+  'Invoke-SpicetifyTransactionalMaintenance',
+  'Save-SpicetifyTransaction','Write-SpicetifyJournalJsonAtomic')
 $fns=@($ast.FindAll({param($x)
   $x -is [Management.Automation.Language.FunctionDefinitionAst] -and
   $x.Name -cin $required
@@ -50,6 +51,28 @@ try {
   [IO.File]::WriteAllText((Join-Path $spice 'Themes/theme.css'),'user-theme-original',$utf8)
   [IO.File]::WriteAllBytes((Join-Path $spice 'Backup/xpui.spa'),([byte[]]@(0,1,3,255,0,10)))
   [IO.File]::WriteAllBytes((Join-Path $apps 'xpui.spa'),([byte[]]@(4,3,255,0,88,5)))
+  # Exercise actual product journal publication on scratch NTFS.
+  function Ensure-SpicetifyTransactionShape {param($Transaction);return $Transaction}
+  $ledgerDir=Join-Path $scratch 'AtomicJournal'
+  New-Item -ItemType Directory -Path $ledgerDir -Force | Out-Null
+  $script:SpicetifyTransactionPath=Join-Path $ledgerDir 'last-transaction.json'
+  $script:SpicetifyTransactionReport=Join-Path $ledgerDir 'report.json'
+  $journalA=[pscustomobject]@{schema=3;id='scratch-only';status='prepared'}
+  Save-SpicetifyTransaction -Transaction $journalA
+  $oldHash=Get-ExactFileSha256 -Path $script:SpicetifyTransactionPath
+  $journalB=[pscustomobject]@{schema=3;id='scratch-only';status='awaiting-guard'}
+  Save-SpicetifyTransaction -Transaction $journalB
+  $current=Get-Content -LiteralPath $script:SpicetifyTransactionPath -Raw | ConvertFrom-Json
+  $report=Get-Content -LiteralPath $script:SpicetifyTransactionReport -Raw | ConvertFrom-Json
+  $preFile=$script:SpicetifyTransactionPath+'.previous'
+  if($current.status -cne 'awaiting-guard' -or
+     $report.status -cne 'awaiting-guard' -or
+     (Get-ExactFileSha256 -Path $preFile) -cne $oldHash){
+    throw 'R131_ATOMIC_SCHEMA3_JOURNAL_READBACK_FAILURE'
+  }
+  $tempCount=@(Get-ChildItem -LiteralPath $ledgerDir -File -Filter '.spotifycontrol-journal-*.tmp').Count
+  if($tempCount -ne 0){throw 'R131_JOURNAL_UNEXPECTED_TEMP_LEFTOVER'}
+  Write-Host 'R131_PRODUCTION_ATOMIC_PRIMARY_REPORT_AND_PREVIOUS_SNAPSHOT=PASS'
   $beforeSpice=Get-SpicetifyRootManifest -Path $spice
   $beforeApps=Get-SpicetifyRootManifest -Path $apps
   $pre=New-SpicetifyMigrationPreimage -TransactionBackupDir $backupDir -InstalledCliVersion '2.46.4'

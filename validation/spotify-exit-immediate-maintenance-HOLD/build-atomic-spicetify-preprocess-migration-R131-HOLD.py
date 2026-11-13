@@ -173,6 +173,67 @@ function Restore-SpicetifyMigrationPreimage {
   return [pscustomobject]@{Restored=$true;Status='EXACT_EXTERNAL_PREIMAGE_RESTORED'}
 }
 
+function Write-SpicetifyJournalJsonAtomic {
+  param([string]$Path,[string]$Json)
+  if([string]::IsNullOrWhiteSpace($Path) -or
+     [string]::IsNullOrWhiteSpace($Json)){
+    throw 'R131_JOURNAL_EMPTY_TARGET_OR_CONTENT'
+  }
+  $full=[IO.Path]::GetFullPath($Path)
+  $dir=Split-Path -Parent $full
+  $parent=Get-Item -LiteralPath $dir -Force -ErrorAction Stop
+  if(-not $parent.PSIsContainer -or
+     ($parent.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){
+    throw 'R131_JOURNAL_DIRECTORY_UNSAFE'
+  }
+  $present=Test-Path -LiteralPath $full
+  $previous=$full+'.previous'
+  foreach($check in @($full,$previous)){
+    if(Test-Path -LiteralPath $check){
+      $info=Get-Item -LiteralPath $check -Force -ErrorAction Stop
+      if($info.PSIsContainer -or
+         ($info.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){
+        throw 'R131_JOURNAL_TARGET_UNSAFE'
+      }
+    }
+  }
+  $stage=Join-Path $dir ('.spotifycontrol-journal-'+[guid]::NewGuid().ToString('N')+'.tmp')
+  $bytes=[Text.UTF8Encoding]::new($false).GetBytes($Json)
+  $hash=[Security.Cryptography.SHA256]::Create()
+  try{$expected=[BitConverter]::ToString($hash.ComputeHash($bytes)).Replace('-','').ToLowerInvariant()}
+  finally{$hash.Dispose()}
+  $stream=$null
+  try{
+    $stream=[IO.FileStream]::new($stage,[IO.FileMode]::CreateNew,
+         [IO.FileAccess]::Write,[IO.FileShare]::None)
+    $stream.Write($bytes,0,$bytes.Length)
+    $stream.Flush($true)
+    $stream.Dispose();$stream=$null
+    if((Get-ExactFileSha256 -Path $stage) -cne $expected){
+      throw 'R131_JOURNAL_STAGE_READBACK_MISMATCH'
+    }
+    # The authoritative primary journal is replaced atomically before the
+    # informational report. A crash can leave the report one revision behind,
+    # but never silently truncate a previously committed primary JSON file.
+    if($present){
+      if(-not (Test-Path -LiteralPath $full -PathType Leaf)){
+        throw 'R131_JOURNAL_TARGET_CHANGED_BEFORE_REPLACE'
+      }
+      [IO.File]::Replace($stage,$full,$previous,$true)
+    }else{
+      [IO.File]::Move($stage,$full)
+    }
+    if((Get-ExactFileSha256 -Path $full) -cne $expected){
+      throw 'R131_JOURNAL_PUBLISHED_READBACK_MISMATCH'
+    }
+  }finally{
+    if($null -ne $stream){$stream.Dispose()}
+    if(Test-Path -LiteralPath $stage){
+      Remove-Item -LiteralPath $stage -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+
 function Confirm-SpicetifyMigrationApplied {
   param($Txn)
   if(-not [bool]$Txn.migration_required){return $Txn}
@@ -309,6 +370,14 @@ def main():
     } elseif ([bool]$txn.apply_attempted) {
         $restoreApply=Invoke-NativeCapture -FilePath $targetExe -Arguments @('apply','--no-restart')""","restore_bytes_instead_of_reapply")
     ]);replacements.append(("Rollback-SpicetifyCliTransaction",)+replay)
+    text,replay=splice_fn(text,"Save-SpicetifyTransaction",[
+      ("""$Transaction | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $SpicetifyTransactionPath -Encoding UTF8
+    $Transaction | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $SpicetifyTransactionReport -Encoding UTF8""",
+       """$json=$Transaction | ConvertTo-Json -Depth 8
+    Write-SpicetifyJournalJsonAtomic -Path $SpicetifyTransactionPath -Json $json
+    Write-SpicetifyJournalJsonAtomic -Path $SpicetifyTransactionReport -Json $json""",
+       "atomic_primary_then_report")
+    ]);replacements.append(("Save-SpicetifyTransaction",)+replay)
     text,replay=splice_fn(text,"Commit-SpicetifyCliTransaction",[
       ("""foreach($leftover in @([string]$txn.same_dir_old_root,[string]$txn.same_dir_new_root))""",
        """if([bool]$txn.migration_required){
@@ -357,7 +426,7 @@ def main():
     print("R131_OLD_CLI_BACKUP_PREIMAGE_BEFORE_SWAP=PASS")
     print("R131_OFFICIAL_RESTORE_BACKUP_APPLY_PATH=PASS")
     print("R131_PREIMAGE_ROLLBACK_AND_JOURNAL_FIELDS=PASS")
-    print("R131_ONLY_FOUR_FUNCTIONS_AND_FOUR_NEW_HELPERS_CHANGED=PASS")
+    print("R131_FIVE_FUNCTIONS_AND_FIVE_NEW_HELPERS_CHANGED=PASS")
     print("R131_PUBLIC_MAIN_AND_OWNER_FILES=UNCHANGED")
     print("R131_CANDIDATE_SHA256="+sha(b))
 
