@@ -251,6 +251,17 @@ def main():
     replace='    [string]$AgentEvent = "Manual",\n    [string]$OwnerOnceApproval = "",\n    [switch]$Force'
     check(t.count(prefix)==1,"PARAMETER_PREFIX_MISMATCH")
     t=t.replace(prefix,replace,1)
+    # The product enters a fresh process on each owner or agent invocation;
+    # no process-local approval may survive by default.
+    global_old="$AgentMutationDefault = $false\n"
+    global_new="""$AgentMutationDefault = $false
+$script:R135ActiveOwnerAttempt = $false
+$script:R135AttemptCalls = 0
+$script:R135ClaimSHA = $null
+$script:R135OwnerId = $null
+"""
+    check(t.count(global_old)==1,"GLOBAL_APPROVAL_DEFAULT_ANCHOR")
+    t=t.replace(global_old,global_new,1)
     choices='"GuardUpdates","Status")]'
     check(t.count(choices)==1,"ACTION_CHOICES_MISMATCH")
     t=t.replace(choices,'"GuardUpdates","Status","OwnerSpicetifyOnce")]',1)
@@ -268,6 +279,7 @@ def main():
 
 ""","",1)
     rev=rev.replace('"GuardUpdates","Status","OwnerSpicetifyOnce")]','"GuardUpdates","Status")]',1)
+    rev=rev.replace(global_new,global_old,1)
     rev=rev.replace(replace,prefix,1)
     rev=rev.replace(HELPERS+marker,marker,1)
     for name,old,new in reversed(changes):
