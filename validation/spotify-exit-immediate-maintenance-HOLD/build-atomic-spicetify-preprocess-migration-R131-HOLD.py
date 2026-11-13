@@ -271,9 +271,83 @@ def main():
            -not [bool]$txn.post_apply_guard_succeeded){
             throw 'R131_COMMIT_MIGRATION_INCOMPLETE'
         }
+        # PSCustomObject is a reference type: retain the ORIGINAL durable
+        # after-image pins before recomputing manifest fields in place.
+        $pinnedApps=[string]$txn.migration_apps_after_sha256
+        $pinnedRoaming=[string]$txn.migration_spicetify_after_sha256
+        if($pinnedApps -cnotmatch '^[a-f0-9]{64}
+            throw 'R131_COMMIT_EXTERNAL_AFTER_TREE_CHANGED'
+        }
+    }
+    foreach($leftover in @([string]$txn.same_dir_old_root,[string]$txn.same_dir_new_root))""","durable_external_commit_proof")
+    ]);replacements.append(("Commit-SpicetifyCliTransaction",)+replay)
+    marker="\nfunction Start-SpicetifyCliTransaction {"
+    fail(text.count(marker)==1 and text.count("function New-SpicetifyMigrationPreimage")==0,
+         "HELPER_INSERTION_NOT_UNIQUE")
+    text=text.replace(marker,HELPERS+marker,1)
+    fail("restore','backup','apply','--no-restart" in text,"OFFICIAL_MIGRATION_MISSING")
+    fail("R131_PREPROCESSOR_PREIMAGE_INVALID" in text,"PREIMAGE_ADMISSION_MISSING")
+    # Exact reverse modified function bodies; prevents accidental unrelated edits.
+    reverse=text.replace(HELPERS+marker,marker,1)
+    for name,old,new in reversed(replacements):
+        fail(reverse.count(new)==1,"REVERSE_NEW_BODY_NOT_UNIQUE_"+name)
+        reverse=reverse.replace(new,old,1)
+    fail(reverse==original,"UNRELATED_SOURCE_CHANGED")
+    b=bom+text.replace("\n",newline).encode("utf-8")
+    fail(not OUT.exists(),"OUTPUT_ALREADY_EXISTS")
+    OUT.parent.mkdir(parents=True,exist_ok=True)
+    with OUT.open("xb") as fh:fh.write(b)
+    fail(sha(OUT.read_bytes())==sha(b),"OUTPUT_HASH_MISMATCH")
+    print("R131_PARENT_R130_SHA=PASS")
+    print("R131_OLD_CLI_BACKUP_PREIMAGE_BEFORE_SWAP=PASS")
+    print("R131_OFFICIAL_RESTORE_BACKUP_APPLY_PATH=PASS")
+    print("R131_PREIMAGE_ROLLBACK_AND_JOURNAL_FIELDS=PASS")
+    print("R131_ONLY_FOUR_FUNCTIONS_AND_FOUR_NEW_HELPERS_CHANGED=PASS")
+    print("R131_PUBLIC_MAIN_AND_OWNER_FILES=UNCHANGED")
+    print("R131_CANDIDATE_SHA256="+sha(b))
+
+if __name__=="__main__":
+    main()
+ -or
+           $pinnedRoaming -cnotmatch '^[a-f0-9]{64}
+            throw 'R131_COMMIT_EXTERNAL_AFTER_TREE_CHANGED'
+        }
+    }
+    foreach($leftover in @([string]$txn.same_dir_old_root,[string]$txn.same_dir_new_root))""","durable_external_commit_proof")
+    ]);replacements.append(("Commit-SpicetifyCliTransaction",)+replay)
+    marker="\nfunction Start-SpicetifyCliTransaction {"
+    fail(text.count(marker)==1 and text.count("function New-SpicetifyMigrationPreimage")==0,
+         "HELPER_INSERTION_NOT_UNIQUE")
+    text=text.replace(marker,HELPERS+marker,1)
+    fail("restore','backup','apply','--no-restart" in text,"OFFICIAL_MIGRATION_MISSING")
+    fail("R131_PREPROCESSOR_PREIMAGE_INVALID" in text,"PREIMAGE_ADMISSION_MISSING")
+    # Exact reverse modified function bodies; prevents accidental unrelated edits.
+    reverse=text.replace(HELPERS+marker,marker,1)
+    for name,old,new in reversed(replacements):
+        fail(reverse.count(new)==1,"REVERSE_NEW_BODY_NOT_UNIQUE_"+name)
+        reverse=reverse.replace(new,old,1)
+    fail(reverse==original,"UNRELATED_SOURCE_CHANGED")
+    b=bom+text.replace("\n",newline).encode("utf-8")
+    fail(not OUT.exists(),"OUTPUT_ALREADY_EXISTS")
+    OUT.parent.mkdir(parents=True,exist_ok=True)
+    with OUT.open("xb") as fh:fh.write(b)
+    fail(sha(OUT.read_bytes())==sha(b),"OUTPUT_HASH_MISMATCH")
+    print("R131_PARENT_R130_SHA=PASS")
+    print("R131_OLD_CLI_BACKUP_PREIMAGE_BEFORE_SWAP=PASS")
+    print("R131_OFFICIAL_RESTORE_BACKUP_APPLY_PATH=PASS")
+    print("R131_PREIMAGE_ROLLBACK_AND_JOURNAL_FIELDS=PASS")
+    print("R131_ONLY_FOUR_FUNCTIONS_AND_FOUR_NEW_HELPERS_CHANGED=PASS")
+    print("R131_PUBLIC_MAIN_AND_OWNER_FILES=UNCHANGED")
+    print("R131_CANDIDATE_SHA256="+sha(b))
+
+if __name__=="__main__":
+    main()
+){
+            throw 'R131_COMMIT_EXTERNAL_AFTER_PINS_MISSING'
+        }
         $current=Confirm-SpicetifyMigrationApplied $txn
-        if([string]$current.migration_apps_after_sha256 -cne [string]$txn.migration_apps_after_sha256 -or
-           [string]$current.migration_spicetify_after_sha256 -cne [string]$txn.migration_spicetify_after_sha256){
+        if([string]$current.migration_apps_after_sha256 -cne $pinnedApps -or
+           [string]$current.migration_spicetify_after_sha256 -cne $pinnedRoaming){
             throw 'R131_COMMIT_EXTERNAL_AFTER_TREE_CHANGED'
         }
     }
