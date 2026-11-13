@@ -26,7 +26,8 @@ $out=New-Object 'System.Collections.Generic.List[string]'
 [void]$out.Add('SPOTIFY_OR_SPICETIFY_UPDATE=NO')
 [void]$out.Add('AUTO_RETRY=NO')
 
-function Hash([string]$p){
+function Hash {
+  param([string]$p)
   if(-not(Test-Path -LiteralPath $p -PathType Leaf)){return $null}
   return (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()
 }
@@ -68,24 +69,26 @@ function GetCandidateBytes {
   $wc=New-Object Net.WebClient
   try{return $wc.DownloadData($newUrl)}finally{$wc.Dispose()}
 }
-function BytesSha([byte[]]$bytes){
+function BytesSha {
+  param([byte[]]$bytes)
   $h=[Security.Cryptography.SHA256]::Create()
   try{return ([BitConverter]::ToString($h.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}
   finally{$h.Dispose()}
 }
-function Acquire([string]$purpose){
+function Acquire {
+  param([string]$purpose)
   $sid=if($SyntheticHostTest){'SYNTHETIC'}else{[Security.Principal.WindowsIdentity]::GetCurrent().User.Value}
   $safe=([string]$sid -replace '[^A-Za-z0-9]','_')
-  $m=[Threading.Mutex]::new($false,("Local\SpotifyControl-{0}-{1}" -f $purpose,$safe))
-  try{$ok=$m.WaitOne(0,$false)}catch[Threading.AbandonedMutexException]{$ok=$true}
+  $m=[System.Threading.Mutex]::new($false,("Local\SpotifyControl-{0}-{1}" -f $purpose,$safe))
+  try{$ok=$m.WaitOne(0,$false)} catch [System.Threading.AbandonedMutexException] {$ok=$true}
   if(-not $ok){$m.Dispose();return $null}
   return $m
 }
-function Release([ref]$m){
-  if($null -ne $m.Value){
-    try{$m.Value.ReleaseMutex()}catch{}
-    $m.Value.Dispose()
-    $m.Value=$null
+function Release-Mutex {
+  param($Mutex)
+  if($null -ne $Mutex){
+    try{$Mutex.ReleaseMutex()}catch{}
+    $Mutex.Dispose()
   }
 }
 function ReadEnabledState {
@@ -204,8 +207,8 @@ try{
   # New R139 must acquire the product mutexes itself. Release the wrapper
   # locks only after the source swap is verified. Until its durable receipt
   # plus enabled state exist, R139 remains fail-closed on the old R135 claim.
-  Release ([ref]$agent)
-  Release ([ref]$maintenance)
+  Release-Mutex $agent; $agent=$null
+  Release-Mutex $maintenance; $maintenance=$null
 
   if($SyntheticHostTest){
     if([string]$env:R139_TEST_ENABLE_RESULT -ceq 'PASS'){
@@ -293,8 +296,8 @@ try{
   [void]$out.Add("HOLD_CLASS=$reason")
   [void]$out.Add('RESULT=HOLD_NO_AUTO_RETRY')
 }finally{
-  Release ([ref]$agent)
-  Release ([ref]$maintenance)
+  Release-Mutex $agent; $agent=$null
+  Release-Mutex $maintenance; $maintenance=$null
   $receipt=$out.ToArray() -join [Environment]::NewLine
   if(-not $SyntheticHostTest){try{Set-Clipboard -Value $receipt -ErrorAction Stop}catch{}}
   Write-Output $receipt
