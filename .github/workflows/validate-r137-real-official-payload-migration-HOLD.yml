@@ -28,10 +28,14 @@ jobs:
              $digest -cne '4ac4e4ccb48c57b59b9fe87d688df76dd823998e5e791f4ed877c289175e7d99'){
             throw 'R137_ACTUAL_OFFICIAL_PAYLOAD_SOURCE_NOT_EXACT'
           }
-          $source=[Text.Encoding]::UTF8.GetString($raw)
+          $source=[Text.Encoding]::UTF8.GetString($raw).TrimStart([char]0xFEFF)
           $tokens=$null;$errors=$null
           $ast=[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
-          if(@($errors).Count -ne 0){throw 'R137_SOURCE_PARSE_ERRORS'}
+          if(@($errors).Count -ne 0){
+            Write-Host ('R137_PRODUCT_PARSE_ERROR_COUNT='+@($errors).Count)
+            Write-Host ('R137_PRODUCT_PARSE_ERROR_ID='+[string]$errors[0].ErrorId)
+            throw 'R137_SOURCE_PARSE_ERRORS'
+          }
           $names=@(
             'ConvertTo-NativeQuotedArgument','Invoke-NativeCapture',
             'Test-UsablePath','Get-ExactFileSha256','Get-StringSha256',
