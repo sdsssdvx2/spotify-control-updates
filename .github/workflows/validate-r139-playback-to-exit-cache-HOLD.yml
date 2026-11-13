@@ -1,0 +1,177 @@
+name: HOLD R139 playback-to-exit cached handoff
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - validation/spotify-exit-immediate-maintenance-HOLD/spotify-control-R139-SafeAutoAfterR135-HOLD.ps1
+      - .github/workflows/validate-r139-playback-to-exit-cache-HOLD.yml
+permissions: {contents: read}
+jobs:
+  playback-to-exit:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: PS5.1 warm while playing then reuse exact ZIP after Spotify exit
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $source='validation/spotify-exit-immediate-maintenance-HOLD/spotify-control-R139-SafeAutoAfterR135-HOLD.ps1'
+          $tokens=$null;$errors=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile($source,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R139_INTEGRATED_PARSE_FAIL'}
+          $names=@(
+            'Get-R138AssetKey','Get-R138AssetCache','Save-R138AssetCache',
+            'Invoke-R138PlaybackWarm','Expand-AndValidateSpicetifyAsset',
+            'Join-SpicetifyRelativePath','Invoke-ResidentAgentTick'
+          )
+          $defs=@($ast.FindAll({
+            param($n)
+            $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -cin $names
+          },$true))
+          if($defs.Count -ne $names.Count){throw 'R139_INTEGRATED_FUNCTIONS_MISSING'}
+          . ([ScriptBlock]::Create((@($defs|ForEach-Object{$_.Extent.Text}) -join [Environment]::NewLine)))
+
+          $work=Join-Path $env:RUNNER_TEMP ('R139-Integrated-'+[guid]::NewGuid().ToString('N'))
+          $script:Root=Join-Path $work 'SpotifyControl'
+          $script:ScriptVersion='0.6.30'
+          $script:spotifyRunning=$true
+          $script:networkCalls=0
+          $script:networkForbidden=$false
+          $script:maintainCalls=0
+          $script:LastResidentMutationPhaseEntered=$false
+          $script:LastResidentDiscoveryRan=$false
+          $script:AgentDiscoveryIntervalHours=12
+          $script:AgentReport=Join-Path $script:Root 'agent.json'
+          $script:state=[pscustomobject]@{
+            agent_mutation_enabled=$true;pending_maintenance=$true
+            maintenance_check_healthy=$true;pending_addon_auto_ambiguous=0
+            pending_addon_nonauto_ambiguous=0
+            last_check_only_utc='fresh';last_agent_tick_utc=$null
+            last_agent_event=$null;last_agent_decision='before';agent_version='0.1.1'
+            pending_reasons=@('spicetify-cli-update')
+          }
+
+          function New-ZipFixture {
+            param([string]$Version,[string]$ZipPath)
+            $payload=Join-Path $work ('payload-'+$Version)
+            foreach($d in @('CustomApps','Extensions','Themes','jsHelper')){
+              [void](New-Item -ItemType Directory -Force -Path (Join-Path $payload $d))
+              [IO.File]::WriteAllText((Join-Path $payload ($d+'\fixture.txt')),($d+'-'+$Version))
+            }
+            [IO.File]::WriteAllBytes((Join-Path $payload 'spicetify.exe'),(New-Object byte[] 1049600))
+            [IO.File]::WriteAllText((Join-Path $payload 'globals.d.ts'),'globals-'+$Version)
+            [IO.File]::WriteAllText((Join-Path $payload 'css-map.json'),'{}')
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            [IO.Compression.ZipFile]::CreateFromDirectory($payload,$ZipPath,[IO.Compression.CompressionLevel]::Fastest,$false)
+          }
+          function New-Release {
+            param([string]$Version,[string]$ZipPath)
+            $sha=(Get-FileHash $ZipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $asset='spicetify-'+$Version+'-windows-x64.zip'
+            return [pscustomobject]@{
+              Verified=$true;Version=$Version;Tag=('v'+$Version);Architecture='x64'
+              AssetName=$asset;AssetUrl=('https://github.com/spicetify/cli/releases/download/v'+$Version+'/'+$asset)
+              AssetDigest=('sha256:'+$sha);AssetSize=(Get-Item $ZipPath).Length
+              Fixture=$ZipPath
+            }
+          }
+          function Get-ExactFileSha256 {
+            param([string]$Path)
+            if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null}
+            return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+          }
+          function Invoke-WebRequest {
+            param([string]$Uri,$Headers,[string]$OutFile,[switch]$UseBasicParsing,[int]$TimeoutSec)
+            if($script:networkForbidden){throw 'NETWORK_REDOWNLOAD_FORBIDDEN_AFTER_WARM'}
+            $script:networkCalls++
+            $match=[regex]::Match($Uri,'/v(?<v>\d+\.\d+\.\d+)/spicetify-')
+            if(-not $match.Success){throw 'UNEXPECTED_FIXTURE_URI'}
+            [IO.File]::Copy($script:releases[$match.Groups['v'].Value].Fixture,$OutFile)
+          }
+          function Get-SpicetifyReleaseInfoForVersion {param($Version);return $script:releases[$Version]}
+          function Test-SpotifyRunning {return [bool]$script:spotifyRunning}
+          function Invoke-NativeCapture {
+            param($FilePath,$Arguments)
+            return [pscustomobject]@{ExitCode=0;Output=$script:activeVersion;StdOut=$script:activeVersion;StdErr=''}
+          }
+          function Get-SpicetifyRootManifest {
+            param([string]$Path)
+            $files=@(Get-ChildItem -LiteralPath $Path -File -Recurse)
+            return [pscustomobject]@{TreeSha256=('a'*64);FileCount=$files.Count;Rows=@()}
+          }
+          function Enter-SpotifyControlMutex {param($Purpose);return [pscustomobject]@{Purpose=$Purpose}}
+          function Exit-SpotifyControlMutex {param($Mutex)}
+          function Ensure-StateShape {param($State);return $State}
+          function Load-State {return $script:state}
+          function Save-State {param($State);$script:state=$State}
+          function Migrate-StateFromLog {param($State);return $State}
+          function Test-DueHours {return $false}
+          function Write-Log {param($Message,$Level)}
+          function Invoke-MaintenanceCheckPhase {
+            param($State)
+            return [pscustomobject]@{
+              State=$State;GuardPlan=[pscustomobject]@{}
+              Report=[pscustomobject]@{phase='check-only';healthy=$true}
+            }
+          }
+          function Maintain {
+            param([switch]$FromResidentAgent,$VerifiedAgentCheck)
+            if(-not $FromResidentAgent){throw 'EXPECTED_EXIT_RESIDENT_HANDOFF'}
+            $script:maintainCalls++
+            $script:activeVersion='2.46.8'
+            $applyWork=Join-Path $work 'after-exit-apply'
+            [void](New-Item -ItemType Directory -Force -Path $applyWork)
+            $expanded=Expand-AndValidateSpicetifyAsset -ReleaseInfo $script:releases['2.46.8'] -WorkRoot $applyWork
+            if([string]$expanded.ActualDigest -cne [string]$script:releases['2.46.8'].AssetDigest -or
+               [string]$expanded.Version -cne '2.46.8'){
+              throw 'CACHED_EXPANSION_NOT_EXACT'
+            }
+            $script:LastResidentMutationPhaseEntered=$true
+          }
+
+          try{
+            [void](New-Item -ItemType Directory -Force -Path $script:Root)
+            $zOld=Join-Path $work 'old.zip';$zNew=Join-Path $work 'new.zip'
+            New-ZipFixture '2.46.7' $zOld
+            New-ZipFixture '2.46.8' $zNew
+            $old=New-Release '2.46.7' $zOld
+            $new=New-Release '2.46.8' $zNew
+            $script:releases=@{'2.46.7'=$old;'2.46.8'=$new}
+
+            # Playing: discovery may prefetch exact official ZIPs, but no CLI/apply is run.
+            $disc=[pscustomobject]@{Report=[pscustomobject]@{
+              phase='check-only';healthy=$true
+              spicetify=[pscustomobject]@{
+                upgrade_pending=$true;install_mode='official-localappdata'
+                installed_version='2.46.7';latest_tag='v2.46.8';latest_digest=$new.AssetDigest
+              }
+            }}
+            $warm=Invoke-R138PlaybackWarm -Discovery $disc
+            if($warm -cne 'rollback=verified-new;candidate=verified-new' -or $script:networkCalls -ne 2){
+              throw 'PLAYBACK_WARM_NOT_COMPLETE'
+            }
+            if(-not(Test-SpotifyRunning)){throw 'PLAYBACK_WAS_INTERRUPTED'}
+            $oldCache=Get-R138AssetCache -Release $old
+            $newCache=Get-R138AssetCache -Release $new
+            if(-not $oldCache -or -not $newCache){throw 'CACHE_NOT_VERIFIED_AFTER_WARM'}
+
+            # Closed: resident handoff uses cache; any network attempt is a test failure.
+            $script:networkForbidden=$true
+            $script:spotifyRunning=$false
+            Invoke-ResidentAgentTick -EventName 'SpotifyExit'
+            if($script:maintainCalls -ne 1 -or -not $script:LastResidentMutationPhaseEntered){
+              throw 'EXIT_HANDOFF_NOT_EXECUTED'
+            }
+            if($script:networkCalls -ne 2){throw 'EXIT_PATH_REDOWLOADED_WARMED_ZIP'}
+
+            Write-Host 'R139_PLAYBACK_SESSION_UNINTERRUPTED=PASS'
+            Write-Host 'R139_OFFICIAL_ROLLBACK_AND_TARGET_ZIPS_WARMED=PASS'
+            Write-Host 'R139_SPOTIFY_EXIT_EVENT_HANDOFF=PASS'
+            Write-Host 'R139_EXIT_TARGET_ZIP_CACHE_REUSE=PASS'
+            Write-Host 'R139_EXIT_ADDITIONAL_NETWORK_CALLS=0'
+            Write-Host 'RESULT=R139_PLAYBACK_TO_EXIT_CACHED_HANDOFF_PASS'
+          } finally {
+            if(Test-Path -LiteralPath $work){Remove-Item -LiteralPath $work -Recurse -Force}
+          }
