@@ -233,6 +233,9 @@ try{
        (HFile $backup) -cne $script:AcceptedOwnerMainSha){
       throw 'R133_NEW_SOURCE_OR_SNAPSHOT_READBACK_INVALID'
     }
+    if($SyntheticHostedFixture -and $env:R133_TEST_ABORT_AFTER_SOURCE_SWAP -ceq 'YES'){
+      throw 'R133_SYNTHETIC_FAULT_AFTER_ATOMIC_SOURCE_SWAP'
+    }
     # Same-thread Mutex.WaitOne is recursive; R132's nested acquisitions
     # are released by R132, while the outer R133 transaction stays locked.
     $script:Phase='R132_OWNER_PREIMAGE_ADOPTION'
@@ -271,7 +274,8 @@ try{
     Emit 'BLOCK_CLASS' 'SOURCE_FETCH_OR_PARSER'
   }
   if($script:Published -and -not $script:Adopted){
-    Release-Locks
+    # Keep the same owner mutexes while restoring the prior pinned source.
+    # Try-SafeRestore reacquires them on this same thread, then releases all.
     Try-SafeRestore
   }
   Emit 'RESULT' $(if($script:Published){'HOLD_AFTER_SOURCE_CUTOVER_REVIEW_REQUIRED'}else{'HOLD_NO_OPERATING_CUTOVER'})
