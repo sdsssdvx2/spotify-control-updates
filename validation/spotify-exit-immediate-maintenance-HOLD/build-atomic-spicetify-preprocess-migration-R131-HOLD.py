@@ -278,7 +278,10 @@ def main():
            $pinnedRoaming -cnotmatch '^[a-f0-9]{64}$'){
             throw 'R131_COMMIT_EXTERNAL_AFTER_PINS_MISSING'
         }
-        $current=Confirm-SpicetifyMigrationApplied $txn
+        # Probe a detached in-memory copy: a rejected commit must not
+        # overwrite pinned expectations even for a later invocation.
+        $probe=$txn | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+        $current=Confirm-SpicetifyMigrationApplied $probe
         if([string]$current.migration_apps_after_sha256 -cne $pinnedApps -or
            [string]$current.migration_spicetify_after_sha256 -cne $pinnedRoaming){
             throw 'R131_COMMIT_EXTERNAL_AFTER_TREE_CHANGED'
