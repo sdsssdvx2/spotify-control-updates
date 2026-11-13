@@ -305,12 +305,31 @@ try {
     $statePath=Join-Path $root 'state.json'
     $Phase='READONLY_PREFLIGHT'
     StopRunningCondition
+    # The owner may already have the exact, previously verified R112 bytes
+    # installed. A repeated source swap is unnecessary and could overwrite
+    # a legitimate current main during an otherwise read-only preflight.
+    # Only the TWO pinned identities below are accepted; no unknown variant.
+    if(-not(Regular $script:OriginalMain 500000)){
+      Fail 'R125_MAIN_NOT_REGULAR_OR_MISSING'
+    }
+    $mainPreflightSHA=HashFile $script:OriginalMain
+    $mainMode=switch ($mainPreflightSHA) {
+      $OriginalSHA { 'ORIGINAL_V0630'; break }
+      $CandidateSHA { 'R112_ALREADY_INSTALLED'; break }
+      default { 'OTHER_OR_UNTRUSTED' }
+    }
+    Emit 'R125_MAIN_PREEXISTING_CLASS' $mainMode
+    if($mainMode -ceq 'OTHER_OR_UNTRUSTED'){
+      Fail 'R125_MAIN_UNRECOGNIZED_NO_OVERWRITE'
+    }
     foreach($x in @(
-      @($script:OriginalMain,500000,$OriginalSHA),
-      @($agent,200000,$AgentSHA),@($addon,500000,$AddonSHA),
-      @($boot,100000,$BootSHA),@($cli,40000000,$OldCliSHA))){
-      if(-not(Regular ([string]$x[0]) ([long]$x[1])) -or
-         (HashFile ([string]$x[0])) -cne ([string]$x[2])){
+      @('AGENT',$agent,200000,$AgentSHA),
+      @('ADDON',$addon,500000,$AddonSHA),
+      @('BOOTSTRAP',$boot,100000,$BootSHA),
+      @('SPICETIFY',$cli,40000000,$OldCliSHA))){
+      if(-not(Regular ([string]$x[1]) ([long]$x[2])) -or
+         (HashFile ([string]$x[1])) -cne ([string]$x[3])){
+        Emit 'R125_FAILED_FILE_CLASS' ([string]$x[0])
         Fail 'R125_OPERATING_FILE_EXACT_SHA_REQUIRED'
       }
     }
@@ -346,16 +365,26 @@ try {
     # not an approval grant, and not proof of currently due maintenance.
     # The pinned product's fresh check and guarded admission remain mandatory.
     $oldBytes=[IO.File]::ReadAllBytes($script:OriginalMain)
-    $script:PatchedMain=PatchExactR112 $oldBytes
-    Emit 'R125_R112_PATCH' 'EXACT_SOURCE_BYTES_PROVEN'
+    if((HashBytes $oldBytes) -cne $mainPreflightSHA){
+      Fail 'R125_MAIN_CHANGED_DURING_READ'
+    }
+    if($mainMode -ceq 'ORIGINAL_V0630'){
+      $script:PatchedMain=PatchExactR112 $oldBytes
+      Emit 'R125_R112_PATCH' 'EXACT_SOURCE_BYTES_PROVEN'
+    }else{
+      $script:PatchedMain=$null
+      Emit 'R125_R112_PATCH' 'ALREADY_PINNED_NO_MAIN_WRITE'
+    }
     $Phase='BACKUP_STAGING'
     $script:StageRoot=Join-Path $env:LOCALAPPDATA ('SpotifyControl-R125-Recovery-'+([guid]::NewGuid().ToString('N')))
     if(Test-Path $script:StageRoot){Fail 'R125_RECOVERY_PATH_COLLISION'}
     [void][IO.Directory]::CreateDirectory($script:StageRoot)
-    $persistent=Join-Path $script:StageRoot 'ORIGINAL-v0630-RETAIN.ps1'
+    $persistent=Join-Path $script:StageRoot 'PREEXISTING-MAIN-SHA-PINNED.ps1'
     [IO.File]::WriteAllBytes($persistent,$oldBytes)
-    if((HashFile $persistent) -cne $OriginalSHA){Fail 'R125_RECOVERY_SOURCE_NOT_VERIFIED'}
-    Emit 'R125_RECOVERY_ORIGINAL' 'SHA_PINNED_AND_RETAINED'
+    if((HashFile $persistent) -cne $mainPreflightSHA){
+      Fail 'R125_RECOVERY_SOURCE_NOT_VERIFIED'
+    }
+    Emit 'R125_PREEXISTING_MAIN_BACKUP' 'SHA_PINNED_AND_RETAINED'
     $Phase='OFFICIAL_RELEASE_PROVENANCE'
     $script:ExpectedNewExe=AuthOfficialRelease $script:StageRoot
     Emit 'R125_OFFICIAL_2467_ZIP_SHA' 'PASS'
@@ -364,9 +393,17 @@ try {
       Fail 'R125_STATE_CHANGED_SINCE_PREFLIGHT'
     }
     $Phase='SOURCE_ATOMIC_SWAP'
-    ReplaceMain $OriginalSHA $script:PatchedMain 'R125-BEFORE-SWAP-ORIGINAL.ps1'
-    $script:SourceSwapped=$true
-    Emit 'R125_TWO_FUNCTION_PUBLICATION' 'EXACT_R112_SHA_PASS'
+    if($mainMode -ceq 'ORIGINAL_V0630'){
+      ReplaceMain $OriginalSHA $script:PatchedMain 'R125-BEFORE-SWAP-ORIGINAL.ps1'
+      $script:SourceSwapped=$true
+      Emit 'R125_TWO_FUNCTION_PUBLICATION' 'EXACT_R112_SHA_PASS'
+    }else{
+      # Check again immediately before the action, but never re-apply R112.
+      if((HashFile $script:OriginalMain) -cne $CandidateSHA){
+        Fail 'R125_EXISTING_R112_CHANGED_BEFORE_AGENT'
+      }
+      Emit 'R125_TWO_FUNCTION_PUBLICATION' 'ALREADY_INSTALLED_NO_SOURCE_WRITE'
+    }
     $Phase='AGENT_ONESHOT'
     $psExe=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $stdout=Join-Path $script:StageRoot 'AgentTick-PRIVATE.stdout'
@@ -417,7 +454,9 @@ try {
     'R125_MAIN_CHANGED_DURING_TRANSACTION','R125_ATOMIC_PUBLICATION_NOT_VERIFIED',
     'R125_TRANSACTION_AND_POSTFLIGHT_NOT_PROVEN','R125_AGENT_ONESHOT_TIMEOUT_UNCERTAIN',
     'R125_R112_TARGET_SHA_MISMATCH','R125_ORIGINAL_MAIN_SHA_MISMATCH',
-    'R125_OWNER_STATE_UNSAFE_OR_NOT_ARMED','R125_STATE_CHANGED_DURING_READ'
+    'R125_OWNER_STATE_UNSAFE_OR_NOT_ARMED','R125_STATE_CHANGED_DURING_READ',
+    'R125_MAIN_NOT_REGULAR_OR_MISSING','R125_MAIN_UNRECOGNIZED_NO_OVERWRITE',
+    'R125_MAIN_CHANGED_DURING_READ','R125_EXISTING_R112_CHANGED_BEFORE_AGENT'
   )
   $reason=if($message -cin $known -or
       $message -match '^R125_PINNED_PATCH_ANCHOR_DRIFT_[A-Z_]+$' -or
@@ -437,7 +476,7 @@ try {
   if($Mode -ceq 'Once' -and $script:SourceSwapped -and -not $script:Succeeded -and -not $script:AgentStarted){
     try{
       if((HashFile $script:OriginalMain) -ceq $CandidateSHA){
-        $originalBytes=[IO.File]::ReadAllBytes((Join-Path $script:StageRoot 'ORIGINAL-v0630-RETAIN.ps1'))
+        $originalBytes=[IO.File]::ReadAllBytes((Join-Path $script:StageRoot 'PREEXISTING-MAIN-SHA-PINNED.ps1'))
         if((HashBytes $originalBytes) -cne $OriginalSHA){Fail 'R125_RECOVERY_SOURCE_CHANGED'}
         ReplaceMain $CandidateSHA $originalBytes 'R125-FAILED-R112-RETAIN.ps1'
         Emit 'R125_MAIN_SOURCE_ROLLBACK' 'ORIGINAL_V0630_SHA_PASS'
