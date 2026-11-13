@@ -234,6 +234,60 @@ function Write-SpicetifyJournalJsonAtomic {
   }
 }
 
+function Assert-SpicetifyOwnerPreimageAdoption {
+    param($Txn)
+    if([string]$Txn.status -cne 'owner-reviewed-preimage' -or
+       -not [bool]$Txn.root_transaction){throw 'R132_ADOPTION_INVALID_STATUS'}
+    $prop=$Txn.PSObject.Properties['owner_reconciliation']
+    if($null -eq $prop -or $null -eq $prop.Value){throw 'R132_ADOPTION_RECEIPT_MISSING'}
+    $a=$prop.Value
+    if([string]$a.schema -cne '1' -or
+       [string]$a.kind -cne 'OWNER_APPROVED_CURRENT_PREIMAGE_NOT_EXTERNAL_ROLLBACK' -or
+       [string]$Txn.id -cnotmatch '^\d{8}-\d{6}-[a-f0-9]{8}$'){
+       throw 'R132_ADOPTION_ID_INVALID'
+    }
+    $root=Join-Path $Root ('owner-recovery\R132-'+[string]$Txn.id)
+    if(-not [string]::Equals([IO.Path]::GetFullPath([string]$a.snapshot_root),
+         [IO.Path]::GetFullPath($root),[StringComparison]::OrdinalIgnoreCase)){
+       throw 'R132_ADOPTION_SNAPSHOT_PATH_INVALID'
+    }
+    $evidence=Join-Path $root 'adoption-evidence.json'
+    if([string]$a.evidence_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
+       (Get-ExactFileSha256 -Path $evidence) -cne [string]$a.evidence_sha256){
+       throw 'R132_ADOPTION_EVIDENCE_SHA_INVALID'
+    }
+    $e=Get-Content -LiteralPath $evidence -Raw -ErrorAction Stop | ConvertFrom-Json
+    if([string]$e.schema -cne '1' -or
+       [string]$e.transaction_id -cne [string]$Txn.id -or
+       [string]$e.evidence_kind -cne 'CURRENT_PREIMAGE_ADOPTED_NOT_HISTORICAL_EXTERNAL_ROLLBACK'){
+       throw 'R132_ADOPTION_EVIDENCE_INVALID'
+    }
+    $orig=Join-Path $root 'original-ledger.json'
+    if([string]$e.ledger_sha256 -cnotmatch '^[a-f0-9]{64}$' -or
+       (Get-ExactFileSha256 -Path $orig) -cne [string]$e.ledger_sha256){
+       throw 'R132_ADOPTION_ORIGINAL_LEDGER_SHA_INVALID'
+    }
+    $before=Get-Content -LiteralPath $orig -Raw -ErrorAction Stop | ConvertFrom-Json
+    if([string]$before.status -cne 'awaiting-guard' -or
+       [string]$before.id -cne [string]$Txn.id -or
+       [string]$before.before_tree_sha256 -cne [string]$Txn.before_tree_sha256 -or
+       [string]$before.before_sha256 -cne [string]$Txn.before_sha256){
+       throw 'R132_ADOPTION_PARENT_MISMATCH'
+    }
+    foreach($pair in @(@('spicetify-roaming','roaming_tree_sha256'),
+                        @('spotify-apps','apps_tree_sha256'))){
+       $pin=[string]$e.([string]$pair[1])
+       if($pin -cnotmatch '^[a-f0-9]{64}$' -or
+          (Get-SpicetifyRootManifest -Path (Join-Path $root ([string]$pair[0]))).TreeSha256 -cne $pin){
+          throw 'R132_ADOPTION_EXTERNAL_COPY_MISMATCH'
+       }
+    }
+    if((Get-SpicetifyRootManifest -Path ([string]$Txn.target_root)).TreeSha256 -cne [string]$Txn.before_tree_sha256){
+       throw 'R132_ADOPTION_LIVE_ROOT_DRIFT'
+    }
+    return $true
+}
+
 function Confirm-SpicetifyMigrationApplied {
   param($Txn)
   if(-not [bool]$Txn.migration_required){return $Txn}
@@ -291,6 +345,13 @@ def main():
     text=original
     replacements=[]
     text,replay=splice_fn(text,"Start-SpicetifyCliTransaction",[
+      ("""if ($existing -and [string]$existing.status -notin @('committed','rolled-back')) { throw "An uncommitted Spicetify transaction already exists: $($existing.id) status=$($existing.status)" }""",
+       """if($existing -and [string]$existing.status -ceq 'owner-reviewed-preimage'){
+        [void](Assert-SpicetifyOwnerPreimageAdoption $existing)
+    }elseif($existing -and [string]$existing.status -notin @('committed','rolled-back')){
+        throw "An uncommitted Spicetify transaction already exists: $($existing.id) status=$($existing.status)"
+    }""",
+       "owner_current_preimage_admission"),
       ("""    if ($upgradeClass -cne 'BACKUP_PREPROCESSOR_CURRENT') {
         throw ('R130_PREPROCESSED_BACKUP_MIGRATION_HOLD:'+$upgradeClass)
     }""",
@@ -372,7 +433,11 @@ def main():
     ]);replacements.append(("Rollback-SpicetifyCliTransaction",)+replay)
     text,replay=splice_fn(text,"Repair-PendingSpicetifyTransaction",[
       ("""Write-Log "Found uncommitted Spicetify transaction $($txn.id) status=$($txn.status); rolling it back before new mutation." 'WARN'""",
-       """if($null -eq $txn.PSObject.Properties['migration_required']){
+       """if([string]$txn.status -ceq 'owner-reviewed-preimage'){
+           [void](Assert-SpicetifyOwnerPreimageAdoption $txn)
+           return $txn
+       }
+       if($null -eq $txn.PSObject.Properties['migration_required']){
            throw 'R131_UNSETTLED_PRE_MIGRATION_LEDGER_OWNER_REVIEW_HOLD'
        }
        if([bool]$txn.migration_required -and -not [bool]$txn.migration_snapshot_ready){
@@ -437,7 +502,7 @@ def main():
     print("R131_OLD_CLI_BACKUP_PREIMAGE_BEFORE_SWAP=PASS")
     print("R131_OFFICIAL_RESTORE_BACKUP_APPLY_PATH=PASS")
     print("R131_PREIMAGE_ROLLBACK_AND_JOURNAL_FIELDS=PASS")
-    print("R131_SIX_FUNCTIONS_AND_FIVE_NEW_HELPERS_CHANGED=PASS")
+    print("R131_SIX_FUNCTIONS_AND_SIX_NEW_HELPERS_CHANGED=PASS")
     print("R131_PUBLIC_MAIN_AND_OWNER_FILES=UNCHANGED")
     print("R131_CANDIDATE_SHA256="+sha(b))
 
