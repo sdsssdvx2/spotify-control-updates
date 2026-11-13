@@ -53,6 +53,11 @@ function Pinned-Download([string]$Name,[string]$Hash,[int64]$Length){
   }
   $enc=[Text.UTF8Encoding]::new($false,$true)
   $text=$enc.GetString($b)
+  # ParseInput does not process the UTF-8 signature like ParseFile.
+  # Strip BOM only from parsed text; keep exact bytes for source SHA/install.
+  if($text.Length -gt 0 -and $text[0] -eq [char]0xFEFF){
+    $text=$text.Substring(1)
+  }
   $astErrors=$null;$astTokens=$null
   [void][Management.Automation.Language.Parser]::ParseInput($text,[ref]$astTokens,[ref]$astErrors)
   if(@($astErrors).Count -ne 0){throw 'R133_REMOTE_SOURCE_PS51_SYNTAX_INVALID'}
