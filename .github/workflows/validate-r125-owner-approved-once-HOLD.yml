@@ -262,4 +262,19 @@ jobs:
               Write-Host ('R125_ACTUAL_LINE='+$safe)
             }
           }
+          $contractNames=@('Get-SpicetifyTransaction','Save-SpicetifyTransaction',
+            'Commit-SpicetifyCliTransaction','Invoke-SpicetifyTransactionalMaintenance',
+            'Invoke-SpicetifyBackupApplyPinnedPrefs','Start-SpicetifyCliTransaction',
+            'Invoke-SpicetifyPreflight')
+          foreach($fn in @($fns | Where-Object {$_.Name -in $contractNames})){
+            Write-Host ('R125_TRANSACTION_FUNCTION='+$fn.Name)
+            $lines=@($fn.Extent.Text -split '\r?\n')
+            $n=0
+            foreach($line in $lines){
+              $n++
+              if($line -match 'transaction|[Ss]tatus|[Ss]uccess|[Cc]ommit|[Bb]ackup|[Aa]pply|[Rr]estore|[Pp]ath|[Cc]onfig|[Pp]reserved|[Pp]ending|[Ss]ha|[Tt]ag|[Vv]ersion|[Mm]etadata|[Ss]pice|[Rr]eturn|[Ee]rror' -and $n -lt 180){
+                Write-Host ('R125_TRANSACTION_LINE='+$fn.Name+'#'+$n+':'+$line.Trim())
+              }
+            }
+          }
           Write-Host 'R125_PRODUCT_FUNCTIONS_INSPECTED_WITHOUT_INVOCATION=PASS'
