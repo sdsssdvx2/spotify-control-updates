@@ -367,3 +367,30 @@ jobs:
           }
           Write-Host 'R125_LEDGER_PATH_EXACT_PRODUCT_CONTRACT=PASS'
           Write-Host 'R125_OWNER_INSTALLATIONS_AND_SECRET_CONTENTS_UNTOUCHED=PASS'
+      - name: Diagnose R126 split-brain rollback ledger from exact product code
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/out/private-stable-ahead-R112/spotify-control.ps1'
+          $txt=[IO.File]::ReadAllText($p,[Text.Encoding]::UTF8)
+          $errors=$null;$tokens=$null
+          $ast=[Management.Automation.Language.Parser]::ParseInput($txt,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -gt 0){throw 'R126_SOURCE_PARSE_FAILURE'}
+          $names=@('Rollback-SpicetifyCliTransaction','Rollback-LegacySpicetifyCliTransaction',
+            'Get-SpicetifyRootManifest','Save-SpicetifyTransaction',
+            'Invoke-SpicetifyTransactionalMaintenance')
+          $fns=@($ast.FindAll({
+            param($x) $x -is [Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -cin $names
+          },$true))
+          if($fns.Count -ne $names.Count){throw 'R126_EXPECTED_REAL_FUNCTIONS_NOT_PRESENT'}
+          foreach($fn in $fns){
+            Write-Host ('R126_EXACT_FN='+$fn.Name)
+            $lines=@($fn.Extent.Text -split '\r?\n')
+            $max=if($fn.Name -eq 'Invoke-SpicetifyTransactionalMaintenance'){145}else{200}
+            for($i=0;$i -lt [Math]::Min($max,$lines.Count);$i++){
+              $line=$lines[$i]
+              if($line.Length -gt 230){$line=$line.Substring(0,230)}
+              Write-Host ('R126_SRC_'+$fn.Name+'_'+($i+1)+'='+$line)
+            }
+          }
+          Write-Host 'R126_REAL_SOURCE_REVIEW_ONLY_NO_PRODUCT_EXECUTION=PASS'
