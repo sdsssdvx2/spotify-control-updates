@@ -11,9 +11,9 @@ Set-StrictMode -Version 2.0
 $script:OldMainSha='b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92232d'
 $script:PatchedR112Sha='beb850064670c078a679585ace25f8071daa88c0b264185c03ef3364329b431b'
 $script:AcceptedOwnerMainSha=$null
-$script:NewMainSha='16db29223a50c9b2a504a543ab01fa898660642904e4be0414b959195bb113b1'
-$script:R132Sha='17dd4b29210f353e6c1094aebc3116446e0867336a4db5c5ee2fb473b0ee8b1c'
-$script:PinnedCommit='a9725238689467360cef8c68cb41509b1120876c'
+$script:NewMainSha='99e1bc36667400fa8fc7a5464ec20d3b4e84ee648e979c746c18d9848b0f47fa'
+$script:R132Sha='01f4b8fb4330877ea7f69ca5f8143448ecdcb1545c815f4d7e0ae8b44bc9ae1a'
+$script:PinnedCommit='0bfce5f0691efae33513b2ae0e0c36d6f2603783'
 $script:Repo='sdsssdvx2/spotify-control-updates'
 $script:Folder='validation/spotify-exit-immediate-maintenance-HOLD/'
 $script:Root=Join-Path $env:LOCALAPPDATA 'SpotifyControl'
@@ -141,7 +141,7 @@ function Invoke-ExactSourceCrashRecovery {
     throw 'R133_RECOVERY_UNAPPROVED_PREIMAGE_SOURCE'
   }
   if((HFile $script:Main) -cne $script:NewMainSha){
-    throw 'R133_RECOVERY_LIVE_NOT_EXPECTED_R131_SOURCE'
+    throw 'R133_RECOVERY_LIVE_NOT_EXPECTED_R134_SOURCE'
   }
   $ledgerBeforeSHA=HFile $script:Ledger
   $tx=Get-Content -LiteralPath $script:Ledger -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
@@ -169,7 +169,7 @@ function Invoke-ExactSourceCrashRecovery {
   }
   Emit 'OWNER_SOURCE' 'R112_OR_ORIGINAL_PREIMAGE_RESTORED'
   Emit 'ORIGINAL_LEDGER' 'UNCHANGED_PENDING_OWNER_REVIEW'
-  Emit 'R131_SOURCE' 'RETAINED_IN_CRASH_RECOVERY_BACKUP'
+  Emit 'R134_SOURCE' 'RETAINED_IN_CRASH_RECOVERY_BACKUP'
   Emit 'SPOTIFY_APPS_AND_CONFIG' 'UNTOUCHED_NOT_VERIFIED_HISTORICAL'
   Emit 'RESULT' 'EXACT_SOURCE_ONLY_RECOVERED_OWNER_REVIEW_REQUIRED'
 }
@@ -222,7 +222,7 @@ try{
     $requiredApproval=$(if($Mode -ceq 'Recover'){
       'APPROVE_R133_CRASH_SOURCE_ONLY_RECOVERY_ONCE'
     }else{
-      'APPROVE_R133_R131_SOURCE_AND_R132_OWNER_ADOPTION_ONCE'
+      'APPROVE_R133_R134_SOURCE_AND_R132_OWNER_ADOPTION_ONCE'
     })
     if($ApprovalPhrase -cne $requiredApproval){
       throw 'R133_EXPLICIT_OWNER_APPROVAL_REQUIRED'
@@ -240,10 +240,10 @@ try{
   $script:Phase='PIN_SOURCES'
   [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
   $script:Phase='PIN_R131_COMPILED_SOURCE'
-  $mainSource=Pinned-Download 'spotify-control-R131-Owner-Candidate-HOLD.ps1' $script:NewMainSha 316638
+  $mainSource=Pinned-Download 'spotify-control-R134-Owner-DefaultHold-HOLD.ps1' $script:NewMainSha 317847
   $script:Phase='PIN_R132_OWNER_SOURCE'
   $ownerSource=Pinned-Download 'owner-r132-current-preimage-adoption-HOLD.ps1' $script:R132Sha 13210
-  Emit 'R131_SOURCE' 'EXACT_PIN_VERIFIED'
+  Emit 'R134_SOURCE' 'EXACT_PIN_VERIFIED'
   Emit 'R132_SOURCE' 'EXACT_PIN_VERIFIED'
   $script:Phase='READ_OWNER_ADMISSION'
   $transactionId=Check-Old-Admission
@@ -324,7 +324,7 @@ try{
       throw 'R133_FINAL_LEDGER_MAIN_BINDING_INVALID'
     }
     $script:Adopted=$true
-    Emit 'R131_MAIN' 'INSTALLED_PIN_VERIFIED'
+    Emit 'R134_MAIN' 'INSTALLED_PIN_VERIFIED'
     Emit 'R132_LEDGER' 'OWNER_REVIEWED_CURRENT_PREIMAGE'
     Emit 'HISTORICAL_SPOTIFY_APPLY_RESTORE' 'NOT_CLAIMED'
     Emit 'NATIVE_SPICETIFY_UPGRADE' 'NOT_EXECUTED'
