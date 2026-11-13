@@ -161,7 +161,7 @@ try{
   if($candidate.Length -ne $newMainSize -or (BytesSha $candidate) -cne $newMainSha){
     throw 'R139_CANDIDATE_SHA_OR_SIZE_MISMATCH'
   }
-  $text=[Text.Encoding]::UTF8.GetString($candidate)
+  $text=([Text.Encoding]::UTF8.GetString($candidate)).TrimStart([char]0xFEFF)
   $tokens=$null;$errors=$null
   [void][Management.Automation.Language.Parser]::ParseInput($text,[ref]$tokens,[ref]$errors)
   if(@($errors).Count -ne 0 -or
