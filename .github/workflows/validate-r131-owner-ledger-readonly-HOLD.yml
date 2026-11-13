@@ -1,0 +1,64 @@
+name: HOLD R131 owner ledger read-only acceptance
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - validation/spotify-exit-immediate-maintenance-HOLD/owner-r131-unsettled-ledger-exact-readonly-HOLD.ps1
+      - .github/workflows/validate-r131-owner-ledger-readonly-HOLD.yml
+permissions: {contents: read}
+jobs:
+  owner-ledger-synthetic:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Inspect Windows syntax and synthetic no-mutation receipt
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/owner-r131-unsettled-ledger-exact-readonly-HOLD.ps1'
+          $errors=$null;$tokens=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($p,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'WITNESS_SYNTAX_INVALID'}
+          $oldLocal=$env:LOCALAPPDATA;$oldApp=$env:APPDATA
+          $scratch=Join-Path $env:RUNNER_TEMP ('R131-Witness-'+[guid]::NewGuid().ToString('N'))
+          $env:LOCALAPPDATA=Join-Path $scratch 'Local'
+          $env:APPDATA=Join-Path $scratch 'Roaming'
+          try {
+            $ctrl=Join-Path $env:LOCALAPPDATA 'SpotifyControl'
+            New-Item -ItemType Directory -Force -Path $ctrl | Out-Null
+            $lines=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $p -NoClipboard)
+            if($LASTEXITCODE -ne 0 -or $lines -notcontains 'RESULT=HOLD_READONLY_INCOMPLETE'){
+              throw 'WITNESS_MISSING_LEDGER_NOT_HELD'
+            }
+            $id='20261113-120000-aabbccdd'
+            $r=Join-Path $env:LOCALAPPDATA 'spicetify'
+            $b=Join-Path $ctrl ('backups\spicetify-transactions\'+$id+'\root-before')
+            foreach($d in @($r,$b,(Join-Path $env:APPDATA 'spicetify'))){
+              New-Item -ItemType Directory -Force -Path $d | Out-Null
+            }
+            [IO.File]::WriteAllBytes((Join-Path $r 'spicetify.exe'),([byte[]]@(77,90,1,2,3)))
+            [IO.File]::WriteAllBytes((Join-Path $b 'spicetify.exe'),([byte[]]@(77,90,1,2,3)))
+            $fi=Join-Path $env:APPDATA 'spicetify\config-xpui.ini'
+            [IO.File]::WriteAllText($fi,('[Backup]'+[Environment]::NewLine+'with=2.46.4'))
+            $t=[pscustomobject]@{
+              schema=3;status='awaiting-guard';id=$id
+              before_version='2.46.4';after_version='2.46.7'
+              before_sha256=((Get-FileHash (Join-Path $r 'spicetify.exe') -Algorithm SHA256).Hash.ToLowerInvariant())
+              after_sha256=('f'*64);before_tree_sha256=('a'*64);after_tree_sha256=('f'*64)
+              backup_root=$b
+            }
+            $t|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $ctrl 'spicetify-last-transaction.json') -Encoding UTF8
+            $lines=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $p -NoClipboard)
+            if($LASTEXITCODE -ne 0 -or $lines -notcontains 'LEDGER=UNSETTLED' -or
+               $lines -notcontains 'BACKUP_WITH=BEFORE' -or
+               $lines -notcontains 'RESULT=HOLD_NOT_RECOVERED'){
+              throw 'WITNESS_SAFE_PARTIAL_EVIDENCE_NOT_CLASSIFIED'
+            }
+            Write-Host 'SYNTHETIC_READONLY_LEDGER_CLASSIFICATION=PASS'
+            Write-Host ('WITNESS_SHA256='+((Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()))
+          }finally {
+            $env:LOCALAPPDATA=$oldLocal;$env:APPDATA=$oldApp
+            if(Test-Path -LiteralPath $scratch){Remove-Item -LiteralPath $scratch -Recurse -Force}
+          }
