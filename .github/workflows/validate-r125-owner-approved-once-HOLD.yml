@@ -101,3 +101,46 @@ jobs:
             Write-Host ('R125_USER_SCOPE_AND_RECEIPT_'+$case.Label+'=PASS')
           }
           Write-Host 'R125_REAL_OWNER_PC_MODIFICATIONS=ZERO_HOSTED_TEST_ONLY'
+      - name: Validate live-status drift admission against exact R125 source helpers
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-StrictMode -Version 2.0
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-r112-spicetify-v2467-onepass-R125-HOLD.ps1'
+          $errors=$null;$tokens=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile($script,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R125_STATE_CONTRACT_SOURCE_SYNTAX'}
+          $names=@('StateClass','StateFlag','StateDecisionClass')
+          $defs=@($ast.FindAll({param($x) $x -is [Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -cin $names},$true))
+          if($defs.Count -ne 3){throw 'R125_STATE_CONTRACT_NOT_EXACT_THREE_FUNCTIONS'}
+          . ([ScriptBlock]::Create((@($defs | ForEach-Object{$_.Extent.Text}) -join [Environment]::NewLine)))
+          $old=[pscustomobject]@{
+            agent_mutation_enabled=$true;pending_addon_auto_ambiguous=0
+            maintenance_check_healthy=$true;pending_maintenance=$false;pending_spicetify_upgrade=$false
+            last_agent_decision='closed-check-not-due'
+          }
+          $drift=[pscustomobject]@{
+            agent_mutation_enabled=$true;pending_addon_auto_ambiguous=0
+            maintenance_check_healthy=$false;pending_maintenance=$true;pending_spicetify_upgrade=$true
+            last_agent_decision='closed-idle-or-not-due'
+          }
+          $ambig=[pscustomobject]@{agent_mutation_enabled=$true;pending_addon_auto_ambiguous=2}
+          $disarmed=[pscustomobject]@{agent_mutation_enabled=$false;pending_addon_auto_ambiguous=0}
+          $unknown=[pscustomobject]@{agent_mutation_enabled=$true}
+          foreach($entry in @(
+            @{name='BASELINE';state=$old;expected='ARMED_FRESH_DISCOVERY_REQUIRED'},
+            @{name='DYNAMIC_STALE_FLAGS';state=$drift;expected='ARMED_FRESH_DISCOVERY_REQUIRED'},
+            @{name='AUTO_AMBIGUITY';state=$ambig;expected='AUTO_AMBIGUITY_PRESENT'},
+            @{name='OWNER_DISARM';state=$disarmed;expected='MUTATION_DISARMED'},
+            @{name='MISSING_AMBIGUITY';state=$unknown;expected='AUTO_AMBIGUITY_UNVERIFIED'}
+          )){
+            $r=StateClass $entry.state
+            if($r -cne $entry.expected){throw ('R125_STATE_CONTRACT_'+$entry.name)}
+            Write-Host ('R125_STATE_'+$entry.name+'=PASS')
+          }
+          if((StateFlag $drift 'maintenance_check_healthy') -cne 'FALSE' -or
+             (StateFlag $drift 'pending_maintenance') -cne 'TRUE' -or
+             (StateDecisionClass $drift) -cne 'closed-idle-or-not-due'){
+            throw 'R125_STATE_CLASSIFICATION_INCORRECT'
+          }
+          Write-Host 'R125_STATE_CLASSIFICATION_ONLY_NOT_UPDATE_AUTHORIZATION=PASS'
