@@ -1,0 +1,137 @@
+name: HOLD R133 pinned source cutover plus R132 real function integration
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - validation/spotify-exit-immediate-maintenance-HOLD/owner-r133-integrated-cutover-once-HOLD.ps1
+      - .github/workflows/validate-r133-integrated-owner-cutover-HOLD.yml
+permissions: {contents: read}
+jobs:
+  scratch-onepass:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Guarded R133 old-owner scratch to real R131 and R132 integration
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/owner-r133-integrated-cutover-once-HOLD.ps1'
+          $errors=$null;$tokens=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($script,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R133_SOURCE_PS51_PARSE_FAILED'}
+          $localBefore=$env:LOCALAPPDATA;$roamBefore=$env:APPDATA
+          $scratch=Join-Path $env:RUNNER_TEMP ('Spotify-R133-Scratch-'+[guid]::NewGuid().ToString('N'))
+          $env:LOCALAPPDATA=Join-Path $scratch 'Local'
+          $env:APPDATA=Join-Path $scratch 'Roaming'
+          try {
+            $root=Join-Path $env:LOCALAPPDATA 'SpotifyControl'
+            $main=Join-Path $root 'bin/spotify-control.ps1'
+            $ledger=Join-Path $root 'spicetify-last-transaction.json'
+            $state=Join-Path $root 'state.json'
+            $live=Join-Path $env:LOCALAPPDATA 'spicetify'
+            $roam=Join-Path $env:APPDATA 'spicetify'
+            $apps=Join-Path $env:APPDATA 'Spotify/Apps'
+            $id='20261113-215000-aabbccdd'
+            $backup=Join-Path $root ('backups/spicetify-transactions/'+$id+'/root-before')
+            foreach($d in @((Split-Path $main -Parent),$live,$backup,$roam,
+                (Join-Path $roam 'Backup'),$apps)){
+              New-Item -ItemType Directory -Force -Path $d | Out-Null
+            }
+            $utf8=New-Object System.Text.UTF8Encoding($false)
+            [IO.File]::WriteAllText($main,'synthetic owner old R112',$utf8)
+            [IO.File]::WriteAllBytes((Join-Path $live 'spicetify.exe'),([byte[]]@(77,90,1,2,3)))
+            [IO.File]::Copy((Join-Path $live 'spicetify.exe'),(Join-Path $backup 'spicetify.exe'))
+            [IO.File]::WriteAllText((Join-Path $roam 'config-xpui.ini'),
+                ("[Backup]"+[Environment]::NewLine+"with=2.46.4"+[Environment]::NewLine),$utf8)
+            [IO.File]::WriteAllText((Join-Path $roam 'Backup/xpui.spa'),'old-normal-backup',$utf8)
+            [IO.File]::WriteAllText((Join-Path $apps 'xpui.spa'),'owner-applied-old-stable',$utf8)
+            $oldSHA=(Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant()
+            $env:R133_TEST_OLD_MAIN_SHA=$oldSHA
+            $fileSHA=(Get-FileHash (Join-Path $live 'spicetify.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+            $row=[pscustomobject]@{path='spicetify.exe';type='file';size=[int64]5;sha256=$fileSHA}
+            $serialize=$row | ConvertTo-Json -Depth 5 -Compress
+            $sha=[Security.Cryptography.SHA256]::Create()
+            try{$treeHash=([BitConverter]::ToString($sha.ComputeHash($utf8.GetBytes($serialize)))).Replace('-','').ToLowerInvariant()}
+            finally {$sha.Dispose()}
+            $oldTransaction=[ordered]@{
+              schema=3;root_transaction=$true;id=$id;status='awaiting-guard'
+              target_root=$live;backup_root=$backup
+              same_dir_old_root=(Join-Path (Split-Path $live -Parent) ('.spotifycontrol-spicetify-old-'+$id))
+              same_dir_new_root=(Join-Path (Split-Path $live -Parent) ('.spotifycontrol-spicetify-new-'+$id))
+              before_tree_sha256=$treeHash;after_tree_sha256=('a'*64)
+              before_sha256=$fileSHA;after_sha256=('b'*64)
+              before_version='2.46.4';after_version='2.46.7'
+            }
+            [IO.File]::WriteAllText($ledger,($oldTransaction|ConvertTo-Json -Depth 8),$utf8)
+            [IO.File]::WriteAllText($state,
+                ([pscustomobject]@{spicetify_last_transaction_id='DIFFERENT_EXISTING_TRANSACTION'}|ConvertTo-Json),$utf8)
+            $ledgerBefore=(Get-FileHash $ledger -Algorithm SHA256).Hash
+            $stateBefore=(Get-FileHash $state -Algorithm SHA256).Hash
+            $plan=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Plan)
+            if($LASTEXITCODE -ne 0 -or $plan -notcontains 'RESULT=CUTOVER_PLAN_READY_NO_OPERATING_WRITES' -or
+                (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldSHA){
+              throw 'R133_OWNER_PLAN_NOT_READY_OR_MUTATED'
+            }
+            $denied=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once)
+            if($LASTEXITCODE -ne 0 -or $denied -notcontains 'RESULT=HOLD_NO_OPERATING_CUTOVER' -or
+                (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldSHA -or
+                (Get-FileHash $ledger -Algorithm SHA256).Hash -cne $ledgerBefore){
+              throw 'R133_MISSING_APPROVAL_MUTATED_OWNER'
+            }
+            $approved=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R131_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
+            if($LASTEXITCODE -ne 0 -or
+               $approved -notcontains 'RESULT=OWNER_CUTOVER_ADOPTED_NO_MODEL_OR_SPICETIFY_CALL'){
+              Write-Host ('R133_APPROVED_ONLY_STATUS='+(@($approved|Where-Object{$_ -match '^(FAILED_PHASE|RESULT|ROLLBACK_SOURCE)='}) -join ';'))
+              throw 'R133_OWNER_ONESHOT_NOT_ADOPTED'
+            }
+            $now=Get-Content -LiteralPath $ledger -Raw | ConvertFrom-Json
+            $ownerArchive=Join-Path $root ('owner-recovery/R132-'+$id)
+            if($now.status -cne 'owner-reviewed-preimage' -or
+               (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                   '16db29223a50c9b2a504a543ab01fa898660642904e4be0414b959195bb113b1' -or
+               (Get-FileHash $state -Algorithm SHA256).Hash -cne $stateBefore -or
+               (Get-FileHash (Join-Path $ownerArchive 'original-ledger.json') -Algorithm SHA256).Hash -cne $ledgerBefore){
+              throw 'R133_PROTECTED_OWNER_STATE_OR_ARCHIVE_DRIFT'
+            }
+            $astErrors=$null;$astTokens=$null
+            $ast=[Management.Automation.Language.Parser]::ParseFile($main,[ref]$astTokens,[ref]$astErrors)
+            if(@($astErrors).Count -ne 0){throw 'R133_DEPLOYED_REAL_MAIN_PS51_PARSE_FAILED'}
+            $names=@('Get-ExactFileSha256','Get-StringSha256',
+                     'Get-SpicetifyRootManifest','Assert-SpicetifyOwnerPreimageAdoption')
+            $defs=@($ast.FindAll({param($node)
+              $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+              $node.Name -cin $names
+            },$true))
+            if($defs.Count -ne $names.Count){throw 'R133_REAL_R131_PROVENANCE_FUNCTIONS_MISSING'}
+            . ([ScriptBlock]::Create((@($defs|ForEach-Object{$_.Extent.Text}) -join [Environment]::NewLine)))
+            function Test-UsablePath {
+              param([string]$Path,[string]$PathType)
+              return (Test-Path -LiteralPath $Path -PathType $PathType)
+            }
+            $script:Root=$root
+            if((Assert-SpicetifyOwnerPreimageAdoption $now) -cne $true){
+              throw 'R133_REAL_PRODUCT_REJECTED_ACTUAL_R132_RECEIPT'
+            }
+            [IO.File]::WriteAllText((Join-Path $ownerArchive 'spotify-apps/xpui.spa'),'BROKEN_BACKUP',$utf8)
+            $blocked=$false
+            try{[void](Assert-SpicetifyOwnerPreimageAdoption $now)}catch{
+              $blocked=$_.Exception.Message -match 'R132_ADOPTION_EXTERNAL_COPY_MISMATCH'
+            }
+            if(-not $blocked){throw 'R133_REAL_R131_ACCEPTED_TAMPERED_OWNER_ARCHIVE'}
+            $again=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R131_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
+            if($LASTEXITCODE -ne 0 -or $again -notcontains 'RESULT=HOLD_NO_OPERATING_CUTOVER'){
+              throw 'R133_OWNER_CUTOVER_REPEAT_NOT_DENIED'
+            }
+            Write-Host 'R133_PINNED_PLAN_AND_APPROVAL_EXACT_OWNER=PASS'
+            Write-Host 'R133_REAL_R131_CANDIDATE_PLUS_REAL_R132_SNAPSHOT_ADOPTION=PASS'
+            Write-Host 'R133_PRODUCT_ADMISSION_REQUIRES_UNTAMPERED_EXTERNAL_BACKUP=PASS'
+            Write-Host 'R133_OWNER_STATE_UNCHANGED_AND_REPETITION_DENIED=PASS'
+          }finally{
+            $env:LOCALAPPDATA=$localBefore;$env:APPDATA=$roamBefore
+            Remove-Item Env:R133_TEST_OLD_MAIN_SHA -ErrorAction SilentlyContinue
+            Remove-Item Env:R132_TEST_MAIN_SHA -ErrorAction SilentlyContinue
+            Remove-Item Env:R132_TEST_CLI_SHA -ErrorAction SilentlyContinue
+            if(Test-Path -LiteralPath $scratch){Remove-Item -LiteralPath $scratch -Recurse -Force}
+          }
