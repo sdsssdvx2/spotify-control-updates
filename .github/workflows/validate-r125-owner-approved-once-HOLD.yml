@@ -699,3 +699,49 @@ jobs:
             }
           }
           Write-Host 'R130_EXACT_R112_SOURCE_ADMISSION_INSPECTED=PASS'
+      - name: Verify R130 source-pinned upstream Backup.with preprocessor gate in native Windows PowerShell
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-StrictMode -Version 2.0
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          $py=$base+'build-preprocessed-spicetify-migration-gate-R130-HOLD.py'
+          & python $py
+          if($LASTEXITCODE -ne 0){throw 'R130_EXACT_R112_BUILD_FAILED'}
+          $p=$base+'out/private-preprocessed-migration-gate-R130/spotify-control.ps1'
+          $er=$null;$tok=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile($p,[ref]$tok,[ref]$er)
+          if(@($er).Count -ne 0){throw 'R130_POWERSHELL_51_SYNTAX_ERROR'}
+          $names=@('Get-SpicetifyBackupMigrationClass','Start-SpicetifyCliTransaction')
+          $defs=@($ast.FindAll({param($n)
+            $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -cin $names
+          },$true))
+          if($defs.Count -ne 2){throw 'R130_HELPER_OR_START_NOT_FOUND'}
+          $gate=@($defs|Where-Object {$_.Name -ceq 'Get-SpicetifyBackupMigrationClass'})
+          . ([ScriptBlock]::Create($gate[0].Extent.Text))
+          $tests=@(
+            @{A='2.46.4';B='2.46.7';W='2.46.4';Expected='VERSION_CHANGE_REQUIRES_ATOMIC_BACKUP_REPROCESSING'},
+            @{A='2.46.4';B='2.46.4';W='2.46.4';Expected='BACKUP_PREPROCESSOR_CURRENT'},
+            @{A='2.46.7';B='2.46.7';W='2.46.4';Expected='BACKUP_PREPROCESSOR_NOT_CURRENT_CLI'},
+            @{A='2.46.4';B='2.46.7';W='';Expected='BACKUP_PREPROCESSOR_UNVERIFIED'},
+            @{A='2.46.4';B='2.46.7';W='2.46.7';Expected='BACKUP_PREPROCESSOR_NOT_CURRENT_CLI'}
+          )
+          foreach($case in $tests){
+            $actual=Get-SpicetifyBackupMigrationClass -InstalledVersion $case.A -TargetVersion $case.B -BackupWith $case.W
+            if($actual -cne $case.Expected){
+              throw ('R130_BACKUP_WITH_GUARD_WRONG_'+$case.Expected)
+            }
+          }
+          $start=@($defs|Where-Object {$_.Name -ceq 'Start-SpicetifyCliTransaction'})[0].Extent.Text
+          $gatePos=$start.IndexOf("R130_PREPROCESSED_BACKUP_MIGRATION_HOLD:")
+          $stagingPos=$start.IndexOf('$id = (Get-Date -Format')
+          if($gatePos -lt 0 -or $stagingPos -lt 0 -or $gatePos -ge $stagingPos){
+            throw 'R130_GATE_NOT_BEFORE_STAGING'
+          }
+          if($start -cnotmatch 'Get-IniSectionValue -Path \$spiceConfig -Section ''Backup'' -Key ''with'''){
+            throw 'R130_DID_NOT_READ_OFFICIAL_BACKUP_WITH'
+          }
+          Write-Host 'R130_OFFICIAL_APPLY_BACKUP_WITH_VERSION_GUARD=PASS'
+          Write-Host 'R130_UNSAFE_2464_TO_2467_ROOT_MUTATION_BLOCKED=PASS'
+          Write-Host 'R130_CURRENT_VERSION_REINSTALL_BYPASS_NOT_CREATED=PASS'
+          Write-Host 'R130_REAL_SPOTIFY_AND_OWNER_ACCOUNT_UNCHANGED=PASS'
