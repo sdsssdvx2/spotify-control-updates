@@ -329,7 +329,8 @@ try {
     $script:TxnForCommit=[pscustomobject]@{
       schema=3;root_transaction=$true;id=$id;status='awaiting-guard'
       target_root=$cliRoot;backup_root=$rootBackup
-      same_dir_old_root='';same_dir_new_root=''
+      same_dir_old_root=(Join-Path $scratch ('NeverExists-Old-'+$id))
+      same_dir_new_root=(Join-Path $scratch ('NeverExists-New-'+$id))
       before_tree_sha256=$old.TreeSha256;after_tree_sha256=$new.TreeSha256
       before_sha256=$oldExeHash;after_sha256=$script:R131AfterExeHash
       before_version='2.46.4';after_version='2.46.7'
