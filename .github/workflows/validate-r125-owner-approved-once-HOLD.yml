@@ -7,6 +7,8 @@ on:
       - validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-r112-spicetify-v2467-onepass-R125-HOLD.ps1
       - validation/spotify-exit-immediate-maintenance-HOLD/build-atomic-spicetify-preprocess-migration-R131-HOLD.py
       - validation/spotify-exit-immediate-maintenance-HOLD/test-atomic-spicetify-preprocess-migration-R131-HOLD.ps1
+      - validation/spotify-exit-immediate-maintenance-HOLD/build-owner-postadoption-default-hold-R134-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/test-owner-postadoption-default-hold-R134-HOLD.ps1
 permissions: {contents: read}
 jobs:
   r125-buildonly:
@@ -868,6 +870,16 @@ jobs:
           # LASTEXITCODE. A stale exit value from unrelated prior steps must
           # not turn a completed PASS into a false failure.
           Write-Host 'R131_EXACT_SCHEMA3_TRANSACTION_COMMIT_AND_EXTERNAL_ROLLBACK_TESTED=PASS'
+      - name: Build exact R134 owner-adoption default-deny overlay from R131 source
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          & python ($base+'build-owner-postadoption-default-hold-R134-HOLD.py')
+          if($LASTEXITCODE -ne 0){throw 'R134_OWNER_GATE_BUILD_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ($base+'test-owner-postadoption-default-hold-R134-HOLD.ps1')
+          if($LASTEXITCODE -ne 0){throw 'R134_OWNER_GATE_REAL_PRODUCT_TEST_FAILED'}
+          Write-Host 'R134_R132_ADOPTION_NO_AUTOMATIC_OR_MANUAL_UPGRADE_WITHOUT_SEPARATE_OWNER_APPROVAL=PASS'
       - name: Pin final generated owner candidate without operating deployment
         shell: powershell
         run: |
