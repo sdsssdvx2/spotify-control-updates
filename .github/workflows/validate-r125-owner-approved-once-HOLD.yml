@@ -192,3 +192,41 @@ jobs:
           }
           Write-Host 'R125_WINDOWS_NATIVE_ATOMIC_ORIGINAL_RECOVERY=PASS'
           Write-Host 'R125_OWNER_PC_AND_SPOTIFY_CONFIGURATION_UNCHANGED=PASS'
+      - name: Confirm exact already-installed R112 identity and no redundant source swap
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-StrictMode -Version 2.0
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          & python ($base+'build-private-stable-ahead-R112-HOLD.py')
+          if($LASTEXITCODE -ne 0){throw 'R125_R112_CANDIDATE_REBUILD_FAILED'}
+          $source=$base+'owner-approved-r112-spicetify-v2467-onepass-R125-HOLD.ps1'
+          $old=$base+'out/release-staging-boot-wmi-R70/bin/spotify-control.ps1'
+          $candidate=$base+'out/private-stable-ahead-R112/spotify-control.ps1'
+          $inputText=[IO.File]::ReadAllText($source,[Text.Encoding]::UTF8)
+          $errors=$null;$tokens=$null
+          $ast=[Management.Automation.Language.Parser]::ParseInput($inputText,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R125_REVISED_SOURCE_PARSER_ERROR'}
+          $fn=@($ast.FindAll({
+            param($x) $x -is [Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -ceq 'MainIdentityClass'
+          },$true))
+          if($fn.Count -ne 1){throw 'R125_IDENTITY_HELPER_NOT_UNIQUE'}
+          $OriginalSHA='b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92232d'
+          $CandidateSHA='beb850064670c078a679585ace25f8071daa88c0b264185c03ef3364329b431b'
+          . ([ScriptBlock]::Create($fn[0].Extent.Text))
+          $oldHash=(Get-FileHash -LiteralPath $old -Algorithm SHA256).Hash.ToLowerInvariant()
+          $candidateHash=(Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant()
+          if((MainIdentityClass $oldHash) -cne 'ORIGINAL_V0630' -or
+             (MainIdentityClass $candidateHash) -cne 'R112_ALREADY_INSTALLED' -or
+             (MainIdentityClass ('0'*64)) -cne 'OTHER_OR_UNTRUSTED'){
+            throw 'R125_PINNED_IDENTITY_WRONG'
+          }
+          if($inputText -cnotmatch "Emit 'R125_TWO_FUNCTION_PUBLICATION' 'ALREADY_INSTALLED_NO_SOURCE_WRITE'" -or
+             $inputText -cnotmatch "if\(\$mainMode -ceq 'ORIGINAL_V0630'\)\{" -or
+             $inputText -cnotmatch "Fail 'R125_EXISTING_R112_CHANGED_BEFORE_AGENT'"){
+            throw 'R125_ALREADY_INSTALLED_BRANCH_UNVERIFIED'
+          }
+          Write-Host 'R125_ORIGINAL_AND_ALREADY_INSTALLED_R112_IDENTITY=PASS'
+          Write-Host 'R125_EXACT_R112_NO_SECOND_MAIN_SWAP_BRANCH=PASS'
+          Write-Host 'R125_UNKNOWN_MAIN_REJECTED=PASS'
+          Write-Host 'R125_REAL_OWNER_PC_UNTOUCHED=PASS'
