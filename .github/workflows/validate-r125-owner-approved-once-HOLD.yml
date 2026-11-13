@@ -535,3 +535,70 @@ jobs:
             Write-Host ('R128_STATIC_PATH='+$line.Trim())
           }
           Write-Host 'R128_SOURCE_INSPECTION_READONLY=PASS'
+      - name: R128 Windows native synthetic offline apply-cause and pristine-file audit
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $script='validation/spotify-exit-immediate-maintenance-HOLD/owner-spicetify-r128-apply-cause-readonly-HOLD.ps1'
+          $errs=$null;$tk=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile($script,[ref]$tk,[ref]$errs)
+          if(@($errs).Count -ne 0){throw 'R128_PS51_SYNTAX_ERROR'}
+          $testRoot=Join-Path $env:RUNNER_TEMP ('Spotify-R128-'+[guid]::NewGuid().ToString('N'))
+          $env:LOCALAPPDATA=Join-Path $testRoot 'LocalAppData'
+          $env:APPDATA=Join-Path $testRoot 'Roaming'
+          $root=Join-Path $env:LOCALAPPDATA 'SpotifyControl'
+          $log=Join-Path $root 'logs'
+          $rep=Join-Path $root 'reports'
+          $config=Join-Path $env:APPDATA 'spicetify'
+          $prefs=Join-Path $env:APPDATA 'Spotify'
+          New-Item -ItemType Directory -Path $log,$rep,$config,$prefs -Force|Out-Null
+          $txn=[pscustomobject]@{id='A';status='awaiting-guard'}
+          $state=[pscustomobject]@{spicetify_last_transaction_id='B';spicetify_last_transaction_status='rolled-back-apply-failure'}
+          $txn|ConvertTo-Json -Compress|Set-Content -LiteralPath (Join-Path $root 'spicetify-last-transaction.json') -Encoding UTF8
+          $txn|ConvertTo-Json -Compress|Set-Content -LiteralPath (Join-Path $rep 'spicetify-transaction-latest.json') -Encoding UTF8
+          $state|ConvertTo-Json -Compress|Set-Content -LiteralPath (Join-Path $root 'state.json') -Encoding UTF8
+          [IO.File]::WriteAllText((Join-Path $config 'config-xpui.ini'),
+              ('[Backup]'+[Environment]::NewLine+'version=1.3.6.1921'+[Environment]::NewLine),
+              [Text.UTF8Encoding]::new($false))
+          [IO.File]::WriteAllText((Join-Path $prefs 'prefs'),
+              ('app.last-launched-version="1.3.6.1921"'+[Environment]::NewLine),
+              [Text.UTF8Encoding]::new($false))
+          [IO.File]::WriteAllText((Join-Path $log 'spotify-control-2026-11-12.log'),
+              ('2026-11-12 23:42:11 [INFO] spicetify apply --no-restart [exit=0]'+[Environment]::NewLine),
+              [Text.UTF8Encoding]::new($false))
+          [IO.File]::WriteAllText((Join-Path $log 'spotify-control-2026-11-13.log'),
+              ('2026-11-13 14:21:04 [WARN] spicetify apply --no-restart [exit=1]: backup metadata invalid: private-file'+[Environment]::NewLine),
+              [Text.UTF8Encoding]::new($false))
+          $files=@(Get-ChildItem -LiteralPath $testRoot -Recurse -File)
+          $before=@($files|ForEach-Object{"$($_.FullName)=$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)"})
+          $ps=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          $output=@(& $ps -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script)
+          $receipt=@(($output -join [Environment]::NewLine) -split '[\r\n]+' |
+                Where-Object {-not [string]::IsNullOrWhiteSpace($_)})
+          foreach($wanted in @(
+            'DIAGNOSTIC=SPOTIFY_R128_APPLY_CAUSE_READONLY',
+            'TRANSACTION_ID_RELATION=DIFFERENT',
+            'STATE_ROLLBACK_APPLY_FAILURE=YES',
+            'LEDGER_AWAITING_GUARD=YES',
+            'REPORT_LEDGER_ID=MATCH',
+            'BACKUP_VERSION_RELATION=BACKUP_AND_PREFS_VERSION_MATCH',
+            'LOG_FILES_SCANNED=2',
+            'APPLY_LOG_ENTRIES_OBSERVED=2',
+            'APPLY_LOG_NONZERO_ENTRIES=1',
+            'LATEST_APPLY_LOG_CLASS=EXIT_NONZERO',
+            'LAST_NONZERO_APPLY_ERROR_CLASS=BACKUP_NOT_ACCEPTED',
+            'RESULT=READONLY_APPLY_CAUSE_CLASSIFIED_NO_RECOVERY',
+            'OPERATING_SPICETIFY_UNCHANGED_BY_THIS_TOOL=YES'
+          )){
+            if($receipt -cnotcontains $wanted){
+              Write-Host ('R128_EXPECTED_RECEIPT_KEY_MISSING='+($wanted -split '=')[0])
+              throw 'R128_OFFLINE_CONTRACT_FAILURE'
+            }
+          }
+          $after=@($files|ForEach-Object{"$($_.FullName)=$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)"})
+          if(($before -join [Environment]::NewLine) -cne ($after -join [Environment]::NewLine)){
+            throw 'R128_READONLY_MUTATED_SYNTHETIC_FIXTURE'
+          }
+          Write-Host 'R128_WINDOWS_PS51_OFFLINE_APPLY_FAILURE_EVIDENCE=PASS'
+          Write-Host 'R128_READONLY_FIXTURE_BYTE_IMMUTABILITY=PASS'
+          Write-Host 'R128_OWNER_PC_AND_SPOTIFY_UNTOUCHED=PASS'
