@@ -1,0 +1,137 @@
+name: HOLD R137 actual Spicetify 2.46.4 to 2.46.7 official binaries
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths: [.github/workflows/validate-r137-real-official-payload-migration-HOLD.yml]
+permissions: {contents: read}
+jobs:
+  real-official-archive-and-synthetic-root-migration:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Exact R137 product functions verify both actual official ZIPs, native executables and scratch upgrade with preserved user extras
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-StrictMode -Version 2.0
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          $url='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/49ba076e30a8046d37017c25d812d8d8483ffc8f/'+$base+'spotify-control-R137-Owner-PreclaimReady-HOLD.ps1'
+          [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+          $wc=New-Object Net.WebClient
+          try{[byte[]]$raw=$wc.DownloadData($url)}finally{$wc.Dispose()}
+          $alg=[Security.Cryptography.SHA256]::Create()
+          try{$digest=([BitConverter]::ToString($alg.ComputeHash($raw))).Replace('-','').ToLowerInvariant()}
+          finally{$alg.Dispose()}
+          if($raw.Length -ne 329938 -or
+             $digest -cne '4ac4e4ccb48c57b59b9fe87d688df76dd823998e5e791f4ed877c289175e7d99'){
+            throw 'R137_ACTUAL_OFFICIAL_PAYLOAD_SOURCE_NOT_EXACT'
+          }
+          $source=[Text.Encoding]::UTF8.GetString($raw)
+          $tokens=$null;$errors=$null
+          $ast=[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R137_SOURCE_PARSE_ERRORS'}
+          $names=@(
+            'ConvertTo-NativeQuotedArgument','Invoke-NativeCapture',
+            'Test-UsablePath','Get-ExactFileSha256','Get-StringSha256',
+            'Join-SpicetifyRelativePath','Get-SpicetifyRootManifest',
+            'Get-SpicetifyManifestMap','Get-SpicetifyExtraManifest',
+            'Remove-ObsoleteSpicetifyPayloadPaths','Test-SpicetifyLivePayloadBaseline',
+            'Assert-SpicetifyOverlaySafe','Overlay-SpicetifyPayload',
+            'Assert-SpicetifyNonPayloadPreserved','Assert-SpicetifyPayloadApplied',
+            'Expand-AndValidateSpicetifyAsset'
+          )
+          $defs=@($ast.FindAll({param($node)
+            $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -cin $names
+          },$true))
+          if($defs.Count -ne $names.Count){throw 'R137_NATIVE_PRODUCT_PAYLOAD_FUNCTIONS_NOT_UNIQUE'}
+          . ([ScriptBlock]::Create((@($defs | ForEach-Object{$_.Extent.Text}) -join [Environment]::NewLine)))
+          $ScriptVersion='0.6.30'
+          $scratch=Join-Path $env:RUNNER_TEMP ('R137-REAL-OFFICIAL-'+[guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $scratch | Out-Null
+          try{
+            $payloads=@{}
+            $pins=@{
+              '2.46.4'=[pscustomobject]@{sha='0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f';size=[int64]7795758}
+              '2.46.7'=[pscustomobject]@{sha='c5a723d31eae529ba13f6922a7a027124238c7f3da7edd182a73eab03c447e9e';size=[int64]7812363}
+            }
+            foreach($version in @('2.46.4','2.46.7')){
+              $release=Invoke-RestMethod -Uri ('https://api.github.com/repos/spicetify/cli/releases/tags/v'+$version) -Headers @{'User-Agent'='SpotifyControl-R137-RealArtifacts';Accept='application/vnd.github+json'}
+              if([string]$release.tag_name -cne ('v'+$version)){throw 'R137_WRONG_OFFICIAL_RELEASE_TAG'}
+              $name='spicetify-'+$version+'-windows-x64.zip'
+              $assets=@($release.assets | Where-Object {
+                [string]$_.name -ceq $name -and [string]$_.state -ceq 'uploaded'
+              })
+              if($assets.Count -ne 1){throw 'R137_OFFICIAL_RELEASE_ASSET_NOT_UNIQUE'}
+              $asset=$assets[0]
+              $downloadUrl='https://github.com/spicetify/cli/releases/download/v'+$version+'/'+$name
+              if([string]$asset.digest -cne ('sha256:'+$pins[$version].sha) -or
+                 [int64]$asset.size -ne $pins[$version].size -or
+                 [string]$asset.browser_download_url -cne $downloadUrl){
+                throw 'R137_OFFICIAL_RELEASE_EXACT_ASSET_PIN_MISMATCH'
+              }
+              $work=Join-Path $scratch ('official-'+$version.Replace('.','-'))
+              New-Item -ItemType Directory -Force -Path $work | Out-Null
+              $info=[pscustomobject]@{
+                Version=$version;AssetUrl=$downloadUrl;AssetDigest=('sha256:'+$pins[$version].sha);
+                AssetSize=$pins[$version].size
+              }
+              # Execute actual verified product logic: HTTP ZIP readback, path
+              # checks, archive extraction, full manifest and native --version.
+              $payload=Expand-AndValidateSpicetifyAsset -ReleaseInfo $info -WorkRoot $work
+              if([string]$payload.Version -cne $version -or
+                 [string]$payload.ActualDigest -cne ('sha256:'+$pins[$version].sha) -or
+                 [string]$payload.ExeSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+                 [int]$payload.Manifest.FileCount -lt 4){
+                throw 'R137_ACTUAL_NATIVE_PRODUCT_ASSET_REJECTED'
+              }
+              $payloads[$version]=$payload
+              Write-Host ('R137_REAL_OFFICIAL_'+$version.Replace('.','_')+'_ZIP_SHA_EXTRACT_NATIVE_VERSION=PASS')
+              Write-Host ('R137_REAL_OFFICIAL_'+$version.Replace('.','_')+'_PAYLOAD_FILES='+[int]$payload.Manifest.FileCount)
+            }
+            $old=$payloads['2.46.4'];$new=$payloads['2.46.7']
+            $live=Join-Path $scratch 'synthetic-live'
+            Copy-Item -LiteralPath $old.PayloadRoot -Destination $live -Recurse -Force
+            $user=Join-Path $live 'CustomApps\local-user-still-preserved\index.js'
+            [void][IO.Directory]::CreateDirectory((Split-Path $user -Parent))
+            [IO.File]::WriteAllText($user,'const preservedByOriginalSource = true;',[Text.UTF8Encoding]::new($false))
+            $userBefore=Get-ExactFileSha256 -Path $user
+            $baseLine=Test-SpicetifyLivePayloadBaseline -LiveRoot $live -Payload $old
+            if(-not $baseLine.Verified){throw ('R137_REAL_OLD_BASELINE_FAILED: '+$baseLine.Error)}
+            Assert-SpicetifyOverlaySafe -LiveManifest $baseLine.LiveManifest -BeforePayloadManifest $old.Manifest -AfterPayloadManifest $new.Manifest
+            $originalRoot=Get-SpicetifyRootManifest -Path $live
+            $stage=Join-Path $scratch 'synthetic-staged-new'
+            Copy-Item -LiteralPath $live -Destination $stage -Recurse -Force
+            Remove-ObsoleteSpicetifyPayloadPaths -DestinationRoot $stage -BeforePayloadManifest $old.Manifest -AfterPayloadManifest $new.Manifest
+            Overlay-SpicetifyPayload -Payload $new -DestinationRoot $stage
+            $applied=Assert-SpicetifyPayloadApplied -RootPath $stage -PayloadManifest $new.Manifest
+            $extras=Assert-SpicetifyNonPayloadPreserved -BeforeManifest $originalRoot -AfterManifest $applied -BeforePayloadManifest $old.Manifest -AfterPayloadManifest $new.Manifest
+            if([int]$extras.Before.FileCount -lt 1 -or
+               [string]$extras.Before.TreeSha256 -cne [string]$extras.After.TreeSha256 -or
+               (Get-ExactFileSha256 -Path (Join-Path $stage 'CustomApps\local-user-still-preserved\index.js')) -cne $userBefore){
+              throw 'R137_REAL_OFFICIAL_UPGRADE_DESTROYED_SYNTHETIC_USER_EXTRA'
+            }
+            $oldHeld=Join-Path $scratch 'synthetic-rollback-preimage'
+            Move-Item -LiteralPath $live -Destination $oldHeld
+            Move-Item -LiteralPath $stage -Destination $live
+            if((Get-SpicetifyRootManifest -Path $live).TreeSha256 -cne $applied.TreeSha256){
+              throw 'R137_REAL_OFFICIAL_SWAP_READBACK_FAILED'
+            }
+            $afterHeld=Join-Path $scratch 'synthetic-after-held'
+            Move-Item -LiteralPath $live -Destination $afterHeld
+            Move-Item -LiteralPath $oldHeld -Destination $live
+            if((Get-SpicetifyRootManifest -Path $live).TreeSha256 -cne $originalRoot.TreeSha256 -or
+               (Get-ExactFileSha256 -Path $user) -cne $userBefore){
+              throw 'R137_REAL_OFFICIAL_ROLLBACK_BYTES_NOT_EXACT'
+            }
+            Write-Host 'R137_REAL_OFFICIAL_2464_TO_2467_ROOT_OVERLAY_USER_EXTRAS_PRESERVED=PASS'
+            Write-Host 'R137_REAL_OFFICIAL_2467_TO_2464_ROOT_ROLLBACK_BYTE_EXACT=PASS'
+            Write-Host 'R137_NATIVE_SPICETIFY_COMMANDS=VERSION_ONLY'
+            Write-Host 'R137_REAL_SPOTIFY_APPS_OR_USER_ACCOUNT=NOT_TOUCHED'
+            Write-Host 'R137_OWNER_ATTEMPT_CLAIM=NOT_CREATED'
+            Write-Host 'R137_REAL_FILES_ACCEPTANCE=PASS'
+          }finally{
+            if(Test-Path -LiteralPath $scratch){Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction Stop}
+          }
