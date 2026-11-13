@@ -29,6 +29,11 @@ jobs:
               'EXTERNAL_OR_CLI_SNAPSHOT_CHANGED','OWNER_APPROVAL_REQUIRED','ATOMIC_JOURNAL_TRANSITION')){
             if(-not $src.Contains($anchor)){throw 'R132_REQUIRED_GUARD_MISSING'}
           }
+          $sourceBytes=([Text.UTF8Encoding]::new($false)).GetBytes(([IO.File]::ReadAllText($p)).Replace("`r`n","`n"))
+          $alg=[Security.Cryptography.SHA256]::Create()
+          try {$lfHash=([BitConverter]::ToString($alg.ComputeHash($sourceBytes))).Replace('-','').ToLowerInvariant()}
+          finally {$alg.Dispose()}
+          Write-Host ('R132_RAW_LF_SOURCE_SHA256='+$lfHash)
           Write-Host 'R132_WINDOWS_PS51_SOURCE_VALID=PASS'
           Write-Host 'R132_EXPLICIT_APPROVAL_AND_EXTERNAL_COPY_GATES_PRESENT=PASS'
           Write-Host ('R132_CANDIDATE_SOURCE_SHA256='+((Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()))
