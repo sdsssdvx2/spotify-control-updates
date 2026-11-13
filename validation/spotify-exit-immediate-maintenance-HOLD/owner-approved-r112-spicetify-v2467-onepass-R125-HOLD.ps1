@@ -198,6 +198,11 @@ function ReplaceMain([string]$expected,[byte[]]$contents,[string]$backupName){
 # pending work, or cached discovery health. None is an authorization grant.
 # The actual agent MUST rerun fresh discovery and verify its own state under
 # the existing cross-process mutex before any mutation.
+function MainIdentityClass([string]$sha) {
+  if($sha -ceq $OriginalSHA){return 'ORIGINAL_V0630'}
+  if($sha -ceq $CandidateSHA){return 'R112_ALREADY_INSTALLED'}
+  return 'OTHER_OR_UNTRUSTED'
+}
 function StateClass($state) {
   if($null -eq $state){return 'STATE_MISSING'}
   $arm=$state.PSObject.Properties['agent_mutation_enabled']
@@ -313,11 +318,7 @@ try {
       Fail 'R125_MAIN_NOT_REGULAR_OR_MISSING'
     }
     $mainPreflightSHA=HashFile $script:OriginalMain
-    $mainMode=switch ($mainPreflightSHA) {
-      $OriginalSHA { 'ORIGINAL_V0630'; break }
-      $CandidateSHA { 'R112_ALREADY_INSTALLED'; break }
-      default { 'OTHER_OR_UNTRUSTED' }
-    }
+    $mainMode=MainIdentityClass $mainPreflightSHA
     Emit 'R125_MAIN_PREEXISTING_CLASS' $mainMode
     if($mainMode -ceq 'OTHER_OR_UNTRUSTED'){
       Fail 'R125_MAIN_UNRECOGNIZED_NO_OVERWRITE'
