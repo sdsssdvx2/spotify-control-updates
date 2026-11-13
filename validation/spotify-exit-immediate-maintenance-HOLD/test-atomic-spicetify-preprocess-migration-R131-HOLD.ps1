@@ -16,7 +16,8 @@ $required=@('New-SpicetifyMigrationPreimage','Restore-SpicetifyMigrationSurface'
   'Restore-SpicetifyMigrationPreimage','Confirm-SpicetifyMigrationApplied',
   'Get-SpicetifyRootManifest','Copy-SpicetifyRootExact','Get-ExactFileSha256',
   'Get-StringSha256','Get-SpicetifyConfigSemanticHash','Get-IniSectionValue',
-  'Commit-SpicetifyCliTransaction','Rollback-SpicetifyCliTransaction')
+  'Commit-SpicetifyCliTransaction','Rollback-SpicetifyCliTransaction',
+  'Invoke-SpicetifyTransactionalMaintenance')
 $fns=@($ast.FindAll({param($x)
   $x -is [Management.Automation.Language.FunctionDefinitionAst] -and
   $x.Name -cin $required
@@ -280,6 +281,154 @@ try {
     throw 'R131_INTERRUPTED_CLI_ROOT_ROLLBACK_DID_NOT_RESUME'
   }
   Write-Host 'R131_PRODUCTION_INTERRUPTED_CLI_ROOT_ROLLBACK_RESUMED=PASS'
+  # Execute the real maintenance coordinator against an isolated complete
+  # synthetic transaction. Only the upstream CLI process and network-dependent
+  # starter/guard are substituted; commit, rollback, migration confirmation,
+  # root manifest and file restore are actual R131 production functions.
+  function Ensure-StateShape {param($State);return $State}
+  function Save-State {param($State);$script:R131SavedState=$State}
+  function Load-State {return $script:R131SavedState}
+  function Repair-PendingSpicetifyTransaction {return $null}
+  function Get-SmartUpdateGuardPlan {
+    return [pscustomobject]@{
+      CurrentSupported=$true;MinSupported='1.3.0';MaxSupported='1.3.9'
+      SpicetifyTag='v2.46.7'
+    }
+  }
+  function Invoke-SmartUpdateGuard {
+    param($State,$Plan)
+    return [pscustomobject]@{Success=$true;State=$State}
+  }
+  function Get-InstalledSpicetifyVersion {return '2.46.7'}
+  function Get-SpicetifyManagedInstallInfo {
+    return [pscustomobject]@{Mode='OFFICIAL_PINNED_SYNTHETIC'}
+  }
+  function Get-SpicetifyCommand {return $exe}
+  $script:R131Attempt=0
+  $script:R131NativeApply=0
+  $script:R131SpyCalls=0
+  $script:R131SimulateFailure=$false
+  function Start-SpicetifyCliTransaction {
+    param([switch]$ForceReinstall)
+    $script:R131Attempt++
+    if($script:R131Attempt -gt 2){throw 'R131_SYNTHETIC_UNEXPECTED_EXTRA_START'}
+    $id=if($script:R131Attempt -eq 1){
+      '20261113-180020-abcdef06'
+    }else{'20261113-180021-abcdef07'}
+    $dir=Join-Path $scratch ('OwnerBackup/spicetify-transactions/'+$id)
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    $pre=New-SpicetifyMigrationPreimage -TransactionBackupDir $dir -InstalledCliVersion '2.46.4'
+    $old=Get-SpicetifyRootManifest -Path $cliRoot
+    $rootBackup=Join-Path $dir 'root-before'
+    [void](Copy-SpicetifyRootExact -Source $cliRoot -Destination $rootBackup -ExpectedTreeSha256 $old.TreeSha256)
+    $oldExeHash=Get-ExactFileSha256 -Path $exe
+    [IO.File]::WriteAllBytes($exe,([byte[]]@(77,90,51,2,46,7)))
+    $new=Get-SpicetifyRootManifest -Path $cliRoot
+    $script:R131BeforeExeHash=$oldExeHash
+    $script:R131AfterExeHash=Get-ExactFileSha256 -Path $exe
+    $script:TxnForCommit=[pscustomobject]@{
+      schema=3;root_transaction=$true;id=$id;status='awaiting-guard'
+      target_root=$cliRoot;backup_root=$rootBackup
+      same_dir_old_root='';same_dir_new_root=''
+      before_tree_sha256=$old.TreeSha256;after_tree_sha256=$new.TreeSha256
+      before_sha256=$oldExeHash;after_sha256=$script:R131AfterExeHash
+      before_version='2.46.4';after_version='2.46.7'
+      release_tag='v2.46.7';asset_digest='sha256:SYNTHETIC_ONLY'
+      apply_attempted=$false;apply_succeeded=$false
+      post_apply_guard_succeeded=$false;extras_preserved=$true
+      extras_before_tree_sha256=('a'*64);extras_after_tree_sha256=('a'*64)
+      migration_required=$true;migration_snapshot_ready=$true
+      migration_started=$false;migration_finished=$false
+      migration_snapshot_root=$pre.BackupRoot
+      migration_spicetify_root=$pre.Roaming
+      migration_apps_root=$pre.Apps
+      migration_spicetify_before_sha256=$pre.RoamingTreeSha256
+      migration_apps_before_sha256=$pre.AppsTreeSha256
+      migration_semantic_before_sha256=$pre.SemanticHash
+      migration_spicetify_after_sha256=$null
+      migration_apps_after_sha256=$null
+      migration_external_rollback_restored=$false
+      rollback_reapply_succeeded=$null;rollback_reapply_at=$null
+      committed_at=$null;rolled_back_at=$null;error=$null
+    }
+    $script:R131AttemptBefore=$pre
+    return [pscustomobject]@{
+      Changed=$true;Transaction=$script:TxnForCommit
+      Latest=[pscustomobject]@{Tag='v2.46.7'}
+    }
+  }
+  function Invoke-NativeCapture {
+    param([string]$FilePath,[string[]]$Arguments)
+    if(@($Arguments).Count -ne 1 -or $Arguments[0] -cne '--version'){
+      $script:R131NativeApply++
+      throw 'R131_SYNTHETIC_NATIVE_OLD_APPLY_NOT_ALLOWED'
+    }
+    $now=Get-ExactFileSha256 -Path $FilePath
+    $ver=if($now -ceq $script:R131BeforeExeHash){'2.46.4'
+      }elseif($now -ceq $script:R131AfterExeHash){'2.46.7'
+      }else{throw 'R131_SYNTHETIC_UNKNOWN_CLI_BYTES'}
+    return [pscustomobject]@{ExitCode=0;Output=('Spicetify '+$ver)}
+  }
+  function Invoke-Spice {
+    param([string[]]$Arguments)
+    if(($Arguments -join ' ') -cne 'restore backup apply --no-restart'){
+      throw 'R131_SYNTHETIC_WRONG_OFFICIAL_COMMAND'
+    }
+    $script:R131SpyCalls++
+    [IO.File]::WriteAllText((Join-Path $spice 'config-xpui.ini'),$iniAfter,$utf8)
+    [IO.File]::WriteAllText((Join-Path $spice 'Backup/xpui.spa'),'processed-new-cli',$utf8)
+    [IO.File]::WriteAllText((Join-Path $apps 'xpui.spa'),'applied-new-cli',$utf8)
+    if($script:R131SimulateFailure){
+      throw 'R131_SYNTHETIC_APPLY_EXIT_NONZERO'
+    }
+  }
+  function New-R131CoordinatorState {
+    return [pscustomobject]@{
+      last_spicetify_upgrade_check=$null;pending_spicetify_upgrade=$true
+      spicetify_installed_version='2.46.4'
+      spicetify_install_mode=$null
+      spicetify_compat_tag=$null;spicetify_compat_min_windows=$null
+      spicetify_max_windows=$null;spicetify_latest_tag=$null
+      spicetify_last_digest=$null
+      spicetify_last_transaction_id=$null
+      spicetify_last_transaction_status=$null
+      spicetify_last_transaction_utc=$null
+    }
+  }
+  $initial=New-R131CoordinatorState
+  Save-State $initial
+  $script:R131SimulateFailure=$false
+  $outcome=Invoke-SpicetifyTransactionalMaintenance -State $initial
+  if(-not $outcome.Success -or $outcome.Status -cne 'committed' -or
+     $script:TxnForCommit.status -cne 'committed' -or
+     -not $script:TxnForCommit.migration_finished -or
+     $script:R131SpyCalls -ne 1 -or $script:R131NativeApply -ne 0 -or
+     $outcome.State.spicetify_installed_version -cne '2.46.7' -or
+     $outcome.State.pending_spicetify_upgrade -ne $false){
+    throw 'R131_ACTUAL_MAINTENANCE_COORDINATOR_COMMIT_INVALID'
+  }
+  Write-Host 'R131_REAL_COORDINATOR_SYNTHETIC_UPGRADE_AND_COMMIT=PASS'
+  # Reset only this scratch fixture to the old version. A committed real
+  # transaction is never automatically rolled back in production.
+  [void](Restore-SpicetifyMigrationPreimage -Txn $script:TxnForCommit)
+  [IO.File]::WriteAllBytes($exe,([byte[]]@(77,90,4,0,4,0)))
+  $initial=New-R131CoordinatorState
+  Save-State $initial
+  $script:R131SimulateFailure=$true
+  $failed=Invoke-SpicetifyTransactionalMaintenance -State $initial
+  if($failed.Success -or $failed.Status -cne 'rolled-back-apply-failure' -or
+     $script:TxnForCommit.status -cne 'rolled-back' -or
+     $failed.State.pending_spicetify_upgrade -ne $true -or
+     $script:R131SpyCalls -ne 2 -or $script:R131NativeApply -ne 0 -or
+     (Get-SpicetifyRootManifest -Path $cliRoot).TreeSha256 -cne
+       $script:TxnForCommit.before_tree_sha256 -or
+     (Get-SpicetifyRootManifest -Path $apps).TreeSha256 -cne
+       $script:R131AttemptBefore.AppsTreeSha256 -or
+     (Get-SpicetifyRootManifest -Path $spice).TreeSha256 -cne
+       $script:R131AttemptBefore.RoamingTreeSha256){
+    throw 'R131_ACTUAL_MAINTENANCE_COORDINATOR_FAILED_APPLY_NOT_ROLLED_BACK'
+  }
+  Write-Host 'R131_REAL_COORDINATOR_SYNTHETIC_APPLY_FAILURE_AND_ROLLBACK=PASS'
   # New and old transaction remains protected if one external backup is tampered.
   [IO.File]::WriteAllText((Join-Path $pre.RoamingBackup 'Themes/theme.css'),'CORRUPTED_BACKUP',$utf8)
   $failed=$false
