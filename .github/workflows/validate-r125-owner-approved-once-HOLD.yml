@@ -5,6 +5,8 @@ on:
     paths:
       - .github/workflows/validate-r125-owner-approved-once-HOLD.yml
       - validation/spotify-exit-immediate-maintenance-HOLD/owner-approved-r112-spicetify-v2467-onepass-R125-HOLD.ps1
+      - validation/spotify-exit-immediate-maintenance-HOLD/build-atomic-spicetify-preprocess-migration-R131-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/test-atomic-spicetify-preprocess-migration-R131-HOLD.ps1
 permissions: {contents: read}
 jobs:
   r125-buildonly:
