@@ -851,8 +851,9 @@ jobs:
           $null=[Management.Automation.Language.Parser]::ParseFile($candidate,[ref]$tokens,[ref]$errors)
           if(@($errors).Count -ne 0){throw 'R131_PS51_SYNTAX_FAILURE'}
           $r131Source=[IO.File]::ReadAllText($candidate,[Text.Encoding]::UTF8)
-          if(-not $r131Source.Contains('R131_COMMIT_EXTERNAL_AFTER_PINS_MISSING')){
-            throw 'R131_EXPECTED_EXTERNAL_AFTER_SHA_PIN_GUARD_MISSING'
+          if(-not $r131Source.Contains('R131_COMMIT_EXTERNAL_AFTER_PINS_MISSING') -or
+             -not $r131Source.Contains('$probe=$txn | ConvertTo-Json -Depth 8 | ConvertFrom-Json')){
+            throw 'R131_EXPECTED_IMMUTABLE_AFTER_SHA_PIN_GUARD_MISSING'
           }
           Write-Host 'R131_DURABLE_AFTER_IMAGE_SHA_PIN_GUARD=PASS'
           Write-Host 'R131_NATIVE_PS51_SOURCE_PARSE=PASS'
