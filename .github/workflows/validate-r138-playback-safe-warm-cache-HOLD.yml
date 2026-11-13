@@ -1,0 +1,105 @@
+name: HOLD R138 playback-safe cache acceptance
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - validation/spotify-exit-immediate-maintenance-HOLD/spotify-control-R138-PlaybackSafeWarmCache-HOLD.ps1
+      - .github/workflows/validate-r138-playback-safe-warm-cache-HOLD.yml
+permissions: {contents: read}
+jobs:
+  warm-cache:
+    runs-on: windows-2025
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: PS5.1 parse and isolated verified warm/reuse/alteration refusal
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $source='validation/spotify-exit-immediate-maintenance-HOLD/spotify-control-R138-PlaybackSafeWarmCache-HOLD.ps1'
+          $tokens=$null; $errors=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile($source,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -gt 0){throw 'R138_WINDOWS_PARSE_FAIL'}
+          $names=@('Get-R138AssetKey','Get-R138AssetCache','Save-R138AssetCache','Invoke-R138PlaybackWarm')
+          $defs=@($ast.FindAll({
+            param($a)
+            $a -is [Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -cin $names
+          },$true))
+          if($defs.Count -ne 4){throw 'R138_FUNCTION_SET_NOT_FOUND'}
+          . ([ScriptBlock]::Create((@($defs|ForEach-Object{$_.Extent.Text}) -join [Environment]::NewLine)))
+          $work=Join-Path $env:RUNNER_TEMP ('R138-Isolated-'+[guid]::NewGuid().ToString('N'))
+          $script:Root=Join-Path $work 'SpotifyControl'
+          $script:ScriptVersion='0.6.30'
+          $script:networkCalls=0
+          $script:blob=[Text.Encoding]::UTF8.GetBytes('official-zip-synthetic-test')
+          $sha256=[Security.Cryptography.SHA256]::Create()
+          try{$script:blobSha=([BitConverter]::ToString($sha256.ComputeHash($script:blob))).Replace('-','').ToLowerInvariant()}
+          finally{$sha256.Dispose()}
+          function Get-ExactFileSha256 {
+            param([string]$Path)
+            return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+          }
+          function Invoke-WebRequest {
+            param([string]$Uri,$Headers,[string]$OutFile,[switch]$UseBasicParsing,[int]$TimeoutSec)
+            if($Uri -notlike 'https://github.com/spicetify/cli/releases/download/*' -or $TimeoutSec -ne 120){throw 'BAD_URL_OR_TIMEOUT'}
+            $script:networkCalls++
+            [IO.File]::WriteAllBytes($OutFile,$script:blob)
+          }
+          function New-Release {
+            param([string]$Version)
+            $asset='spicetify-'+$Version+'-windows-x64.zip'
+            return [pscustomobject]@{
+              Verified=$true;Version=$Version;Tag=('v'+$Version)
+              Architecture='x64';AssetName=$asset
+              AssetUrl=('https://github.com/spicetify/cli/releases/download/v'+$Version+'/'+$asset)
+              AssetDigest=('sha256:'+$script:blobSha);AssetSize=$script:blob.Length
+            }
+          }
+          $old=New-Release '2.46.4'
+          $new=New-Release '2.46.7'
+          $script:releases=@{'2.46.4'=$old;'2.46.7'=$new}
+          function Get-SpicetifyReleaseInfoForVersion {param($Version);return $script:releases[$Version]}
+          function Test-SpotifyRunning {return $true}
+          try{
+            [void](New-Item -ItemType Directory -Force -Path $script:Root)
+            $disc=[pscustomobject]@{Report=[pscustomobject]@{
+              phase='check-only';healthy=$true
+              spicetify=[pscustomobject]@{
+                upgrade_pending=$true;install_mode='official-localappdata'
+                installed_version='2.46.4';latest_tag='v2.46.7'
+                latest_digest=('sha256:'+$script:blobSha)
+              }
+            }}
+            $r=Invoke-R138PlaybackWarm -Discovery $disc
+            if($r -cne 'rollback=verified-new;candidate=verified-new' -or $script:networkCalls -ne 2){throw 'FIRST_WARM_FAILED'}
+            $before=Get-R138AssetCache -Release $old
+            $after=Get-R138AssetCache -Release $new
+            if(-not $before -or -not $after){throw 'WARM_OBJECTS_NOT_PINNED'}
+            $again=Invoke-R138PlaybackWarm -Discovery $disc
+            if($again -cne 'rollback=verified-reuse;candidate=verified-reuse' -or $script:networkCalls -ne 2){throw 'CACHE_NOT_REUSED'}
+            [IO.File]::WriteAllText($after,'tampered synthetic cache')
+            if(Get-R138AssetCache -Release $new){throw 'CORRUPT_CACHE_ACCEPTED'}
+            $denied=$false
+            try{[void](Save-R138AssetCache -Release $new)}catch{$denied=$_.Exception.Message -eq 'R138_CACHE_COLLISION_HOLD'}
+            if(-not $denied -or $script:networkCalls -ne 2){throw 'CORRUPT_CACHE_REPLACED'}
+            $bad=New-Release '2.46.8'
+            $bad.AssetUrl='https://example.invalid/file.zip'
+            $rejected=$false
+            try{[void](Get-R138AssetKey -Release $bad)}catch{$rejected=$_.Exception.Message -eq 'R138_UNTRUSTED_RELEASE'}
+            if(-not $rejected){throw 'UNTRUSTED_METADATA_ACCEPTED'}
+            $disc.Report.spicetify.latest_digest=('sha256:'+('f'*64))
+            $changed=$false
+            try{[void](Invoke-R138PlaybackWarm -Discovery $disc)}catch{$changed=$_.Exception.Message -eq 'R138_RELEASE_CHANGED'}
+            if(-not $changed){throw 'CHANGED_METADATA_ACCEPTED'}
+            Write-Host 'R138_WINDOWS_PARSE=PASS'
+            Write-Host 'R138_SYNTHETIC_WARMED_ASSETS=2'
+            Write-Host 'R138_CACHE_REUSE=PASS'
+            Write-Host 'R138_CACHE_CORRUPTION_HOLD=PASS'
+            Write-Host 'R138_UNTRUSTED_RELEASE_HOLD=PASS'
+            Write-Host 'R138_DISCOVERY_DRIFT_HOLD=PASS'
+            Write-Host 'R138_SPOTIFY_MUTATIONS=0'
+            Write-Host 'RESULT=R138_WINDOWS_ISOLATED_WARM_CACHE_PASS'
+          } finally {
+            if(Test-Path -LiteralPath $work){Remove-Item -LiteralPath $work -Recurse -Force}
+          }
