@@ -143,6 +143,44 @@ try {
   Write-Host 'R131_WINDOWS_REAL_SOURCE_EXACT_EXTERNAL_ROLLBACK=PASS'
   Write-Host 'R131_WINDOWS_REPEATED_RECOVERY_IS_NOOP=PASS'
   Write-Host 'R131_WINDOWS_QUARANTINE_UNKNOWN_CHANGES=PASS'
+  # Simulate abrupt termination after live Apps was moved aside but before
+  # the verified staged original was published: this must resume safely.
+  $resumeId='20261113-180012-abcdef02'
+  $appsParent=Split-Path -Parent $apps
+  $heldApps=Join-Path $appsParent ('.spotifycontrol-r131-quarantine-apps-'+$resumeId)
+  $stageApps=Join-Path $appsParent ('.spotifycontrol-r131-staged-apps-'+$resumeId)
+  [IO.File]::WriteAllText((Join-Path $apps 'xpui.spa'),'interrupted-transaction-current',$utf8)
+  [void](Copy-SpicetifyRootExact -Source $pre.AppsBackup -Destination $stageApps -ExpectedTreeSha256 $pre.AppsTreeSha256)
+  Move-Item -LiteralPath $apps -Destination $heldApps -ErrorAction Stop
+  $resumed=Restore-SpicetifyMigrationSurface -Path $apps -Backup $pre.AppsBackup -BeforeSha256 $pre.AppsTreeSha256 -TransactionId $resumeId -Suffix 'apps'
+  if(-not $resumed.Resumed -or
+     (Get-SpicetifyRootManifest -Path $apps).TreeSha256 -cne $pre.AppsTreeSha256 -or
+     -not (Test-Path -LiteralPath $heldApps -PathType Container)){
+    throw 'R131_INTERRUPTED_STAGED_RESTORE_NOT_RESUMED_EXACT'
+  }
+  # A later external edit must not be overwritten even if an older
+  # transaction quarantine is still present.
+  [IO.File]::WriteAllText((Join-Path $apps 'xpui.spa'),'third-party-after-restore',$utf8)
+  $blockedForeign=$false
+  try{
+    [void](Restore-SpicetifyMigrationSurface -Path $apps -Backup $pre.AppsBackup -BeforeSha256 $pre.AppsTreeSha256 -TransactionId $resumeId -Suffix 'apps')
+  }catch{$blockedForeign=$_.Exception.Message -match 'R131_RESTORE_RESERVED_PATH_ALREADY_EXISTS'}
+  if(-not $blockedForeign){throw 'R131_FOREIGN_LIVE_TREE_WAS_NOT_PROTECTED'}
+  [IO.File]::WriteAllBytes((Join-Path $apps 'xpui.spa'),([byte[]]@(4,3,255,0,88,5)))
+  # Test a crash with the staged original absent: recreate only from the
+  # still-verified preimage; leave the displaced unknown tree untouched.
+  $resumeId2='20261113-180013-abcdef03'
+  $heldSpice=Join-Path (Split-Path -Parent $spice) ('.spotifycontrol-r131-quarantine-roaming-'+$resumeId2)
+  [IO.File]::WriteAllText((Join-Path $spice 'Themes/theme.css'),'interrupted-roaming-current',$utf8)
+  Move-Item -LiteralPath $spice -Destination $heldSpice -ErrorAction Stop
+  $resumed2=Restore-SpicetifyMigrationSurface -Path $spice -Backup $pre.RoamingBackup -BeforeSha256 $pre.RoamingTreeSha256 -TransactionId $resumeId2 -Suffix 'roaming'
+  if(-not $resumed2.Resumed -or
+     (Get-SpicetifyRootManifest -Path $spice).TreeSha256 -cne $pre.RoamingTreeSha256 -or
+     -not (Test-Path -LiteralPath $heldSpice -PathType Container)){
+    throw 'R131_INTERRUPTED_UNSTAGED_RESTORE_NOT_RESUMED_EXACT'
+  }
+  Write-Host 'R131_INTERRUPTED_STAGED_AND_UNSTAGED_RESTORE_RESUME=PASS'
+  Write-Host 'R131_INTERRUPTED_RECOVERY_FOREIGN_TREE_NO_CLOBBER=PASS'
   # New and old transaction remains protected if one external backup is tampered.
   [IO.File]::WriteAllText((Join-Path $pre.RoamingBackup 'Themes/theme.css'),'CORRUPTED_BACKUP',$utf8)
   $failed=$false

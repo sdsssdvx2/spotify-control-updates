@@ -92,7 +92,35 @@ function Restore-SpicetifyMigrationSurface {
   $parent=Split-Path -Parent $dest
   $stage=Join-Path $parent ('.spotifycontrol-r131-staged-'+$Suffix+'-'+$TransactionId)
   $held=Join-Path $parent ('.spotifycontrol-r131-quarantine-'+$Suffix+'-'+$TransactionId)
-  if((Test-Path -LiteralPath $stage) -or (Test-Path -LiteralPath $held)){
+  $stagePresent=Test-Path -LiteralPath $stage
+  $heldPresent=Test-Path -LiteralPath $held
+  # Resume ONLY the interrupted destination->quarantine rename, when the
+  # original destination is absent and the exact transaction quarantine exists.
+  # Never overwrite an occupied destination, even during restart recovery.
+  if($heldPresent -and -not (Test-Path -LiteralPath $dest)){
+    $heldItem=Get-Item -LiteralPath $held -Force -ErrorAction Stop
+    if(-not $heldItem.PSIsContainer -or
+       ($heldItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){
+      throw 'R131_INTERRUPTED_QUARANTINE_UNSAFE'
+    }
+    if($stagePresent){
+      $stageItem=Get-Item -LiteralPath $stage -Force -ErrorAction Stop
+      if(-not $stageItem.PSIsContainer -or
+         ($stageItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+         (Get-SpicetifyRootManifest -Path $stage).TreeSha256 -cne $BeforeSha256){
+        throw 'R131_INTERRUPTED_STAGE_INVALID'
+      }
+    }else{
+      [void](Copy-SpicetifyRootExact -Source $Backup -Destination $stage -ExpectedTreeSha256 $BeforeSha256)
+    }
+    Move-Item -LiteralPath $stage -Destination $dest -ErrorAction Stop
+    if((Get-SpicetifyRootManifest -Path $dest).TreeSha256 -cne $BeforeSha256){
+      throw 'R131_INTERRUPTED_RESUME_SHA_MISMATCH'
+    }
+    # Retain the displaced modified tree for operator review.
+    return [pscustomobject]@{Restored=$true;AlreadyExact=$false;Resumed=$true}
+  }
+  if($stagePresent -or $heldPresent){
     throw 'R131_RESTORE_RESERVED_PATH_ALREADY_EXISTS'
   }
   [void](Copy-SpicetifyRootExact -Source $Backup -Destination $stage -ExpectedTreeSha256 $BeforeSha256)
