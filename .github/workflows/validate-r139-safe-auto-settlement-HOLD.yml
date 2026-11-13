@@ -1,0 +1,174 @@
+name: HOLD R139 safe-auto settlement acceptance
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - validation/spotify-exit-immediate-maintenance-HOLD/spotify-control-R139-SafeAutoAfterR135-HOLD.ps1
+      - .github/workflows/validate-r139-safe-auto-settlement-HOLD.yml
+permissions: {contents: read}
+jobs:
+  safe-auto:
+    runs-on: windows-2025
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: PS5.1 parse, exact R135 settlement, tamper hold and exit-event handoff
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $source='validation/spotify-exit-immediate-maintenance-HOLD/spotify-control-R139-SafeAutoAfterR135-HOLD.ps1'
+          $tokens=$null;$errors=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile($source,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R139_PS51_PARSE_FAILED'}
+          $names=@(
+            'Get-R139SafeAutoReceiptPath','Read-R139SafeAutoReceipt',
+            'Assert-R139ExactCommittedR135Baseline','Invoke-R139EnableSafeAuto',
+            'Test-R134OwnerReconciledMutationHold','Assert-R136NoBypassFromOwnerHold',
+            'Invoke-ResidentAgentTick'
+          )
+          $defs=@($ast.FindAll({
+            param($n)
+            $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -cin $names
+          },$true))
+          if($defs.Count -ne $names.Count){throw 'R139_REQUIRED_FUNCTIONS_MISSING'}
+          . ([ScriptBlock]::Create((@($defs|ForEach-Object{$_.Extent.Text}) -join [Environment]::NewLine)))
+
+          $enableDef=@($defs|Where-Object{$_.Name -ceq 'Invoke-R139EnableSafeAuto'})[0].Extent.Text
+          if($enableDef -match 'Invoke-Spice|Start-Process|Invoke-WebRequest|Remove-Item'){
+            throw 'R139_ENABLE_ACTION_CONTAINS_SPOTIFY_OR_NETWORK_MUTATION'
+          }
+
+          $work=Join-Path $env:RUNNER_TEMP ('R139-'+[guid]::NewGuid().ToString('N'))
+          $localBefore=$env:LOCALAPPDATA;$roamBefore=$env:APPDATA
+          $env:LOCALAPPDATA=Join-Path $work 'Local'
+          $env:APPDATA=Join-Path $work 'Roaming'
+          try{
+            $script:Root=Join-Path $env:LOCALAPPDATA 'SpotifyControl'
+            $script:SpicetifyTransactionPath=Join-Path $script:Root 'spicetify-last-transaction.json'
+            $owner=Join-Path $script:Root 'owner-recovery'
+            $live=Join-Path $env:LOCALAPPDATA 'spicetify'
+            $roam=Join-Path $env:APPDATA 'spicetify'
+            foreach($d in @($script:Root,$owner,$live,$roam)){[void](New-Item -ItemType Directory -Force -Path $d)}
+            $exe=Join-Path $live 'spicetify.exe'
+            [IO.File]::WriteAllText($exe,'synthetic exact R135 committed 2.46.7 executable')
+            $exeSha=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            $claimPath=Join-Path $owner 'r135-v2467-owner-once-claim.v1.json'
+            $claim=[ordered]@{
+              schema=1;kind='R135_ONE_OWNER_ATTEMPT_NO_REPLAY';target_version='2.46.7'
+              target_asset_sha256='c5a723d31eae529ba13f6922a7a027124238c7f3da7edd182a73eab03c447e9e'
+              owner_transaction_id='20261114-010000-aabbccdd'
+              owner_ledger_sha256=('a'*64);owner_adoption_evidence_sha256=('b'*64)
+              old_executable_sha256=('c'*64);issued_at=[DateTimeOffset]::UtcNow.ToString('o')
+            }
+            $utf8=New-Object Text.UTF8Encoding($false)
+            [IO.File]::WriteAllText($claimPath,($claim|ConvertTo-Json -Depth 5),$utf8)
+            $script:txn=[pscustomobject]@{
+              schema=3;root_transaction=$true;id='20261114-020000-11223344';status='committed'
+              before_version='2.46.4';after_version='2.46.7'
+              asset_digest='sha256:c5a723d31eae529ba13f6922a7a027124238c7f3da7edd182a73eab03c447e9e'
+              apply_attempted=$true;apply_succeeded=$true;migration_required=$true
+              migration_snapshot_ready=$true;migration_started=$true;migration_finished=$true
+              post_apply_guard_succeeded=$true;extras_preserved=$true
+              extras_before_tree_sha256=('d'*64);extras_after_tree_sha256=('d'*64)
+              after_sha256=$exeSha
+            }
+            [IO.File]::WriteAllText($script:SpicetifyTransactionPath,($script:txn|ConvertTo-Json -Depth 6),$utf8)
+            $script:state=[pscustomobject]@{
+              agent_mutation_enabled=$false;pending_maintenance=$true
+              maintenance_check_healthy=$true;pending_addon_auto_ambiguous=0
+              last_check_only_utc='x';last_agent_decision='before';last_agent_tick_utc=$null
+              last_agent_event=$null
+            }
+            $script:spotifyRunning=$true
+            $script:R135ActiveOwnerAttempt=$false
+            $script:R135AttemptCalls=0
+            $script:R135ClaimSHA=$null
+            $script:R135OwnerId=$null
+            $script:LastResidentMutationPhaseEntered=$false
+            $script:LastResidentDiscoveryRan=$false
+            $script:maintainCalls=0
+            $script:AgentDiscoveryIntervalHours=12
+            $script:AgentReport=Join-Path $script:Root 'agent.json'
+            $script:ScriptVersion='0.6.30'
+
+            function Get-R135OwnerAttemptPath{return $claimPath}
+            function Get-ExactFileSha256 {param($Path);if(-not(Test-Path -LiteralPath $Path -PathType Leaf)){return $null};return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()}
+            function Read-R135OwnerAttempt {return (Get-Content $claimPath -Raw|ConvertFrom-Json)}
+            function Get-SpicetifyTransaction{return $script:txn}
+            function Get-SpicetifyManagedInstallInfo{return [pscustomobject]@{Managed=$true;Version='2.46.7';Path=$exe}}
+            function Get-IniSectionValue {return '2.46.7'}
+            function Test-SpotifyRunning{return [bool]$script:spotifyRunning}
+            function Enter-SpotifyControlMutex {param($Purpose);return [pscustomobject]@{Purpose=$Purpose}}
+            function Exit-SpotifyControlMutex {param($Mutex)}
+            function Ensure-StateShape {param($State);return $State}
+            function Load-State {return $script:state}
+            function Save-State {param($State);$script:state=$State}
+            function Write-Log {param($Message,$Level)}
+            function Test-DueHours {return $false}
+            function Migrate-StateFromLog {param($State);return $State}
+            function Invoke-MaintenanceCheckPhase {
+              param($State)
+              $script:state=$State
+              return [pscustomobject]@{
+                State=$State;GuardPlan=[pscustomobject]@{}
+                Report=[pscustomobject]@{phase='check-only';healthy=$true}
+              }
+            }
+            function Maintain {
+              param([switch]$FromResidentAgent,$VerifiedAgentCheck)
+              if(-not $FromResidentAgent){throw 'EXPECTED_RESIDENT'}
+              $script:maintainCalls++
+              $script:LastResidentMutationPhaseEntered=$true
+            }
+
+            # No approval: no receipt and no state change.
+            $denied=$false
+            try{[void](Invoke-R139EnableSafeAuto -OwnerApproval 'NO')}catch{$denied=$_.Exception.Message -eq 'R139_EXPLICIT_OWNER_APPROVAL_REQUIRED'}
+            if(-not $denied -or (Test-Path (Get-R139SafeAutoReceiptPath)) -or [bool]$script:state.agent_mutation_enabled){throw 'R139_MISSING_APPROVAL_CHANGED_STATE'}
+
+            # Before settlement, the R135 claim still blocks unrelated mutation.
+            $blocked=$false
+            try{Assert-R136NoBypassFromOwnerHold -RequestedAction 'UpdateSpotify'}catch{$blocked=$_.Exception.Message -eq 'R136_OWNER_ADOPTION_NOT_APPROVAL_FOR_OTHER_MUTATIONS'}
+            if(-not $blocked){throw 'R139_PRESETTLEMENT_HOLD_BYPASSED'}
+
+            # Exact committed R135 state + explicit approval creates one durable receipt and enables agent.
+            [void](Invoke-R139EnableSafeAuto -OwnerApproval 'APPROVE_R139_SAFE_AUTOMATION_AFTER_VERIFIED_R135')
+            $receiptPath=Get-R139SafeAutoReceiptPath
+            if(-not(Test-Path -LiteralPath $receiptPath -PathType Leaf) -or -not [bool]$script:state.agent_mutation_enabled){throw 'R139_ENABLE_NOT_DURABLE'}
+            $receiptHash=(Get-FileHash $receiptPath -Algorithm SHA256).Hash
+            if(Test-R134OwnerReconciledMutationHold){throw 'R139_SETTLED_BASELINE_STILL_HELD'}
+            Assert-R136NoBypassFromOwnerHold -RequestedAction 'UpdateSpotify'
+
+            # Re-running the enable action is idempotent: receipt bytes remain exact.
+            [void](Invoke-R139EnableSafeAuto -OwnerApproval 'APPROVE_R139_SAFE_AUTOMATION_AFTER_VERIFIED_R135')
+            if((Get-FileHash $receiptPath -Algorithm SHA256).Hash -cne $receiptHash){throw 'R139_RECEIPT_REWRITTEN'}
+
+            # A future committed transaction does not erase the explicitly settled baseline.
+            $script:txn=[pscustomobject]@{status='committed';id='20261115-020000-55667788'}
+            if(Test-R134OwnerReconciledMutationHold){throw 'R139_FUTURE_COMMIT_RELOCKED_SETTLED_POLICY'}
+
+            # Spotify exit hands the pending, healthy state to the resident mutation path.
+            $script:spotifyRunning=$false
+            Invoke-ResidentAgentTick -EventName 'SpotifyExit'
+            if($script:maintainCalls -ne 1 -or -not $script:LastResidentMutationPhaseEntered){throw 'R139_EXIT_EVENT_DID_NOT_HANDOFF'}
+
+            # Claim tamper after settlement fails closed; no silent trust.
+            [IO.File]::AppendAllText($claimPath,' ')
+            $tamper=$false
+            try{[void](Test-R134OwnerReconciledMutationHold)}catch{$tamper=$_.Exception.Message -eq 'R139_R135_CLAIM_CHANGED'}
+            if(-not $tamper){throw 'R139_CLAIM_TAMPER_NOT_HELD'}
+
+            Write-Host 'R139_PS51_PARSE=PASS'
+            Write-Host 'R139_NO_APPROVAL_NO_CHANGE=PASS'
+            Write-Host 'R139_EXACT_R135_BASELINE_SEALED=PASS'
+            Write-Host 'R139_RECEIPT_IDEMPOTENT=PASS'
+            Write-Host 'R139_POSTSETTLEMENT_MUTATION_GATE_RELEASED=PASS'
+            Write-Host 'R139_FUTURE_COMMITTED_TRANSACTION_POLICY_CONTINUES=PASS'
+            Write-Host 'R139_SPOTIFY_EXIT_RESIDENT_HANDOFF=PASS'
+            Write-Host 'R139_CLAIM_TAMPER_FAIL_CLOSED=PASS'
+            Write-Host 'RESULT=R139_WINDOWS_SYNTHETIC_SAFE_AUTO_PASS'
+          } finally {
+            $env:LOCALAPPDATA=$localBefore;$env:APPDATA=$roamBefore
+            if(Test-Path -LiteralPath $work){Remove-Item -LiteralPath $work -Recurse -Force}
+          }
