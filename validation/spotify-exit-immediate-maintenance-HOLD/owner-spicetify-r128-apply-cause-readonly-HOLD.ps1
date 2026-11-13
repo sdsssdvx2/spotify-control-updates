@@ -121,7 +121,7 @@ function ReadRecentApplyClasses([string]$dir) {
          $_.Name -match '^spotify-control-\d{4}-\d{2}-\d{2}\.log$' -and
          $_.Length -le 6291456 -and
          ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0
-       }|Sort-Object Name -Descending|Select-Object -First 3)
+       }|Sort-Object Name|Select-Object -Last 3)
   }
   $attempts=0;$nonzero=0;$latest='NOT_SEEN';$latestFailure='NOT_SEEN'
   $hasOldRollback=$false;$hasRollbackFailed=$false
@@ -131,7 +131,7 @@ function ReadRecentApplyClasses([string]$dir) {
       if($null -ne $v){
         $attempts++
         if($latest -ceq 'NOT_SEEN'){
-          # Log list is descending by DATE but lines within each file ascend.
+          # Logs are read oldest to newest; each file's tail is chronological.
           $latest='SEEN'
         }
         $latest=$(if($v.Nonzero){'EXIT_NONZERO'}else{'EXIT_ZERO'})
