@@ -134,8 +134,18 @@ function Write-NewJson([string]$Path,$Object){
   return (HFile $Path)
 }
 function Acquire([string]$Purpose,[string]$Sid){
-  $mutex=[Threading.Mutex]::new($false,('Local\SpotifyControl-'+$Purpose+'-'+$Sid))
-  try{if(-not $mutex.WaitOne(0)){throw 'AGENT_MUTEX_BUSY'};return $mutex}catch{$mutex.Dispose();throw}
+  # Exactly match the product's Enter-SpotifyControlMutex naming contract.
+  # User SID hyphens MUST become underscores for a shared cross-process lock.
+  $safeSid=([string]$Sid -replace '[^A-Za-z0-9]','_')
+  $name="Local\SpotifyControl-{0}-{1}" -f $Purpose,$safeSid
+  $mutex=[Threading.Mutex]::new($false,$name)
+  try{
+    $acquired=$false
+    try{$acquired=$mutex.WaitOne(0,$false)}
+    catch [Threading.AbandonedMutexException]{$acquired=$true}
+    if(-not $acquired){throw 'AGENT_MUTEX_BUSY'}
+    return $mutex
+  }catch{$mutex.Dispose();throw}
 }
 Emit 'DIAGNOSTIC' 'SPOTIFY_R132_OWNER_APPROVED_CURRENT_PREIMAGE_ADOPTION'
 Emit 'MODE' $Mode
