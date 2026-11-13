@@ -84,7 +84,7 @@ jobs:
             $approved=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R131_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
             if($LASTEXITCODE -ne 0 -or
                $approved -notcontains 'RESULT=OWNER_CUTOVER_ADOPTED_NO_MODEL_OR_SPICETIFY_CALL'){
-              Write-Host ('R133_APPROVED_ONLY_STATUS='+(@($approved|Where-Object{$_ -match '^(FAILED_PHASE|RESULT|ROLLBACK_SOURCE)='}) -join ';'))
+              Write-Host ('R133_APPROVED_ONLY_STATUS='+(@($approved|Where-Object{$_ -match '^(FAILED_PHASE|BLOCK_CLASS|RESULT|ROLLBACK_SOURCE)='}) -join ';'))
               throw 'R133_OWNER_ONESHOT_NOT_ADOPTED'
             }
             $now=Get-Content -LiteralPath $ledger -Raw | ConvertFrom-Json
