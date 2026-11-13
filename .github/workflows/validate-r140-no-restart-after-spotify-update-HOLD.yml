@@ -86,7 +86,7 @@ jobs:
             $applyLines=@(
               $r140 -split [Environment]::NewLine |
               Where-Object {
-                $_ -match 'Invoke-Spice' -and
+                $_ -match 'Invoke-Spice(?:Capture)?\s+-Arguments' -and
                 $_ -match 'apply' -and
                 $_ -notmatch '--no-restart'
               }
