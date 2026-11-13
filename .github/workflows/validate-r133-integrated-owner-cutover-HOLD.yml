@@ -225,7 +225,8 @@ jobs:
                      'Get-SpicetifyRootManifest','Assert-SpicetifyOwnerPreimageAdoption',
                      'Test-R134OwnerReconciledMutationHold','Start-SpicetifyCliTransaction',
                      'Invoke-MaintenanceMutationPhase','Invoke-R135OwnerSpicetifyOneShot',
-                     'Get-R135OwnerAttemptPath')
+                     'Get-R135OwnerAttemptPath','Read-R135OwnerAttempt',
+                     'Assert-R135ActiveOwnerAttempt')
             $defs=@($ast.FindAll({param($node)
               $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
               $node.Name -cin $names
