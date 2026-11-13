@@ -504,3 +504,34 @@ jobs:
           Write-Host 'R127_REDACTED_APPLY_ERROR_CLASSES=PASS'
           Write-Host 'R127_UNSETTLED_ID_MISMATCH_AND_BACKUP_DRIFT_CLASSIFIED=PASS'
           Write-Host 'R127_REAL_OWNER_PC_DOWNLOADS_MUTATIONS_AND_MODEL_CALLS=ZERO'
+      - name: Inspect real Spotify apply/log provenance for frozen R127 state
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/out/private-stable-ahead-R112/spotify-control.ps1'
+          $t=[IO.File]::ReadAllText($p,[Text.Encoding]::UTF8)
+          $er=$null;$tk=$null
+          $ast=[Management.Automation.Language.Parser]::ParseInput($t,[ref]$tk,[ref]$er)
+          if(@($er).Count -ne 0){throw 'R128_ACTUAL_PRODUCT_PARSE_FAILED'}
+          $functions=@('Write-Log','Invoke-Spice','Invoke-SpiceCapture',
+              'Get-SpotifyPrefsPath','Get-SpotifyPrefsLaunchedVersion',
+              'Get-SpotifyConfigPath','Repair-SpicetifyBackupMetadataIfTrusted')
+          foreach($fn in @($ast.FindAll({param($x)
+            $x -is [Management.Automation.Language.FunctionDefinitionAst] -and
+            $x.Name -cin $functions
+          },$true))){
+            Write-Host ('R128_FN='+$fn.Name)
+            $i=0
+            foreach($line in ($fn.Extent.Text -split '\r?\n')){
+              $i++
+              if($i -gt 95){break}
+              if($line.Length -gt 220){$line=$line.Substring(0,220)}
+              Write-Host ('R128_LINE='+$fn.Name+'#'+$i+':'+$line)
+            }
+          }
+          foreach($line in @($t -split '\r?\n'|Where-Object{
+            $_ -match '^\s*\$(LogFile|LogPath|LogDir|SpicetifyBackupPath|SpotifyPrefsPath|AgentReport)\s*='
+          })){
+            Write-Host ('R128_STATIC_PATH='+$line.Trim())
+          }
+          Write-Host 'R128_SOURCE_INSPECTION_READONLY=PASS'
