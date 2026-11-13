@@ -12,8 +12,8 @@ $script:OldMainSha='b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92
 $script:PatchedR112Sha='beb850064670c078a679585ace25f8071daa88c0b264185c03ef3364329b431b'
 $script:AcceptedOwnerMainSha=$null
 $script:NewMainSha='99e1bc36667400fa8fc7a5464ec20d3b4e84ee648e979c746c18d9848b0f47fa'
-$script:R132Sha='01f4b8fb4330877ea7f69ca5f8143448ecdcb1545c815f4d7e0ae8b44bc9ae1a'
-$script:PinnedCommit='0bfce5f0691efae33513b2ae0e0c36d6f2603783'
+$script:R132Sha='2bd914f6b5ac83605283a83b457bf4e617369e59d2700be84fb81590f768cb90'
+$script:PinnedCommit='c9aea3900dbeb536f586af3fe870461ebd670210'
 $script:Repo='sdsssdvx2/spotify-control-updates'
 $script:Folder='validation/spotify-exit-immediate-maintenance-HOLD/'
 $script:Root=Join-Path $env:LOCALAPPDATA 'SpotifyControl'
@@ -67,11 +67,17 @@ function Pinned-Download([string]$Name,[string]$Hash,[int64]$Length){
   return [pscustomobject]@{Bytes=$b;Text=$text}
 }
 function Acquire([string]$Purpose){
+  # Identical to the product's Enter-SpotifyControlMutex contract:
+  # sanitize Windows SID before constructing the shared Local mutex name.
   $ident=[Security.Principal.WindowsIdentity]::GetCurrent()
-  $name='Local\SpotifyControl-'+$Purpose+'-'+$ident.User.Value
+  $safeSid=([string]$ident.User.Value -replace '[^A-Za-z0-9]','_')
+  $name="Local\SpotifyControl-{0}-{1}" -f $Purpose,$safeSid
   $m=[Threading.Mutex]::new($false,$name)
   try{
-    if(-not $m.WaitOne(0)){throw 'R133_MAINTENANCE_BUSY'}
+    $acquired=$false
+    try{$acquired=$m.WaitOne(0,$false)}
+    catch [Threading.AbandonedMutexException]{$acquired=$true}
+    if(-not $acquired){throw 'R133_MAINTENANCE_BUSY'}
     $script:Locks+=,$m
   }catch{$m.Dispose();throw}
 }
@@ -242,7 +248,7 @@ try{
   $script:Phase='PIN_R131_COMPILED_SOURCE'
   $mainSource=Pinned-Download 'spotify-control-R134-Owner-DefaultHold-HOLD.ps1' $script:NewMainSha 317847
   $script:Phase='PIN_R132_OWNER_SOURCE'
-  $ownerSource=Pinned-Download 'owner-r132-current-preimage-adoption-HOLD.ps1' $script:R132Sha 13210
+  $ownerSource=Pinned-Download 'owner-r132-current-preimage-adoption-HOLD.ps1' $script:R132Sha 13571
   Emit 'R134_SOURCE' 'EXACT_PIN_VERIFIED'
   Emit 'R132_SOURCE' 'EXACT_PIN_VERIFIED'
   $script:Phase='READ_OWNER_ADMISSION'
