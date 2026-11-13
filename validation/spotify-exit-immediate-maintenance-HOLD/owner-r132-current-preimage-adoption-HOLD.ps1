@@ -158,7 +158,7 @@ try{
   if([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
      $PSVersionTable.PSVersion.Major -ne 5 -or
      $PSVersionTable.PSEdition -cne 'Desktop'){throw 'WIN_PS51_REQUIRED'}
-  $script:ExpectedMainSHA='07407f9dd566616395644a5c5bff8a1255701696dab2a074df062bab3ad279b4'
+  $script:ExpectedMainSHA='0f059208b231f9f8ec3e8829117785a319d52a3ded3a745147caf7039a7eee3d'
   $script:ExpectedOldCliSHA='3563f26acd7527adc97e6c19272fa1b48ce976a913625d9804ac57d3c54fb4db'
   if($SyntheticHostTest){
     if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_OS -cne 'Windows' -or
