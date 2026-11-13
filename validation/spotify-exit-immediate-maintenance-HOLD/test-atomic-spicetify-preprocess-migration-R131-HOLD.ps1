@@ -455,6 +455,14 @@ try {
     throw 'R131_ACTUAL_MAINTENANCE_COORDINATOR_FAILED_APPLY_NOT_ROLLED_BACK'
   }
   Write-Host 'R131_REAL_COORDINATOR_SYNTHETIC_APPLY_FAILURE_AND_ROLLBACK=PASS'
+  # Restore the actual product function after the isolated coordinator
+  # deliberately substituted a no-op admission fixture.
+  $repairDefs=@($ast.FindAll({param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -ceq 'Repair-PendingSpicetifyTransaction'
+  },$true))
+  if($repairDefs.Count -ne 1){throw 'R131_REAL_REPAIR_FUNCTION_NOT_UNIQUE'}
+  . ([ScriptBlock]::Create($repairDefs[0].Extent.Text))
   # Fail closed before any mutation when a previous R112/R130 journal lacks
   # complete R131 external-preimage provenance (owner review required).
   $legacy=[pscustomobject]@{
