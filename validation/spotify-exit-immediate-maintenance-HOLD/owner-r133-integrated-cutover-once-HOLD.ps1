@@ -9,9 +9,11 @@ Set-StrictMode -Version 2.0
 # R133: owner-approved source cutover + R132 current-preimage adoption.
 # Never invoke Spicetify, Spotify or AgentTick; never automatically retry.
 $script:OldMainSha='b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92232d'
+$script:PatchedR112Sha='beb850064670c078a679585ace25f8071daa88c0b264185c03ef3364329b431b'
+$script:AcceptedOwnerMainSha=$null
 $script:NewMainSha='16db29223a50c9b2a504a543ab01fa898660642904e4be0414b959195bb113b1'
-$script:R132Sha='c11d4c63f60f2487a9fbc33a9ab68066e08515aa150ee17c2f6a4e0ceecc86a0'
-$script:PinnedCommit='a532704e092b088dcaba1d67d8aee40c3016c736'
+$script:R132Sha='17dd4b29210f353e6c1094aebc3116446e0867336a4db5c5ee2fb473b0ee8b1c'
+$script:PinnedCommit='a9725238689467360cef8c68cb41509b1120876c'
 $script:Repo='sdsssdvx2/spotify-control-updates'
 $script:Folder='validation/spotify-exit-immediate-maintenance-HOLD/'
 $script:Root=Join-Path $env:LOCALAPPDATA 'SpotifyControl'
@@ -80,7 +82,16 @@ function Release-Locks{
 }
 function Check-Old-Admission {
   $mainSHA=HFile $script:Main
-  if($mainSHA -cne $script:OldMainSha){throw 'R133_OWNER_MAIN_NOT_APPROVED_R112'}
+  if($SyntheticHostedFixture){
+    if($mainSHA -cne $script:OldMainSha){throw 'R133_SYNTHETIC_MAIN_SHA_CHANGED'}
+  }elseif($mainSHA -cnotin @($script:OldMainSha,$script:PatchedR112Sha)){
+    throw 'R133_OWNER_MAIN_NOT_APPROVED_V0630_OR_R112'
+  }
+  if($null -ne $script:AcceptedOwnerMainSha -and
+     $mainSHA -cne $script:AcceptedOwnerMainSha){
+    throw 'R133_MAIN_SWITCHED_BETWEEN_ADMISSION_PHASES'
+  }
+  $script:AcceptedOwnerMainSha=$mainSHA
   $script:OldLedgerSha=HFile $script:Ledger
   $tx=Get-Content -LiteralPath $script:Ledger -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
   if([string]$tx.status -cne 'awaiting-guard' -or
@@ -92,6 +103,23 @@ function Check-Old-Admission {
   if((HFile $script:Ledger) -cne $script:OldLedgerSha){throw 'R133_LEDGER_CHANGED_DURING_ADMISSION'}
   return [string]$tx.id
 }
+function Confirm-R132ReadOnlyPreimage([string]$Source){
+  # Full independent external image pin before operating source mutation.
+  $args=@{
+    Mode='Plan'
+    PreSwapMainSha=$script:AcceptedOwnerMainSha
+    NoClipboard=$true
+  }
+  if($SyntheticHostedFixture){$args.SyntheticHostTest=$true}
+  $v=@(& ([ScriptBlock]::Create($Source)) @args)
+  $lines=@(($v -join [Environment]::NewLine) -split '\r?\n')
+  if($lines -notcontains 'RESULT=OWNER_ADOPTION_PLAN_READY_NOT_APPLIED' -or
+     $lines -notcontains 'CLI_ROOT=PREIMAGE_MATCH' -or
+     $lines -notcontains 'CLI_BACKUP=PREIMAGE_MATCH' -or
+     $lines -notcontains 'EXTERNAL_SNAPSHOT_READY=YES'){
+    throw 'R133_R132_READONLY_PREIMAGE_NOT_READY'
+  }
+}
 function Try-SafeRestore {
   # The source may be restored only when R132 did not publish any new ledger
   # and when the exact new source is still installed.
@@ -100,17 +128,17 @@ function Try-SafeRestore {
     Acquire 'AgentTick'
     if((HFile $script:Ledger) -cne $script:OldLedgerSha -or
        (HFile $script:Main) -cne $script:NewMainSha -or
-       (HFile $script:OldBackup) -cne $script:OldMainSha){
+       (HFile $script:OldBackup) -cne $script:AcceptedOwnerMainSha){
       Emit 'ROLLBACK_SOURCE' 'NOT_ATTEMPTED_UNCERTAIN_STATE'
       return
     }
     $restore=$script:Main+'.r133-restore-'+[guid]::NewGuid().ToString('N')+'.tmp'
     New-File $restore ([IO.File]::ReadAllBytes($script:OldBackup))
-    if((HFile $restore) -cne $script:OldMainSha){throw 'R133_RESTORE_STAGE_SHA_INVALID'}
+    if((HFile $restore) -cne $script:AcceptedOwnerMainSha){throw 'R133_RESTORE_STAGE_SHA_INVALID'}
     $failed=$script:Main+'.r133-new-source-held'
     if(Test-Path -LiteralPath $failed){throw 'R133_EXISTING_FAILED_SOURCE_BACKUP'}
     [IO.File]::Replace($restore,$script:Main,$failed,$true)
-    if((HFile $script:Main) -cne $script:OldMainSha){throw 'R133_RESTORED_MAIN_READBACK_INVALID'}
+    if((HFile $script:Main) -cne $script:AcceptedOwnerMainSha){throw 'R133_RESTORED_MAIN_READBACK_INVALID'}
     Emit 'ROLLBACK_SOURCE' 'R112_RESTORED_SHA_VERIFIED'
   }catch{
     Emit 'ROLLBACK_SOURCE' 'UNCERTAIN_OWNER_REVIEW_REQUIRED'
@@ -153,12 +181,22 @@ try{
   $script:Phase='PIN_R131_COMPILED_SOURCE'
   $mainSource=Pinned-Download 'spotify-control-R131-Owner-Candidate-HOLD.ps1' $script:NewMainSha 316638
   $script:Phase='PIN_R132_OWNER_SOURCE'
-  $ownerSource=Pinned-Download 'owner-r132-current-preimage-adoption-HOLD.ps1' $script:R132Sha 12497
+  $ownerSource=Pinned-Download 'owner-r132-current-preimage-adoption-HOLD.ps1' $script:R132Sha 13210
   Emit 'R131_SOURCE' 'EXACT_PIN_VERIFIED'
   Emit 'R132_SOURCE' 'EXACT_PIN_VERIFIED'
   $script:Phase='READ_OWNER_ADMISSION'
   $transactionId=Check-Old-Admission
   Emit 'R112_MAIN_AND_PENDING_LEDGER' 'SHA_ADMITTED'
+  Emit 'OWNER_MAIN_CLASS' $(if($SyntheticHostedFixture){'SYNTHETIC_EXACT'}
+     elseif($script:AcceptedOwnerMainSha -ceq $script:PatchedR112Sha){'EXACT_PATCHED_R112'}
+     else{'EXACT_ORIGINAL_V0630'})
+  if($SyntheticHostedFixture){
+    $env:R132_TEST_MAIN_SHA=$script:NewMainSha
+    $env:R132_TEST_CLI_SHA=HFile (Join-Path $env:LOCALAPPDATA 'spicetify\spicetify.exe')
+  }
+  $script:Phase='R132_BEFORE_SWAP_READONLY_PREIMAGE'
+  Confirm-R132ReadOnlyPreimage $ownerSource.Text
+  Emit 'R132_PRE_SWAP' 'EXACT_PREIMAGE_VERIFIED_NO_WRITES'
   if($Mode -ceq 'Plan'){
     Emit 'RESULT' 'CUTOVER_PLAN_READY_NO_OPERATING_WRITES'
   }else{
@@ -169,12 +207,13 @@ try{
       throw 'R133_SPOTIFY_RUNNING'
     }
     [void](Check-Old-Admission)
+    Confirm-R132ReadOnlyPreimage $ownerSource.Text
     $serial=[guid]::NewGuid().ToString('N')
     $store=Join-Path $script:Root ('owner-recovery\R133-source-'+$serial)
     [void][IO.Directory]::CreateDirectory($store)
     $script:OldBackup=Join-Path $store 'original-R112-main.ps1'
     [IO.File]::Copy($script:Main,$script:OldBackup,$false)
-    if((HFile $script:OldBackup) -cne $script:OldMainSha){
+    if((HFile $script:OldBackup) -cne $script:AcceptedOwnerMainSha){
       throw 'R133_ORIGINAL_MAIN_BACKUP_SHA_INVALID'
     }
     $script:Tmp=Join-Path (Split-Path -Parent $script:Main) ('.r133-'+$serial+'.tmp')
@@ -185,16 +224,17 @@ try{
     $backup=$script:Main+'.r133-previous'
     if(Test-Path -LiteralPath $backup){throw 'R133_PRIOR_SOURCE_SNAPSHOT_EXISTS'}
     if((HFile $script:Ledger) -cne $script:OldLedgerSha -or
-       (HFile $script:Main) -cne $script:OldMainSha){
+       (HFile $script:Main) -cne $script:AcceptedOwnerMainSha){
       throw 'R133_SOURCE_OR_LEDGER_CHANGED_BEFORE_SWAP'
     }
     [IO.File]::Replace($script:Tmp,$script:Main,$backup,$true)
     $script:Published=$true
     if((HFile $script:Main) -cne $script:NewMainSha -or
-       (HFile $backup) -cne $script:OldMainSha){
+       (HFile $backup) -cne $script:AcceptedOwnerMainSha){
       throw 'R133_NEW_SOURCE_OR_SNAPSHOT_READBACK_INVALID'
     }
-    Release-Locks
+    # Same-thread Mutex.WaitOne is recursive; R132's nested acquisitions
+    # are released by R132, while the outer R133 transaction stays locked.
     $script:Phase='R132_OWNER_PREIMAGE_ADOPTION'
     if($SyntheticHostedFixture){
       $env:R132_TEST_MAIN_SHA=$script:NewMainSha
