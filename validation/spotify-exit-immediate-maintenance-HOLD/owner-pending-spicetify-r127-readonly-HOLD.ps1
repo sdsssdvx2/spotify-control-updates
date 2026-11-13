@@ -110,6 +110,30 @@ function R127TreeClass($snapshot,[string]$before,[string]$after) {
   if([string]$snapshot.TreeSha256 -ceq $after){return 'EXACT_AFTER_ROOT'}
   return 'NEITHER_PINNED_ROOT'
 }
+function R127ErrorClass($obj) {
+  $v=[string](R127Field $obj 'error')
+  if([string]::IsNullOrWhiteSpace($v)){return 'NO_ERROR_RECORDED'}
+  # Redacted fixed classes only: never print the raw error, path, ID, or log.
+  if($v -match '(?i)(restore|rollback|old spicetify).{0,90}apply.{0,60}(fail|error)'){
+    return 'ROLLBACK_REAPPLY_FAILURE_HINT'
+  }
+  if($v -match '(?i)(apply.{0,70}(fail|error)|spicetify.{0,70}apply failed)'){
+    return 'NEW_APPLY_FAILURE_HINT'
+  }
+  if($v -match '(?i)(access.*denied|unauthori[sz]ed|permission denied)'){
+    return 'FILE_ACCESS_FAILURE_HINT'
+  }
+  if($v -match '(?i)(tree|root|payload).{0,70}(mismatch|corrupt|unexpected)'){
+    return 'ROOT_INTEGRITY_FAILURE_HINT'
+  }
+  if($v -match '(?i)(compatib|smart update guard)'){
+    return 'COMPATIBILITY_GUARD_FAILURE_HINT'
+  }
+  if($v -match '(?i)Spotify (is )?(running|started)'){
+    return 'SPOTIFY_STARTED_HINT'
+  }
+  return 'OTHER_ERROR_REDACTED'
+}
 function R127TxnStatus($obj) {
   if($null -eq $obj){return 'ABSENT'}
   $v=[string](R127Field $obj 'status')
@@ -174,6 +198,11 @@ try {
   R127Add 'ROLLBACK_REAPPLY_SUCCEEDED' (R127Flag $txn 'rollback_reapply_succeeded')
   R127Add 'LEDGER_ERROR_PRESENT' $(if([string]::IsNullOrWhiteSpace(
     [string](R127Field $txn 'error'))){'NO'}else{'YES'})
+  R127Add 'LEDGER_ERROR_CLASS' (R127ErrorClass $txn)
+  R127Add 'ROLLBACK_REAPPLY_TIME_PRESENT' $(if([string]::IsNullOrWhiteSpace(
+    [string](R127Field $txn 'rollback_reapply_at'))){'NO'}else{'YES'})
+  R127Add 'LEDGER_REPORT_STATUS_MATCH' $(if($null -eq $report){'REPORT_ABSENT'}elseif(
+    (R127TxnStatus $txn) -ceq (R127TxnStatus $report)){'SAME'}else{'DIFFERENT'})
   $before=[string](R127Field $txn 'before_tree_sha256')
   $after=[string](R127Field $txn 'after_tree_sha256')
   if($before -cnotmatch '^[a-f0-9]{64}$' -or $after -cnotmatch '^[a-f0-9]{64}$'){
