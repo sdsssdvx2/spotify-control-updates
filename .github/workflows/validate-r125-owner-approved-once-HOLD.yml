@@ -198,8 +198,12 @@ jobs:
           $ErrorActionPreference='Stop'
           Set-StrictMode -Version 2.0
           $base='validation/spotify-exit-immediate-maintenance-HOLD/'
-          & python ($base+'build-private-stable-ahead-R112-HOLD.py')
-          if($LASTEXITCODE -ne 0){throw 'R125_R112_CANDIDATE_REBUILD_FAILED'}
+          # The earlier native scratch swap step already built R112 in this
+          # checkout; reuse those exact bytes instead of rebuilding over them.
+          $candidate=$base+'out/private-stable-ahead-R112/spotify-control.ps1'
+          if(-not (Test-Path -LiteralPath $candidate -PathType Leaf)){
+            throw 'R125_R112_CANDIDATE_FIXTURE_MISSING'
+          }
           $source=$base+'owner-approved-r112-spicetify-v2467-onepass-R125-HOLD.ps1'
           $old=$base+'out/release-staging-boot-wmi-R70/bin/spotify-control.ps1'
           $candidate=$base+'out/private-stable-ahead-R112/spotify-control.ps1'
