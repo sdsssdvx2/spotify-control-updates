@@ -209,7 +209,18 @@ try{
 
   if($SyntheticHostTest){
     if([string]$env:R139_TEST_ENABLE_RESULT -ceq 'PASS'){
-      [IO.File]::WriteAllText($receiptPath,'synthetic-r139-receipt')
+      $tx=Get-Content -LiteralPath $ledgerPath -Raw|ConvertFrom-Json
+      $rr=[ordered]@{
+        schema=1;kind='R139_SAFE_AUTO_AFTER_VERIFIED_R135'
+        r135_claim_sha256=(Hash $claimPath)
+        r135_committed_ledger_sha256=(Hash $ledgerPath)
+        r135_transaction_id='20261114-020000-11223344'
+        spicetify_version='2.46.7'
+        spicetify_exe_sha256=[string]$tx.after_sha256
+        r135_asset_digest='sha256:c5a723d31eae529ba13f6922a7a027124238c7f3da7edd182a73eab03c447e9e'
+        issued_at=[DateTimeOffset]::UtcNow.ToString('o')
+      }
+      [IO.File]::WriteAllText($receiptPath,($rr|ConvertTo-Json -Depth 5))
       $st=Get-Content -LiteralPath $statePath -Raw|ConvertFrom-Json
       $st.agent_mutation_enabled=$true
       [IO.File]::WriteAllText($statePath,($st|ConvertTo-Json -Depth 8))
