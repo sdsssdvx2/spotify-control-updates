@@ -277,4 +277,19 @@ jobs:
               }
             }
           }
+          foreach($line in @($src -split '\r?\n' | Where-Object {
+            $_ -match '^\s*\$SpicetifyTransaction(Path|Report)\s*='
+          })){
+            Write-Host ('R125_LEDGER_PATH_DECLARATION='+$line.Trim())
+          }
+          foreach($fn in @($fns | Where-Object {$_.Name -in @('Ensure-SpicetifyTransactionShape','Repair-PendingSpicetifyTransaction','Get-MaintenanceMode')})){
+            $idx=0
+            Write-Host ('R125_LEDGER_SHAPE_FUNCTION='+$fn.Name)
+            foreach($line in @($fn.Extent.Text -split '\r?\n')){
+              $idx++
+              if($idx -le 110 -and $line -match 'status|root_transaction|after_sha256|apply|committed_at|extras|rolled_back|transaction|return|mode|[Pp]ath'){
+                Write-Host ('R125_LEDGER_SHAPE_LINE='+$fn.Name+'#'+$idx+':'+$line.Trim())
+              }
+            }
+          }
           Write-Host 'R125_PRODUCT_FUNCTIONS_INSPECTED_WITHOUT_INVOCATION=PASS'
