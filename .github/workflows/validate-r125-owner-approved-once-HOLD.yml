@@ -417,3 +417,84 @@ jobs:
             Write-Host ('R127_PRODUCT_PATH_DEFINITION='+$line.Trim())
           }
           Write-Host 'R127_OFFLINE_PRODUCT_SHA_CONTRACT_INSPECTED=PASS'
+      - name: R127 exact Windows read-only source and product manifest parity
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-StrictMode -Version 2.0
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          $script=$base+'owner-pending-spicetify-r127-readonly-HOLD.ps1'
+          $src=[IO.File]::ReadAllText($script,[Text.Encoding]::UTF8)
+          $errors=$null;$tokens=$null
+          $ast=[Management.Automation.Language.Parser]::ParseInput($src,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R127_SOURCE_PARSE_ERROR'}
+          $need=@('R127Field','R127Flag','R127FileSHA','R127ReadJson',
+            'R127IsAllowedPath','R127Snapshot','R127TreeClass','R127TxnStatus','R127Proof')
+          $defs=@($ast.FindAll({param($x)
+            $x -is [Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -cin $need
+          },$true))
+          if($defs.Count -ne $need.Count){throw 'R127_SOURCE_HELPERS_NOT_EXACT'}
+          . ([ScriptBlock]::Create((@($defs|ForEach-Object {$_.Extent.Text}) -join [Environment]::NewLine)))
+          $product=$base+'out/private-stable-ahead-R112/spotify-control.ps1'
+          $psrc=[IO.File]::ReadAllText($product,[Text.Encoding]::UTF8)
+          $perr=$null;$ptok=$null
+          $past=[Management.Automation.Language.Parser]::ParseInput($psrc,[ref]$ptok,[ref]$perr)
+          if(@($perr).Count -ne 0){throw 'R127_REAL_PRODUCT_PARSE_ERROR'}
+          $pnames=@('Get-SpicetifyRootManifest','Get-ExactFileSha256','Get-StringSha256')
+          $pdefs=@($past.FindAll({param($x)
+            $x -is [Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -cin $pnames
+          },$true))
+          if($pdefs.Count -ne 3){throw 'R127_PRODUCT_MANIFEST_FUNCTIONS_MISSING'}
+          . ([ScriptBlock]::Create((@($pdefs|ForEach-Object {$_.Extent.Text}) -join [Environment]::NewLine)))
+          function Test-UsablePath {
+            param([string]$Path,[string]$PathType)
+            return (Test-Path -LiteralPath $Path -PathType $PathType)
+          }
+          $root=Join-Path $env:RUNNER_TEMP ('r127-'+[guid]::NewGuid().ToString('N'))
+          $live=Join-Path $root 'spicetify'
+          $parent=Join-Path $root 'backups\spicetify-transactions'
+          $backup=Join-Path $parent 'synthetic-test-id\root-before'
+          New-Item -ItemType Directory -Path $live,$backup -Force|Out-Null
+          foreach($dir in @($live,$backup)){
+            New-Item -ItemType Directory -Path (Join-Path $dir 'bin'),(Join-Path $dir 'sub') -Force|Out-Null
+            [IO.File]::WriteAllBytes((Join-Path $dir 'bin\spicetify.exe'),([byte[]]@(3,0,10,255,10,12)))
+            [IO.File]::WriteAllText((Join-Path $dir 'sub\영문 mixed test.txt'),'fixture',[Text.UTF8Encoding]::new($false))
+          }
+          $our=R127Snapshot $live
+          $canonical=Get-SpicetifyRootManifest -Path $live
+          if($our.TreeSha256 -cne $canonical.TreeSha256 -or
+             $our.FileCount -ne $canonical.FileCount -or
+             $our.DirectoryCount -ne $canonical.DirectoryCount){
+            throw 'R127_PRODUCT_TREE_SHA_PARITY_FAILED'
+          }
+          $backupSnapshot=R127Snapshot $backup
+          if($backupSnapshot.TreeSha256 -cne $our.TreeSha256){
+            throw 'R127_SYNTHETIC_IDENTICAL_TREES_NOT_IDENTICAL'
+          }
+          if(-not (R127IsAllowedPath $live $live) -or
+             -not (R127IsAllowedPath $backup $parent -Backup) -or
+             (R127IsAllowedPath $backup $live) -or
+             (R127IsAllowedPath (Join-Path $env:RUNNER_TEMP 'not-here') $parent -Backup)){
+            throw 'R127_STRICT_PATH_ADMISSION_NOT_ENFORCED'
+          }
+          Write-Host 'R127_NATIVE_WINDOWS_EXACT_PRODUCT_TREE_SHA=PASS'
+          Write-Host 'R127_ALLOWLISTED_LIVE_BACKUP_PATHS=PASS'
+          $state=[pscustomobject]@{spicetify_last_transaction_id='t1'}
+          $txn=[pscustomobject]@{id='t1';status='awaiting-guard'}
+          if((R127Proof $txn $state $null $our $backupSnapshot $our.TreeSha256 ('f'*64)) -cne
+             'ROOT_BEFORE_AND_BACKUP_EXACT_LEDGER_UNSETTLED'){
+            throw 'R127_RECOVERY_CLASS_UNSETTLED_INCORRECT'
+          }
+          $state.spicetify_last_transaction_id='t2'
+          if((R127Proof $txn $state $null $our $backupSnapshot $our.TreeSha256 ('f'*64)) -cne
+             'LEDGER_AND_STATE_DIFFERENT_TRANSACTION'){
+            throw 'R127_RECOVERY_CLASS_DIFFERENT_ID_INCORRECT'
+          }
+          [IO.File]::WriteAllText((Join-Path $backup 'sub\영문 mixed test.txt'),'modified',[Text.UTF8Encoding]::new($false))
+          $modified=R127Snapshot $backup
+          if((R127Proof $txn $state $null $our $modified $our.TreeSha256 ('f'*64)) -cne
+             'BACKUP_NOT_PINNED_BEFORE'){
+            throw 'R127_CORRUPT_BACKUP_NOT_REJECTED'
+          }
+          Write-Host 'R127_UNSETTLED_ID_MISMATCH_AND_BACKUP_DRIFT_CLASSIFIED=PASS'
+          Write-Host 'R127_REAL_OWNER_PC_DOWNLOADS_MUTATIONS_AND_MODEL_CALLS=ZERO'
