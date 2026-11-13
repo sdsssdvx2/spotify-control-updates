@@ -238,6 +238,67 @@ function StateDecisionClass($state){
 function StopRunningCondition{
   if(@(Get-Process -Name Spotify -ErrorAction SilentlyContinue).Count -ne 0){Fail 'R125_SPOTIFY_RUNNING'}
 }
+function R125Field($obj,[string]$name){
+  if($null -eq $obj){return $null}
+  $p=$obj.PSObject.Properties[$name]
+  if($null -eq $p){return $null}
+  return $p.Value
+}
+function Test-R125CommittedUpgrade($txn,$state,[string]$priorId,
+    [DateTimeOffset]$attemptUtc,[string]$expectedExe,[string]$installedExe,
+    [string]$mainSha){
+  # This is a read-only verdict over the product's own schema-3 journal.
+  # Neither agent admission nor a stale "committed" field proves success.
+  $code='UNVERIFIED_LEDGER'
+  if($null -eq $txn -or $null -eq $state){return $code}
+  if([string](R125Field $txn 'status') -cne 'committed'){return 'NO_COMMITTED_TXN'}
+  $id=[string](R125Field $txn 'id')
+  if([string]::IsNullOrWhiteSpace($id) -or $id -ceq $priorId){
+    return 'NO_NEW_TRANSACTION_ID'
+  }
+  if([string](R125Field $txn 'schema') -cne '3' -or
+     (R125Field $txn 'root_transaction') -cne $true){
+    return 'NOT_ROOT_TRANSACTION'
+  }
+  if([string](R125Field $txn 'before_version') -cne '2.46.4' -or
+     [string](R125Field $txn 'after_version') -cne '2.46.7' -or
+     [string](R125Field $txn 'release_tag') -cne 'v2.46.7'){
+    return 'NOT_PINNED_VERSION_TRANSITION'
+  }
+  if([string](R125Field $txn 'before_sha256') -cne $OldCliSHA -or
+     [string](R125Field $txn 'after_sha256') -cne $expectedExe -or
+     $installedExe -cne $expectedExe -or $mainSha -cne $CandidateSHA){
+    return 'EXACT_BINARY_OR_MAIN_MISMATCH'
+  }
+  $pin='sha256:'+$OfficialZipSHA
+  if([string](R125Field $txn 'asset_digest') -cne $pin){
+    return 'RELEASE_ASSET_DIGEST_UNPROVEN'
+  }
+  foreach($flag in @('apply_attempted','apply_succeeded',
+      'post_apply_guard_succeeded','extras_preserved')){
+    if((R125Field $txn $flag) -cne $true){
+      return 'APPLY_GUARD_OR_EXTRAS_UNPROVEN'
+    }
+  }
+  $extraBefore=[string](R125Field $txn 'extras_before_tree_sha256')
+  $extraAfter=[string](R125Field $txn 'extras_after_tree_sha256')
+  if($extraBefore -cnotmatch '^[a-f0-9]{64}$' -or
+     $extraBefore -cne $extraAfter){
+    return 'USER_EXTRAS_PRESERVATION_UNPROVEN'
+  }
+  $when=[DateTimeOffset]::MinValue
+  if(-not [DateTimeOffset]::TryParse([string](R125Field $txn 'committed_at'),[ref]$when) -or
+     $when -lt $attemptUtc){
+    return 'COMMIT_NOT_NEWER_THAN_ATTEMPT'
+  }
+  if([string](R125Field $state 'spicetify_last_transaction_id') -cne $id -or
+     [string](R125Field $state 'spicetify_last_transaction_status') -cne 'committed' -or
+     [string](R125Field $state 'spicetify_installed_version') -cne '2.46.7' -or
+     (R125Field $state 'pending_spicetify_upgrade') -cne $false){
+    return 'STATE_AND_LEDGER_NOT_CORRELATED'
+  }
+  return 'FRESH_COMMITTED_ROOT_APPLY_AND_EXTRAS_VERIFIED'
+}
 function AuthOfficialRelease([string]$scratch){
   $asset=Join-Path $scratch 'official-spicetify-2467-PINNED.zip'
   if(Test-Path $asset){Fail 'R125_OFFICIAL_ASSET_COLLISION'}
@@ -267,7 +328,7 @@ Emit 'DIAGNOSTIC' 'SPOTIFY_R125_OWNER_R112_2467_ONE_SHOT'
 Emit 'NETWORK' $(if($Mode -ceq 'BuildOnly'){'NO'}else{'OFFICIAL_SPICETIFY_ASSET_AND_EXISTING_PRODUCT_ONLY'})
 Emit 'AUTO_RETRY' 'NO'
 Emit 'PUBLIC_MAIN_WRITE' 'NO'
-Emit 'PROCESS_KILL' 'ONLY_OUR_CHILD_ON_TIMEOUT'
+Emit 'PROCESS_KILL' 'NO_UNCERTAIN_TRANSACTION_KILL'
 Emit 'SPOTIFY_INSTALL' 'NO'
 Emit 'CONFIG_OR_TASK_DIRECT_WRITE' 'NO'
 try {
@@ -308,6 +369,7 @@ try {
     $cfg=Join-Path $env:APPDATA 'spicetify\config-xpui.ini'
     $spiceBackup=Join-Path $env:APPDATA 'spicetify\Backup'
     $statePath=Join-Path $root 'state.json'
+    $txnPath=Join-Path $root 'spicetify-last-transaction.json'
     $Phase='READONLY_PREFLIGHT'
     StopRunningCondition
     # The owner may already have the exact, previously verified R112 bytes
@@ -365,6 +427,26 @@ try {
     # Last decision and pending flags are stale observations, not a lease,
     # not an approval grant, and not proof of currently due maintenance.
     # The pinned product's fresh check and guarded admission remain mandatory.
+    $priorTxnId=''
+    $priorTxnSha='ABSENT'
+    if(Test-Path -LiteralPath $txnPath){
+      if(-not(Regular $txnPath 2097152)){
+        Fail 'R125_PREVIOUS_LEDGER_NOT_REGULAR'
+      }
+      $priorTxnSha=HashFile $txnPath
+      $priorTxn=Get-Content -LiteralPath $txnPath -Raw | ConvertFrom-Json
+      if((HashFile $txnPath) -cne $priorTxnSha){
+        Fail 'R125_PREVIOUS_LEDGER_CHANGED_DURING_READ'
+      }
+      if([string](R125Field $priorTxn 'status') -cnotin @('committed','rolled-back')){
+        Fail 'R125_PREVIOUS_TRANSACTION_NOT_SETTLED'
+      }
+      $priorTxnId=[string](R125Field $priorTxn 'id')
+      if([string]::IsNullOrWhiteSpace($priorTxnId)){
+        Fail 'R125_PREVIOUS_TRANSACTION_ID_UNVERIFIED'
+      }
+    }
+    Emit 'R125_PREVIOUS_LEDGER_CLASS' $(if($priorTxnSha -ceq 'ABSENT'){'ABSENT'}else{'SETTLED_PINNED'})
     $oldBytes=[IO.File]::ReadAllBytes($script:OriginalMain)
     if((HashBytes $oldBytes) -cne $mainPreflightSHA){
       Fail 'R125_MAIN_CHANGED_DURING_READ'
@@ -393,6 +475,13 @@ try {
     if((HashFile $statePath) -cne $beforeStateSha){
       Fail 'R125_STATE_CHANGED_SINCE_PREFLIGHT'
     }
+    if($priorTxnSha -ceq 'ABSENT'){
+      if(Test-Path -LiteralPath $txnPath){
+        Fail 'R125_LEDGER_CHANGED_SINCE_PREFLIGHT'
+      }
+    }elseif((HashFile $txnPath) -cne $priorTxnSha){
+      Fail 'R125_LEDGER_CHANGED_SINCE_PREFLIGHT'
+    }
     $Phase='SOURCE_ATOMIC_SWAP'
     if($mainMode -ceq 'ORIGINAL_V0630'){
       ReplaceMain $OriginalSHA $script:PatchedMain 'R125-BEFORE-SWAP-ORIGINAL.ps1'
@@ -410,11 +499,14 @@ try {
     $stdout=Join-Path $script:StageRoot 'AgentTick-PRIVATE.stdout'
     $stderr=Join-Path $script:StageRoot 'AgentTick-PRIVATE.stderr'
     $args='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "'+$script:OriginalMain+'" -Action AgentTick -AgentEvent SpotifyExit'
+    $script:AttemptStartedUtc=[DateTimeOffset]::UtcNow
     $script:AgentStarted=$true
     $proc=Start-Process -FilePath $psExe -ArgumentList $args -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
     if(-not $proc.WaitForExit(300000)){
-      Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-      Fail 'R125_AGENT_ONESHOT_TIMEOUT_UNCERTAIN'
+      # The product can be midway through full-root swap, backup/apply or
+      # rollback. Killing it risks leaving the journal in an uncertain phase.
+      # Stop waiting, never auto-retry, preserve owner recovery materials.
+      Fail 'R125_AGENT_TIMEOUT_LEFT_RUNNING_FOR_OWNER_REVIEW'
     }
     $childExit=$proc.ExitCode
     Emit 'R125_AGENT_EXIT' $(if($childExit -eq 0){'ZERO'}else{'NONZERO'})
@@ -423,21 +515,30 @@ try {
     $installedDigest=HashFile $cli
     $sourceDigest=HashFile $script:OriginalMain
     $afterState=$null
-    try{$afterState=Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json}catch{}
-    if($childExit -eq 0 -and $installedDigest -ceq $script:ExpectedNewExe -and
-       $sourceDigest -ceq $CandidateSHA -and $null -ne $afterState -and
-       [string]$afterState.spicetify_last_transaction_status -ceq 'committed' -and
-       [string]$afterState.last_agent_decision -ceq 'maintenance-phase-entered' -and
+    $afterTxn=$null
+    try{
+      if(Regular $statePath 2097152){
+        $afterState=Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+      }
+      if(Regular $txnPath 2097152){
+        $afterTxn=Get-Content -LiteralPath $txnPath -Raw | ConvertFrom-Json
+      }
+    }catch{}
+    $proof=Test-R125CommittedUpgrade $afterTxn $afterState $priorTxnId `
+      $script:AttemptStartedUtc $script:ExpectedNewExe $installedDigest $sourceDigest
+    Emit 'R125_PRODUCT_COMMIT_EVIDENCE' $proof
+    if($childExit -eq 0 -and
+       $proof -ceq 'FRESH_COMMITTED_ROOT_APPLY_AND_EXTRAS_VERIFIED' -and
        (Regular $cfg 1000000) -and
        @(Get-ChildItem -LiteralPath $spiceBackup -File -Filter '*.spa').Count -gt 0){
       $script:Succeeded=$true
       Emit 'R125_OFFICIAL_SPICETIFY_2467_EXACT' 'PASS'
-      Emit 'R125_PRODUCT_TRANSACTION' 'COMMITTED_REPORTED'
+      Emit 'R125_PRODUCT_TRANSACTION' 'FRESH_COMMIT_APPLY_GUARD_AND_EXTRAS_PASS'
       Emit 'R125_R112_MAIN_INSTALLED' 'EXACT'
       Emit 'RESULT' 'AUTO_UPDATE_2467_VERIFIED_REVIEW_OWNER'
     }else{
       Emit 'R125_CLI_MATCHES_EXACT_2467' $(if($installedDigest -ceq $script:ExpectedNewExe){'YES'}else{'NO'})
-      Emit 'R125_TRANSACTION_STATUS' 'NOT_PROVEN'
+      Emit 'R125_TRANSACTION_STATUS' 'NOT_PROVEN_NO_AUTO_RETRY'
       Fail 'R125_TRANSACTION_AND_POSTFLIGHT_NOT_PROVEN'
     }
   }
@@ -457,7 +558,10 @@ try {
     'R125_R112_TARGET_SHA_MISMATCH','R125_ORIGINAL_MAIN_SHA_MISMATCH',
     'R125_OWNER_STATE_UNSAFE_OR_NOT_ARMED','R125_STATE_CHANGED_DURING_READ',
     'R125_MAIN_NOT_REGULAR_OR_MISSING','R125_MAIN_UNRECOGNIZED_NO_OVERWRITE',
-    'R125_MAIN_CHANGED_DURING_READ','R125_EXISTING_R112_CHANGED_BEFORE_AGENT'
+    'R125_MAIN_CHANGED_DURING_READ','R125_EXISTING_R112_CHANGED_BEFORE_AGENT',
+    'R125_PREVIOUS_LEDGER_NOT_REGULAR','R125_PREVIOUS_LEDGER_CHANGED_DURING_READ',
+    'R125_PREVIOUS_TRANSACTION_NOT_SETTLED','R125_PREVIOUS_TRANSACTION_ID_UNVERIFIED',
+    'R125_LEDGER_CHANGED_SINCE_PREFLIGHT','R125_AGENT_TIMEOUT_LEFT_RUNNING_FOR_OWNER_REVIEW'
   )
   $reason=if($message -cin $known -or
       $message -match '^R125_PINNED_PATCH_ANCHOR_DRIFT_[A-Z_]+$' -or
