@@ -2,7 +2,9 @@
 param(
   [ValidateSet('Plan','Adopt')][string]$Mode='Plan',
   [string]$ApprovalPhrase='',
-  [switch]$SyntheticHostTest
+  [switch]$SyntheticHostTest,
+  [string]$PreSwapMainSha='',
+  [switch]$NoClipboard
 )
 Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
@@ -157,6 +159,18 @@ try{
     $script:ExpectedMainSHA=[string]$env:R132_TEST_MAIN_SHA
     $script:ExpectedOldCliSHA=[string]$env:R132_TEST_CLI_SHA
   }
+  if(-not [string]::IsNullOrEmpty($PreSwapMainSha)){
+    if($Mode -cne 'Plan'){throw 'PRESWAP_PIN_ALLOWED_ONLY_IN_READONLY_PLAN'}
+    if(-not $SyntheticHostTest -and
+       $PreSwapMainSha -cnotin @(
+         'b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92232d',
+         'beb850064670c078a679585ace25f8071daa88c0b264185c03ef3364329b431b'
+       )){throw 'PRESWAP_MAIN_NOT_APPROVED_SOURCE'}
+    if($PreSwapMainSha -cnotmatch '^[a-f0-9]{64}$'){
+      throw 'PRESWAP_PIN_FORMAT_INVALID'
+    }
+    $script:ExpectedMainSHA=$PreSwapMainSha
+  }
   if($Mode -ceq 'Adopt'){
     if($ApprovalPhrase -cne 'APPROVE_R132_CURRENT_PREIMAGE_ONCE'){
       throw 'OWNER_APPROVAL_REQUIRED'
@@ -181,7 +195,7 @@ try{
   if($o.MainSHA -cne $script:ExpectedMainSHA){
     throw 'R132_AWARE_MAIN_NOT_YET_DEPLOYED'
   }
-  Emit 'CURRENT_MAIN' 'R132_AWARE_HOLD_CANDIDATE_PINNED'
+  Emit 'CURRENT_MAIN' $(if([string]::IsNullOrEmpty($PreSwapMainSha)){'R132_AWARE_HOLD_CANDIDATE_PINNED'}else{'EXACT_PRE_SWAP_MAIN_PINNED'})
   if($Mode -ceq 'Plan'){
     Emit 'RESULT' 'OWNER_ADOPTION_PLAN_READY_NOT_APPLIED'
   }else{
@@ -254,5 +268,5 @@ try{
   }
 }
 $receipt=@($Report.ToArray()) -join [Environment]::NewLine
-try{Set-Clipboard -Value $receipt -ErrorAction Stop}catch{}
+if(-not $NoClipboard){try{Set-Clipboard -Value $receipt -ErrorAction Stop}catch{}}
 Write-Output $receipt
