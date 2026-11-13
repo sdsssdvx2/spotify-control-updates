@@ -334,8 +334,9 @@ try {
       before_sha256=$oldExeHash;after_sha256=$script:R131AfterExeHash
       before_version='2.46.4';after_version='2.46.7'
       release_tag='v2.46.7';asset_digest='sha256:SYNTHETIC_ONLY'
-      apply_attempted=$false;apply_succeeded=$false
-      post_apply_guard_succeeded=$false;extras_preserved=$true
+      apply_attempted=$false;apply_succeeded=$false;apply_at=$null
+      post_apply_guard_succeeded=$false;post_apply_guard_at=$null
+      extras_preserved=$true
       extras_before_tree_sha256=('a'*64);extras_after_tree_sha256=('a'*64)
       migration_required=$true;migration_snapshot_ready=$true
       migration_started=$false;migration_finished=$false
