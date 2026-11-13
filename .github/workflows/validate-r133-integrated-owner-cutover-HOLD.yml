@@ -69,10 +69,23 @@ jobs:
                 ([pscustomobject]@{spicetify_last_transaction_id='DIFFERENT_EXISTING_TRANSACTION'}|ConvertTo-Json),$utf8)
             $ledgerBefore=(Get-FileHash $ledger -Algorithm SHA256).Hash
             $stateBefore=(Get-FileHash $state -Algorithm SHA256).Hash
+            $rawUrl='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/a532704e092b088dcaba1d67d8aee40c3016c736/validation/spotify-exit-immediate-maintenance-HOLD/spotify-control-R131-Owner-Candidate-HOLD.ps1'
+            [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+            $rawWC=New-Object Net.WebClient
+            try {
+              [byte[]]$rawBytes=$rawWC.DownloadData($rawUrl)
+              $hash=[Security.Cryptography.SHA256]::Create()
+              try {$rawDigest=([BitConverter]::ToString($hash.ComputeHash($rawBytes))).Replace('-','').ToLowerInvariant()}
+              finally{$hash.Dispose()}
+              Write-Host ('R133_RAW_SOURCE_BYTES='+$rawBytes.Length)
+              Write-Host ('R133_RAW_SOURCE_SHA256='+$rawDigest)
+            }catch {
+              Write-Host ('R133_RAW_SOURCE_ACCESS_CLASS='+$_.Exception.GetType().Name)
+            }finally{$rawWC.Dispose()}
             $plan=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Plan)
             if($LASTEXITCODE -ne 0 -or $plan -notcontains 'RESULT=CUTOVER_PLAN_READY_NO_OPERATING_WRITES' -or
                 (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldSHA){
-              Write-Host ('R133_PLAN_SAFE_STATUS='+(@($plan|Where-Object{$_ -match '^(FAILED_PHASE|RESULT|R131_SOURCE|R132_SOURCE|R112_MAIN_AND_PENDING_LEDGER)='}) -join ';'))
+              Write-Host ('R133_PLAN_SAFE_STATUS='+(@($plan|Where-Object{$_ -match '^(FAILED_PHASE|BLOCK_CLASS|RESULT|R131_SOURCE|R132_SOURCE|R112_MAIN_AND_PENDING_LEDGER)='}) -join ';'))
               throw 'R133_OWNER_PLAN_NOT_READY_OR_MUTATED'
             }
             $denied=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once)
