@@ -243,6 +243,43 @@ try {
   }
   Write-Host 'R131_PRODUCTION_ROLLBACK_CLI_APPS_CONFIG_TOGETHER=PASS'
   Write-Host 'R131_PRODUCTION_MIGRATION_ROLLBACK_NO_OLD_REAPPLY=PASS'
+  # Rehearse a second interruption in the *CLI root* rollback.
+  # The after-root was moved into exact transaction quarantine and the
+  # before-root copy was staged, but the process died before publication.
+  $rootCrashId='20261113-180015-abcdef05'
+  $rootCrashDir=Join-Path $scratch ('OwnerBackup/spicetify-transactions/'+$rootCrashId)
+  New-Item -ItemType Directory -Path $rootCrashDir -Force | Out-Null
+  $crashPre=New-SpicetifyMigrationPreimage -TransactionBackupDir $rootCrashDir -InstalledCliVersion '2.46.4'
+  $crashBeforeRoot=Get-SpicetifyRootManifest -Path $cliRoot
+  $crashBeforeExe=(Get-ExactFileSha256 -Path $exe)
+  $crashRootBackup=Join-Path $rootCrashDir 'root-before'
+  [void](Copy-SpicetifyRootExact -Source $cliRoot -Destination $crashRootBackup -ExpectedTreeSha256 $crashBeforeRoot.TreeSha256)
+  [IO.File]::WriteAllBytes($exe,([byte[]]@(77,90,45,2,46,7)))
+  $crashAfterRoot=Get-SpicetifyRootManifest -Path $cliRoot
+  $script:TxnForCommit.id=$rootCrashId
+  $script:TxnForCommit.status='awaiting-guard'
+  $script:TxnForCommit.backup_root=$crashRootBackup
+  $script:TxnForCommit.before_tree_sha256=$crashBeforeRoot.TreeSha256
+  $script:TxnForCommit.after_tree_sha256=$crashAfterRoot.TreeSha256
+  $script:TxnForCommit.before_sha256=$crashBeforeExe
+  $script:TxnForCommit.after_sha256=(Get-ExactFileSha256 -Path $exe)
+  $script:TxnForCommit.migration_snapshot_root=$crashPre.BackupRoot
+  $script:TxnForCommit.migration_spicetify_before_sha256=$crashPre.RoamingTreeSha256
+  $script:TxnForCommit.migration_apps_before_sha256=$crashPre.AppsTreeSha256
+  $script:TxnForCommit.migration_semantic_before_sha256=$crashPre.SemanticHash
+  $script:TxnForCommit.migration_external_rollback_restored=$false
+  $crashQuarantine=Join-Path (Split-Path -Parent $cliRoot) ('.spotifycontrol-spicetify-rollback-current-'+$rootCrashId)
+  $crashStage=Join-Path (Split-Path -Parent $cliRoot) ('.spotifycontrol-spicetify-restore-'+$rootCrashId)
+  [void](Copy-SpicetifyRootExact -Source $crashRootBackup -Destination $crashStage -ExpectedTreeSha256 $crashBeforeRoot.TreeSha256)
+  Move-Item -LiteralPath $cliRoot -Destination $crashQuarantine -ErrorAction Stop
+  $crashResult=Rollback-SpicetifyCliTransaction
+  if(-not $crashResult.Success -or $crashResult.Status -cne 'rolled-back' -or
+     (Get-SpicetifyRootManifest -Path $cliRoot).TreeSha256 -cne $crashBeforeRoot.TreeSha256 -or
+     -not $script:TxnForCommit.migration_external_rollback_restored -or
+     $script:OldCliApplyCalls -ne 0){
+    throw 'R131_INTERRUPTED_CLI_ROOT_ROLLBACK_DID_NOT_RESUME'
+  }
+  Write-Host 'R131_PRODUCTION_INTERRUPTED_CLI_ROOT_ROLLBACK_RESUMED=PASS'
   # New and old transaction remains protected if one external backup is tampered.
   [IO.File]::WriteAllText((Join-Path $pre.RoamingBackup 'Themes/theme.css'),'CORRUPTED_BACKUP',$utf8)
   $failed=$false

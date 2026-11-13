@@ -278,6 +278,25 @@ def main():
         $txnForApply.apply_succeeded = $true""","official_full_preprocess")
     ]);replacements.append(("Invoke-SpicetifyTransactionalMaintenance",)+replay)
     text,replay=splice_fn(text,"Rollback-SpicetifyCliTransaction",[
+      ("""if (Test-Path -LiteralPath $quarantine) { throw "Rollback quarantine path unexpectedly exists: $quarantine" }""",
+       """if(Test-Path -LiteralPath $quarantine){
+        # Only a displaced, byte-exact after-root from this transaction is
+        # allowed to survive across an interrupted root rollback.
+        $quarantineManifest=Get-SpicetifyRootManifest -Path $quarantine
+        if($quarantineManifest.TreeSha256 -cne [string]$txn.after_tree_sha256 -or
+           ($liveManifest -and $liveManifest.TreeSha256 -cne [string]$txn.before_tree_sha256)){
+          throw 'R131_INTERRUPTED_CLI_QUARANTINE_CONFLICT_HOLD'
+        }
+    }""","resumable_root_quarantine"),
+      ("""[void](Copy-SpicetifyRootExact -Source $backupRoot -Destination $restoreRoot -ExpectedTreeSha256 ([string]$txn.before_tree_sha256))""",
+       """if(Test-Path -LiteralPath $restoreRoot){
+        $restoreManifest=Get-SpicetifyRootManifest -Path $restoreRoot
+        if($restoreManifest.TreeSha256 -cne [string]$txn.before_tree_sha256){
+          throw 'R131_INTERRUPTED_CLI_RESTORE_STAGE_INVALID_HOLD'
+        }
+    }else{
+        [void](Copy-SpicetifyRootExact -Source $backupRoot -Destination $restoreRoot -ExpectedTreeSha256 ([string]$txn.before_tree_sha256))
+    }""","resumable_root_stage"),
       ("""if ([bool]$txn.apply_attempted) {
         $restoreApply=Invoke-NativeCapture -FilePath $targetExe -Arguments @('apply','--no-restart')""",
        """if([bool]$txn.migration_required){
