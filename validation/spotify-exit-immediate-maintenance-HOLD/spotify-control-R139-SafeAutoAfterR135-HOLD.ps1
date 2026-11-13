@@ -2395,6 +2395,7 @@ function Invoke-R139EnableSafeAuto {
           $existing=Read-R139SafeAutoReceipt
        }
        if($null -eq $existing){throw 'R139_RECEIPT_NOT_DURABLE'}
+       if(-not (Test-SpotifyRunning)){throw 'R139_SPOTIFY_CLOSED_BEFORE_AGENT_ENABLE'}
        $state=Ensure-StateShape (Load-State)
        $state.agent_mutation_enabled=$true
        $state.last_agent_decision='r139-safe-auto-enabled-after-verified-r135'
