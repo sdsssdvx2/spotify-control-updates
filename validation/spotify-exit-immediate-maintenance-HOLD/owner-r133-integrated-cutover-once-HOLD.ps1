@@ -218,6 +218,8 @@ try{
   }
 }catch{
   Emit 'FAILED_PHASE' $script:Phase
+  $safeExceptionClass=($_.Exception.GetType().Name -replace '[^A-Za-z]','')
+  Emit 'EXCEPTION_TYPE' $safeExceptionClass
   if([string]$_.Exception.Message -ceq 'R133_REMOTE_SOURCE_PIN_INVALID'){
     Emit 'BLOCK_CLASS' 'SOURCE_BYTES_NOT_PINNED'
   }elseif($script:Phase -like 'PIN_*'){
