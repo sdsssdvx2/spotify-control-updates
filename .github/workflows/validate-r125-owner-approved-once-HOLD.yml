@@ -839,3 +839,15 @@ jobs:
             }
           }
           Write-Host 'R131_EXACT_EXTERNAL_ROOT_HELPERS_REVIEWED=PASS'
+      - name: Build R131 multi-root migration from exact R130 parent
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          & python ($base+'build-atomic-spicetify-preprocess-migration-R131-HOLD.py')
+          if($LASTEXITCODE -ne 0){throw 'R131_EXACT_PATCH_BUILD_FAILED'}
+          $candidate=$base+'out/atomic-spicetify-preprocess-migration-R131/spotify-control.ps1'
+          $errors=$null;$tokens=$null
+          $null=[Management.Automation.Language.Parser]::ParseFile($candidate,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R131_PS51_SYNTAX_FAILURE'}
+          Write-Host 'R131_NATIVE_PS51_SOURCE_PARSE=PASS'
