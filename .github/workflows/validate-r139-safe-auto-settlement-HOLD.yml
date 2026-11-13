@@ -78,7 +78,7 @@ jobs:
               agent_mutation_enabled=$false;pending_maintenance=$true
               maintenance_check_healthy=$true;pending_addon_auto_ambiguous=0
               last_check_only_utc='x';last_agent_decision='before';last_agent_tick_utc=$null
-              last_agent_event=$null
+              last_agent_event=$null;agent_version='0.1.1';pending_reasons=@('spicetify-cli-update')
             }
             $script:spotifyRunning=$true
             $script:R135ActiveOwnerAttempt=$false
