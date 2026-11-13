@@ -32,3 +32,105 @@ jobs:
           Write-Host 'R132_WINDOWS_PS51_SOURCE_VALID=PASS'
           Write-Host 'R132_EXPLICIT_APPROVAL_AND_EXTERNAL_COPY_GATES_PRESENT=PASS'
           Write-Host ('R132_CANDIDATE_SOURCE_SHA256='+((Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()))
+      - name: Full scratch-only owner Plan, mutation denial, explicit adoption and no-repeat
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/owner-r132-current-preimage-adoption-HOLD.ps1'
+          $oldLocal=$env:LOCALAPPDATA;$oldApp=$env:APPDATA
+          $base=Join-Path $env:RUNNER_TEMP ('R132-Integrated-'+[guid]::NewGuid().ToString('N'))
+          $env:LOCALAPPDATA=Join-Path $base 'Local'
+          $env:APPDATA=Join-Path $base 'Roaming'
+          try {
+            $ctrl=Join-Path $env:LOCALAPPDATA 'SpotifyControl'
+            $main=Join-Path $ctrl 'bin/spotify-control.ps1'
+            $live=Join-Path $env:LOCALAPPDATA 'spicetify'
+            $iniRoot=Join-Path $env:APPDATA 'spicetify'
+            $apps=Join-Path $env:APPDATA 'Spotify/Apps'
+            $id='20261113-190050-aabbccdd'
+            $backup=Join-Path $ctrl ('backups/spicetify-transactions/'+$id+'/root-before')
+            foreach($d in @((Split-Path $main -Parent),$live,$backup,
+                $iniRoot,(Join-Path $iniRoot 'Backup'),$apps)){
+              [void][IO.Directory]::CreateDirectory($d)
+            }
+            $uf=New-Object System.Text.UTF8Encoding($false)
+            [IO.File]::WriteAllText($main,'pinned synthetic R131 source',$uf)
+            [IO.File]::WriteAllBytes((Join-Path $live 'spicetify.exe'),([byte[]]@(77,90,1,2,3)))
+            [IO.File]::Copy((Join-Path $live 'spicetify.exe'),(Join-Path $backup 'spicetify.exe'))
+            [IO.File]::WriteAllText((Join-Path $iniRoot 'config-xpui.ini'),
+                ("[Backup]"+[Environment]::NewLine+"with=2.46.4"+[Environment]::NewLine),$uf)
+            [IO.File]::WriteAllText((Join-Path $iniRoot 'Backup/xpui.spa'),'old-preprocessed',$uf)
+            [IO.File]::WriteAllText((Join-Path $apps 'xpui.spa'),'current-user-applied',$uf)
+            $env:R132_TEST_MAIN_SHA=(Get-FileHash -LiteralPath $main -Algorithm SHA256).Hash.ToLowerInvariant()
+            $env:R132_TEST_CLI_SHA=(Get-FileHash -LiteralPath (Join-Path $live 'spicetify.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+            # Use the exact manifest serializer found in the R132 implementation,
+            # including type/size, to verify independent archive snapshots.
+            $mainSHA=$env:R132_TEST_MAIN_SHA
+            $beforeExe=$env:R132_TEST_CLI_SHA
+            $f=[pscustomobject]@{path='spicetify.exe';type='file';size=[int64]5;sha256=$beforeExe}
+            $j=$f | ConvertTo-Json -Depth 5 -Compress
+            $utf8=[Text.UTF8Encoding]::new($false)
+            $sha=[Security.Cryptography.SHA256]::Create()
+            try {
+              $tree=([BitConverter]::ToString($sha.ComputeHash($utf8.GetBytes($j)))).Replace('-','').ToLowerInvariant()
+            }finally{$sha.Dispose()}
+            $tx=[ordered]@{
+              schema=3;root_transaction=$true;id=$id;status='awaiting-guard'
+              target_root=$live;backup_root=$backup
+              same_dir_old_root=(Join-Path (Split-Path $live -Parent) ('.spotifycontrol-spicetify-old-'+$id))
+              same_dir_new_root=(Join-Path (Split-Path $live -Parent) ('.spotifycontrol-spicetify-new-'+$id))
+              before_tree_sha256=$tree;after_tree_sha256=('a'*64)
+              before_sha256=$beforeExe;after_sha256=('b'*64)
+              before_version='2.46.4';after_version='2.46.7'
+            }
+            $ledger=Join-Path $ctrl 'spicetify-last-transaction.json'
+            $state=Join-Path $ctrl 'state.json'
+            [IO.File]::WriteAllText($ledger,($tx|ConvertTo-Json -Depth 8),$uf)
+            [IO.File]::WriteAllText($state,
+                ([pscustomobject]@{spicetify_last_transaction_id='OTHER_OLD_TRANSACTION'}|ConvertTo-Json),$uf)
+            $originalLedgerSHA=(Get-FileHash -LiteralPath $ledger -Algorithm SHA256).Hash
+            $originalStateSHA=(Get-FileHash -LiteralPath $state -Algorithm SHA256).Hash
+            function Receipt([string[]]$Lines){
+              return @((($Lines -join [Environment]::NewLine) -split '\r?\n')|Where-Object{$_ -ne ''})
+            }
+            $planned=Receipt @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $p -SyntheticHostTest -Mode Plan)
+            if($planned -notcontains 'RESULT=OWNER_ADOPTION_PLAN_READY_NOT_APPLIED' -or
+               (Get-FileHash -LiteralPath $ledger -Algorithm SHA256).Hash -cne $originalLedgerSHA){
+              throw 'R132_PLAN_NOT_READONLY_OR_NOT_READY'
+            }
+            $denied=Receipt @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $p -SyntheticHostTest -Mode Adopt)
+            if($denied -notcontains 'RESULT=HOLD_NO_OPERATING_MUTATION' -or
+               (Get-FileHash -LiteralPath $ledger -Algorithm SHA256).Hash -cne $originalLedgerSHA){
+              throw 'R132_OWNER_APPROVAL_NOT_ENFORCED'
+            }
+            $applied=Receipt @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $p -SyntheticHostTest -Mode Adopt -ApprovalPhrase 'APPROVE_R132_CURRENT_PREIMAGE_ONCE')
+            if($applied -notcontains 'RESULT=OWNER_ADOPTION_RECEIPTED_NOT_SPOTIFY_APPLY_PROOF'){
+              Write-Host ('ADOPTION_RESULT='+(@($applied|Where-Object{$_ -match '^(RESULT|FAILED_PHASE)='}) -join ';'))
+              throw 'R132_ADOPTION_NOT_PUBLISHED'
+            }
+            $after=Get-Content -LiteralPath $ledger -Raw | ConvertFrom-Json
+            $archive=Join-Path $ctrl ('owner-recovery/R132-'+$id)
+            if($after.status -cne 'owner-reviewed-preimage' -or
+               $after.owner_reconciliation.evidence_sha256 -cne
+                   ((Get-FileHash -LiteralPath (Join-Path $archive 'adoption-evidence.json') -Algorithm SHA256).Hash.ToLowerInvariant()) -or
+               (Get-FileHash -LiteralPath (Join-Path $archive 'original-ledger.json') -Algorithm SHA256).Hash -cne $originalLedgerSHA -or
+               (Get-FileHash -LiteralPath $state -Algorithm SHA256).Hash -cne $originalStateSHA -or
+               (Get-FileHash -LiteralPath $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne $mainSHA -or
+               (Get-FileHash -LiteralPath (Join-Path $live 'spicetify.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $beforeExe){
+              throw 'R132_ARCHIVE_JOURNAL_OR_PROTECTED_FILES_INVALID'
+            }
+            $adoptedSHA=(Get-FileHash -LiteralPath $ledger -Algorithm SHA256).Hash
+            $again=Receipt @(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $p -SyntheticHostTest -Mode Adopt -ApprovalPhrase 'APPROVE_R132_CURRENT_PREIMAGE_ONCE')
+            if($again -notcontains 'RESULT=HOLD_NO_OPERATING_MUTATION' -or
+               (Get-FileHash -LiteralPath $ledger -Algorithm SHA256).Hash -cne $adoptedSHA){
+              throw 'R132_SECOND_ADOPTION_NOT_REFUSED'
+            }
+            Write-Host 'R132_SYNTHETIC_PLAN_AND_APPROVAL_GATES=PASS'
+            Write-Host 'R132_REAL_ATOMIC_ADOPTION_EXTERNAL_COPIES_AND_NO_REPEAT=PASS'
+            Write-Host 'R132_ORIGINAL_STATE_MAIN_CLI_LEFT_UNCHANGED=PASS'
+          }finally{
+            $env:LOCALAPPDATA=$oldLocal;$env:APPDATA=$oldApp
+            Remove-Item Env:R132_TEST_MAIN_SHA -ErrorAction SilentlyContinue
+            Remove-Item Env:R132_TEST_CLI_SHA -ErrorAction SilentlyContinue
+            if(Test-Path -LiteralPath $base){Remove-Item -LiteralPath $base -Recurse -Force}
+          }
