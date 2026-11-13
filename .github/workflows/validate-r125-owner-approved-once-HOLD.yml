@@ -745,3 +745,48 @@ jobs:
           Write-Host 'R130_UNSAFE_2464_TO_2467_ROOT_MUTATION_BLOCKED=PASS'
           Write-Host 'R130_CURRENT_VERSION_REINSTALL_BYPASS_NOT_CREATED=PASS'
           Write-Host 'R130_REAL_SPOTIFY_AND_OWNER_ACCOUNT_UNCHANGED=PASS'
+      - name: R130 actual Start-SpicetifyCliTransaction stops before mutation for wrong Backup.with
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-StrictMode -Version 2.0
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/out/private-preprocessed-migration-gate-R130/spotify-control.ps1'
+          $errors=$null;$tokens=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile($p,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -gt 0){throw 'R130_SOURCE_INTEGRATION_NOT_PARSEABLE'}
+          $names=@('Get-SpicetifyBackupMigrationClass','Start-SpicetifyCliTransaction')
+          $fns=@($ast.FindAll({param($n)
+            $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -cin $names
+          },$true))
+          if($fns.Count -ne 2){throw 'R130_REAL_ADMISSION_FUNCTIONS_NOT_PRESENT'}
+          . ([ScriptBlock]::Create((@($fns|ForEach-Object{$_.Extent.Text}) -join [Environment]::NewLine)))
+          $script:CaseBackupWith='2.46.4'
+          function Test-SpotifyRunning {return $false}
+          function Get-SpicetifyTransaction {return $null}
+          function Get-SpicetifyManagedInstallInfo {
+            return [pscustomobject]@{Managed=$true;Version='2.46.4';Path=(Join-Path $env:RUNNER_TEMP 'NeverCreate-Spicetify\spicetify.exe')}
+          }
+          function Get-SpicetifyLatestReleaseInfo {
+            return [pscustomobject]@{Verified=$true;Version='2.46.7'}
+          }
+          function Compare-VersionParts {return 1}
+          function Get-ConfigPath {return 'FAKE_CONFIG_PATH_NO_READ'}
+          function Get-IniSectionValue {return $script:CaseBackupWith}
+          foreach($case in @(
+            @{With='2.46.4';Reason='VERSION_CHANGE_REQUIRES_ATOMIC_BACKUP_REPROCESSING'},
+            @{With='2.46.7';Reason='BACKUP_PREPROCESSOR_NOT_CURRENT_CLI'},
+            @{With='';Reason='BACKUP_PREPROCESSOR_UNVERIFIED'}
+          )){
+            $script:CaseBackupWith=$case.With
+            $caught=''
+            try { [void](Start-SpicetifyCliTransaction) } catch { $caught=$_.Exception.Message }
+            if($caught -cne ('R130_PREPROCESSED_BACKUP_MIGRATION_HOLD:'+$case.Reason)){
+              throw 'R130_ACTUAL_START_FUNCTION_DID_NOT_HOLD_EXACT_EXPECTED_REASON'
+            }
+          }
+          if(Test-Path -LiteralPath (Join-Path $env:RUNNER_TEMP 'NeverCreate-Spicetify')){
+            throw 'R130_UNEXPECTED_FS_MUTATION'
+          }
+          Write-Host 'R130_REAL_START_FUNCTION_PRESTAGING_HOLD=PASS'
+          Write-Host 'R130_FRESH_VERSION_MISMATCH_NEVER_REACHES_ROOT_SWAP=PASS'
+          Write-Host 'R130_REAL_USER_INSTALL_AND_PUBLIC_MAIN_UNCHANGED=PASS'
