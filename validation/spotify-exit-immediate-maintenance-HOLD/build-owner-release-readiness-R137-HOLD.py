@@ -27,6 +27,11 @@ function Assert-R137OfficialSpicetifyPairReady {
            [string]$r.AssetDigest -cnotmatch '^sha256:[a-f0-9]{64}$'){
             throw ('R137_OFFICIAL_RELEASE_NOT_READY_'+($version -replace '\.','_'))
         }
+        if($version -ceq '2.46.4' -and
+           [string]$r.AssetDigest -cne
+             'sha256:0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f'){
+            throw 'R137_EXACT_ROLLBACK_ASSET_SHA_MISMATCH'
+        }
         if($version -ceq '2.46.7' -and
            [string]$r.AssetDigest -cne
              'sha256:c5a723d31eae529ba13f6922a7a027124238c7f3da7edd182a73eab03c447e9e'){

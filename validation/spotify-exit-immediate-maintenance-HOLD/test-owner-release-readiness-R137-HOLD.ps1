@@ -16,6 +16,7 @@ if($defs.Count -ne $names.Count){throw 'R137_PRODUCTION_FUNCTIONS_NOT_FOUND'}
 $script:Calls=@()
 $script:ReleaseFailure=''
 $script:BadDigest=$false
+$script:BadOldDigest=$false
 function Get-SpicetifyReleaseInfoForVersion {
  param([string]$Version)
  $script:Calls+=,$Version
@@ -28,7 +29,8 @@ function Get-SpicetifyReleaseInfoForVersion {
       'sha256:'+('0'*64)
    }elseif($Version -ceq '2.46.7'){
       'sha256:c5a723d31eae529ba13f6922a7a027124238c7f3da7edd182a73eab03c447e9e'
-   }else{'sha256:'+('c'*64)})
+   }elseif($script:BadOldDigest){'sha256:'+('1'*64)}
+    else{'sha256:0490380bf59e00c94cf6cb12bfac5152791b91bb8009aceef53c49815b45a56f'})
  }
 }
 $fail=$false
@@ -45,6 +47,13 @@ try{[void](Assert-R137OfficialSpicetifyPairReady)}catch{
 }
 if(-not $fail){throw 'R137_BAD_NEW_ASSET_PIN_NOT_REJECTED'}
 $script:BadDigest=$false
+$script:BadOldDigest=$true
+$fail=$false
+try{[void](Assert-R137OfficialSpicetifyPairReady)}catch{
+ $fail=$_.Exception.Message -ceq 'R137_EXACT_ROLLBACK_ASSET_SHA_MISMATCH'
+}
+if(-not $fail){throw 'R137_BAD_OFFICIAL_2464_ASSET_PIN_NOT_REJECTED'}
+$script:BadOldDigest=$false
 $script:Calls=@()
 if((Assert-R137OfficialSpicetifyPairReady) -cne $true -or
  $script:Calls.Count -ne 2 -or
