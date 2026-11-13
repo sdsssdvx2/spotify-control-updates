@@ -1,0 +1,102 @@
+name: HOLD publish verified R134 post-adoption default-deny main
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/publish-pinned-R134-owner-candidate-HOLD.yml
+permissions: {contents: write}
+jobs:
+  source-pinned-r134-only:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Independently reconstruct exact R134 from published immutable R131
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='validation/spotify-exit-immediate-maintenance-HOLD/'
+          $parent=$root+'out/atomic-spicetify-preprocess-migration-R131/spotify-control.ps1'
+          [void][IO.Directory]::CreateDirectory((Split-Path $parent -Parent))
+          $url='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/a532704e092b088dcaba1d67d8aee40c3016c736/'+$root+'spotify-control-R131-Owner-Candidate-HOLD.ps1'
+          [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+          $wc=New-Object Net.WebClient
+          try {[byte[]]$bytes=$wc.DownloadData($url)}finally{$wc.Dispose()}
+          $sha=[Security.Cryptography.SHA256]::Create()
+          try {$hash=([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}
+          finally{$sha.Dispose()}
+          if($bytes.Length -ne 316638 -or
+             $hash -cne '16db29223a50c9b2a504a543ab01fa898660642904e4be0414b959195bb113b1'){
+            throw 'PUBLISHED_R131_PARENT_NOT_PINNED'
+          }
+          [IO.File]::WriteAllBytes($parent,$bytes)
+          & python ($root+'build-owner-postadoption-default-hold-R134-HOLD.py')
+          if($LASTEXITCODE -ne 0){throw 'R134_PINNED_REBUILD_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ($root+'test-owner-postadoption-default-hold-R134-HOLD.ps1')
+          if($LASTEXITCODE -ne 0){throw 'R134_GATE_NATIVE_POWERSHELL_FAILED'}
+          $file=$root+'out/owner-postadoption-default-hold-R134/spotify-control.ps1'
+          $result=Get-Item -LiteralPath $file -Force
+          if($result.PSIsContainer -or $result.Length -ne 317847 -or
+             ($result.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+             (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne '99e1bc36667400fa8fc7a5464ec20d3b4e84ee648e979c746c18d9848b0f47fa'){
+            throw 'R134_FINAL_REBUILT_CANDIDATE_NOT_EXACT'
+          }
+          $null=$null
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R134_WINPS51_FULL_MAIN_PARSE_FAILED'}
+          Write-Host 'R134_SOURCE_SHA_PIN_AND_REAL_MUTATION_BOUNDARIES=PASS'
+      - name: Publish once to HOLD branch only without altering public main
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $repo='sdsssdvx2/spotify-control-updates'
+          if($env:GITHUB_REPOSITORY -cne $repo -or
+             $env:GITHUB_REF -cne 'refs/heads/validate/spotify-exit-immediate-maintenance-HOLD'){
+             throw 'R134_WRONG_REPO_OR_BRANCH'
+          }
+          $headers=@{
+            Authorization=('Bearer '+$env:GH_TOKEN)
+            Accept='application/vnd.github+json'
+            'X-GitHub-Api-Version'='2022-11-28'
+            'User-Agent'='SpotifyControl-R134-HOLD-Only'
+          }
+          $api='https://api.github.com/repos/'+$repo
+          $h=Invoke-RestMethod -Method Get -Uri ($api+'/git/ref/heads/validate/spotify-exit-immediate-maintenance-HOLD') -Headers $headers
+          if([string]$h.object.sha -cne $env:GITHUB_SHA){throw 'R134_DEV_BRANCH_DRIFT'}
+          $m=Invoke-RestMethod -Method Get -Uri ($api+'/git/ref/heads/main') -Headers $headers
+          if([string]$m.object.sha -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){
+            throw 'R134_PUBLIC_MAIN_DRIFT'
+          }
+          $path='validation/spotify-exit-immediate-maintenance-HOLD/spotify-control-R134-Owner-DefaultHold-HOLD.ps1'
+          $dest=$api+'/contents/'+$path
+          try {
+             $existing=Invoke-RestMethod -Method Get -Uri ($dest+'?ref=validate%2Fspotify-exit-immediate-maintenance-HOLD') -Headers $headers -ErrorAction Stop
+             throw 'R134_NO_OVERWRITE'
+          }catch {
+             if($_.Exception.Message -ceq 'R134_NO_OVERWRITE'){throw}
+             $response=$_.Exception.Response
+             if($null -eq $response -or [int]$response.StatusCode -ne 404){
+               throw 'R134_DESTINATION_EXISTENCE_UNCERTAIN'
+             }
+          }
+          $file='validation/spotify-exit-immediate-maintenance-HOLD/out/owner-postadoption-default-hold-R134/spotify-control.ps1'
+          $body=@{
+            message='build(HOLD): preserve byte-exact R134 default-deny post-adoption product main'
+            content=[Convert]::ToBase64String([IO.File]::ReadAllBytes($file))
+            branch='validate/spotify-exit-immediate-maintenance-HOLD'
+          }|ConvertTo-Json -Depth 5 -Compress
+          try{
+            $new=Invoke-RestMethod -Method Put -Uri $dest -Headers $headers -ContentType 'application/json' -Body ([Text.Encoding]::UTF8.GetBytes($body)) -ErrorAction Stop
+          }catch{throw 'R134_SOURCE_CREATE_FAILED_NO_RETRY'}
+          if([string]$new.content.path -cne $path -or
+             [int64]$new.content.size -ne 317847 -or
+             [string]::IsNullOrWhiteSpace([string]$new.commit.sha)){
+             throw 'R134_SOURCE_PUBLICATION_NOT_READBACK_VERIFIED'
+          }
+          Write-Host 'R134_PUBLISHED_HOLD_ONLY=PASS'
+          Write-Host ('R134_PUBLISHED_COMMIT='+[string]$new.commit.sha)
+          Write-Host 'PUBLIC_MAIN=UNCHANGED;USER_WINDOWS=UNCHANGED;NATIVE_CLI_CALLS=0'
