@@ -40,7 +40,7 @@ function Tree([string]$p){
   $ordered=@($rows.ToArray() | Sort-Object path,type)
   return (HText ([string]($ordered | ConvertTo-Json -Depth 5 -Compress)))
 }
-function Class([string]$actual,[string]$before,[string]$after){
+function Compare-TreePin([string]$actual,[string]$before,[string]$after){
   if($actual -ceq 'ABSENT'){return 'ABSENT'}
   if($actual -cnotmatch '^[a-f0-9]{64}\z'){return 'UNVERIFIED'}
   if($before -cmatch '^[a-f0-9]{64}\z' -and $actual -ceq $before){return 'BEFORE'}
@@ -74,31 +74,31 @@ try{
   $beforeLedger=HFile $ledger
   $txn=Get-Content -LiteralPath $ledger -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
   $s=[string](F $txn 'status')
-  $map.LEDGER=if($s -cin @('committed','rolled-back')){'SETTLED'}elseif($s -cin @('awaiting-guard','prepared','rollback-root-restored-apply-failed')){'UNSETTLED'}else{'UNCLASSIFIED'}
+  $map.LEDGER=$(if($s -cin @('committed','rolled-back')){'SETTLED'}elseif($s -cin @('awaiting-guard','prepared','rollback-root-restored-apply-failed')){'UNSETTLED'}else{'UNCLASSIFIED'})
   $id=[string](F $txn 'id')
   $old=[string](F $txn 'before_tree_sha256');$new=[string](F $txn 'after_tree_sha256')
   $live=Join-Path $env:LOCALAPPDATA 'spicetify'
-  $map.ROOT=Class (Tree $live) $old $new
+  $map.ROOT=Compare-TreePin (Tree $live) $old $new
   $exe=Join-Path $live 'spicetify.exe'
-  $exehash=if(Test-Path -LiteralPath $exe -PathType Leaf){HFile $exe}else{'ABSENT'}
-  $map.EXE=Class $exehash ([string](F $txn 'before_sha256')) ([string](F $txn 'after_sha256'))
-  $expected=if($id -cmatch '^\d{8}-\d{6}-[a-f0-9]{8}\z'){
+  $exehash=$(if(Test-Path -LiteralPath $exe -PathType Leaf){HFile $exe}else{'ABSENT'})
+  $map.EXE=Compare-TreePin $exehash ([string](F $txn 'before_sha256')) ([string](F $txn 'after_sha256'))
+  $expected=$(if($id -cmatch '^\d{8}-\d{6}-[a-f0-9]{8}\z'){
     Join-Path $ctrl ('backups\spicetify-transactions\'+$id+'\root-before')
-  }else{''}
+  }else{''})
   $back=[string](F $txn 'backup_root')
   if($expected -and $back -and
      [IO.Path]::GetFullPath($back) -ieq [IO.Path]::GetFullPath($expected)){
-    $map.BACKUP_ROOT=Class (Tree $back) $old ''
+    $map.BACKUP_ROOT=Compare-TreePin (Tree $back) $old ''
   }else{$map.BACKUP_ROOT='UNTRUSTED_PATH'}
   $map.BACKUP_WITH=ConfigWith (Join-Path $env:APPDATA 'spicetify\config-xpui.ini') ([string](F $txn 'before_version')) ([string](F $txn 'after_version'))
   $state=Join-Path $ctrl 'state.json'
   if(Test-Path -LiteralPath $state -PathType Leaf){
     $sh=HFile $state
     $sv=Get-Content -LiteralPath $state -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-    $map.STATE_LINK=if([string](F $sv 'spicetify_last_transaction_id') -ceq $id){'SAME'}else{'DIFFERENT'}
+    $map.STATE_LINK=$(if([string](F $sv 'spicetify_last_transaction_id') -ceq $id){'SAME'}else{'DIFFERENT'})
     if((HFile $state) -cne $sh){$map.STATE_LINK='CHANGED'}
   }else{$map.STATE_LINK='ABSENT'}
-  $map.LEDGER_STABLE=if((HFile $ledger) -ceq $beforeLedger){'YES'}else{'NO'}
+  $map.LEDGER_STABLE=$(if((HFile $ledger) -ceq $beforeLedger){'YES'}else{'NO'})
   if($map.LEDGER_STABLE -eq 'YES' -and $map.BACKUP_ROOT -eq 'BEFORE' -and
      $map.ROOT -cin @('BEFORE','AFTER') -and $map.EXE -cin @('BEFORE','AFTER')){
     $map.RESULT='EXACT_PREIMAGE_EVIDENCE_OWNER_REVIEW_ONLY'
