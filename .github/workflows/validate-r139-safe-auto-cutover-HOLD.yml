@@ -70,6 +70,7 @@ jobs:
             $env:R139_TEST_SPOTIFY_RUNNING='YES'
             $env:R139_TEST_ENABLE_RESULT='PASS'
             $plan=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $cut -SyntheticHostTest -Mode Plan)
+            Write-Host ('R139_PLAN_RECEIPT='+($plan -join ';'))
             if($LASTEXITCODE -ne 0 -or $plan -notcontains 'RESULT=R139_CUTOVER_READY_NO_OPERATING_WRITE' -or
                (Get-FileHash $a.Main -Algorithm SHA256).Hash.ToLowerInvariant() -cne '4ac4e4ccb48c57b59b9fe87d688df76dd823998e5e791f4ed877c289175e7d99'){
               throw 'R139_PLAN_NOT_READONLY_READY'
