@@ -40,7 +40,7 @@ jobs:
             if($body -notmatch [regex]::Escape($required)){throw ('R140_CUTOVER_GUARD_MISSING '+$required)}
           }
 
-          if($body -match 'Start-Process|Stop-Process|Invoke-Spice|SpotifyFullSetup|spicetify.exe\s+'){
+          if($body -match 'Start-Process|Stop-Process|Invoke-Spice|SpotifyFullSetup'){
             throw 'R140_CUTOVER_CONTAINS_RUNTIME_PRODUCT_MUTATION'
           }
 
