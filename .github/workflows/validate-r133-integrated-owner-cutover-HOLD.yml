@@ -72,6 +72,7 @@ jobs:
             $plan=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Plan)
             if($LASTEXITCODE -ne 0 -or $plan -notcontains 'RESULT=CUTOVER_PLAN_READY_NO_OPERATING_WRITES' -or
                 (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldSHA){
+              Write-Host ('R133_PLAN_SAFE_STATUS='+(@($plan|Where-Object{$_ -match '^(FAILED_PHASE|RESULT|R131_SOURCE|R132_SOURCE|R112_MAIN_AND_PENDING_LEDGER)='}) -join ';'))
               throw 'R133_OWNER_PLAN_NOT_READY_OR_MUTATED'
             }
             $denied=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once)
