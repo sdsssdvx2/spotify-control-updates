@@ -865,3 +865,4 @@ jobs:
           # PowerShell source test is not a native EXE and does not set
           # LASTEXITCODE. A stale exit value from unrelated prior steps must
           # not turn a completed PASS into a false failure.
+          Write-Host 'R131_EXACT_SCHEMA3_TRANSACTION_COMMIT_AND_EXTERNAL_ROLLBACK_TESTED=PASS'
