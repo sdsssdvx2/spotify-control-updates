@@ -815,3 +815,27 @@ jobs:
             }
           }
           Write-Host 'R131_EXACT_ROLLBACK_AND_APPLY_SOURCE_INSPECTED=PASS'
+      - name: Inspect R112 source of exact external root snapshot and custom settings preservation
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $src='validation/spotify-exit-immediate-maintenance-HOLD/out/private-stable-ahead-R112/spotify-control.ps1'
+          $errors=$null;$tok=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile($src,[ref]$tok,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R131_EXT_SOURCE_PARSE_HOLD'}
+          foreach($fn in @($ast.FindAll({param($x)
+            $x -is [Management.Automation.Language.FunctionDefinitionAst] -and
+            $x.Name -cin @('Copy-SpicetifyRootExact','Get-SpicetifyRootManifest',
+              'Get-SpicetifyConfigSemanticHash','Get-SpicetifyTransaction',
+              'Save-SpicetifyTransaction','Invoke-NativeCapture')
+          },$true))){
+            $l=@($fn.Extent.Text -split '\r?\n')
+            Write-Host ('R131_EXT_FUNCTION='+$fn.Name+';LINES='+$l.Count)
+            $limit=if($fn.Name -eq 'Invoke-NativeCapture'){80}else{110}
+            for($i=0;$i -lt [Math]::Min($limit,$l.Count);$i++){
+              $line=$l[$i].Trim()
+              if($line.Length -gt 240){$line=$line.Substring(0,240)}
+              Write-Host ('R131_EXT_LINE='+$fn.Name+'#'+($i+1)+':'+$line)
+            }
+          }
+          Write-Host 'R131_EXACT_EXTERNAL_ROOT_HELPERS_REVIEWED=PASS'
