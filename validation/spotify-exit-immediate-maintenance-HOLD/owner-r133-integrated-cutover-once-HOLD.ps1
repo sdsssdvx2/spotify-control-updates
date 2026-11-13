@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet('Plan','Once')][string]$Mode='Plan',
+  [ValidateSet('Plan','Once','Recover')][string]$Mode='Plan',
   [string]$ApprovalPhrase='',
   [switch]$SyntheticHostedFixture
 )
@@ -22,6 +22,7 @@ $script:Ledger=Join-Path $script:Root 'spicetify-last-transaction.json'
 $script:Phase='START'
 $script:Published=$false
 $script:Adopted=$false
+$script:RecoveryPublished=$false
 $script:OldLedgerSha=$null
 $script:OldBackup=$null
 $script:Tmp=$null
@@ -120,6 +121,58 @@ function Confirm-R132ReadOnlyPreimage([string]$Source){
     throw 'R133_R132_READONLY_PREIMAGE_NOT_READY'
   }
 }
+function Invoke-ExactSourceCrashRecovery {
+  # Manual, owner-approved source-only recovery. A hard stop after File.Replace
+  # leaves a byte-exact .r133-previous from the same NTFS transaction.
+  # No ledger, Spotify Apps, roaming, agent, or native CLI modifications.
+  $script:Phase='RECOVER_EXACT_PRIOR_SOURCE'
+  Acquire 'Maintenance'
+  Acquire 'AgentTick'
+  if(@(Get-Process -Name Spotify -ErrorAction SilentlyContinue).Count -ne 0){
+    throw 'R133_RECOVERY_REQUIRES_SPOTIFY_CLOSED'
+  }
+  $pre=$script:Main+'.r133-previous'
+  $held=$script:Main+'.r133-crash-recovered-new-HOLD'
+  if(Test-Path -LiteralPath $held){throw 'R133_RECOVERY_ALREADY_ATTEMPTED'}
+  $beforeSHA=HFile $pre
+  if($SyntheticHostedFixture){
+    if($beforeSHA -cne $script:OldMainSha){throw 'R133_RECOVERY_FIXTURE_OLD_PIN_MISMATCH'}
+  }elseif($beforeSHA -cnotin @($script:OldMainSha,$script:PatchedR112Sha)){
+    throw 'R133_RECOVERY_UNAPPROVED_PREIMAGE_SOURCE'
+  }
+  if((HFile $script:Main) -cne $script:NewMainSha){
+    throw 'R133_RECOVERY_LIVE_NOT_EXPECTED_R131_SOURCE'
+  }
+  $ledgerBeforeSHA=HFile $script:Ledger
+  $tx=Get-Content -LiteralPath $script:Ledger -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+  if([string]$tx.status -cne 'awaiting-guard' -or
+     [string]$tx.schema -cne '3' -or -not [bool]$tx.root_transaction -or
+     [string]$tx.before_version -cne '2.46.4' -or
+     [string]$tx.id -cnotmatch '^\d{8}-\d{6}-[a-f0-9]{8}$'){
+    throw 'R133_RECOVERY_NOT_AN_EXACT_UNSETTLED_R112_LEDGER'
+  }
+  $previousTemp=$script:Main+'.r133-crash-restore-'+[guid]::NewGuid().ToString('N')+'.tmp'
+  New-File $previousTemp ([IO.File]::ReadAllBytes($pre))
+  if((HFile $previousTemp) -cne $beforeSHA -or
+     (HFile $pre) -cne $beforeSHA -or
+     (HFile $script:Main) -cne $script:NewMainSha -or
+     (HFile $script:Ledger) -cne $ledgerBeforeSHA){
+    throw 'R133_RECOVERY_PREIMAGE_CHANGED_BEFORE_SWAP'
+  }
+  [IO.File]::Replace($previousTemp,$script:Main,$held,$true)
+  $script:RecoveryPublished=$true
+  if((HFile $script:Main) -cne $beforeSHA -or
+     (HFile $held) -cne $script:NewMainSha -or
+     (HFile $pre) -cne $beforeSHA -or
+     (HFile $script:Ledger) -cne $ledgerBeforeSHA){
+    throw 'R133_RECOVERY_SOURCE_OR_LEDGER_READBACK_INVALID'
+  }
+  Emit 'OWNER_SOURCE' 'R112_OR_ORIGINAL_PREIMAGE_RESTORED'
+  Emit 'ORIGINAL_LEDGER' 'UNCHANGED_PENDING_OWNER_REVIEW'
+  Emit 'R131_SOURCE' 'RETAINED_IN_CRASH_RECOVERY_BACKUP'
+  Emit 'SPOTIFY_APPS_AND_CONFIG' 'UNTOUCHED_NOT_VERIFIED_HISTORICAL'
+  Emit 'RESULT' 'EXACT_SOURCE_ONLY_RECOVERED_OWNER_REVIEW_REQUIRED'
+}
 function Try-SafeRestore {
   # The source may be restored only when R132 did not publish any new ledger
   # and when the exact new source is still installed.
@@ -165,8 +218,13 @@ try{
     $script:OldMainSha=[string]$env:R133_TEST_OLD_MAIN_SHA
     if($script:OldMainSha -cnotmatch '^[a-f0-9]{64}$'){throw 'R133_SYNTHETIC_OLD_MAIN_SHA_MISSING'}
   }
-  if($Mode -ceq 'Once'){
-    if($ApprovalPhrase -cne 'APPROVE_R133_R131_SOURCE_AND_R132_OWNER_ADOPTION_ONCE'){
+  if($Mode -cin @('Once','Recover')){
+    $requiredApproval=$(if($Mode -ceq 'Recover'){
+      'APPROVE_R133_CRASH_SOURCE_ONLY_RECOVERY_ONCE'
+    }else{
+      'APPROVE_R133_R131_SOURCE_AND_R132_OWNER_ADOPTION_ONCE'
+    })
+    if($ApprovalPhrase -cne $requiredApproval){
       throw 'R133_EXPLICIT_OWNER_APPROVAL_REQUIRED'
     }
     $principal=[Security.Principal.WindowsPrincipal]::new(
@@ -176,6 +234,9 @@ try{
       throw 'R133_NONADMIN_OWNER_REQUIRED'
     }
   }
+  if($Mode -ceq 'Recover'){
+    Invoke-ExactSourceCrashRecovery
+  }else{
   $script:Phase='PIN_SOURCES'
   [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
   $script:Phase='PIN_R131_COMPILED_SOURCE'
@@ -233,6 +294,11 @@ try{
        (HFile $backup) -cne $script:AcceptedOwnerMainSha){
       throw 'R133_NEW_SOURCE_OR_SNAPSHOT_READBACK_INVALID'
     }
+    if($SyntheticHostedFixture -and $env:R133_TEST_HARD_EXIT_AFTER_SOURCE_SWAP -ceq 'YES'){
+      # Isolated hosted-Windows-only synthetic crash: no catch/finally code
+      # executes. The owner recovery path must work from durable preimage.
+      [Environment]::Exit(82)
+    }
     if($SyntheticHostedFixture -and $env:R133_TEST_ABORT_AFTER_SOURCE_SWAP -ceq 'YES'){
       throw 'R133_SYNTHETIC_FAULT_AFTER_ATOMIC_SOURCE_SWAP'
     }
@@ -264,6 +330,7 @@ try{
     Emit 'NATIVE_SPICETIFY_UPGRADE' 'NOT_EXECUTED'
     Emit 'RESULT' 'OWNER_CUTOVER_ADOPTED_NO_MODEL_OR_SPICETIFY_CALL'
   }
+  }
 }catch{
   Emit 'FAILED_PHASE' $script:Phase
   $safeExceptionClass=($_.Exception.GetType().Name -replace '[^A-Za-z]','')
@@ -278,7 +345,13 @@ try{
     # Try-SafeRestore reacquires them on this same thread, then releases all.
     Try-SafeRestore
   }
-  Emit 'RESULT' $(if($script:Published){'HOLD_AFTER_SOURCE_CUTOVER_REVIEW_REQUIRED'}else{'HOLD_NO_OPERATING_CUTOVER'})
+  Emit 'RESULT' $(if($script:RecoveryPublished){
+    'HOLD_AFTER_SOURCE_ONLY_RECOVERY_REVIEW_REQUIRED'
+  }elseif($script:Published){
+    'HOLD_AFTER_SOURCE_CUTOVER_REVIEW_REQUIRED'
+  }else{
+    'HOLD_NO_OPERATING_CUTOVER'
+  })
 }finally{
   Release-Locks
   [Net.ServicePointManager]::SecurityProtocol=$previousTLS
