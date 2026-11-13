@@ -93,6 +93,8 @@ try {
   $script:TxnForCommit|Add-Member -NotePropertyName 'after_sha256' -NotePropertyValue ((Get-ExactFileSha256 -Path $exe))
   $script:TxnForCommit|Add-Member -NotePropertyName 'root_transaction' -NotePropertyValue $true
   $script:TxnForCommit|Add-Member -NotePropertyName 'status' -NotePropertyValue 'awaiting-guard'
+  $script:TxnForCommit|Add-Member -NotePropertyName 'before_version' -NotePropertyValue '2.46.4'
+  $script:TxnForCommit|Add-Member -NotePropertyName 'committed_at' -NotePropertyValue $null
   $script:TxnForCommit|Add-Member -NotePropertyName 'extras_preserved' -NotePropertyValue $true
   $script:TxnForCommit|Add-Member -NotePropertyName 'extras_before_tree_sha256' -NotePropertyValue ('a'*64)
   $script:TxnForCommit|Add-Member -NotePropertyName 'extras_after_tree_sha256' -NotePropertyValue ('a'*64)
