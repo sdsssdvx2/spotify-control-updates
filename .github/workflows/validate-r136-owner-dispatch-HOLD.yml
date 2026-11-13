@@ -1,0 +1,41 @@
+name: HOLD R136 full mutating-command gate and playback preservation
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - validation/spotify-exit-immediate-maintenance-HOLD/build-owner-postadoption-dispatch-gate-R136-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/test-owner-postadoption-dispatch-gate-R136-HOLD.ps1
+      - .github/workflows/validate-r136-owner-dispatch-HOLD.yml
+permissions: {contents: read}
+jobs:
+  windows-owner-gate:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Pinned R135 to full R136 product and Windows native behavior
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          $folder=$base+'out/owner-v2467-one-approved-attempt-R135'
+          [void][IO.Directory]::CreateDirectory($folder)
+          $url='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/25dd08ac8946f0bed2d2e210fa00d1fb859b1ca8/'+$base+'spotify-control-R135-Owner-OneShot-HOLD.ps1'
+          [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+          $wc=New-Object Net.WebClient
+          try{[byte[]]$bytes=$wc.DownloadData($url)}finally{$wc.Dispose()}
+          $alg=[Security.Cryptography.SHA256]::Create()
+          try{$actual=([BitConverter]::ToString($alg.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}
+          finally{$alg.Dispose()}
+          if($bytes.Length -ne 326533 -or
+             $actual -cne '07407f9dd566616395644a5c5bff8a1255701696dab2a074df062bab3ad279b4'){
+             throw 'R136_PINNED_R135_PARENT_INVALID'
+          }
+          [IO.File]::WriteAllBytes((Join-Path $folder 'spotify-control.ps1'),$bytes)
+          & python ($base+'build-owner-postadoption-dispatch-gate-R136-HOLD.py')
+          if($LASTEXITCODE -ne 0){throw 'R136_BYTE_EXACT_BUILD_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ($base+'test-owner-postadoption-dispatch-gate-R136-HOLD.ps1')
+          if($LASTEXITCODE -ne 0){throw 'R136_WINDOWS_PRODUCT_MUTATION_GATE_FAILED'}
+          Write-Host 'R136_FULL_PRODUCT_ACTION_DISPATCH_AND_LAUNCH_SYNTHETIC_ACCEPTANCE=PASS'
+          Write-Host 'USER_PC=UNCHANGED;PUBLIC_MAIN=UNCHANGED;REAL_SPOTIFY_OR_NATIVE_CALLS=ZERO'
