@@ -1,0 +1,34 @@
+name: HOLD R132 owner preimage adoption build and safety
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - validation/spotify-exit-immediate-maintenance-HOLD/owner-r132-current-preimage-adoption-HOLD.ps1
+      - .github/workflows/validate-r132-owner-preimage-HOLD.yml
+permissions: {contents: read}
+jobs:
+  owner-r132-static:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Windows AST and explicit approval / legacy-main safety
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/owner-r132-current-preimage-adoption-HOLD.ps1'
+          $tokens=$null;$errors=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($p,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){
+            foreach($e in $errors){Write-Host ('SYNTAX='+$e.Message)}
+            throw 'R132_SOURCE_SYNTAX_INVALID'
+          }
+          $src=Get-Content -LiteralPath $p -Raw
+          foreach($anchor in @('owner-reviewed-preimage','OWNER_APPROVED_CURRENT_PREIMAGE_NOT_EXTERNAL_ROLLBACK',
+              'EXTERNAL_OR_CLI_SNAPSHOT_CHANGED','OWNER_APPROVAL_REQUIRED','ATOMIC_JOURNAL_TRANSITION')){
+            if(-not $src.Contains($anchor)){throw 'R132_REQUIRED_GUARD_MISSING'}
+          }
+          Write-Host 'R132_WINDOWS_PS51_SOURCE_VALID=PASS'
+          Write-Host 'R132_EXPLICIT_APPROVAL_AND_EXTERNAL_COPY_GATES_PRESENT=PASS'
+          Write-Host ('R132_CANDIDATE_SOURCE_SHA256='+((Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()))
