@@ -73,7 +73,7 @@ $script:Status='committed'
 $script:ClaimPresent=$false
 $script:LaunchCount=0
 $script:SpiceCount=0
-$script:LastGuardResult=[pscustomobject]@{CurrentSupported=$false}
+$script:LastGuardResult=[pscustomobject]@{CurrentSupported=$false;Reason='synthetic-unsupported'}
 Launch-ManagedSpotify
 if($script:SpiceCount -ne 0 -or $script:LaunchCount -ne 1){
   throw 'R136_NON_ADOPTED_LAUNCH_REGRESSED'
