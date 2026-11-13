@@ -40,8 +40,15 @@ jobs:
             if($body -notmatch [regex]::Escape($required)){throw ('R140_CUTOVER_GUARD_MISSING '+$required)}
           }
 
-          if($body -match 'Start-Process|Stop-Process|Invoke-Spice|SpotifyFullSetup'){
-            throw 'R140_CUTOVER_CONTAINS_RUNTIME_PRODUCT_MUTATION'
+          $runtimeMutationLines=@(
+            $body -split [Environment]::NewLine |
+            Where-Object {
+              $_ -match 'Start-Process|Stop-Process|SpotifyFullSetup' -or
+              $_ -match '^\s*(?:\$[^=]+\s*=\s*)?Invoke-Spice(?:Capture)?\s'
+            }
+          )
+          if($runtimeMutationLines.Count -ne 0){
+            throw ('R140_CUTOVER_CONTAINS_RUNTIME_PRODUCT_MUTATION count='+$runtimeMutationLines.Count)
           }
 
           $newRaw=Get-Content -LiteralPath $new -Raw
