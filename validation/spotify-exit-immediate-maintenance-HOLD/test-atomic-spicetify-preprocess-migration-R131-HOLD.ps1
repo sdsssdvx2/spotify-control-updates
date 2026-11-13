@@ -18,6 +18,7 @@ $required=@('New-SpicetifyMigrationPreimage','Restore-SpicetifyMigrationSurface'
   'Get-StringSha256','Get-SpicetifyConfigSemanticHash','Get-IniSectionValue',
   'Commit-SpicetifyCliTransaction','Rollback-SpicetifyCliTransaction',
   'Invoke-SpicetifyTransactionalMaintenance',
+  'Repair-PendingSpicetifyTransaction',
   'Save-SpicetifyTransaction','Write-SpicetifyJournalJsonAtomic')
 $fns=@($ast.FindAll({param($x)
   $x -is [Management.Automation.Language.FunctionDefinitionAst] -and
@@ -454,6 +455,43 @@ try {
     throw 'R131_ACTUAL_MAINTENANCE_COORDINATOR_FAILED_APPLY_NOT_ROLLED_BACK'
   }
   Write-Host 'R131_REAL_COORDINATOR_SYNTHETIC_APPLY_FAILURE_AND_ROLLBACK=PASS'
+  # Fail closed before any mutation when a previous R112/R130 journal lacks
+  # complete R131 external-preimage provenance (owner review required).
+  $legacy=[pscustomobject]@{
+    schema=3;root_transaction=$true;id='20261113-170000-aabbccdd'
+    status='awaiting-guard';apply_attempted=$true
+  }
+  $script:TxnForCommit=$legacy
+  $legacyBefore=$legacy|ConvertTo-Json -Compress
+  $nativeBefore=$script:R131NativeApply
+  $held=$false
+  try{[void](Repair-PendingSpicetifyTransaction)}catch{
+    $held=$_.Exception.Message -match 'R131_UNSETTLED_PRE_MIGRATION_LEDGER_OWNER_REVIEW_HOLD'
+  }
+  if(-not $held -or ($script:TxnForCommit|ConvertTo-Json -Compress) -cne $legacyBefore -or
+      $script:R131NativeApply -ne $nativeBefore){
+    throw 'R131_UNSETTLED_LEGACY_LEDGER_MUST_BE_FROZEN'
+  }
+  Write-Host 'R131_UNSETTLED_R112_LEDGER_AUTO_REPAIR_BLOCKED=PASS'
+  $partial=[pscustomobject]@{
+    schema=3;root_transaction=$true;id='20261113-170100-aabbccdd'
+    status='awaiting-guard';apply_attempted=$true
+    migration_required=$true;migration_snapshot_ready=$false
+    migration_snapshot_root=$null
+    migration_spicetify_before_sha256=$null
+    migration_apps_before_sha256=$null
+  }
+  $script:TxnForCommit=$partial
+  $partialBefore=$partial|ConvertTo-Json -Compress
+  $held=$false
+  try{[void](Repair-PendingSpicetifyTransaction)}catch{
+    $held=$_.Exception.Message -match 'R131_UNSETTLED_MIGRATION_SNAPSHOT_NOT_CERTIFIED_HOLD'
+  }
+  if(-not $held -or ($script:TxnForCommit|ConvertTo-Json -Compress) -cne $partialBefore -or
+      $script:R131NativeApply -ne $nativeBefore){
+    throw 'R131_PARTIAL_MIGRATION_LEDGER_MUST_BE_FROZEN'
+  }
+  Write-Host 'R131_PARTIAL_MIGRATION_LEDGER_AUTO_REPAIR_BLOCKED=PASS'
   # New and old transaction remains protected if one external backup is tampered.
   [IO.File]::WriteAllText((Join-Path $pre.RoamingBackup 'Themes/theme.css'),'CORRUPTED_BACKUP',$utf8)
   $failed=$false
