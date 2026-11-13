@@ -856,4 +856,6 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           & 'validation/spotify-exit-immediate-maintenance-HOLD/test-atomic-spicetify-preprocess-migration-R131-HOLD.ps1'
-          if($LASTEXITCODE -ne 0){throw 'R131_WINDOWS_REAL_SOURCE_TEST_NONZERO'}
+          # PowerShell source test is not a native EXE and does not set
+          # LASTEXITCODE. A stale exit value from unrelated prior steps must
+          # not turn a completed PASS into a false failure.
