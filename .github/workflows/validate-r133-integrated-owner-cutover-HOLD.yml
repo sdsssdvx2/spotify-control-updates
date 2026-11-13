@@ -94,6 +94,38 @@ jobs:
                 (Get-FileHash $ledger -Algorithm SHA256).Hash -cne $ledgerBefore){
               throw 'R133_MISSING_APPROVAL_MUTATED_OWNER'
             }
+            # Force a synthetic process-level fault immediately after the
+            # pinned R131 main swap. The exact original journal and owner data
+            # must be unchanged; rollback must retain the same owner mutex.
+            $env:R133_TEST_ABORT_AFTER_SOURCE_SWAP='YES'
+            try {
+              $interrupted=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R131_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
+            } finally {
+              Remove-Item Env:R133_TEST_ABORT_AFTER_SOURCE_SWAP -ErrorAction SilentlyContinue
+            }
+            $previous=$main+'.r133-previous'
+            $newHeld=$main+'.r133-new-source-held'
+            if($LASTEXITCODE -ne 0 -or
+               $interrupted -notcontains 'FAILED_PHASE=EXCLUSIVE_SOURCE_CUTOVER' -and
+               $interrupted -notcontains 'FAILED_PHASE=R132_OWNER_PREIMAGE_ADOPTION'){
+              Write-Host ('R133_INTERRUPTED_STATUS='+(@($interrupted|Where-Object{$_ -match '^(FAILED_PHASE|EXCEPTION_TYPE|BLOCK_CLASS|RESULT|ROLLBACK_SOURCE)='}) -join ';'))
+              throw 'R133_POST_SWAP_FAULT_NOT_INJECTED'
+            }
+            if($interrupted -notcontains 'ROLLBACK_SOURCE=R112_RESTORED_SHA_VERIFIED' -or
+               $interrupted -notcontains 'RESULT=HOLD_AFTER_SOURCE_CUTOVER_REVIEW_REQUIRED' -or
+               (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldSHA -or
+               (Get-FileHash $ledger -Algorithm SHA256).Hash -cne $ledgerBefore -or
+               (Get-FileHash $state -Algorithm SHA256).Hash -cne $stateBefore -or
+               -not(Test-Path -LiteralPath $previous -PathType Leaf) -or
+               -not(Test-Path -LiteralPath $newHeld -PathType Leaf) -or
+               (Get-FileHash $previous -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldSHA -or
+               (Get-FileHash $newHeld -Algorithm SHA256).Hash.ToLowerInvariant() -cne '16db29223a50c9b2a504a543ab01fa898660642904e4be0414b959195bb113b1'){
+              throw 'R133_POST_SWAP_SOURCE_ROLLBACK_NOT_EXACT'
+            }
+            Write-Host 'R133_INTERRUPTED_SOURCE_SWAP_ROLLBACK_MAIN_AND_LEDGER_EXACT=PASS'
+            # Test fixture reset, NOT an operating retry or an owner recovery
+            # recommendation. A real interrupted transaction is HOLD.
+            Remove-Item -LiteralPath $previous,$newHeld -Force
             $approved=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R131_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
             if($LASTEXITCODE -ne 0 -or
                $approved -notcontains 'RESULT=OWNER_CUTOVER_ADOPTED_NO_MODEL_OR_SPICETIFY_CALL'){
