@@ -144,3 +144,51 @@ jobs:
             throw 'R125_STATE_CLASSIFICATION_INCORRECT'
           }
           Write-Host 'R125_STATE_CLASSIFICATION_ONLY_NOT_UPDATE_AUTHORIZATION=PASS'
+      - name: Native Windows scratch atomic R112 swap and exact original recovery
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-StrictMode -Version 2.0
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          & python ($base+'build-private-stable-ahead-R112-HOLD.py')
+          if($LASTEXITCODE -ne 0){throw 'R125_R112_CANDIDATE_REBUILD_FAILED'}
+          $original=$base+'out/release-staging-boot-wmi-R70/bin/spotify-control.ps1'
+          $candidate=$base+'out/private-stable-ahead-R112/spotify-control.ps1'
+          $oldSHA='b2b2fbf1afb60b58d501312160f7e2437c2452e90cb61ca8c2be0d877f92232d'
+          $newSHA='beb850064670c078a679585ace25f8071daa88c0b264185c03ef3364329b431b'
+          if((Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldSHA -or
+             (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant() -cne $newSHA){
+            throw 'R125_OFFICIAL_R112_SOURCE_PINS_CHANGED'
+          }
+          $script=$base+'owner-approved-r112-spicetify-v2467-onepass-R125-HOLD.ps1'
+          $parseErrors=$null;$tokens=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile($script,[ref]$tokens,[ref]$parseErrors)
+          if(@($parseErrors).Count -ne 0){throw 'R125_SOURCE_PARSE_ERROR'}
+          $names=@('HashBytes','HashFile','Regular','Fail','Acquire','Release','ReplaceMain')
+          $defs=@($ast.FindAll({param($x) $x -is [Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -cin $names},$true))
+          if($defs.Count -ne $names.Count){throw 'R125_SCRATCH_SWAP_SOURCE_EXTRACTION_DRIFT'}
+          . ([ScriptBlock]::Create((@($defs | ForEach-Object {$_.Extent.Text}) -join [Environment]::NewLine)))
+          $script:StageRoot=Join-Path $env:RUNNER_TEMP ('R125-Atomic-'+[guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $script:StageRoot -ErrorAction Stop | Out-Null
+          $bin=Join-Path $script:StageRoot 'bin'
+          New-Item -ItemType Directory -Path $bin -ErrorAction Stop | Out-Null
+          $script:OriginalMain=Join-Path $bin 'spotify-control.ps1'
+          Copy-Item -LiteralPath $original -Destination $script:OriginalMain -ErrorAction Stop
+          $script:SourceSwapped=$false
+          if(@(Get-Process -Name Spotify -ErrorAction SilentlyContinue).Count -ne 0){
+            throw 'R125_HOSTED_SCRATCH_SPOTIFY_PROCESS_PRESENT'
+          }
+          ReplaceMain $oldSHA ([IO.File]::ReadAllBytes($candidate)) 'before-swap.ps1'
+          if(-not $script:SourceSwapped -or
+             (HashFile $script:OriginalMain) -cne $newSHA -or
+             (HashFile (Join-Path $script:StageRoot 'before-swap.ps1')) -cne $oldSHA){
+            throw 'R125_SCRATCH_SWAP_CONTENT_NOT_PROVEN'
+          }
+          Write-Host 'R125_WINDOWS_NATIVE_ATOMIC_R112_SWAP=PASS'
+          ReplaceMain $newSHA ([IO.File]::ReadAllBytes($original)) 'failed-r112.ps1'
+          if((HashFile $script:OriginalMain) -cne $oldSHA -or
+             (HashFile (Join-Path $script:StageRoot 'failed-r112.ps1')) -cne $newSHA){
+            throw 'R125_SCRATCH_ROLLBACK_CONTENT_NOT_PROVEN'
+          }
+          Write-Host 'R125_WINDOWS_NATIVE_ATOMIC_ORIGINAL_RECOVERY=PASS'
+          Write-Host 'R125_OWNER_PC_AND_SPOTIFY_CONFIGURATION_UNCHANGED=PASS'
