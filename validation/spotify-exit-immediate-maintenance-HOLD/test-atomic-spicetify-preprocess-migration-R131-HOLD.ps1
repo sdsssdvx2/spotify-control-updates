@@ -181,6 +181,68 @@ try {
   }
   Write-Host 'R131_INTERRUPTED_STAGED_AND_UNSTAGED_RESTORE_RESUME=PASS'
   Write-Host 'R131_INTERRUPTED_RECOVERY_FOREIGN_TREE_NO_CLOBBER=PASS'
+  # Exercise the actual product rollback, not just the external helper:
+  # a fully swapped CLI root and both modified external surfaces must be
+  # restored through the same durable transaction. In the migration branch,
+  # old CLI 'apply' is intentionally NOT rerun over exact restored bytes.
+  $recoveryId='20261113-180014-abcdef04'
+  $recoveryDir=Join-Path $scratch ('OwnerBackup/spicetify-transactions/'+$recoveryId)
+  New-Item -ItemType Directory -Path $recoveryDir -Force | Out-Null
+  $recoveryPre=New-SpicetifyMigrationPreimage -TransactionBackupDir $recoveryDir -InstalledCliVersion '2.46.4'
+  $cliBefore=Get-SpicetifyRootManifest -Path $cliRoot
+  $exeBefore=(Get-ExactFileSha256 -Path $exe)
+  $cliBackup=Join-Path $recoveryDir 'root-before'
+  [void](Copy-SpicetifyRootExact -Source $cliRoot -Destination $cliBackup -ExpectedTreeSha256 $cliBefore.TreeSha256)
+  [IO.File]::WriteAllBytes($exe,([byte[]]@(77,90,31,2,46,7)))
+  $cliAfter=Get-SpicetifyRootManifest -Path $cliRoot
+  [IO.File]::WriteAllText((Join-Path $spice 'config-xpui.ini'),$iniAfter,$utf8)
+  [IO.File]::WriteAllText((Join-Path $spice 'Themes/theme.css'),'migration-changed-theme',$utf8)
+  [IO.File]::WriteAllBytes((Join-Path $apps 'xpui.spa'),([byte[]]@(77,79,68,73,70,73,69,68)))
+  $script:TxnForCommit=[pscustomobject]@{
+    schema=3;root_transaction=$true;id=$recoveryId;status='awaiting-guard'
+    target_root=$cliRoot;backup_root=$cliBackup
+    same_dir_old_root=(Join-Path $scratch 'NeverExists-OldCliRoot')
+    same_dir_new_root=(Join-Path $scratch 'NeverExists-NewCliRoot')
+    before_tree_sha256=$cliBefore.TreeSha256;after_tree_sha256=$cliAfter.TreeSha256
+    before_sha256=$exeBefore;after_sha256=(Get-ExactFileSha256 -Path $exe)
+    before_version='2.46.4';after_version='2.46.7';apply_attempted=$true
+    migration_required=$true;migration_snapshot_ready=$true
+    migration_snapshot_root=$recoveryPre.BackupRoot
+    migration_spicetify_root=$recoveryPre.Roaming
+    migration_apps_root=$recoveryPre.Apps
+    migration_spicetify_before_sha256=$recoveryPre.RoamingTreeSha256
+    migration_apps_before_sha256=$recoveryPre.AppsTreeSha256
+    migration_semantic_before_sha256=$recoveryPre.SemanticHash
+    migration_started=$true
+    migration_external_rollback_restored=$false
+    rollback_reapply_succeeded=$null;rollback_reapply_at=$null
+    rolled_back_at=$null;error=$null
+  }
+  $script:OldCliApplyCalls=0
+  function Invoke-NativeCapture {
+    param([string]$FilePath,[string[]]$Arguments)
+    if($Arguments -contains 'apply'){
+      $script:OldCliApplyCalls++
+      return [pscustomobject]@{ExitCode=90;Output='UNEXPECTED_OLD_CLI_APPLY'}
+    }
+    if(@($Arguments).Count -ne 1 -or $Arguments[0] -cne '--version'){
+      throw 'R131_ROLLBACK_UNEXPECTED_NATIVE_CALL'
+    }
+    return [pscustomobject]@{ExitCode=0;Output='Spicetify 2.46.4'}
+  }
+  function Get-SpicetifyCommand {return $null}
+  $rolled=Rollback-SpicetifyCliTransaction
+  if(-not $rolled.Success -or $rolled.Status -cne 'rolled-back' -or
+     $script:TxnForCommit.status -cne 'rolled-back' -or
+     -not $script:TxnForCommit.migration_external_rollback_restored -or
+     $script:OldCliApplyCalls -ne 0 -or
+     (Get-SpicetifyRootManifest -Path $cliRoot).TreeSha256 -cne $cliBefore.TreeSha256 -or
+     (Get-SpicetifyRootManifest -Path $apps).TreeSha256 -cne $recoveryPre.AppsTreeSha256 -or
+     (Get-SpicetifyRootManifest -Path $spice).TreeSha256 -cne $recoveryPre.RoamingTreeSha256){
+    throw 'R131_PRODUCTION_FULL_ROOT_AND_EXTERNAL_ROLLBACK_FAILED'
+  }
+  Write-Host 'R131_PRODUCTION_ROLLBACK_CLI_APPS_CONFIG_TOGETHER=PASS'
+  Write-Host 'R131_PRODUCTION_MIGRATION_ROLLBACK_NO_OLD_REAPPLY=PASS'
   # New and old transaction remains protected if one external backup is tampered.
   [IO.File]::WriteAllText((Join-Path $pre.RoamingBackup 'Themes/theme.css'),'CORRUPTED_BACKUP',$utf8)
   $failed=$false
