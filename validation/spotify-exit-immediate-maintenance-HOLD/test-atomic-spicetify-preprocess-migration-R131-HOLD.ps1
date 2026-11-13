@@ -19,6 +19,7 @@ $required=@('New-SpicetifyMigrationPreimage','Restore-SpicetifyMigrationSurface'
   'Commit-SpicetifyCliTransaction','Rollback-SpicetifyCliTransaction',
   'Invoke-SpicetifyTransactionalMaintenance',
   'Repair-PendingSpicetifyTransaction',
+  'Assert-SpicetifyOwnerPreimageAdoption',
   'Save-SpicetifyTransaction','Write-SpicetifyJournalJsonAtomic')
 $fns=@($ast.FindAll({param($x)
   $x -is [Management.Automation.Language.FunctionDefinitionAst] -and
@@ -500,6 +501,59 @@ try {
     throw 'R131_PARTIAL_MIGRATION_LEDGER_MUST_BE_FROZEN'
   }
   Write-Host 'R131_PARTIAL_MIGRATION_LEDGER_AUTO_REPAIR_BLOCKED=PASS'
+  # Accept the owner-reviewed baseline only when its original pending
+  # journal and full external copies are separately certified. The owner
+  # status must not claim a historical Spotify-app rollback.
+  $script:Root=Join-Path $scratch 'R132Owner'
+  $ownerId='20261113-190050-aabbccdd'
+  $ownerDir=Join-Path $script:Root ('owner-recovery\R132-'+$ownerId)
+  New-Item -ItemType Directory -Path $ownerDir -Force | Out-Null
+  $manifest=Get-SpicetifyRootManifest -Path $cliRoot
+  $orig=[pscustomobject]@{
+    schema=3;root_transaction=$true;id=$ownerId;status='awaiting-guard'
+    target_root=$cliRoot;before_tree_sha256=$manifest.TreeSha256
+    before_sha256=(Get-ExactFileSha256 -Path $exe)
+  }
+  $oldFile=Join-Path $ownerDir 'original-ledger.json'
+  [IO.File]::WriteAllText($oldFile,($orig|ConvertTo-Json -Depth 8),$utf8)
+  Copy-Item -LiteralPath $spice -Destination (Join-Path $ownerDir 'spicetify-roaming') -Recurse -Force
+  Copy-Item -LiteralPath $apps -Destination (Join-Path $ownerDir 'spotify-apps') -Recurse -Force
+  $evidence=[pscustomobject]@{
+    schema=1;transaction_id=$ownerId
+    evidence_kind='CURRENT_PREIMAGE_ADOPTED_NOT_HISTORICAL_EXTERNAL_ROLLBACK'
+    ledger_sha256=(Get-ExactFileSha256 -Path $oldFile)
+    roaming_tree_sha256=(Get-SpicetifyRootManifest -Path $spice).TreeSha256
+    apps_tree_sha256=(Get-SpicetifyRootManifest -Path $apps).TreeSha256
+  }
+  $evidencePath=Join-Path $ownerDir 'adoption-evidence.json'
+  [IO.File]::WriteAllText($evidencePath,($evidence|ConvertTo-Json -Depth 8),$utf8)
+  $adopted=$orig|ConvertTo-Json -Depth 8|ConvertFrom-Json
+  $adopted.status='owner-reviewed-preimage'
+  $adopted|Add-Member -NotePropertyName owner_reconciliation -NotePropertyValue (
+    [pscustomobject]@{
+      schema=1;kind='OWNER_APPROVED_CURRENT_PREIMAGE_NOT_EXTERNAL_ROLLBACK'
+      snapshot_root=$ownerDir
+      evidence_sha256=(Get-ExactFileSha256 -Path $evidencePath)
+    })
+  $script:TxnForCommit=$adopted
+  if((Assert-SpicetifyOwnerPreimageAdoption $adopted) -cne $true){
+    throw 'R132_OWNER_ADOPTION_NOT_ACCEPTED_BY_REAL_PRODUCT_HELPER'
+  }
+  $returned=Repair-PendingSpicetifyTransaction
+  if([string]$returned.status -cne 'owner-reviewed-preimage' -or
+     $script:R131NativeApply -ne $nativeBefore){
+    throw 'R132_OWNER_ADOPTION_TRIGGERED_UNAPPROVED_ROLLBACK'
+  }
+  Write-Host 'R132_OWNER_RECONCILIATION_REAL_PRODUCT_ADMISSION=PASS'
+  [IO.File]::WriteAllText($evidencePath,'TAMPERED_OWNER_EVIDENCE',$utf8)
+  $blockedOwner=$false
+  try{[void](Repair-PendingSpicetifyTransaction)}catch{
+    $blockedOwner=$_.Exception.Message -match 'R132_ADOPTION_EVIDENCE_SHA_INVALID'
+  }
+  if(-not $blockedOwner -or $script:R131NativeApply -ne $nativeBefore){
+    throw 'R132_TAMPERED_OWNER_ADOPTION_NOT_BLOCKED'
+  }
+  Write-Host 'R132_TAMPERED_ARCHIVE_BLOCKED_BEFORE_NEW_MUTATION=PASS'
   # New and old transaction remains protected if one external backup is tampered.
   [IO.File]::WriteAllText((Join-Path $pre.RoamingBackup 'Themes/theme.css'),'CORRUPTED_BACKUP',$utf8)
   $failed=$false
@@ -519,7 +573,8 @@ try {
   $allFlow=$combined -join [Environment]::NewLine
   if(-not $allFlow.Contains("('restore','backup','apply','--no-restart')") -or
      -not $allFlow.Contains('Restore-SpicetifyMigrationPreimage') -or
-     -not $allFlow.Contains('migration_snapshot_ready')){
+     -not $allFlow.Contains('migration_snapshot_ready') -or
+     -not $allFlow.Contains('Assert-SpicetifyOwnerPreimageAdoption')){
     throw 'R131_OFFICIAL_CLI_AND_ROLLBACK_NOT_WIRED'
   }
   Write-Host 'R131_PRODUCT_MIGRATION_AND_RECOVERY_SOURCE_WIRED=PASS'
