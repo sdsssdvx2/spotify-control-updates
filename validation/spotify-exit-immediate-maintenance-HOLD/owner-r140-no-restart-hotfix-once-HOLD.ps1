@@ -30,28 +30,28 @@ function Get-ExactSha256 {
 function Get-CandidateBytes {
   [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
   $wc=New-Object Net.WebClient
-  try{return $wc.DownloadData($newUrl)}finally{$wc.Dispose()}
+  try { return $wc.DownloadData($newUrl) } finally { $wc.Dispose() }
 }
 function Get-BytesSha256 {
   param([byte[]]$Bytes)
   $h=[Security.Cryptography.SHA256]::Create()
-  try{return ([BitConverter]::ToString($h.ComputeHash($Bytes))).Replace('-','').ToLowerInvariant()}
-  finally{$h.Dispose()}
+  try { return ([BitConverter]::ToString($h.ComputeHash($Bytes))).Replace('-','').ToLowerInvariant() }
+  finally { $h.Dispose() }
 }
 function Enter-Lock {
   param([ValidateSet('Maintenance','AgentTick')][string]$Purpose)
   $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
   $safe=([string]$sid -replace '[^A-Za-z0-9]','_')
   $m=New-Object System.Threading.Mutex($false,("Local\SpotifyControl-{0}-{1}" -f $Purpose,$safe))
-  try{$ok=$m.WaitOne(0,$false)}catch[System.Threading.AbandonedMutexException]{$ok=$true}
+  try { $ok=$m.WaitOne(0,$false) } catch [System.Threading.AbandonedMutexException] { $ok=$true }
   if(-not $ok){$m.Dispose();return $null}
   return $m
 }
 function Exit-Lock {
   param($Mutex)
   if($null -eq $Mutex){return}
-  try{$Mutex.ReleaseMutex()}catch{}
-  try{$Mutex.Dispose()}catch{}
+  try { $Mutex.ReleaseMutex() } catch {}
+  try { $Mutex.Dispose() } catch {}
 }
 
 $maintenance=$null
@@ -129,7 +129,7 @@ try{
   [void]$out.Add('R139_PREVIOUS_SOURCE=SHA256_VERIFIED')
   [void]$out.Add('R139_STATE_LEDGER_CLAIM_SPICETIFY=UNCHANGED')
   [void]$out.Add('RESULT=R140_NO_RESTART_HOTFIX_COMMITTED')
-}catch{
+} catch {
   $reason=[string]$_.Exception.Message
   if($Mode -ceq 'Once' -and
      (Test-Path -LiteralPath $backup -PathType Leaf) -and
@@ -150,10 +150,10 @@ try{
   if($reason -cnotmatch '^[A-Z0-9_]{4,100}$'){$reason=$_.Exception.GetType().Name}
   [void]$out.Add("HOLD_CLASS=$reason")
   [void]$out.Add('RESULT=HOLD_NO_AUTO_RETRY')
-}finally{
+} finally {
   Exit-Lock -Mutex $agent
   Exit-Lock -Mutex $maintenance
   $receipt=$out.ToArray() -join [Environment]::NewLine
-  try{Set-Clipboard -Value $receipt}catch{}
+  try { Set-Clipboard -Value $receipt } catch {}
   Write-Output $receipt
 }
