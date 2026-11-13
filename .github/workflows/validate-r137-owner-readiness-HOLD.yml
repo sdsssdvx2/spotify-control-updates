@@ -1,0 +1,41 @@
+name: HOLD R137 official release readiness before owner claim
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - validation/spotify-exit-immediate-maintenance-HOLD/build-owner-release-readiness-R137-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/test-owner-release-readiness-R137-HOLD.ps1
+      - .github/workflows/validate-r137-owner-readiness-HOLD.yml
+permissions: {contents: read}
+jobs:
+  windows-preclaim-release-gates:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Build R137 only from immutable verified R136; verify owner claim is not consumed by metadata failure
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          $folder=$base+'out/owner-postadoption-dispatch-gate-R136'
+          [void][IO.Directory]::CreateDirectory($folder)
+          $url='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/fe3cbf1d14dc5986a49b7028a04e8534d694405a/'+$base+'spotify-control-R136-Owner-NoBypass-HOLD.ps1'
+          [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+          $wc=New-Object Net.WebClient
+          try{[byte[]]$bytes=$wc.DownloadData($url)}finally{$wc.Dispose()}
+          $alg=[Security.Cryptography.SHA256]::Create()
+          try{$actual=([BitConverter]::ToString($alg.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}
+          finally{$alg.Dispose()}
+          if($bytes.Length -ne 327600 -or
+            $actual -cne '0f059208b231f9f8ec3e8829117785a319d52a3ded3a745147caf7039a7eee3d'){
+            throw 'R137_R136_BYTE_PARENT_INVALID'
+          }
+          [IO.File]::WriteAllBytes((Join-Path $folder 'spotify-control.ps1'),$bytes)
+          & python ($base+'build-owner-release-readiness-R137-HOLD.py')
+          if($LASTEXITCODE -ne 0){throw 'R137_RELEASE_GATE_BUILD_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ($base+'test-owner-release-readiness-R137-HOLD.ps1')
+          if($LASTEXITCODE -ne 0){throw 'R137_RELEASE_GATE_NATIVE_POWERSHELL_FAILED'}
+          Write-Host 'R137_RELEASE_METADATA_AND_NO_OWNER_ATTEMPT_BURN=PASS'
+          Write-Host 'USER_PC=UNCHANGED;PUBLIC_MAIN=UNCHANGED;NATIVE_CALLS=ZERO'
