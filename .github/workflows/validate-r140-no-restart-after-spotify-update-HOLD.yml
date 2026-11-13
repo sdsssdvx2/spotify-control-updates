@@ -29,8 +29,8 @@ jobs:
           $r140=Get-Content -LiteralPath $new -Raw
           $needleOld="@('backup','apply')"
           $needleNew="@('backup','apply','--no-restart')"
-          if(($r139.Split($needleOld).Count-1) -ne 1){throw 'R139_EXPECTED_SINGLE_RESTARTING_APPLY_NOT_FOUND'}
-          if(($r140.Split($needleNew).Count-1) -ne 1){throw 'R140_EXPECTED_NO_RESTART_APPLY_NOT_FOUND'}
+          if(([regex]::Matches($r139,[regex]::Escape($needleOld))).Count -ne 1){throw 'R139_EXPECTED_SINGLE_RESTARTING_APPLY_NOT_FOUND'}
+          if(([regex]::Matches($r140,[regex]::Escape($needleNew))).Count -ne 1){throw 'R140_EXPECTED_NO_RESTART_APPLY_NOT_FOUND'}
           if($r140.Replace($needleNew,$needleOld) -cne $r139){throw 'R140_NOT_EXACT_ONE_LINE_DELTA'}
 
           $need=@('ConvertTo-SpotifyPrefsBytesWithVersion','Invoke-SpicetifyBackupApplyPinnedPrefs')
