@@ -851,3 +851,9 @@ jobs:
           $null=[Management.Automation.Language.Parser]::ParseFile($candidate,[ref]$tokens,[ref]$errors)
           if(@($errors).Count -ne 0){throw 'R131_PS51_SYNTAX_FAILURE'}
           Write-Host 'R131_NATIVE_PS51_SOURCE_PARSE=PASS'
+      - name: Exercise R131 actual Windows external snapshot and exact rollback
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & 'validation/spotify-exit-immediate-maintenance-HOLD/test-atomic-spicetify-preprocess-migration-R131-HOLD.ps1'
+          if($LASTEXITCODE -ne 0){throw 'R131_WINDOWS_REAL_SOURCE_TEST_NONZERO'}
