@@ -226,7 +226,7 @@ jobs:
             throw 'R125_PINNED_IDENTITY_WRONG'
           }
           if($inputText -cnotmatch "Emit 'R125_TWO_FUNCTION_PUBLICATION' 'ALREADY_INSTALLED_NO_SOURCE_WRITE'" -or
-             $inputText -cnotmatch "if\(\$mainMode -ceq 'ORIGINAL_V0630'\)\{" -or
+             -not $inputText.Contains("if(`$mainMode -ceq 'ORIGINAL_V0630'){") -or
              $inputText -cnotmatch "Fail 'R125_EXISTING_R112_CHANGED_BEFORE_AGENT'"){
             throw 'R125_ALREADY_INSTALLED_BRANCH_UNVERIFIED'
           }
