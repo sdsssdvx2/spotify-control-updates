@@ -868,3 +868,22 @@ jobs:
           # LASTEXITCODE. A stale exit value from unrelated prior steps must
           # not turn a completed PASS into a false failure.
           Write-Host 'R131_EXACT_SCHEMA3_TRANSACTION_COMMIT_AND_EXTERNAL_ROLLBACK_TESTED=PASS'
+      - name: Pin final generated owner candidate without operating deployment
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/out/atomic-spicetify-preprocess-migration-R131/spotify-control.ps1'
+          if(-not(Test-Path -LiteralPath $p -PathType Leaf)){throw 'R131_OWNER_CANDIDATE_NOT_BUILT'}
+          $actual=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actual -cne '16db29223a50c9b2a504a543ab01fa898660642904e4be0414b959195bb113b1'){
+            throw 'R131_OWNER_CANDIDATE_NOT_APPROVED_SHA'
+          }
+          Write-Host 'R131_OWNER_SOURCE_FINAL_SHA_PIN=PASS'
+          Write-Host 'R131_OPERATING_PC_AND_PUBLIC_STABLE_UNTOUCHED=PASS'
+      - name: Preserve exact R131 HOLD owner candidate source as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: spotify-control-R131-pinned-owner-candidate-HOLD
+          path: validation/spotify-exit-immediate-maintenance-HOLD/out/atomic-spicetify-preprocess-migration-R131/spotify-control.ps1
+          if-no-files-found: error
+          retention-days: 14
