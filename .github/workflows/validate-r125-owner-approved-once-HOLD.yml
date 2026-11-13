@@ -234,3 +234,32 @@ jobs:
           Write-Host 'R125_EXACT_R112_NO_SECOND_MAIN_SWAP_BRANCH=PASS'
           Write-Host 'R125_UNKNOWN_MAIN_REJECTED=PASS'
           Write-Host 'R125_REAL_OWNER_PC_UNTOUCHED=PASS'
+      - name: Inspect actual R112 update and agent contract without executing it
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/out/private-stable-ahead-R112/spotify-control.ps1'
+          $src=[IO.File]::ReadAllText($p,[Text.Encoding]::UTF8)
+          $err=$null;$tok=$null
+          $ast=[Management.Automation.Language.Parser]::ParseInput($src,[ref]$tok,[ref]$err)
+          if(@($err).Count -gt 0){throw 'R125_INTROSPECTION_SOURCE_PARSE_HOLD'}
+          $fns=@($ast.FindAll({param($x) $x -is [Management.Automation.Language.FunctionDefinitionAst]},$true))
+          $names=@($fns | Where-Object {$_.Name -match 'Agent|Spicetify|Maintenance|Upgrade|Restore|Update|State|Guard' } | ForEach-Object {$_.Name})
+          Write-Host ('R125_REAL_PRODUCT_FUNCTION_NAMES='+($names -join ','))
+          $targets=@($fns | Where-Object {$_.Name -in @(
+            'Invoke-ResidentAgentTick','Invoke-MaintenanceCheckPhase',
+            'Invoke-MaintenanceMutationPhase','Get-SpicetifyUpdateCheckResult','Maintain'
+          )})
+          foreach($fn in $targets){
+            $lines=@($fn.Extent.Text -split '\r?\n')
+            Write-Host ('R125_REAL_FUNCTION='+$fn.Name+';LINES='+$lines.Count)
+            $selected=@($lines | Where-Object {
+              $_ -match 'AgentEvent|Test-Due|DueHours|pending_maintenance|spicetify|upgrade|backup|apply|Invoke-|transaction|return|_utc|health|check|Stop|Guard|mutex|Report|success|ExitCode|failed'
+            })
+            foreach($line in @($selected | Select-Object -First 80)){
+              $safe=$line.Trim()
+              if($safe.Length -gt 200){$safe=$safe.Substring(0,200)}
+              Write-Host ('R125_ACTUAL_LINE='+$safe)
+            }
+          }
+          Write-Host 'R125_PRODUCT_FUNCTIONS_INSPECTED_WITHOUT_INVOCATION=PASS'
