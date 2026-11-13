@@ -1,0 +1,137 @@
+name: HOLD R139 guarded cutover acceptance
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - validation/spotify-exit-immediate-maintenance-HOLD/owner-r139-safe-auto-cutover-once-HOLD.ps1
+      - validation/spotify-exit-immediate-maintenance-HOLD/spotify-control-R139-SafeAutoAfterR135-HOLD.ps1
+      - .github/workflows/validate-r139-safe-auto-cutover-HOLD.yml
+permissions: {contents: read}
+jobs:
+  cutover:
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Exact raw pins, plan, successful cutover, failure rollback and crash recovery
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $cut='validation/spotify-exit-immediate-maintenance-HOLD/owner-r139-safe-auto-cutover-once-HOLD.ps1'
+          $tok=$null;$err=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($cut,[ref]$tok,[ref]$err)
+          if(@($err).Count){throw 'R139_CUTOVER_PARSE_FAILED'}
+
+          $scratch=Join-Path $env:RUNNER_TEMP ('R139-Cutover-'+[guid]::NewGuid().ToString('N'))
+          [void](New-Item -ItemType Directory -Force -Path $scratch)
+          $oldRaw=Join-Path $scratch 'r137-raw.ps1'
+          $newRaw=Join-Path $scratch 'r139-raw.ps1'
+          $wc=New-Object Net.WebClient
+          try{
+            $wc.DownloadFile('https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/e51a2477487d68a987a21beb698bb1dc5cf11e3b/validation/spotify-exit-immediate-maintenance-HOLD/spotify-control-R137-Owner-PreclaimReady-HOLD.ps1',$oldRaw)
+            $wc.DownloadFile('https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/086cf8f198fff5338e15c150fa696738648498db/validation/spotify-exit-immediate-maintenance-HOLD/spotify-control-R139-SafeAutoAfterR135-HOLD.ps1',$newRaw)
+          }finally{$wc.Dispose()}
+          if((Get-FileHash $oldRaw -Algorithm SHA256).Hash.ToLowerInvariant() -cne '4ac4e4ccb48c57b59b9fe87d688df76dd823998e5e791f4ed877c289175e7d99'){throw 'R137_RAW_PIN_FAIL'}
+          if((Get-FileHash $newRaw -Algorithm SHA256).Hash.ToLowerInvariant() -cne '832335cfa95247b7ee12cd1fb27bb03904da704385602910531bf6afa63e3bb6'){throw 'R139_RAW_PIN_FAIL'}
+          if((Get-Item $newRaw).Length -ne 340936){throw 'R139_RAW_SIZE_FAIL'}
+
+          function New-Fixture {
+            param([string]$Base)
+            $local=Join-Path $Base 'Local'
+            $root=Join-Path $local 'SpotifyControl'
+            $bin=Join-Path $root 'bin'
+            $owner=Join-Path $root 'owner-recovery'
+            $spice=Join-Path $local 'spicetify'
+            foreach($d in @($bin,$owner,$spice)){[void](New-Item -ItemType Directory -Force -Path $d)}
+            Copy-Item $oldRaw (Join-Path $bin 'spotify-control.ps1')
+            [IO.File]::WriteAllText((Join-Path $owner 'r135-v2467-owner-once-claim.v1.json'),'{}')
+            $exe=Join-Path $spice 'spicetify.exe'
+            [IO.File]::WriteAllText($exe,'synthetic committed v2467 exe')
+            $exeSha=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+            $tx=[pscustomobject]@{
+              status='committed';before_version='2.46.4';after_version='2.46.7'
+              asset_digest='sha256:c5a723d31eae529ba13f6922a7a027124238c7f3da7edd182a73eab03c447e9e'
+              apply_succeeded=$true;migration_finished=$true;post_apply_guard_succeeded=$true
+              extras_preserved=$true;extras_before_tree_sha256=('d'*64);extras_after_tree_sha256=('d'*64)
+              after_sha256=$exeSha
+            }
+            [IO.File]::WriteAllText((Join-Path $root 'spicetify-last-transaction.json'),($tx|ConvertTo-Json -Depth 5))
+            [IO.File]::WriteAllText((Join-Path $root 'state.json'),([pscustomobject]@{agent_mutation_enabled=$false}|ConvertTo-Json))
+            return [pscustomobject]@{Local=$local;Root=$root;Main=(Join-Path $bin 'spotify-control.ps1')}
+          }
+
+          $oldLocal=$env:LOCALAPPDATA
+          try{
+            # Plan and missing approval are read-only.
+            $a=New-Fixture (Join-Path $scratch 'success')
+            $env:LOCALAPPDATA=$a.Local
+            $env:R139_TEST_SOURCE_PATH=$newRaw
+            $env:R139_TEST_SPOTIFY_RUNNING='YES'
+            $env:R139_TEST_ENABLE_RESULT='PASS'
+            $plan=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $cut -SyntheticHostTest -Mode Plan)
+            if($LASTEXITCODE -ne 0 -or $plan -notcontains 'RESULT=R139_CUTOVER_READY_NO_OPERATING_WRITE' -or
+               (Get-FileHash $a.Main -Algorithm SHA256).Hash.ToLowerInvariant() -cne '4ac4e4ccb48c57b59b9fe87d688df76dd823998e5e791f4ed877c289175e7d99'){
+              throw 'R139_PLAN_NOT_READONLY_READY'
+            }
+            $deny=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $cut -SyntheticHostTest -Mode Once)
+            if($LASTEXITCODE -ne 0 -or $deny -notcontains 'RESULT=HOLD_NO_AUTO_RETRY' -or
+               (Get-FileHash $a.Main -Algorithm SHA256).Hash.ToLowerInvariant() -cne '4ac4e4ccb48c57b59b9fe87d688df76dd823998e5e791f4ed877c289175e7d99'){
+              throw 'R139_MISSING_APPROVAL_CHANGED_SOURCE'
+            }
+
+            # Positive source swap + safe-auto enable.
+            $ok=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $cut -SyntheticHostTest -Mode Once -ApprovalPhrase 'APPROVE_R139_SOURCE_AND_SAFE_AUTO_ONCE')
+            if($LASTEXITCODE -ne 0 -or $ok -notcontains 'RESULT=R139_CUTOVER_AND_SAFE_AUTO_ENABLED' -or
+               (Get-FileHash $a.Main -Algorithm SHA256).Hash.ToLowerInvariant() -cne '832335cfa95247b7ee12cd1fb27bb03904da704385602910531bf6afa63e3bb6' -or
+               (Get-FileHash ($a.Main+'.r139-previous') -Algorithm SHA256).Hash.ToLowerInvariant() -cne '4ac4e4ccb48c57b59b9fe87d688df76dd823998e5e791f4ed877c289175e7d99'){
+              throw 'R139_POSITIVE_CUTOVER_FAILED'
+            }
+            $st=Get-Content (Join-Path $a.Root 'state.json') -Raw|ConvertFrom-Json
+            if(-not [bool]$st.agent_mutation_enabled -or -not(Test-Path (Join-Path $a.Root 'owner-recovery\r139-safe-auto-baseline.v1.json'))){throw 'R139_POSITIVE_ENABLE_NOT_DURABLE'}
+            $already=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $cut -SyntheticHostTest -Mode Recover)
+            if($LASTEXITCODE -ne 0 -or $already -notcontains 'RESULT=R139_CUTOVER_ALREADY_CONFIRMED'){throw 'R139_CONFIRMED_RECOVERY_CLASSIFICATION_FAILED'}
+
+            # Child enable failure rolls source back and preserves failed R139 bytes.
+            $b=New-Fixture (Join-Path $scratch 'failure')
+            $env:LOCALAPPDATA=$b.Local
+            $env:R139_TEST_ENABLE_RESULT='FAIL'
+            $fail=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $cut -SyntheticHostTest -Mode Once -ApprovalPhrase 'APPROVE_R139_SOURCE_AND_SAFE_AUTO_ONCE')
+            if($LASTEXITCODE -ne 0 -or $fail -notcontains 'RESULT=HOLD_NO_AUTO_RETRY' -or
+               $fail -notcontains 'ROLLBACK_SOURCE=R137_RESTORED_SHA_VERIFIED' -or
+               (Get-FileHash $b.Main -Algorithm SHA256).Hash.ToLowerInvariant() -cne '4ac4e4ccb48c57b59b9fe87d688df76dd823998e5e791f4ed877c289175e7d99' -or
+               (Get-FileHash ($b.Main+'.r139-failed-new-HOLD') -Algorithm SHA256).Hash.ToLowerInvariant() -cne '832335cfa95247b7ee12cd1fb27bb03904da704385602910531bf6afa63e3bb6'){
+              throw 'R139_FAILED_ENABLE_ROLLBACK_NOT_EXACT'
+            }
+
+            # Simulated hard stop after source swap: recovery requires separate approval.
+            $c=New-Fixture (Join-Path $scratch 'crash')
+            $env:LOCALAPPDATA=$c.Local
+            Move-Item $c.Main ($c.Main+'.r139-previous')
+            Copy-Item $newRaw $c.Main
+            $no=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $cut -SyntheticHostTest -Mode Recover)
+            if($LASTEXITCODE -ne 0 -or $no -notcontains 'RESULT=HOLD_NO_AUTO_RETRY' -or
+               (Get-FileHash $c.Main -Algorithm SHA256).Hash.ToLowerInvariant() -cne '832335cfa95247b7ee12cd1fb27bb03904da704385602910531bf6afa63e3bb6'){
+              throw 'R139_CRASH_RECOVERY_APPROVAL_BYPASSED'
+            }
+            $rec=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $cut -SyntheticHostTest -Mode Recover -ApprovalPhrase 'APPROVE_R139_CRASH_SOURCE_RECOVERY_ONCE')
+            if($LASTEXITCODE -ne 0 -or $rec -notcontains 'RESULT=R139_SOURCE_RECOVERED_OWNER_REVIEW_REQUIRED' -or
+               (Get-FileHash $c.Main -Algorithm SHA256).Hash.ToLowerInvariant() -cne '4ac4e4ccb48c57b59b9fe87d688df76dd823998e5e791f4ed877c289175e7d99' -or
+               (Get-FileHash ($c.Main+'.r139-failed-new-HOLD') -Algorithm SHA256).Hash.ToLowerInvariant() -cne '832335cfa95247b7ee12cd1fb27bb03904da704385602910531bf6afa63e3bb6'){
+              throw 'R139_CRASH_RECOVERY_NOT_EXACT'
+            }
+
+            Write-Host 'R139_RAW_SOURCE_PINS=PASS'
+            Write-Host 'R139_PLAN_NO_WRITE=PASS'
+            Write-Host 'R139_APPROVAL_GATE=PASS'
+            Write-Host 'R139_CUTOVER_AND_ENABLE=PASS'
+            Write-Host 'R139_ENABLE_FAILURE_SOURCE_ROLLBACK=PASS'
+            Write-Host 'R139_HARD_STOP_RECOVERY_APPROVAL_AND_READBACK=PASS'
+            Write-Host 'RESULT=R139_GUARDED_CUTOVER_WINDOWS_PASS'
+          } finally {
+            $env:LOCALAPPDATA=$oldLocal
+            Remove-Item Env:R139_TEST_SOURCE_PATH -ErrorAction SilentlyContinue
+            Remove-Item Env:R139_TEST_SPOTIFY_RUNNING -ErrorAction SilentlyContinue
+            Remove-Item Env:R139_TEST_ENABLE_RESULT -ErrorAction SilentlyContinue
+            if(Test-Path $scratch){Remove-Item $scratch -Recurse -Force}
+          }
