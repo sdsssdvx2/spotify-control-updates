@@ -394,3 +394,26 @@ jobs:
             }
           }
           Write-Host 'R126_REAL_SOURCE_REVIEW_ONLY_NO_PRODUCT_EXECUTION=PASS'
+      - name: Inspect exact product SHA helper for R127 offline snapshot matching
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/out/private-stable-ahead-R112/spotify-control.ps1'
+          $src=[IO.File]::ReadAllText($p,[Text.Encoding]::UTF8)
+          $errors=$null;$tokens=$null
+          $ast=[Management.Automation.Language.Parser]::ParseInput($src,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R127_R112_SYNTAX_HOLD'}
+          foreach($fn in @($ast.FindAll({param($x)
+            $x -is [Management.Automation.Language.FunctionDefinitionAst] -and
+            $x.Name -cin @('Get-StringSha256','Get-ExactFileSha256')},$true))){
+            Write-Host ('R127_SOURCE_HELPER='+$fn.Name)
+            foreach($line in ($fn.Extent.Text -split '\r?\n')){
+              Write-Host ('R127_SOURCE_LINE='+$line.Trim())
+            }
+          }
+          foreach($line in @($src -split '\r?\n' | Where-Object {
+            $_ -match '^\s*\$(Root|BackupDir|ReportDir|SpicetifyTransactionPath)\s*='
+          })){
+            Write-Host ('R127_PRODUCT_PATH_DEFINITION='+$line.Trim())
+          }
+          Write-Host 'R127_OFFLINE_PRODUCT_SHA_CONTRACT_INSPECTED=PASS'
