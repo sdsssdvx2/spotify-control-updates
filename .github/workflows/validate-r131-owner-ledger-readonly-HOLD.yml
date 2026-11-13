@@ -56,6 +56,35 @@ jobs:
                $lines -notcontains 'RESULT=HOLD_NOT_RECOVERED'){
               throw 'WITNESS_SAFE_PARTIAL_EVIDENCE_NOT_CLASSIFIED'
             }
+            # Exercise the actual owner wrapper's direct ScriptBlock.Create path.
+            # Git checkout may be CRLF; the GitHub raw URL is LF.
+            $source=[IO.File]::ReadAllText($p).Replace("`r`n","`n")
+            $utf8=New-Object System.Text.UTF8Encoding($false)
+            $bytes=$utf8.GetBytes($source)
+            $sha=[Security.Cryptography.SHA256]::Create()
+            try {
+              $rawSha=([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()
+            } finally {$sha.Dispose()}
+            if($rawSha -cne '784741bd1bc96392b025b2f1276a6231717d771bf657c15ee7bf01f4b7b53f12'){
+              throw 'RAW_LF_SOURCE_SHA_MISMATCH'
+            }
+            $direct=@(& ([ScriptBlock]::Create($source)) -NoClipboard)
+            $receipt=$direct -join [Environment]::NewLine
+            $receiptLines=@($receipt -split '\r?\n')
+            if($receiptLines -notcontains 'DIAGNOSTIC=SPOTIFY_R131_UNSETTLED_OWNER_EXACT_READONLY' -or
+               $receiptLines -notcontains 'LEDGER=UNSETTLED' -or
+               $receiptLines -notcontains 'BACKUP_WITH=BEFORE' -or
+               $receiptLines -notcontains 'RESULT=HOLD_NOT_RECOVERED'){
+              throw 'OWNER_DIRECT_WRAPPER_RECEIPT_MISMATCH'
+            }
+            if($receipt -notmatch '(?m)^DIAGNOSTIC=SPOTIFY_R131_UNSETTLED_OWNER_EXACT_READONLY\r?$'){
+              throw 'OWNER_CRLF_SAFE_REGEX_DID_NOT_MATCH'
+            }
+            if($receipt -match '(?m)^DIAGNOSTIC=SPOTIFY_R131_UNSETTLED_OWNER_EXACT_READONLY$'){
+              throw 'OWNER_PREVIOUS_BROKEN_REGEX_UNEXPECTEDLY_MATCHED'
+            }
+            Write-Host 'OWNER_DIRECT_SCRIPTBLOCK_CRLF_SAFE_RECEIPT=PASS'
+            Write-Host 'RAW_LF_SOURCE_PIN_VERIFIED=PASS'
             Write-Host 'SYNTHETIC_READONLY_LEDGER_CLASSIFICATION=PASS'
             Write-Host ('WITNESS_SHA256='+((Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant()))
           }finally {
