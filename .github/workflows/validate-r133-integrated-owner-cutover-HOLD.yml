@@ -126,6 +126,54 @@ jobs:
             # Test fixture reset, NOT an operating retry or an owner recovery
             # recommendation. A real interrupted transaction is HOLD.
             Remove-Item -LiteralPath $previous,$newHeld -Force
+            # Emulate an OS process disappearing with neither catch nor
+            # finally after the atomic source swap. The new R131 source and
+            # the old unsettled ledger must remain; recovery is separately
+            # approved and performs source-only restoration without network.
+            $env:R133_TEST_HARD_EXIT_AFTER_SOURCE_SWAP='YES'
+            try {
+              $ignored=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R131_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
+              $crashExit=$LASTEXITCODE
+            }finally{
+              Remove-Item Env:R133_TEST_HARD_EXIT_AFTER_SOURCE_SWAP -ErrorAction SilentlyContinue
+            }
+            if($crashExit -ne 82 -or
+               (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                  '16db29223a50c9b2a504a543ab01fa898660642904e4be0414b959195bb113b1' -or
+               (Get-FileHash $ledger -Algorithm SHA256).Hash -cne $ledgerBefore -or
+               (Get-FileHash $state -Algorithm SHA256).Hash -cne $stateBefore -or
+               -not(Test-Path -LiteralPath $previous -PathType Leaf) -or
+               (Get-FileHash $previous -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldSHA){
+              throw 'R133_HARD_PROCESS_STOP_DID_NOT_PRESERVE_EXACT_CRASH_STATE'
+            }
+            $noGrant=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Recover)
+            if($LASTEXITCODE -ne 0 -or $noGrant -notcontains 'RESULT=HOLD_NO_OPERATING_CUTOVER' -or
+               (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                  '16db29223a50c9b2a504a543ab01fa898660642904e4be0414b959195bb113b1'){
+              throw 'R133_CRASH_RECOVERY_APPROVAL_NOT_REQUIRED'
+            }
+            $recovered=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Recover -ApprovalPhrase 'APPROVE_R133_CRASH_SOURCE_ONLY_RECOVERY_ONCE')
+            if($LASTEXITCODE -ne 0 -or
+               $recovered -notcontains 'RESULT=EXACT_SOURCE_ONLY_RECOVERED_OWNER_REVIEW_REQUIRED' -or
+               (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldSHA -or
+               (Get-FileHash $ledger -Algorithm SHA256).Hash -cne $ledgerBefore -or
+               (Get-FileHash $state -Algorithm SHA256).Hash -cne $stateBefore -or
+               -not(Test-Path -LiteralPath ($main+'.r133-crash-recovered-new-HOLD') -PathType Leaf) -or
+               (Get-FileHash ($main+'.r133-crash-recovered-new-HOLD') -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                  '16db29223a50c9b2a504a543ab01fa898660642904e4be0414b959195bb113b1'){
+              Write-Host ('R133_RECOVERED_ONLY_STATUS='+(@($recovered|Where-Object{$_ -match '^(FAILED_PHASE|EXCEPTION_TYPE|RESULT|OWNER_SOURCE)='}) -join ';'))
+              throw 'R133_EXACT_CRASH_RECOVERY_FAILED'
+            }
+            $repeatRecovery=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Recover -ApprovalPhrase 'APPROVE_R133_CRASH_SOURCE_ONLY_RECOVERY_ONCE')
+            if($LASTEXITCODE -ne 0 -or
+               $repeatRecovery -notcontains 'RESULT=HOLD_NO_OPERATING_CUTOVER' -or
+               (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldSHA){
+              throw 'R133_CRASH_RECOVERY_REPEATED_OR_CHANGED_SOURCE'
+            }
+            Write-Host 'R133_HARD_PROCESS_STOP_OFFLINE_SOURCE_ONLY_RECOVERY_AND_NO_REPEAT=PASS'
+            # Separate, synthetic-only fixture reset for the positive test.
+            # Never remove these files on a real owner machine.
+            Remove-Item -LiteralPath $previous,($main+'.r133-crash-recovered-new-HOLD') -Force
             $approved=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R131_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
             if($LASTEXITCODE -ne 0 -or
                $approved -notcontains 'RESULT=OWNER_CUTOVER_ADOPTED_NO_MODEL_OR_SPICETIFY_CALL'){
