@@ -673,3 +673,29 @@ jobs:
           Write-Host 'R129_WINDOWS_PS51_OFFLINE_APPLY_FAILURE_EVIDENCE=PASS'
           Write-Host 'R129_READONLY_FIXTURE_BYTE_IMMUTABILITY=PASS'
           Write-Host 'R129_OWNER_PC_AND_SPOTIFY_UNTOUCHED=PASS'
+      - name: Inspect exact R112 Spicetify update admission for backup-with migration
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/out/private-stable-ahead-R112/spotify-control.ps1'
+          $src=[IO.File]::ReadAllText($p,[Text.Encoding]::UTF8)
+          $errors=$null;$tokens=$null
+          $ast=[Management.Automation.Language.Parser]::ParseInput($src,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R130_R112_PARSE_HOLD'}
+          $names=@('Start-SpicetifyCliTransaction','Invoke-MaintenanceMutationPhase',
+             'Get-ConfigPath','Get-IniSectionValue','Invoke-SpicetifyTransactionalMaintenance')
+          foreach($fn in @($ast.FindAll({param($x)
+             $x -is [Management.Automation.Language.FunctionDefinitionAst] -and
+             $x.Name -cin $names
+          },$true))){
+            $lines=@($fn.Extent.Text -split '\r?\n')
+            Write-Host ('R130_FUNCTION='+$fn.Name+';LINES='+$lines.Count)
+            $max=if($fn.Name -eq 'Start-SpicetifyCliTransaction'){110}elseif(
+                 $fn.Name -eq 'Invoke-MaintenanceMutationPhase'){145}else{40}
+            for($i=0;$i -lt [Math]::Min($lines.Count,$max);$i++){
+              $l=$lines[$i].Trim()
+              if($l.Length -gt 230){$l=$l.Substring(0,230)}
+              Write-Host ('R130_SOURCE_'+$fn.Name+'#'+($i+1)+'='+$l)
+            }
+          }
+          Write-Host 'R130_EXACT_R112_SOURCE_ADMISSION_INSPECTED=PASS'
