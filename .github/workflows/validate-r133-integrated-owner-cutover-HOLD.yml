@@ -69,7 +69,7 @@ jobs:
                 ([pscustomobject]@{spicetify_last_transaction_id='DIFFERENT_EXISTING_TRANSACTION'}|ConvertTo-Json),$utf8)
             $ledgerBefore=(Get-FileHash $ledger -Algorithm SHA256).Hash
             $stateBefore=(Get-FileHash $state -Algorithm SHA256).Hash
-            $rawUrl='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/0bfce5f0691efae33513b2ae0e0c36d6f2603783/validation/spotify-exit-immediate-maintenance-HOLD/spotify-control-R134-Owner-DefaultHold-HOLD.ps1'
+            $rawUrl='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/8b2cf186696cd1f862b176efb7aebc9eba15e079/validation/spotify-exit-immediate-maintenance-HOLD/spotify-control-R135-Owner-OneShot-HOLD.ps1'
             [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
             $rawWC=New-Object Net.WebClient
             try {
@@ -85,7 +85,7 @@ jobs:
             $plan=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Plan)
             if($LASTEXITCODE -ne 0 -or $plan -notcontains 'RESULT=CUTOVER_PLAN_READY_NO_OPERATING_WRITES' -or
                 (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldSHA){
-              Write-Host ('R133_PLAN_SAFE_STATUS='+(@($plan|Where-Object{$_ -match '^(FAILED_PHASE|EXCEPTION_TYPE|BLOCK_CLASS|RESULT|R134_SOURCE|R132_SOURCE|R112_MAIN_AND_PENDING_LEDGER)='}) -join ';'))
+              Write-Host ('R133_PLAN_SAFE_STATUS='+(@($plan|Where-Object{$_ -match '^(FAILED_PHASE|EXCEPTION_TYPE|BLOCK_CLASS|RESULT|R135_SOURCE|R132_SOURCE|R112_MAIN_AND_PENDING_LEDGER)='}) -join ';'))
               throw 'R133_OWNER_PLAN_NOT_READY_OR_MUTATED'
             }
             $denied=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once)
@@ -103,7 +103,7 @@ jobs:
             $m=[Threading.Mutex]::new($false,$name)
             try {
               if(-not $m.WaitOne(0,$false)){throw 'PRODUCT_MUTEX_FIXTURE_BUSY'}
-              $contention=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R134_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
+              $contention=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R135_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
               if($LASTEXITCODE -ne 0 -or
                  $contention -notcontains 'RESULT=HOLD_NO_OPERATING_CUTOVER' -or
                  $contention -notcontains 'FAILED_PHASE=EXCLUSIVE_SOURCE_CUTOVER'){
@@ -128,7 +128,7 @@ jobs:
             # must be unchanged; rollback must retain the same owner mutex.
             $env:R133_TEST_ABORT_AFTER_SOURCE_SWAP='YES'
             try {
-              $interrupted=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R134_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
+              $interrupted=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R135_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
             } finally {
               Remove-Item Env:R133_TEST_ABORT_AFTER_SOURCE_SWAP -ErrorAction SilentlyContinue
             }
@@ -148,7 +148,7 @@ jobs:
                -not(Test-Path -LiteralPath $previous -PathType Leaf) -or
                -not(Test-Path -LiteralPath $newHeld -PathType Leaf) -or
                (Get-FileHash $previous -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldSHA -or
-               (Get-FileHash $newHeld -Algorithm SHA256).Hash.ToLowerInvariant() -cne '99e1bc36667400fa8fc7a5464ec20d3b4e84ee648e979c746c18d9848b0f47fa'){
+               (Get-FileHash $newHeld -Algorithm SHA256).Hash.ToLowerInvariant() -cne '07407f9dd566616395644a5c5bff8a1255701696dab2a074df062bab3ad279b4'){
               throw 'R133_POST_SWAP_SOURCE_ROLLBACK_NOT_EXACT'
             }
             Write-Host 'R133_INTERRUPTED_SOURCE_SWAP_ROLLBACK_MAIN_AND_LEDGER_EXACT=PASS'
@@ -161,14 +161,14 @@ jobs:
             # approved and performs source-only restoration without network.
             $env:R133_TEST_HARD_EXIT_AFTER_SOURCE_SWAP='YES'
             try {
-              $ignored=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R134_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
+              $ignored=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R135_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
               $crashExit=$LASTEXITCODE
             }finally{
               Remove-Item Env:R133_TEST_HARD_EXIT_AFTER_SOURCE_SWAP -ErrorAction SilentlyContinue
             }
             if($crashExit -ne 82 -or
                (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne
-                  '99e1bc36667400fa8fc7a5464ec20d3b4e84ee648e979c746c18d9848b0f47fa' -or
+                  '07407f9dd566616395644a5c5bff8a1255701696dab2a074df062bab3ad279b4' -or
                (Get-FileHash $ledger -Algorithm SHA256).Hash -cne $ledgerBefore -or
                (Get-FileHash $state -Algorithm SHA256).Hash -cne $stateBefore -or
                -not(Test-Path -LiteralPath $previous -PathType Leaf) -or
@@ -178,7 +178,7 @@ jobs:
             $noGrant=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Recover)
             if($LASTEXITCODE -ne 0 -or $noGrant -notcontains 'RESULT=HOLD_NO_OPERATING_CUTOVER' -or
                (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne
-                  '99e1bc36667400fa8fc7a5464ec20d3b4e84ee648e979c746c18d9848b0f47fa'){
+                  '07407f9dd566616395644a5c5bff8a1255701696dab2a074df062bab3ad279b4'){
               throw 'R133_CRASH_RECOVERY_APPROVAL_NOT_REQUIRED'
             }
             $recovered=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Recover -ApprovalPhrase 'APPROVE_R133_CRASH_SOURCE_ONLY_RECOVERY_ONCE')
@@ -189,7 +189,7 @@ jobs:
                (Get-FileHash $state -Algorithm SHA256).Hash -cne $stateBefore -or
                -not(Test-Path -LiteralPath ($main+'.r133-crash-recovered-new-HOLD') -PathType Leaf) -or
                (Get-FileHash ($main+'.r133-crash-recovered-new-HOLD') -Algorithm SHA256).Hash.ToLowerInvariant() -cne
-                  '99e1bc36667400fa8fc7a5464ec20d3b4e84ee648e979c746c18d9848b0f47fa'){
+                  '07407f9dd566616395644a5c5bff8a1255701696dab2a074df062bab3ad279b4'){
               Write-Host ('R133_RECOVERED_ONLY_STATUS='+(@($recovered|Where-Object{$_ -match '^(FAILED_PHASE|EXCEPTION_TYPE|RESULT|OWNER_SOURCE)='}) -join ';'))
               throw 'R133_EXACT_CRASH_RECOVERY_FAILED'
             }
@@ -203,7 +203,7 @@ jobs:
             # Separate, synthetic-only fixture reset for the positive test.
             # Never remove these files on a real owner machine.
             Remove-Item -LiteralPath $previous,($main+'.r133-crash-recovered-new-HOLD') -Force
-            $approved=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R134_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
+            $approved=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R135_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
             if($LASTEXITCODE -ne 0 -or
                $approved -notcontains 'RESULT=OWNER_CUTOVER_ADOPTED_NO_MODEL_OR_SPICETIFY_CALL'){
               Write-Host ('R133_APPROVED_ONLY_STATUS='+(@($approved|Where-Object{$_ -match '^(FAILED_PHASE|BLOCK_CLASS|RESULT|ROLLBACK_SOURCE)='}) -join ';'))
@@ -213,7 +213,7 @@ jobs:
             $ownerArchive=Join-Path $root ('owner-recovery/R132-'+$id)
             if($now.status -cne 'owner-reviewed-preimage' -or
                (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne
-                   '99e1bc36667400fa8fc7a5464ec20d3b4e84ee648e979c746c18d9848b0f47fa' -or
+                   '07407f9dd566616395644a5c5bff8a1255701696dab2a074df062bab3ad279b4' -or
                (Get-FileHash $state -Algorithm SHA256).Hash -cne $stateBefore -or
                (Get-FileHash (Join-Path $ownerArchive 'original-ledger.json') -Algorithm SHA256).Hash -cne $ledgerBefore){
               throw 'R133_PROTECTED_OWNER_STATE_OR_ARCHIVE_DRIFT'
@@ -224,7 +224,8 @@ jobs:
             $names=@('Get-ExactFileSha256','Get-StringSha256',
                      'Get-SpicetifyRootManifest','Assert-SpicetifyOwnerPreimageAdoption',
                      'Test-R134OwnerReconciledMutationHold','Start-SpicetifyCliTransaction',
-                     'Invoke-MaintenanceMutationPhase')
+                     'Invoke-MaintenanceMutationPhase','Invoke-R135OwnerSpicetifyOneShot',
+                     'Get-R135OwnerAttemptPath')
             $defs=@($ast.FindAll({param($node)
               $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
               $node.Name -cin $names
@@ -258,19 +259,28 @@ jobs:
             if($null -eq $stillHeld -or $stillHeld -ne $state){
               throw 'R134_REAL_MUTATION_PHASE_STARTED_WITHOUT_APPROVAL'
             }
-            Write-Host 'R133_REAL_R134_DEFAULT_DENY_AFTER_R132_ADOPTION=PASS'
+            Write-Host 'R133_REAL_R135_DEFAULT_DENY_AFTER_R132_ADOPTION=PASS'
+            $unauthorizedR135=$false
+            try{[void](Invoke-R135OwnerSpicetifyOneShot -OwnerApproval 'NOT_OWNER_APPROVED')}catch{
+              $unauthorizedR135=$_.Exception.Message -ceq 'R135_EXPLICIT_OWNER_APPROVAL_REQUIRED'
+            }
+            if(-not $unauthorizedR135 -or
+               Test-Path -LiteralPath (Join-Path $root 'owner-recovery/r135-v2467-owner-once-claim.v1.json')){
+              throw 'R135_EXPLICIT_UPGRADE_CONSENT_BYPASS_AFTER_R133_ADOPTION'
+            }
+            Write-Host 'R133_R135_OWNER_UPGRADE_APPROVAL_SEPARATE_AND_NO_CLAIM=PASS'
             [IO.File]::WriteAllText((Join-Path $ownerArchive 'spotify-apps/xpui.spa'),'BROKEN_BACKUP',$utf8)
             $blocked=$false
             try{[void](Assert-SpicetifyOwnerPreimageAdoption $now)}catch{
               $blocked=$_.Exception.Message -match 'R132_ADOPTION_EXTERNAL_COPY_MISMATCH'
             }
             if(-not $blocked){throw 'R133_REAL_R134_ACCEPTED_TAMPERED_OWNER_ARCHIVE'}
-            $again=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R134_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
+            $again=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R135_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
             if($LASTEXITCODE -ne 0 -or $again -notcontains 'RESULT=HOLD_NO_OPERATING_CUTOVER'){
               throw 'R133_OWNER_CUTOVER_REPEAT_NOT_DENIED'
             }
             Write-Host 'R133_PINNED_PLAN_AND_APPROVAL_EXACT_OWNER=PASS'
-            Write-Host 'R133_REAL_R134_CANDIDATE_PLUS_REAL_R132_SNAPSHOT_ADOPTION=PASS'
+            Write-Host 'R133_REAL_R135_CANDIDATE_PLUS_REAL_R132_SNAPSHOT_ADOPTION=PASS'
             Write-Host 'R133_PRODUCT_ADMISSION_REQUIRES_UNTAMPERED_EXTERNAL_BACKUP=PASS'
             Write-Host 'R133_OWNER_STATE_UNCHANGED_AND_REPETITION_DENIED=PASS'
           }finally{
