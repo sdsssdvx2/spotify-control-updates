@@ -1,0 +1,107 @@
+name: HOLD R140 no-restart after Spotify update
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - validation/spotify-exit-immediate-maintenance-HOLD/spotify-control-R140-NoRestartAfterSpotifyUpdate-HOLD.ps1
+      - .github/workflows/validate-r140-no-restart-after-spotify-update-HOLD.yml
+permissions: {contents: read}
+jobs:
+  no-restart:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: PS5.1 exact one-line delta and functional no-restart capture
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $old='validation/spotify-exit-immediate-maintenance-HOLD/spotify-control-R139-SafeAutoAfterR135-HOLD.ps1'
+          $new='validation/spotify-exit-immediate-maintenance-HOLD/spotify-control-R140-NoRestartAfterSpotifyUpdate-HOLD.ps1'
+
+          $tokens=$null
+          $errors=$null
+          $ast=[Management.Automation.Language.Parser]::ParseFile($new,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw 'R140_PS51_PARSE_FAIL'}
+
+          $r139=Get-Content -LiteralPath $old -Raw
+          $r140=Get-Content -LiteralPath $new -Raw
+          $needleOld="@('backup','apply')"
+          $needleNew="@('backup','apply','--no-restart')"
+          if(($r139.Split($needleOld).Count-1) -ne 1){throw 'R139_EXPECTED_SINGLE_RESTARTING_APPLY_NOT_FOUND'}
+          if(($r140.Split($needleNew).Count-1) -ne 1){throw 'R140_EXPECTED_NO_RESTART_APPLY_NOT_FOUND'}
+          if($r140.Replace($needleNew,$needleOld) -cne $r139){throw 'R140_NOT_EXACT_ONE_LINE_DELTA'}
+
+          $need=@('ConvertTo-SpotifyPrefsBytesWithVersion','Invoke-SpicetifyBackupApplyPinnedPrefs')
+          $defs=@($ast.FindAll({
+            param($n)
+            $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -cin $need
+          },$true))
+          if($defs.Count -ne 2){throw 'R140_TARGET_FUNCTIONS_MISSING'}
+          . ([ScriptBlock]::Create((@($defs|ForEach-Object{$_.Extent.Text}) -join [Environment]::NewLine)))
+
+          $work=Join-Path $env:RUNNER_TEMP ('R140-'+[guid]::NewGuid().ToString('N'))
+          [void](New-Item -ItemType Directory -Force -Path $work)
+          $prefs=Join-Path $work 'prefs'
+          $lines=@(
+            'alpha',
+            'app.last-launched-version="1.3.6.1921"',
+            'omega'
+          )
+          [IO.File]::WriteAllText($prefs,($lines -join [Environment]::NewLine),[Text.Encoding]::ASCII)
+
+          $script:captured=$null
+          function Get-SpotifyPrefsPath { return $prefs }
+          function Get-ExactFileSha256 {
+            param($Path)
+            return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+          }
+          function Get-SpotifyPrefsLaunchedVersion {
+            param($Path)
+            $txt=[Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Path))
+            $m=[regex]::Match($txt,'app\.last-launched-version="([^"]+)"')
+            if(-not $m.Success){return $null}
+            return $m.Groups[1].Value
+          }
+          function Invoke-SpiceCapture {
+            param($Arguments)
+            $script:captured=@($Arguments)
+            return [pscustomobject]@{ExitCode=0;Output='synthetic'}
+          }
+
+          try {
+            $beforeSha=(Get-FileHash $prefs -Algorithm SHA256).Hash
+            $res=Invoke-SpicetifyBackupApplyPinnedPrefs -FullVersion '1.3.9.2055'
+            if($res.ExitCode -ne 0){throw 'R140_SYNTHETIC_APPLY_FAILED'}
+            if(@($script:captured).Count -ne 3){throw 'R140_REAPPLY_ARG_COUNT_NOT_3'}
+            if($script:captured[0] -cne 'backup' -or
+               $script:captured[1] -cne 'apply' -or
+               $script:captured[2] -cne '--no-restart'){
+              throw ('R140_RESTART_FLAG_NOT_EXACT args='+(@($script:captured)-join ','))
+            }
+            $afterSha=(Get-FileHash $prefs -Algorithm SHA256).Hash
+            if($afterSha -cne $beforeSha){throw 'R140_PREFS_NOT_BYTE_EXACT_RESTORED'}
+
+            $applyLines=@(
+              $r140 -split [Environment]::NewLine |
+              Where-Object {
+                $_ -match 'Invoke-Spice' -and
+                $_ -match 'apply' -and
+                $_ -notmatch '--no-restart'
+              }
+            )
+            if($applyLines.Count -ne 0){
+              throw ('R140_OTHER_RESTARTING_APPLY_PRESENT count='+$applyLines.Count)
+            }
+
+            Write-Host 'R140_PS51_PARSE=PASS'
+            Write-Host 'R140_R139_DELTA=EXACT_ONE_LINE'
+            Write-Host 'R140_SPOTIFY_UPDATE_REAPPLY_ARGS=backup,apply,--no-restart'
+            Write-Host 'R140_PREFS_BYTE_EXACT_RESTORE=PASS'
+            Write-Host 'R140_OTHER_AUTOMATIC_APPLY_RESTART_PATHS=0'
+            Write-Host 'RESULT=R140_WINDOWS_NO_RESTART_PASS'
+          }
+          finally {
+            if(Test-Path $work){Remove-Item $work -Recurse -Force}
+          }
