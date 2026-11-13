@@ -429,7 +429,7 @@ jobs:
           $ast=[Management.Automation.Language.Parser]::ParseInput($src,[ref]$tokens,[ref]$errors)
           if(@($errors).Count -ne 0){throw 'R127_SOURCE_PARSE_ERROR'}
           $need=@('R127Field','R127Flag','R127FileSHA','R127ReadJson',
-            'R127IsAllowedPath','R127Snapshot','R127TreeClass','R127TxnStatus','R127Proof')
+            'R127IsAllowedPath','R127Snapshot','R127TreeClass','R127ErrorClass','R127TxnStatus','R127Proof')
           $defs=@($ast.FindAll({param($x)
             $x -is [Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -cin $need
           },$true))
@@ -496,5 +496,11 @@ jobs:
              'BACKUP_NOT_PINNED_BEFORE'){
             throw 'R127_CORRUPT_BACKUP_NOT_REJECTED'
           }
+          if((R127ErrorClass ([pscustomobject]@{error='Old Spicetify root restored, but restore apply failed: private filename'})) -cne 'ROLLBACK_REAPPLY_FAILURE_HINT' -or
+             (R127ErrorClass ([pscustomobject]@{error='New Spicetify apply failed: private filename'})) -cne 'NEW_APPLY_FAILURE_HINT' -or
+             (R127ErrorClass ([pscustomobject]@{error=''})) -cne 'NO_ERROR_RECORDED'){
+            throw 'R127_REDACTED_ERROR_CLASSIFICATION_FAILED'
+          }
+          Write-Host 'R127_REDACTED_APPLY_ERROR_CLASSES=PASS'
           Write-Host 'R127_UNSETTLED_ID_MISMATCH_AND_BACKUP_DRIFT_CLASSIFIED=PASS'
           Write-Host 'R127_REAL_OWNER_PC_DOWNLOADS_MUTATIONS_AND_MODEL_CALLS=ZERO'
