@@ -13,6 +13,11 @@ if($defs.Count -ne $targets.Count){throw 'R136_REAL_SOURCE_FUNCTIONS_MISSING'}
 . ([ScriptBlock]::Create((@($defs|ForEach-Object{$_.Extent.Text}) -join [Environment]::NewLine)))
 $script:Status='owner-reviewed-preimage'
 $script:ClaimPresent=$false
+# Real R135 product initializes these at startup; mirror it in the isolated AST fixture.
+$script:R135ActiveOwnerAttempt=$false
+$script:R135AttemptCalls=0
+$script:R135ClaimSHA=$null
+$script:R135OwnerId=$null
 $script:ProofVisits=0
 function Get-SpicetifyTransaction {return [pscustomobject]@{status=$script:Status}}
 function Read-R135OwnerAttempt {
