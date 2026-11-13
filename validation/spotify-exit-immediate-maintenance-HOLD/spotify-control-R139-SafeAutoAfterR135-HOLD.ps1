@@ -2442,7 +2442,11 @@ function Test-R134OwnerReconciledMutationHold {
             return $false
         }
         $settled=Read-R139SafeAutoReceipt
-        if($null -ne $settled){return $false}
+        if($null -ne $settled){
+            $settledState=Ensure-StateShape (Load-State)
+            if([bool]$settledState.agent_mutation_enabled){return $false}
+            return $true
+        }
         return $true
     }
     if($null -eq $txn){return $false}
