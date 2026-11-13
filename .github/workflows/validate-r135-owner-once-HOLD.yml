@@ -1,0 +1,41 @@
+name: HOLD R135 exact owner once target 2.46.7
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - validation/spotify-exit-immediate-maintenance-HOLD/build-owner-v2467-once-R135-HOLD.py
+      - validation/spotify-exit-immediate-maintenance-HOLD/test-owner-v2467-once-R135-HOLD.ps1
+      - .github/workflows/validate-r135-owner-once-HOLD.yml
+permissions: {contents: read}
+jobs:
+  windows-r135-one-attempt:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Build only exact verified R134 source
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='validation/spotify-exit-immediate-maintenance-HOLD/'
+          $parent=$root+'out/owner-postadoption-default-hold-R134/spotify-control.ps1'
+          [void][IO.Directory]::CreateDirectory((Split-Path $parent -Parent))
+          $url='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/d1e56745d75e5238e2fd374b3f9be3c31a3ab406/'+$root+'spotify-control-R134-Owner-DefaultHold-HOLD.ps1'
+          [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+          $wc=New-Object Net.WebClient
+          try {[byte[]]$bytes=$wc.DownloadData($url)}finally{$wc.Dispose()}
+          $sha=[Security.Cryptography.SHA256]::Create()
+          try{$digest=([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}
+          finally{$sha.Dispose()}
+          if($bytes.Length -ne 317847 -or
+             $digest -cne '99e1bc36667400fa8fc7a5464ec20d3b4e84ee648e979c746c18d9848b0f47fa'){
+            throw 'R135_EXACT_R134_PARENT_SOURCE_PIN_MISMATCH'
+          }
+          [IO.File]::WriteAllBytes($parent,$bytes)
+          & python ($root+'build-owner-v2467-once-R135-HOLD.py')
+          if($LASTEXITCODE -ne 0){throw 'R135_BUILD_FAILED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ($root+'test-owner-v2467-once-R135-HOLD.ps1')
+          if($LASTEXITCODE -ne 0){throw 'R135_NATIVE_WINDOWS_OWNER_ONCE_GATE_FAILED'}
+          Write-Host 'R135_R134_PARENT_PRESERVED_SOURCE_AND_OWNER_ONCE_ACTION=PASS'
+          Write-Host 'OPERATING_USER_PC=UNTOUCHED;NATIVE_CLI_CALLS=0;PUBLIC_MAIN=UNCHANGED'
