@@ -1,0 +1,100 @@
+name: HOLD publish verified R137 owner preclaim release readiness main
+on:
+  push:
+    branches: [validate/spotify-exit-immediate-maintenance-HOLD]
+    paths:
+      - .github/workflows/publish-pinned-R137-owner-candidate-HOLD.yml
+permissions: {contents: write}
+jobs:
+  source-pinned-r137-only:
+    runs-on: windows-2025
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Rebuild R137 from exact immutable R136 source
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $base='validation/spotify-exit-immediate-maintenance-HOLD/'
+          $parent=$base+'out/owner-postadoption-dispatch-gate-R136/spotify-control.ps1'
+          [void][IO.Directory]::CreateDirectory((Split-Path $parent -Parent))
+          $url='https://raw.githubusercontent.com/sdsssdvx2/spotify-control-updates/fe3cbf1d14dc5986a49b7028a04e8534d694405a/'+$base+'spotify-control-R136-Owner-NoBypass-HOLD.ps1'
+          [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
+          $wc=New-Object Net.WebClient
+          try{[byte[]]$bytes=$wc.DownloadData($url)}finally{$wc.Dispose()}
+          $sha=[Security.Cryptography.SHA256]::Create()
+          try{$digest=([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}
+          finally{$sha.Dispose()}
+          if($bytes.Length -ne 327600 -or
+             $digest -cne '0f059208b231f9f8ec3e8829117785a319d52a3ded3a745147caf7039a7eee3d'){
+             throw 'R137_R136_PARENT_NOT_BYTE_PINNED'
+          }
+          [IO.File]::WriteAllBytes($parent,$bytes)
+          & python ($base+'build-owner-release-readiness-R137-HOLD.py')
+          if($LASTEXITCODE -ne 0){throw 'R137_BUILDER_NOT_ACCEPTED'}
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ($base+'test-owner-release-readiness-R137-HOLD.ps1')
+          if($LASTEXITCODE -ne 0){throw 'R137_WINPS51_REAL_GATE_NOT_ACCEPTED'}
+          $file=$base+'out/owner-release-readiness-R137/spotify-control.ps1'
+          $info=Get-Item -LiteralPath $file -Force -ErrorAction Stop
+          if($info.PSIsContainer -or ($info.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+             $info.Length -ne 329938 -or
+             (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne '4ac4e4ccb48c57b59b9fe87d688df76dd823998e5e791f4ed877c289175e7d99'){
+             throw 'R137_FINAL_PRODUCT_SOURCE_PIN_MISMATCH'
+          }
+          $tok=$null;$errs=$null
+          [void][Management.Automation.Language.Parser]::ParseFile($file,[ref]$tok,[ref]$errs)
+          if(@($errs).Count -ne 0){throw 'R137_FULL_PRODUCT_PS51_SYNTAX_INVALID'}
+          Write-Host 'R137_FULL_PRODUCT_EXACT_FINAL_SOURCE=PASS'
+      - name: Create source once on HOLD branch only
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $repo='sdsssdvx2/spotify-control-updates'
+          if($env:GITHUB_REPOSITORY -cne $repo -or
+             $env:GITHUB_REF -cne 'refs/heads/validate/spotify-exit-immediate-maintenance-HOLD'){
+            throw 'R137_WRONG_BRANCH_OR_REPO'
+          }
+          $headers=@{
+            Authorization=('Bearer '+$env:GH_TOKEN)
+            Accept='application/vnd.github+json'
+            'X-GitHub-Api-Version'='2022-11-28'
+            'User-Agent'='SpotifyControl-R137-HOLD-Only'
+          }
+          $api='https://api.github.com/repos/'+$repo
+          $ref=Invoke-RestMethod -Method Get -Uri ($api+'/git/ref/heads/validate/spotify-exit-immediate-maintenance-HOLD') -Headers $headers
+          if([string]$ref.object.sha -cne $env:GITHUB_SHA){throw 'R137_DEV_BRANCH_DRIFT'}
+          $stable=Invoke-RestMethod -Method Get -Uri ($api+'/git/ref/heads/main') -Headers $headers
+          if([string]$stable.object.sha -cne 'd38e88d9ae99f6a4983e2ad64f74f6fce7e6cde2'){throw 'R137_MAIN_UNEXPECTED_DRIFT'}
+          $path='validation/spotify-exit-immediate-maintenance-HOLD/spotify-control-R137-Owner-PreclaimReady-HOLD.ps1'
+          $uri=$api+'/contents/'+$path
+          try{
+            $exists=Invoke-RestMethod -Method Get -Uri ($uri+'?ref=validate%2Fspotify-exit-immediate-maintenance-HOLD') -Headers $headers -ErrorAction Stop
+            throw 'R137_ALREADY_PUBLISHED_NO_OVERWRITE'
+          }catch{
+            if($_.Exception.Message -ceq 'R137_ALREADY_PUBLISHED_NO_OVERWRITE'){throw}
+            $response=$_.Exception.Response
+            if($null -eq $response -or [int]$response.StatusCode -ne 404){
+              throw 'R137_DESTINATION_UNCERTAIN'
+            }
+          }
+          $file='validation/spotify-exit-immediate-maintenance-HOLD/out/owner-release-readiness-R137/spotify-control.ps1'
+          $bytes=[IO.File]::ReadAllBytes($file)
+          $request=@{
+            message='build(HOLD): byte-pin R137 source with official old/new release preflight before one-use claim'
+            content=[Convert]::ToBase64String($bytes)
+            branch='validate/spotify-exit-immediate-maintenance-HOLD'
+          }|ConvertTo-Json -Depth 4 -Compress
+          try{
+            $created=Invoke-RestMethod -Method Put -Uri $uri -Headers $headers -ContentType 'application/json' -Body ([Text.Encoding]::UTF8.GetBytes($request)) -ErrorAction Stop
+          }catch{throw 'R137_PUBLISH_FAILED_NO_RETRY'}
+          if([string]$created.content.path -cne $path -or
+             [int64]$created.content.size -ne 329938 -or
+             [string]::IsNullOrWhiteSpace([string]$created.commit.sha)){
+            throw 'R137_PUBLISH_READBACK_FAILED'
+          }
+          Write-Host 'R137_HOLD_ONLY_SOURCE_PIN_PUBLISHED=PASS'
+          Write-Host ('R137_SOURCE_COMMIT='+[string]$created.commit.sha)
+          Write-Host 'MAIN=UNCHANGED;OWNER_PC=UNCHANGED;NATIVE_SPICETIFY_CALLS=0'
