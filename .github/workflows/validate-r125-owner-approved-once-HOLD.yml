@@ -790,3 +790,28 @@ jobs:
           Write-Host 'R130_REAL_START_FUNCTION_PRESTAGING_HOLD=PASS'
           Write-Host 'R130_FRESH_VERSION_MISMATCH_NEVER_REACHES_ROOT_SWAP=PASS'
           Write-Host 'R130_REAL_USER_INSTALL_AND_PUBLIC_MAIN_UNCHANGED=PASS'
+      - name: Inspect exact R112 rollback and post-swap apply source before R131 migration implementation
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $p='validation/spotify-exit-immediate-maintenance-HOLD/out/private-stable-ahead-R112/spotify-control.ps1'
+          $txt=[IO.File]::ReadAllText($p,[Text.Encoding]::UTF8)
+          $er=$null;$tok=$null
+          $ast=[Management.Automation.Language.Parser]::ParseInput($txt,[ref]$tok,[ref]$er)
+          if(@($er).Count -ne 0){throw 'R131_SOURCE_PARSE_HOLD'}
+          $names=@('Invoke-SpicetifyTransactionalMaintenance','Rollback-SpicetifyCliTransaction',
+            'Commit-SpicetifyCliTransaction','Repair-PendingSpicetifyTransaction')
+          foreach($fn in @($ast.FindAll({param($x)
+            $x -is [Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -cin $names
+          },$true))){
+            $l=@($fn.Extent.Text -split '\r?\n')
+            Write-Host ('R131_FUNC='+$fn.Name+';LINES='+$l.Count)
+            for($i=0;$i -lt $l.Count;$i++){
+              if($fn.Name -eq 'Invoke-SpicetifyTransactionalMaintenance' -and $i -lt 40){continue}
+              if($fn.Name -eq 'Rollback-SpicetifyCliTransaction' -and $i -ge 180){break}
+              $v=$l[$i].Trim()
+              if($v.Length -gt 290){$v=$v.Substring(0,290)}
+              Write-Host ('R131_LINE='+$fn.Name+'#'+($i+1)+':'+$v)
+            }
+          }
+          Write-Host 'R131_EXACT_ROLLBACK_AND_APPLY_SOURCE_INSPECTED=PASS'
