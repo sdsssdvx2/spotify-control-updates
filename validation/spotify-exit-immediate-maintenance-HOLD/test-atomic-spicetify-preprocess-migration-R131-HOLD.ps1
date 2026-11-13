@@ -16,7 +16,7 @@ $required=@('New-SpicetifyMigrationPreimage','Restore-SpicetifyMigrationSurface'
   'Restore-SpicetifyMigrationPreimage','Confirm-SpicetifyMigrationApplied',
   'Get-SpicetifyRootManifest','Copy-SpicetifyRootExact','Get-ExactFileSha256',
   'Get-StringSha256','Get-SpicetifyConfigSemanticHash','Get-IniSectionValue',
-  'Commit-SpicetifyCliTransaction')
+  'Commit-SpicetifyCliTransaction','Rollback-SpicetifyCliTransaction')
 $fns=@($ast.FindAll({param($x)
   $x -is [Management.Automation.Language.FunctionDefinitionAst] -and
   $x.Name -cin $required
