@@ -15,7 +15,8 @@ if(@($errors).Count -ne 0){throw 'R131_SOURCE_AST_NOT_VALID'}
 $required=@('New-SpicetifyMigrationPreimage','Restore-SpicetifyMigrationSurface',
   'Restore-SpicetifyMigrationPreimage','Confirm-SpicetifyMigrationApplied',
   'Get-SpicetifyRootManifest','Copy-SpicetifyRootExact','Get-ExactFileSha256',
-  'Get-StringSha256','Get-SpicetifyConfigSemanticHash','Get-IniSectionValue')
+  'Get-StringSha256','Get-SpicetifyConfigSemanticHash','Get-IniSectionValue',
+  'Commit-SpicetifyCliTransaction')
 $fns=@($ast.FindAll({param($x)
   $x -is [Management.Automation.Language.FunctionDefinitionAst] -and
   $x.Name -cin $required
@@ -79,6 +80,50 @@ try {
      $tx.migration_apps_after_sha256 -ceq $tx.migration_apps_before_sha256){
     throw 'R131_MIGRATION_AFTER_PROOF_MISSING'
   }
+  # Exercise the production COMMIT function: changing Apps after successful
+  # apply must not rewrite its durable after-pin by object aliasing.
+  $cliRoot=Join-Path $scratch 'SyntheticCLI'
+  New-Item -ItemType Directory -Path $cliRoot -Force | Out-Null
+  $exe=Join-Path $cliRoot 'spicetify.exe'
+  [IO.File]::WriteAllBytes($exe,([byte[]]@(77,90,4,0,4,0)))
+  $rootManifest=Get-SpicetifyRootManifest -Path $cliRoot
+  $script:TxnForCommit=($tx|ConvertTo-Json -Depth 8|ConvertFrom-Json)
+  $script:TxnForCommit|Add-Member -NotePropertyName 'target_root' -NotePropertyValue $cliRoot
+  $script:TxnForCommit|Add-Member -NotePropertyName 'after_tree_sha256' -NotePropertyValue $rootManifest.TreeSha256
+  $script:TxnForCommit|Add-Member -NotePropertyName 'after_sha256' -NotePropertyValue ((Get-ExactFileSha256 -Path $exe))
+  $script:TxnForCommit|Add-Member -NotePropertyName 'root_transaction' -NotePropertyValue $true
+  $script:TxnForCommit|Add-Member -NotePropertyName 'status' -NotePropertyValue 'awaiting-guard'
+  $script:TxnForCommit|Add-Member -NotePropertyName 'extras_preserved' -NotePropertyValue $true
+  $script:TxnForCommit|Add-Member -NotePropertyName 'extras_before_tree_sha256' -NotePropertyValue ('a'*64)
+  $script:TxnForCommit|Add-Member -NotePropertyName 'extras_after_tree_sha256' -NotePropertyValue ('a'*64)
+  $script:TxnForCommit|Add-Member -NotePropertyName 'apply_succeeded' -NotePropertyValue $true
+  $script:TxnForCommit|Add-Member -NotePropertyName 'post_apply_guard_succeeded' -NotePropertyValue $true
+  $script:TxnForCommit|Add-Member -NotePropertyName 'same_dir_old_root' -NotePropertyValue ''
+  $script:TxnForCommit|Add-Member -NotePropertyName 'same_dir_new_root' -NotePropertyValue ''
+  function Get-SpicetifyTransaction {return $script:TxnForCommit}
+  function Save-SpicetifyTransaction {param($Transaction);$script:TxnForCommit=$Transaction}
+  function Invoke-NativeCapture {
+    param([string]$FilePath,[string[]]$Arguments)
+    return [pscustomobject]@{ExitCode=0;Output='Spicetify 2.46.7'}
+  }
+  function Write-Log {param([string]$Message,[string]$Level='INFO')}
+  $appAfterFirst=[IO.File]::ReadAllBytes((Join-Path $apps 'xpui.spa'))
+  [IO.File]::WriteAllText((Join-Path $apps 'xpui.spa'),'post-apply-tampered-content',$utf8)
+  $blocked=$false
+  try{[void](Commit-SpicetifyCliTransaction)}catch{
+    $blocked=$_.Exception.Message -match 'R131_COMMIT_EXTERNAL_AFTER_TREE_CHANGED'
+  }
+  if(-not $blocked){throw 'R131_COMMIT_DID_NOT_BLOCK_AFTER_IMAGE_DRIFT'}
+  if([string]$script:TxnForCommit.status -cne 'awaiting-guard'){
+    throw 'R131_FAILED_COMMIT_MUTATED_TXN_STATE'
+  }
+  [IO.File]::WriteAllBytes((Join-Path $apps 'xpui.spa'),$appAfterFirst)
+  [void](Commit-SpicetifyCliTransaction)
+  if([string]$script:TxnForCommit.status -cne 'committed'){
+    throw 'R131_PINNED_EXTERNAL_AFTER_IMAGE_NOT_COMMITTED'
+  }
+  Write-Host 'R131_COMMIT_REJECTS_CHANGED_EXTERNAL_AFTER_IMAGE=PASS'
+  Write-Host 'R131_COMMIT_ACCEPTS_STABLE_EXTERNAL_AFTER_IMAGE=PASS'
   $res=Restore-SpicetifyMigrationPreimage $tx
   if(-not $res.Restored -or
      (Get-SpicetifyRootManifest -Path $apps).TreeSha256 -cne $pre.AppsTreeSha256 -or
