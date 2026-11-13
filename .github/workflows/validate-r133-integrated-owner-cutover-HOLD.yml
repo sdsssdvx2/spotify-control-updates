@@ -94,6 +94,35 @@ jobs:
                 (Get-FileHash $ledger -Algorithm SHA256).Hash -cne $ledgerBefore){
               throw 'R133_MISSING_APPROVAL_MUTATED_OWNER'
             }
+            # The real product strips hyphens from the Windows SID before
+            # naming mutexes. Verify R133 and R132 NOW contend with that
+            # identical name from an unrelated OS PowerShell process.
+            $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+            $safeSid=([string]$sid -replace '[^A-Za-z0-9]','_')
+            $name="Local\SpotifyControl-{0}-{1}" -f 'Maintenance',$safeSid
+            $m=[Threading.Mutex]::new($false,$name)
+            try {
+              if(-not $m.WaitOne(0,$false)){throw 'PRODUCT_MUTEX_FIXTURE_BUSY'}
+              $contention=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R134_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
+              if($LASTEXITCODE -ne 0 -or
+                 $contention -notcontains 'RESULT=HOLD_NO_OPERATING_CUTOVER' -or
+                 $contention -notcontains 'FAILED_PHASE=EXCLUSIVE_SOURCE_CUTOVER'){
+                 throw 'R133_EXECUTED_IN_SPITE_OF_REAL_PRODUCT_MUTEX'
+              }
+              $r132File='validation/spotify-exit-immediate-maintenance-HOLD/owner-r132-current-preimage-adoption-HOLD.ps1'
+              $r132Denied=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $r132File -SyntheticHostTest -Mode Adopt -ApprovalPhrase 'APPROVE_R132_CURRENT_PREIMAGE_ONCE')
+              if($LASTEXITCODE -ne 0 -or
+                 $r132Denied -notcontains 'RESULT=HOLD_NO_OPERATING_MUTATION' -or
+                 $r132Denied -notcontains 'FAILED_PHASE=PRECHECK' -or
+                 (Get-FileHash $main -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldSHA -or
+                 (Get-FileHash $ledger -Algorithm SHA256).Hash -cne $ledgerBefore -or
+                 (Get-FileHash $state -Algorithm SHA256).Hash -cne $stateBefore){
+                 throw 'R132_EXECUTED_IN_SPITE_OF_REAL_PRODUCT_MUTEX'
+              }
+              Write-Host 'R133_R132_EXACT_PRODUCT_MUTEX_CROSS_PROCESS_CONTENTION=PASS'
+            }finally{
+              try{$m.ReleaseMutex()}finally{$m.Dispose()}
+            }
             # Force a synthetic process-level fault immediately after the
             # pinned R131 main swap. The exact original journal and owner data
             # must be unchanged; rollback must retain the same owner mutex.
@@ -193,12 +222,14 @@ jobs:
             $ast=[Management.Automation.Language.Parser]::ParseFile($main,[ref]$astTokens,[ref]$astErrors)
             if(@($astErrors).Count -ne 0){throw 'R133_DEPLOYED_REAL_MAIN_PS51_PARSE_FAILED'}
             $names=@('Get-ExactFileSha256','Get-StringSha256',
-                     'Get-SpicetifyRootManifest','Assert-SpicetifyOwnerPreimageAdoption')
+                     'Get-SpicetifyRootManifest','Assert-SpicetifyOwnerPreimageAdoption',
+                     'Test-R134OwnerReconciledMutationHold','Start-SpicetifyCliTransaction',
+                     'Invoke-MaintenanceMutationPhase')
             $defs=@($ast.FindAll({param($node)
               $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
               $node.Name -cin $names
             },$true))
-            if($defs.Count -ne $names.Count){throw 'R133_REAL_R131_PROVENANCE_FUNCTIONS_MISSING'}
+            if($defs.Count -ne $names.Count){throw 'R133_REAL_R134_GATE_FUNCTIONS_MISSING'}
             . ([ScriptBlock]::Create((@($defs|ForEach-Object{$_.Extent.Text}) -join [Environment]::NewLine)))
             function Test-UsablePath {
               param([string]$Path,[string]$PathType)
@@ -208,18 +239,38 @@ jobs:
             if((Assert-SpicetifyOwnerPreimageAdoption $now) -cne $true){
               throw 'R133_REAL_PRODUCT_REJECTED_ACTUAL_R132_RECEIPT'
             }
+            $script:R134VerifiedTxn=$now
+            function Get-SpicetifyTransaction {return $script:R134VerifiedTxn}
+            function Ensure-StateShape {param($State);return $State}
+            function Write-Log {param($Message,$Level)}
+            if((Test-R134OwnerReconciledMutationHold) -cne $true){
+              throw 'R134_REAL_R133_ADOPTION_NOT_HELD'
+            }
+            $directBlocked=$false
+            try{[void](Start-SpicetifyCliTransaction)}catch{
+              $directBlocked=$_.Exception.Message -ceq 'R134_OWNER_ADOPTION_NOT_UPGRADE_APPROVAL'
+            }
+            if(-not $directBlocked){
+              throw 'R134_UNAUTHORIZED_REAL_PRODUCT_CLI_START_ADMITTED'
+            }
+            $state=[pscustomobject]@{agent_mutation_enabled=$true;pending_maintenance=$true}
+            $stillHeld=Invoke-MaintenanceMutationPhase -State $state
+            if($null -eq $stillHeld -or $stillHeld -ne $state){
+              throw 'R134_REAL_MUTATION_PHASE_STARTED_WITHOUT_APPROVAL'
+            }
+            Write-Host 'R133_REAL_R134_DEFAULT_DENY_AFTER_R132_ADOPTION=PASS'
             [IO.File]::WriteAllText((Join-Path $ownerArchive 'spotify-apps/xpui.spa'),'BROKEN_BACKUP',$utf8)
             $blocked=$false
             try{[void](Assert-SpicetifyOwnerPreimageAdoption $now)}catch{
               $blocked=$_.Exception.Message -match 'R132_ADOPTION_EXTERNAL_COPY_MISMATCH'
             }
-            if(-not $blocked){throw 'R133_REAL_R131_ACCEPTED_TAMPERED_OWNER_ARCHIVE'}
+            if(-not $blocked){throw 'R133_REAL_R134_ACCEPTED_TAMPERED_OWNER_ARCHIVE'}
             $again=@(& powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $script -SyntheticHostedFixture -Mode Once -ApprovalPhrase 'APPROVE_R133_R134_SOURCE_AND_R132_OWNER_ADOPTION_ONCE')
             if($LASTEXITCODE -ne 0 -or $again -notcontains 'RESULT=HOLD_NO_OPERATING_CUTOVER'){
               throw 'R133_OWNER_CUTOVER_REPEAT_NOT_DENIED'
             }
             Write-Host 'R133_PINNED_PLAN_AND_APPROVAL_EXACT_OWNER=PASS'
-            Write-Host 'R133_REAL_R131_CANDIDATE_PLUS_REAL_R132_SNAPSHOT_ADOPTION=PASS'
+            Write-Host 'R133_REAL_R134_CANDIDATE_PLUS_REAL_R132_SNAPSHOT_ADOPTION=PASS'
             Write-Host 'R133_PRODUCT_ADMISSION_REQUIRES_UNTAMPERED_EXTERNAL_BACKUP=PASS'
             Write-Host 'R133_OWNER_STATE_UNCHANGED_AND_REPETITION_DENIED=PASS'
           }finally{
