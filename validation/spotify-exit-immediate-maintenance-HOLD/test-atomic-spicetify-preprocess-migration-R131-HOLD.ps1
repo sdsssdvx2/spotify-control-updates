@@ -114,8 +114,9 @@ try {
     $blocked=$_.Exception.Message -match 'R131_COMMIT_EXTERNAL_AFTER_TREE_CHANGED'
   }
   if(-not $blocked){throw 'R131_COMMIT_DID_NOT_BLOCK_AFTER_IMAGE_DRIFT'}
-  if([string]$script:TxnForCommit.status -cne 'awaiting-guard'){
-    throw 'R131_FAILED_COMMIT_MUTATED_TXN_STATE'
+  if([string]$script:TxnForCommit.status -cne 'awaiting-guard' -or
+     [string]$script:TxnForCommit.migration_apps_after_sha256 -cne [string]$tx.migration_apps_after_sha256){
+    throw 'R131_FAILED_COMMIT_MUTATED_DURABLE_EXPECTATION'
   }
   [IO.File]::WriteAllBytes((Join-Path $apps 'xpui.spa'),$appAfterFirst)
   [void](Commit-SpicetifyCliTransaction)
