@@ -265,7 +265,7 @@ jobs:
               $unauthorizedR135=$_.Exception.Message -ceq 'R135_EXPLICIT_OWNER_APPROVAL_REQUIRED'
             }
             if(-not $unauthorizedR135 -or
-               Test-Path -LiteralPath (Join-Path $root 'owner-recovery/r135-v2467-owner-once-claim.v1.json')){
+               (Test-Path -LiteralPath (Join-Path $root 'owner-recovery/r135-v2467-owner-once-claim.v1.json'))){
               throw 'R135_EXPLICIT_UPGRADE_CONSENT_BYPASS_AFTER_R133_ADOPTION'
             }
             Write-Host 'R133_R135_OWNER_UPGRADE_APPROVAL_SEPARATE_AND_NO_CLAIM=PASS'
