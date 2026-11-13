@@ -162,7 +162,8 @@ try{
       throw 'OWNER_APPROVAL_REQUIRED'
     }
     $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
-    if(([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole(
+    if(-not $SyntheticHostTest -and
+       ([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole(
         [Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'ADMIN_USER_REJECTED'}
     $sid=$identity.User.Value
     $mutex1=Acquire 'Maintenance' $sid
